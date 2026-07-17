@@ -13,6 +13,8 @@ import {
   Toggle,
 } from "../ui";
 import { createApiKey, deleteApiKey, fetchApiKeyUsage, toggleApiKey, updateApiKey } from "./api";
+import { storeApiKeySecret } from "../../lib/apiKeySecrets";
+import { ApiKeySelect } from "../cli-tools/ApiKeySelect";
 import { EndpointRow } from "./EndpointRow";
 import { SecurityWarning } from "./SecurityWarning";
 import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage } from "./types";
@@ -133,6 +135,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     setSaving(true);
     try {
       const result = await createApiKey(secret, formData);
+      storeApiKeySecret(result.id, result.key);
       setCreatedSecret(result.key);
       setShowCreateModal(false);
       resetCreateForm();
@@ -287,20 +290,26 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
         <div className="apis-example-form">
           <Field label="Example API key">
-            <Input
-              type="password"
-              placeholder="Paste a client key for curl example"
+            <ApiKeySelect
+              embedded
+              apiKeys={apiKeys}
               value={exampleApiKey}
-              onChange={(event) => setExampleApiKey(event.target.value)}
+              onChange={setExampleApiKey}
+              emptyMessage="No API keys yet. Create one below to generate curl examples."
+              missingSecretMessage="Secret for this key is not saved in this browser. Create a new key below and save the secret when it is shown."
             />
           </Field>
-          <Field label="Example model">
+          <Field label="Example model" hint="Public model IDs from Provider Priority Manager">
             <Select value={exampleModel} onChange={(event) => setExampleModel(event.target.value)}>
-              {modelOptions.map((model) => (
-                <option key={model.value} value={model.value}>
-                  {model.label}
-                </option>
-              ))}
+              {modelOptions.length === 0 ? (
+                <option value="">No models yet</option>
+              ) : (
+                modelOptions.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                  </option>
+                ))
+              )}
             </Select>
           </Field>
         </div>

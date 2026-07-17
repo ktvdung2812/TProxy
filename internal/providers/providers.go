@@ -161,7 +161,7 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 		path = "/models"
 	} else if provider.Type == "codex" {
 		path = "/models?client_version=1.0.0"
-		headers = codexHeaders(provider, credential, false)
+		headers = codexHeaders(provider, credential, false, canonical.Request{})
 	}
 	ctx = withCredentialProxy(ctx, credential)
 	target := endpoint(provider.BaseURL, path)
@@ -587,13 +587,14 @@ func codexTools(tools []map[string]any) []map[string]any {
 	return result
 }
 
-func codexHeaders(provider store.Provider, credential store.Credential, streaming bool) http.Header {
+func codexHeaders(provider store.Provider, credential store.Credential, streaming bool, request canonical.Request) http.Header {
 	headers := authHeaders(provider, credential)
+	applyCodexClientHeaders(headers, clientHeadersFromRequest(request))
 	if headers.Get("User-Agent") == "" {
-		headers.Set("User-Agent", "codex-tui/0.135.0 (Mac OS 26.5.0; arm64) (codex-tui; 0.135.0)")
+		headers.Set("User-Agent", "codex_cli_rs/0.125.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464")
 	}
 	if headers.Get("Originator") == "" && credential.AuthType == "oauth" {
-		headers.Set("Originator", "codex-tui")
+		headers.Set("Originator", "codex_cli_rs")
 	}
 	if credential.OAuthToken != nil && credential.OAuthToken.Extra != nil {
 		if accountID := stringValue(firstValue(credential.OAuthToken.Extra, "account_id", "chatgpt_account_id")); accountID != "" && headers.Get("ChatGPT-Account-ID") == "" {
@@ -647,7 +648,7 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	body := codexBody(request)
-	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/responses"), correlationHeaders(codexHeaders(provider, credential, true), request.RequestID), body)
+	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/responses"), correlationHeaders(codexHeaders(provider, credential, true, request), request.RequestID), body)
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
 	}
@@ -825,7 +826,7 @@ func anthropicBody(request canonical.Request) map[string]any {
 	return body
 }
 
-func anthropicHeaders(provider store.Provider, credential store.Credential) http.Header {
+func anthropicHeaders(provider store.Provider, credential store.Credential, request canonical.Request) http.Header {
 	headers := authHeaders(provider, credential)
 	if credential.AuthType == "oauth" {
 		if headers.Get("anthropic-version") == "" {
@@ -848,6 +849,7 @@ func anthropicHeaders(provider store.Provider, credential store.Credential) http
 				headers.Set("X-Stainless-Lang", "js")
 			}
 		}
+		applyClaudeCodeCompatibilityHeaders(headers, clientHeadersFromRequest(request))
 		return headers
 	}
 	headers.Del("Authorization")
@@ -857,7 +859,16 @@ func anthropicHeaders(provider store.Provider, credential store.Credential) http
 	if headers.Get("anthropic-version") == "" {
 		headers.Set("anthropic-version", "2023-06-01")
 	}
+	applyClaudeCodeCompatibilityHeaders(headers, clientHeadersFromRequest(request))
 	return headers
+}
+
+func clientHeadersFromRequest(request canonical.Request) map[string]string {
+	if request.Metadata == nil {
+		return nil
+	}
+	client, _ := request.Metadata["client_headers"].(map[string]string)
+	return client
 }
 
 func anthropicMessagesEndpoint(provider store.Provider) string {
@@ -871,7 +882,7 @@ func anthropicMessagesEndpoint(provider store.Provider) string {
 func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (*canonical.Response, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	request.Stream = false
-	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), correlationHeaders(anthropicHeaders(provider, credential), request.RequestID), anthropicBody(request))
+	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), correlationHeaders(anthropicHeaders(provider, credential, request), request.RequestID), anthropicBody(request))
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
 	}
@@ -905,7 +916,7 @@ func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider,
 func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	request.Stream = true
-	headers := correlationHeaders(anthropicHeaders(provider, credential), request.RequestID)
+	headers := correlationHeaders(anthropicHeaders(provider, credential, request), request.RequestID)
 	headers.Set("Accept", "text/event-stream")
 	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), headers, anthropicBody(request))
 	if err != nil {

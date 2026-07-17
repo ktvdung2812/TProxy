@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -83,7 +84,7 @@ func (r *Registry) codexQuota(ctx context.Context, provider store.Provider, cred
 		ProviderType: provider.Type,
 		Quotas:       map[string]QuotaEntry{},
 	}
-	body, status, err := r.quotaGET(ctx, "https://chatgpt.com/backend-api/wham/usage", codexHeaders(provider, credential, false))
+	body, status, err := r.quotaGET(ctx, "https://chatgpt.com/backend-api/wham/usage", codexHeaders(provider, credential, false, canonical.Request{}))
 	if err != nil {
 		return result, err
 	}

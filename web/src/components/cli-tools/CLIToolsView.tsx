@@ -1,10 +1,31 @@
-import { CLI_TOOLS, MITM_TOOLS } from "../../cli-tools/constants";
+import { useEffect, useState } from "react";
+import { CLI_TOOLS, isAutoApplyTool, MITM_TOOLS } from "../../cli-tools/constants";
+import { fetchCLIToolStatuses, type CLIToolStatus } from "./api";
 import { MitmToolCard } from "./MitmToolCard";
 import { ToolSummaryCard } from "./ToolSummaryCard";
 
-export function CLIToolsView() {
+type Props = {
+  secret: string;
+};
+
+export function CLIToolsView({ secret }: Props) {
   const regularTools = Object.entries(CLI_TOOLS);
   const mitmTools = Object.entries(MITM_TOOLS);
+  const [statuses, setStatuses] = useState<Record<string, CLIToolStatus>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCLIToolStatuses(secret)
+      .then((next) => {
+        if (!cancelled) setStatuses(next);
+      })
+      .catch(() => {
+        if (!cancelled) setStatuses({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
 
   return (
     <section className="section cli-tools-section">
@@ -19,7 +40,12 @@ export function CLIToolsView() {
 
       <div className="cli-tools-grid">
         {regularTools.map(([toolId, tool]) => (
-          <ToolSummaryCard key={toolId} toolId={toolId} tool={tool} />
+          <ToolSummaryCard
+            key={toolId}
+            toolId={toolId}
+            tool={tool}
+            status={isAutoApplyTool(toolId) ? statuses[toolId] : undefined}
+          />
         ))}
       </div>
 

@@ -22,7 +22,10 @@ import (
 
 	"github.com/tproxy/tproxy/internal/auth"
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/clitools"
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/import9router"
+	"github.com/tproxy/tproxy/internal/importcliproxy"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/router"
 	"github.com/tproxy/tproxy/internal/security"
@@ -295,6 +298,9 @@ func (s *Server) v1(w http.ResponseWriter, r *http.Request) {
 	case "/v1/responses":
 		s.responses(w, r)
 		return
+	case "/v1/responses/compact":
+		s.responsesCompact(w, r)
+		return
 	case "/v1/responses/ws":
 		s.responsesWebSocket(w, r)
 		return
@@ -366,6 +372,24 @@ func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", err.Error(), useClientRequestID(r))
 		return
 	}
+	requestID := useClientRequestID(r)
+	request := parseResponses(body, requestID)
+	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+	attachIngressMetadata(r, &request)
+	s.execute(w, r, request, renderModeResponses)
+}
+
+func (s *Server) responsesCompact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, 405, "method_not_allowed", "POST required", useClientRequestID(r))
+		return
+	}
+	body, err := decodeBody(r)
+	if err != nil {
+		writeError(w, 400, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	body["_compact"] = true
 	requestID := useClientRequestID(r)
 	request := parseResponses(body, requestID)
 	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
@@ -1224,6 +1248,10 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 }
 
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/admin/cli-tools") {
+		clitools.NewHandler().ServeHTTP(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/proxy-pools/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/proxy-pools/")
 		if strings.HasSuffix(suffix, "/test") {
@@ -1400,6 +1428,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"retention": s.cfg.Retention, "payload_capture": false, "allow_remote_management": s.allowRemoteMgmt, "token_saver": map[string]any{"enabled": true, "per_request_opt_out": true}})
+	case "/api/admin/import/9router":
+		s.adminImport9router(w, r)
+	case "/api/admin/import/cliproxyapi":
+		s.adminImportCliproxyAPI(w, r)
 	case "/api/admin/config/export":
 		s.adminConfigExport(w, r)
 	case "/api/admin/config/import":
@@ -2495,6 +2527,45 @@ func (s *Server) adminConfigVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (s *Server) adminImport9router(w http.ResponseWriter, r *http.Request) {
+	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
+		return import9router.Import(ctx, s.store, data, import9router.Options{DryRun: dryRun})
+	})
+}
+
+func (s *Server) adminImportCliproxyAPI(w http.ResponseWriter, r *http.Request) {
+	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
+		return importcliproxy.Import(ctx, s.store, data, importcliproxy.Options{DryRun: dryRun})
+	})
+}
+
+type importOK interface {
+	GetOK() bool
+}
+
+func (s *Server) adminImportPayload(w http.ResponseWriter, r *http.Request, run func(context.Context, []byte, bool) (importOK, error)) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "import_failed", err.Error(), useClientRequestID(r))
+		return
+	}
+	dryRun := strings.EqualFold(r.URL.Query().Get("dry_run"), "true") || r.URL.Query().Get("dry_run") == "1"
+	result, err := run(r.Context(), data, dryRun)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "import_failed", err.Error(), useClientRequestID(r))
+		return
+	}
+	status := http.StatusOK
+	if !result.GetOK() {
+		status = http.StatusBadRequest
+	}
+	writeJSON(w, status, result)
 }
 
 func (s *Server) adminConfigExport(w http.ResponseWriter, r *http.Request) {

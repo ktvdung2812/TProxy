@@ -466,6 +466,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		status := providers.Status(errExecute)
 		code := providers.Code(errExecute)
 		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+		if disableFallback(request) {
+			return nil, errExecute
+		}
 		if status == 0 || store.IsRetryableStatus(status) || status == 401 || status == 403 {
 			r.setCredentialCooldown(ctx, selection.Credential.ID, model.ID, errExecute)
 			continue
@@ -524,6 +527,9 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			lastErr = errExecute
 			status, code := providers.Status(errExecute), providers.Code(errExecute)
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+			if disableFallback(request) {
+				return nil, errExecute
+			}
 			if status == 0 || store.IsRetryableStatus(status) || status == 401 || status == 403 {
 				r.setCredentialCooldown(ctx, selection.Credential.ID, model.ID, errExecute)
 				continue
@@ -1344,7 +1350,21 @@ func providerMatchesPin(provider store.Provider, pin string) bool {
 	if pin == "" {
 		return true
 	}
-	return strings.EqualFold(provider.ID, pin) || strings.EqualFold(provider.Name, pin) || strings.EqualFold(provider.Type, pin)
+	if strings.EqualFold(provider.ID, pin) || strings.EqualFold(provider.Name, pin) || strings.EqualFold(provider.Type, pin) {
+		return true
+	}
+	if strings.EqualFold(pin, "chatgpt") && provider.Type == "codex" {
+		return true
+	}
+	return false
+}
+
+func disableFallback(request canonical.Request) bool {
+	if request.Metadata == nil {
+		return false
+	}
+	value, ok := request.Metadata["disable_fallback"].(bool)
+	return ok && value
 }
 
 func (r *Router) setCredentialCooldown(ctx context.Context, credentialID, modelID string, err error) {

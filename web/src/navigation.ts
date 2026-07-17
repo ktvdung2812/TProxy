@@ -5,134 +5,166 @@ export type NavRoute = {
   icon: string;
   title: string;
   description: string;
-  section?: "primary" | "system";
 };
 
-export const PRIMARY_ROUTES: NavRoute[] = [
+export type NavSection = {
+  id: string;
+  label: string;
+  routes: NavRoute[];
+};
+
+export const NAV_SECTIONS: NavSection[] = [
   {
-    id: "overview",
-    path: "/",
-    label: "Overview",
-    icon: "space_dashboard",
-    title: "Routing overview",
-    description: "Stable model IDs across every upstream.",
-    section: "primary",
+    id: "dashboard",
+    label: "Dashboard",
+    routes: [
+      {
+        id: "overview",
+        path: "/",
+        label: "Overview",
+        icon: "space_dashboard",
+        title: "Routing overview",
+        description: "Stable model IDs across every upstream.",
+      },
+    ],
   },
   {
-    id: "combos",
-    path: "/combos",
-    label: "Combos",
-    icon: "layers",
-    title: "Combos",
-    description: "Ordered fallback policies across virtual models.",
-    section: "primary",
+    id: "routing",
+    label: "Routing",
+    routes: [
+      {
+        id: "models",
+        path: "/models",
+        label: "Provider Priority Manager",
+        icon: "route",
+        title: "Provider Priority Manager",
+        description: "Map providers to stable model IDs and control fallback order.",
+      },
+      {
+        id: "combos",
+        path: "/combos",
+        label: "Combos",
+        icon: "layers",
+        title: "Combos",
+        description: "Ordered fallback policies across virtual models.",
+      },
+    ],
   },
   {
-    id: "models",
-    path: "/models",
-    label: "Virtual models",
-    icon: "apps",
-    title: "Virtual models",
-    description: "Stable IDs presented to clients, with their routes.",
-    section: "primary",
+    id: "infrastructure",
+    label: "Infrastructure",
+    routes: [
+      {
+        id: "providers",
+        path: "/providers",
+        label: "Providers",
+        icon: "dns",
+        title: "Providers",
+        description: "Manage your AI provider connections.",
+      },
+      {
+        id: "upstreams",
+        path: "/upstreams",
+        label: "Upstreams",
+        icon: "cloud",
+        title: "Upstreams",
+        description: "Configured upstream gateways and accounts.",
+      },
+      {
+        id: "proxy-pools",
+        path: "/proxy-pools",
+        label: "Proxy pools",
+        icon: "lan",
+        title: "Proxy pools",
+        description: "Encrypted egress pools bound to providers and credentials.",
+      },
+    ],
   },
   {
-    id: "upstreams",
-    path: "/upstreams",
-    label: "Upstreams",
-    icon: "cloud",
-    title: "Upstreams",
-    description: "Configured upstream gateways and accounts.",
-    section: "primary",
+    id: "monitoring",
+    label: "Monitoring",
+    routes: [
+      {
+        id: "usage",
+        path: "/usage",
+        label: "Usage",
+        icon: "monitoring",
+        title: "Usage",
+        description: "Token usage, estimated cost, and request history.",
+      },
+      {
+        id: "quota",
+        path: "/quota",
+        label: "Quota Tracker",
+        icon: "data_usage",
+        title: "Quota Tracker",
+        description: "Track and manage your API quota limits.",
+      },
+    ],
   },
   {
-    id: "providers",
-    path: "/providers",
-    label: "Providers",
-    icon: "dns",
-    title: "Providers",
-    description: "Manage your AI provider connections.",
-    section: "primary",
+    id: "developer",
+    label: "Developer",
+    routes: [
+      {
+        id: "apis",
+        path: "/apis",
+        label: "APIs",
+        icon: "api",
+        title: "API Endpoint",
+        description: "Gateway URL, client API keys, and authentication.",
+      },
+      {
+        id: "chat",
+        path: "/chat",
+        label: "Chat",
+        icon: "chat",
+        title: "Chat",
+        description: "Test models with a conversational playground.",
+      },
+      {
+        id: "cli-tools",
+        path: "/cli-tools",
+        label: "CLI Tools",
+        icon: "terminal",
+        title: "CLI Tools",
+        description: "Connect coding CLIs and IDE extensions to tproxy.",
+      },
+    ],
   },
   {
-    id: "proxy-pools",
-    path: "/proxy-pools",
-    label: "Proxy pools",
-    icon: "lan",
-    title: "Proxy pools",
-    description: "Encrypted egress pools bound to providers and credentials.",
-    section: "primary",
-  },
-  {
-    id: "quota",
-    path: "/quota",
-    label: "Quota Tracker",
-    icon: "data_usage",
-    title: "Quota Tracker",
-    description: "Track and manage your API quota limits.",
-    section: "primary",
-  },
-  {
-    id: "usage",
-    path: "/usage",
-    label: "Usage",
-    icon: "monitoring",
-    title: "Usage",
-    description: "Token usage, estimated cost, and request history.",
-    section: "primary",
-  },
-  {
-    id: "apis",
-    path: "/apis",
-    label: "APIs",
-    icon: "api",
-    title: "API Endpoint",
-    description: "Gateway URL, client API keys, and authentication.",
-    section: "primary",
-  },
-  {
-    id: "chat",
-    path: "/chat",
-    label: "Chat",
-    icon: "chat",
-    title: "Chat",
-    description: "Test models with a conversational playground.",
-    section: "primary",
-  },
-  {
-    id: "cli-tools",
-    path: "/cli-tools",
-    label: "CLI Tools",
-    icon: "terminal",
-    title: "CLI Tools",
-    description: "Connect coding CLIs and IDE extensions to tproxy.",
-    section: "primary",
+    id: "system",
+    label: "System",
+    routes: [
+      {
+        id: "observability",
+        path: "/logs",
+        label: "Logs & audit",
+        icon: "monitoring",
+        title: "Logs & audit",
+        description: "Recent requests and admin changes.",
+      },
+    ],
   },
 ];
 
-export const SYSTEM_ROUTES: NavRoute[] = [
-  {
-    id: "observability",
-    path: "/logs",
-    label: "Logs & audit",
-    icon: "monitoring",
-    title: "Logs & audit",
-    description: "Recent requests and admin changes.",
-    section: "system",
-  },
-];
+export const ALL_ROUTES = NAV_SECTIONS.flatMap((section) => section.routes);
 
-export const ALL_ROUTES = [...PRIMARY_ROUTES, ...SYSTEM_ROUTES];
+/** @deprecated Use NAV_SECTIONS */
+export const PRIMARY_ROUTES = NAV_SECTIONS.filter((section) => section.id !== "system").flatMap((section) => section.routes);
+
+/** @deprecated Use NAV_SECTIONS */
+export const SYSTEM_ROUTES = NAV_SECTIONS.find((section) => section.id === "system")?.routes ?? [];
 
 export function matchRoute(pathname: string): NavRoute {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized.startsWith("/providers")) {
-    return ALL_ROUTES.find((route) => route.id === "providers") ?? PRIMARY_ROUTES[0];
+    return ALL_ROUTES.find((route) => route.id === "providers") ?? ALL_ROUTES[0];
   }
   if (normalized.startsWith("/cli-tools")) {
-    return ALL_ROUTES.find((route) => route.id === "cli-tools") ?? PRIMARY_ROUTES[0];
+    return ALL_ROUTES.find((route) => route.id === "cli-tools") ?? ALL_ROUTES[0];
   }
-  return ALL_ROUTES.find((route) => route.path === normalized) ?? PRIMARY_ROUTES[0];
+  return ALL_ROUTES.find((route) => route.path === normalized) ?? ALL_ROUTES[0];
 }
 
 export function isRouteActive(pathname: string, route: Pick<NavRoute, "id" | "path">): boolean {

@@ -17,9 +17,11 @@ import { ProvidersView } from "./components/providers/ProvidersView";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
 import { UsageView } from "./components/usage/UsageView";
 import { ApisView } from "./components/apis/ApisView";
+import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
 import { ProxyPoolsView } from "./components/proxy-pools/ProxyPoolsView";
 import { CombosView } from "./components/combos/CombosView";
+import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
 import { matchRoute } from "./navigation";
@@ -64,6 +66,7 @@ type Route = {
   ProviderID: string;
   UpstreamModel: string;
   Priority: number;
+  Weight?: number;
   Enabled: boolean;
 };
 
@@ -147,6 +150,7 @@ function App() {
 
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [gatewayOnline, setGatewayOnline] = useState(true);
+  const [healthCheckAllBusy, setHealthCheckAllBusy] = useState(false);
   const authHeaders = useMemo<Record<string, string>>(() => ({ ...(secret ? { Authorization: `Bearer ${secret}` } : {}) }), [secret]);
 
   const load = useCallback(async () => {
@@ -204,6 +208,33 @@ function App() {
 
   const checkProvider = async (id: string) => {
     try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/health`, "POST"); setNotice(result.ok ? `${id} is healthy` : `${id} health check failed`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Provider health check failed"); }
+  };
+  const checkAllProviders = async () => {
+    const ids = (snapshot.providers || []).map((provider) => provider.ID);
+    if (ids.length === 0) {
+      setError("No providers configured");
+      return;
+    }
+    setHealthCheckAllBusy(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const id of ids) {
+        try {
+          const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/health`, "POST");
+          if (result.ok) ok++;
+          else failed++;
+        } catch {
+          failed++;
+        }
+      }
+      setNotice(`Health check finished: ${ok} healthy, ${failed} failed`);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Health check failed");
+    } finally {
+      setHealthCheckAllBusy(false);
+    }
   };
   const discoverProvider = async (id: string) => {
     try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/models`, "GET"); setDiscovered((current) => ({ ...current, [id]: result.data || [] })); setNotice(`Discovered ${result.data?.length || 0} models from ${id}`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Model discovery failed"); }
@@ -350,16 +381,7 @@ function App() {
 
   function ApisPage() {
     const modelOptions = useMemo(
-      () => [
-        ...(snapshot.models || []).map((model) => ({
-          value: model.ID,
-          label: model.DisplayName ? `${model.DisplayName} (${model.ID})` : model.ID,
-        })),
-        ...(snapshot.combos || []).map((combo) => ({
-          value: combo.id,
-          label: combo.display_name ? `${combo.display_name} (${combo.id})` : combo.id,
-        })),
-      ],
+      () => buildExampleModelOptions(snapshot.models, snapshot.combos),
       [snapshot.models, snapshot.combos],
     );
 
@@ -376,7 +398,14 @@ function App() {
   }
 
   function ChatPage() {
-    const { models: chatModels, loadingProviderModels, providerError } = useChatModels(secret, snapshot);
+    const { models: chatModels, loadingProviderModels, loadingProviderIds, providerError } = useChatModels(
+      secret,
+      snapshot,
+    );
+    const providerLabels = useMemo(
+      () => Object.fromEntries((snapshot.providers || []).map((provider) => [provider.ID, provider.Name || provider.ID])),
+      [snapshot.providers],
+    );
 
     const handleApiKeyChange = (value: string) => {
       setApiKey(value);
@@ -388,6 +417,8 @@ function App() {
       <ChatView
         models={chatModels}
         loadingProviderModels={loadingProviderModels}
+        loadingProviderIds={loadingProviderIds}
+        providerLabels={providerLabels}
         providerError={providerError}
         apiKey={apiKey}
         onApiKeyChange={handleApiKeyChange}
@@ -397,11 +428,11 @@ function App() {
   }
 
   function CLIToolsPage() {
-    return <CLIToolsView />;
+    return <CLIToolsView secret={secret} />;
   }
 
   function CLIToolDetailPage() {
-    return <CLIToolDetailView snapshot={snapshot} />;
+    return <CLIToolDetailView snapshot={snapshot} secret={secret} />;
   }
 
   function ProvidersPage() {
@@ -489,53 +520,50 @@ function App() {
   }
 
   function ModelsPage() {
+    const modelProviders = useMemo(
+      () =>
+        (snapshot.providers || []).map((provider) => ({
+          id: provider.ID,
+          label: provider.Name ? `${provider.Name} (${provider.ID})` : provider.ID,
+          type: provider.Type,
+        })),
+      [snapshot.providers],
+    );
+
+    const credentialCounts = useMemo(() => {
+      const counts: Record<string, number> = {};
+      for (const [providerId, items] of Object.entries(snapshot.credentials || {})) {
+        counts[providerId] = (items || []).filter((item) => item.enabled).length;
+      }
+      return counts;
+    }, [snapshot.credentials]);
+
+    const modelRoutes = useMemo(() => {
+      const mapped: Record<string, { ID: string; ProviderID: string; UpstreamModel: string; Priority: number; Weight?: number; Enabled: boolean }[]> = {};
+      for (const [modelId, routes] of Object.entries(snapshot.routes || {})) {
+        mapped[modelId] = (routes || []).map((route) => ({
+          ID: route.ID,
+          ProviderID: route.ProviderID,
+          UpstreamModel: route.UpstreamModel,
+          Priority: route.Priority,
+          Weight: route.Weight,
+          Enabled: route.Enabled,
+        }));
+      }
+      return mapped;
+    }, [snapshot.routes]);
+
     return (
-      <section className="section">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Public surface</p>
-                  <h2>Virtual models</h2>
-                  <p>Stable IDs presented to clients, with their routes.</p>
-                </div>
-                <span className="meta">{snapshot.models?.length || 0} models</span>
-              </div>
-              <div className="model-grid">
-                {(snapshot.models || []).map((model) => (
-                  <Card key={model.ID} pad="md" className="model-card">
-                    <div className="model-title">
-                      <span className="model-icon">M</span>
-                      <div>
-                        <h3>{model.DisplayName || model.ID}</h3>
-                        <code>{model.ID}</code>
-                      </div>
-                      {model.Enabled ? <Badge variant="success" size="sm" dot>active</Badge> : <Badge size="sm">off</Badge>}
-                    </div>
-                    {(model.Capabilities || []).length > 0 && (
-                      <div className="tags">
-                        {model.Capabilities.map((capability) => <span key={capability}>{capability}</span>)}
-                      </div>
-                    )}
-                    <p className="aliases">Aliases: {(model.Aliases || []).join(", ") || "none"}</p>
-                    <div className="route-list">
-                      {(snapshot.routes?.[model.ID] || []).map((route, index) => (
-                        <div className="route-row" key={route.ID}>
-                          <b>{index + 1}</b>
-                          <span>{route.ProviderID}</span>
-                          <code>{route.UpstreamModel}</code>
-                          <small>P{route.Priority}</small>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: 12 }}>
-                      <Button variant="danger" size="sm" icon="delete" onClick={() => remove(`/api/admin/models/${encodeURIComponent(model.ID)}`, `model ${model.ID}`)}>
-                        Delete model
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-                {(snapshot.models || []).length === 0 && <EmptyState icon="apps" text="No virtual models yet." />}
-              </div>
-      </section>
+      <ModelsView
+        secret={secret}
+        models={snapshot.models || []}
+        routesByModel={modelRoutes}
+        providers={modelProviders}
+        credentialCounts={credentialCounts}
+        onMutated={() => void load()}
+        onNotice={setNotice}
+        onError={setError}
+      />
     );
   }
 
@@ -548,8 +576,18 @@ function App() {
                   <h2>Providers</h2>
                   <p>Configured upstream gateways and accounts.</p>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <span className="meta">{snapshot.providers?.length || 0} configured</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon="monitor_heart"
+                    loading={healthCheckAllBusy}
+                    disabled={healthCheckAllBusy || !(snapshot.providers?.length)}
+                    onClick={() => void checkAllProviders()}
+                  >
+                    {healthCheckAllBusy ? "Checking…" : "Check all health"}
+                  </Button>
                   <Button variant="primary" size="sm" icon="dns" onClick={() => navigate("/providers")}>
                     Manage providers
                   </Button>
@@ -617,7 +655,6 @@ function App() {
                 <div className="row-table">
                   {logs.map((item) => (
                     <div className="row compact-row" key={`${item.request_id}-${item.created_at}`}>
-                      <code>{item.request_id}</code>
                       <div>
                         <strong>{item.method} {item.path}</strong>
                         <small>{item.client_api_key_id || "local"}</small>

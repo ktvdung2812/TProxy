@@ -22,6 +22,11 @@ func TestClassifyProxyIngress(t *testing.T) {
 		{path: "/v1internal:unsupported", ok: false},
 		{path: "/api/admin/snapshot", ok: false},
 		{path: "/openaievil", ok: false},
+		{path: "/v1/v1/messages", wantPath: "/v1/messages", ok: true},
+		{path: "/anthropic/v1/v1/messages", wantPath: "/v1/messages", provider: "anthropic", ok: true},
+		{path: "/responses", wantPath: "/v1/responses", ok: true},
+		{path: "/codex/responses", wantPath: "/v1/responses", ok: true},
+		{path: "/chatgpt/v1/responses", wantPath: "/v1/responses", provider: "chatgpt", ok: true},
 	}
 
 	for _, test := range tests {

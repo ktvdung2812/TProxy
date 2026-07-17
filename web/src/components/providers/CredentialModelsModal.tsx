@@ -1,21 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, EmptyState, Input, Modal } from "../ui";
-import { discoverCredentialModels, type DiscoveredModel } from "./api";
+import { discoverCredentialModels, testModel, type DiscoveredModel } from "./api";
 import type { Credential } from "./types";
 
 type Props = {
   open: boolean;
   credential: Credential | null;
+  providerId: string;
   secret: string;
   onClose: () => void;
 };
 
-export function CredentialModelsModal({ open, credential, secret, onClose }: Props) {
+function inferModelKind(capabilities?: string[]) {
+  if (capabilities?.includes("embedding")) return "embedding";
+  if (capabilities?.includes("image-output")) return "image";
+  if (capabilities?.includes("stt")) return "stt";
+  return "llm";
+}
+
+export function CredentialModelsModal({ open, credential, providerId, secret, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [modelTestResults, setModelTestResults] = useState<Record<string, "ok" | "error">>({});
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [testError, setTestError] = useState("");
 
   useEffect(() => {
     if (!open || !credential) {
@@ -23,6 +34,9 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
       setError(null);
       setCopied(null);
       setSearchQuery("");
+      setModelTestResults({});
+      setTestingModelId(null);
+      setTestError("");
       return;
     }
 
@@ -81,6 +95,30 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
     }
   };
 
+  const handleTestModel = async (model: DiscoveredModel) => {
+    if (!credential || testingModelId) return;
+    setTestingModelId(model.id);
+    setTestError("");
+    try {
+      const result = await testModel(secret, {
+        provider_id: providerId,
+        model_id: model.id,
+        kind: inferModelKind(model.capabilities),
+        credential_id: credential.id,
+      });
+      setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
+      if (!result.ok) {
+        const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
+        setTestError((result.error || "Model not reachable") + latency);
+      }
+    } catch (cause) {
+      setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
+      setTestError(cause instanceof Error ? cause.message : "Test failed");
+    } finally {
+      setTestingModelId(null);
+    }
+  };
+
   const summaryText = normalizedQuery
     ? `${filteredModels.length} of ${models.length} model${models.length === 1 ? "" : "s"}`
     : `${models.length} model${models.length === 1 ? "" : "s"} available on this account`;
@@ -129,6 +167,11 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
         />
       ) : (
         <div>
+          {testError ? (
+            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--color-danger)", wordBreak: "break-word" }}>
+              {testError}
+            </p>
+          ) : null}
           <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--color-text-muted)" }}>
             {summaryText}
             {error ? ` · ${error}` : ""}
@@ -138,14 +181,25 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
               <thead>
                 <tr>
                   <th>Model</th>
-                  <th>Provider</th>
                   <th>Capabilities</th>
                   <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredModels.map((model) => (
-                  <tr key={model.id}>
+                {filteredModels.map((model) => {
+                  const testStatus = modelTestResults[model.id];
+                  const isTesting = testingModelId === model.id;
+                  return (
+                  <tr
+                    key={model.id}
+                    className={
+                      testStatus === "ok"
+                        ? "model-table-test-ok"
+                        : testStatus === "error"
+                          ? "model-table-test-error"
+                          : undefined
+                    }
+                  >
                     <td>
                       <div className="model-table-identity">
                         <div className="model-table-name">{model.name?.trim() || model.id}</div>
@@ -154,7 +208,6 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
                         ) : null}
                       </div>
                     </td>
-                    <td>{model.owned_by || "—"}</td>
                     <td>
                       <div className="model-table-capabilities">
                         {model.capabilities?.map((cap) => (
@@ -167,14 +220,24 @@ export function CredentialModelsModal({ open, credential, secret, onClose }: Pro
                         <Button
                           variant="ghost"
                           size="sm"
+                          icon={isTesting ? "progress_activity" : testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "science"}
+                          onClick={() => void handleTestModel(model)}
+                          disabled={isTesting}
+                          aria-label="Test model"
+                          title={isTesting ? "Testing..." : "Test model"}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           icon={copied === model.id ? "check" : "content_copy"}
-                          onClick={() => handleCopy(model.id)}
+                          onClick={() => void handleCopy(model.id)}
                           aria-label="Copy model id"
                         />
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

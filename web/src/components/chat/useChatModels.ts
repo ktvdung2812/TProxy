@@ -67,10 +67,23 @@ function buildStaticModels(snapshot: SnapshotSlice): ChatModelOption[] {
   return items;
 }
 
+function sortModels(items: ChatModelOption[]): ChatModelOption[] {
+  return [...items].sort((a, b) => {
+    if (a.group === b.group) return a.name.localeCompare(b.name);
+    const groupOrder = (group: string) => {
+      if (group === "Virtual models") return 0;
+      if (group === "Combos") return 1;
+      return 2;
+    };
+    const orderDiff = groupOrder(a.group) - groupOrder(b.group);
+    return orderDiff !== 0 ? orderDiff : a.group.localeCompare(b.group);
+  });
+}
+
 export function useChatModels(secret: string, snapshot: SnapshotSlice) {
   const staticModels = useMemo(() => buildStaticModels(snapshot), [snapshot]);
   const [providerModels, setProviderModels] = useState<ChatModelOption[]>([]);
-  const [loadingProviderModels, setLoadingProviderModels] = useState(false);
+  const [loadingProviderIds, setLoadingProviderIds] = useState<string[]>([]);
   const [providerError, setProviderError] = useState("");
 
   const discoverableProviders = useMemo(() => {
@@ -85,60 +98,65 @@ export function useChatModels(secret: string, snapshot: SnapshotSlice) {
     if (!secret || discoverableProviders.length === 0) {
       setProviderModels([]);
       setProviderError("");
-      setLoadingProviderModels(false);
+      setLoadingProviderIds([]);
       return;
     }
 
     let cancelled = false;
+    setProviderModels([]);
+    setProviderError("");
+    setLoadingProviderIds(discoverableProviders.map((provider) => provider.ID));
 
-    async function loadProviderModels() {
-      setLoadingProviderModels(true);
-      setProviderError("");
+    const staticIds = new Set(staticModels.map((model) => model.id));
+    let failures = 0;
 
-      const staticIds = new Set(staticModels.map((model) => model.id));
-      const discovered: ChatModelOption[] = [];
-
-      const results = await Promise.allSettled(
-        discoverableProviders.map(async (provider) => {
-          const response = await discoverProviderModels(secret, provider.ID);
-          return { provider, models: response.data || [] };
-        }),
-      );
-
-      for (const result of results) {
-        if (result.status !== "fulfilled") continue;
-        const { provider, models } = result.value;
+    void Promise.all(
+      discoverableProviders.map(async (provider) => {
         const group = providerLabel(provider);
+        try {
+          const response = await discoverProviderModels(secret, provider.ID);
+          if (cancelled) return;
 
-        for (const model of models) {
-          const upstreamId = model.id?.trim();
-          if (!upstreamId) continue;
+          const discovered: ChatModelOption[] = [];
+          for (const model of response.data || []) {
+            const upstreamId = model.id?.trim();
+            if (!upstreamId) continue;
 
-          const id = formatProviderModelId(provider.ID, upstreamId);
-          if (staticIds.has(id) || staticIds.has(upstreamId)) continue;
+            const id = formatProviderModelId(provider.ID, upstreamId);
+            if (staticIds.has(id) || staticIds.has(upstreamId)) continue;
 
-          discovered.push({
-            id,
-            name: model.name?.trim() || upstreamId,
-            group,
-            capabilities: model.capabilities || [],
-            requestModel: id,
-          });
-          staticIds.add(id);
+            discovered.push({
+              id,
+              name: model.name?.trim() || upstreamId,
+              group,
+              capabilities: model.capabilities || [],
+              requestModel: id,
+            });
+            staticIds.add(id);
+          }
+
+          if (discovered.length > 0) {
+            setProviderModels((current) => sortModels([...current, ...discovered]));
+          }
+        } catch {
+          failures += 1;
+        } finally {
+          if (!cancelled) {
+            setLoadingProviderIds((current) => current.filter((id) => id !== provider.ID));
+          }
         }
+      }),
+    ).then(() => {
+      if (cancelled) return;
+      if (failures > 0 && staticModels.length === 0) {
+        setProviderModels((current) => {
+          if (current.length === 0) {
+            setProviderError("Failed to discover models from configured providers.");
+          }
+          return current;
+        });
       }
-
-      if (!cancelled) {
-        setProviderModels(discovered.sort((a, b) => a.name.localeCompare(b.name)));
-        const failed = results.filter((result) => result.status === "rejected").length;
-        if (failed > 0 && discovered.length === 0 && staticModels.length === 0) {
-          setProviderError("Failed to discover models from configured providers.");
-        }
-        setLoadingProviderModels(false);
-      }
-    }
-
-    void loadProviderModels();
+    });
 
     return () => {
       cancelled = true;
@@ -146,18 +164,11 @@ export function useChatModels(secret: string, snapshot: SnapshotSlice) {
   }, [secret, discoverableProviders, staticModels]);
 
   const models = useMemo(
-    () => [...staticModels, ...providerModels].sort((a, b) => {
-      if (a.group === b.group) return a.name.localeCompare(b.name);
-      const groupOrder = (group: string) => {
-        if (group === "Virtual models") return 0;
-        if (group === "Combos") return 1;
-        return 2;
-      };
-      const orderDiff = groupOrder(a.group) - groupOrder(b.group);
-      return orderDiff !== 0 ? orderDiff : a.group.localeCompare(b.group);
-    }),
+    () => sortModels([...staticModels, ...providerModels]),
     [staticModels, providerModels],
   );
 
-  return { models, loadingProviderModels, providerError };
+  const loadingProviderModels = loadingProviderIds.length > 0;
+
+  return { models, staticModels, loadingProviderModels, loadingProviderIds, providerError };
 }

@@ -18,6 +18,8 @@ import {
 type Props = {
   models: ChatModelOption[];
   loadingProviderModels?: boolean;
+  loadingProviderIds?: string[];
+  providerLabels?: Record<string, string>;
   providerError?: string;
   apiKey: string;
   onApiKeyChange: (value: string) => void;
@@ -34,6 +36,8 @@ const PRESET_PROMPTS = [
 export function ChatView({
   models,
   loadingProviderModels = false,
+  loadingProviderIds = [],
+  providerLabels = {},
   providerError = "",
   apiKey,
   onApiKeyChange,
@@ -60,6 +64,7 @@ export function ChatView({
   const [streamingMessageId, setStreamingMessageId] = useState("");
   const [streamingText, setStreamingText] = useState("");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -85,8 +90,42 @@ export function ChatView({
     }
     return Array.from(groups.entries())
       .map(([group, items]) => ({ group, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
-      .sort((a, b) => a.group.localeCompare(b.group));
+      .sort((a, b) => {
+        const order = (group: string) => {
+          if (group === "Virtual models") return 0;
+          if (group === "Combos") return 1;
+          return 2;
+        };
+        const diff = order(a.group) - order(b.group);
+        return diff !== 0 ? diff : a.group.localeCompare(b.group);
+      });
   }, [models]);
+
+  const filteredModelGroups = useMemo(() => {
+    const query = modelSearchQuery.trim().toLowerCase();
+    return modelGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((model) => {
+          if (!query) return true;
+          const haystack = [model.name, model.id, model.requestModel, group.group]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(query);
+        }),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [modelGroups, modelSearchQuery]);
+
+  const loadingProviderGroups = useMemo(
+    () =>
+      loadingProviderIds.map((providerId) => ({
+        id: providerId,
+        label: providerLabels[providerId] || providerId,
+      })),
+    [loadingProviderIds, providerLabels],
+  );
 
   const activeModel = useMemo(() => {
     if (activeModelId && modelIndex.has(activeModelId)) return modelIndex.get(activeModelId)!;
@@ -117,9 +156,6 @@ export function ChatView({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target as Node)) {
-        setModelMenuOpen(false);
-      }
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
         setSettingsOpen(false);
       }
@@ -127,6 +163,23 @@ export function ChatView({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModelMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [modelMenuOpen]);
+
+  useEffect(() => {
+    if (!modelMenuOpen) setModelSearchQuery("");
+  }, [modelMenuOpen]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -458,50 +511,89 @@ export function ChatView({
             </button>
 
             {modelMenuOpen ? (
-              <div className="chat-model-menu custom-scrollbar">
-                {modelGroups.length === 0 ? (
-                  <div className="chat-model-menu-empty">
-                    {loadingProviderModels
-                      ? "Discovering models from configured providers..."
-                      : (
-                        <>
-                          No models available. Connect providers in{" "}
-                          <Link to="/providers">Providers</Link> or configure virtual models in{" "}
-                          <Link to="/models">Virtual models</Link>.
-                        </>
-                      )}
-                  </div>
-                ) : modelGroups.map((group) => (
-                  <div key={group.group} className="chat-model-group">
-                    <div className="chat-model-group-header">
-                      <span>{group.group}</span>
-                      <Badge size="sm">{group.items.length}</Badge>
+              <div className="chat-model-overlay" onClick={() => setModelMenuOpen(false)}>
+                <div className="chat-model-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+                  <div className="chat-model-modal-head">
+                    <div>
+                      <h3>Select model</h3>
+                      <p>{models.length} available{loadingProviderModels ? " · discovering more…" : ""}</p>
                     </div>
-                    <div className="chat-model-grid">
-                      {group.items.map((model) => {
-                        const isActive = model.id === activeModelId;
-                        return (
-                          <button
-                            key={model.id}
-                            type="button"
-                            className={cn("chat-model-option", isActive && "is-active")}
-                            onClick={() => handleSelectModel(model.id)}
-                          >
-                            <span className="chat-model-option-name">{model.name}</span>
-                            <span className="chat-model-option-id">{model.requestModel || model.id}</span>
-                            {isActive ? <span className="material-symbols-outlined">check_circle</span> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <button
+                      type="button"
+                      className="chat-model-modal-close"
+                      onClick={() => setModelMenuOpen(false)}
+                      aria-label="Close"
+                    >
+                      <span className="material-symbols-outlined">close</span>
+                    </button>
                   </div>
-                ))}
-                {loadingProviderModels ? (
-                  <div className="chat-model-menu-loading">Loading provider models...</div>
-                ) : null}
-                {providerError ? (
-                  <div className="chat-model-menu-error">{providerError}</div>
-                ) : null}
+
+                  <div className="chat-model-modal-search">
+                    <Input
+                      value={modelSearchQuery}
+                      onChange={(event) => setModelSearchQuery(event.target.value)}
+                      placeholder="Search models…"
+                      icon="search"
+                    />
+                  </div>
+
+                  <div className="chat-model-menu custom-scrollbar">
+                    {filteredModelGroups.length === 0 && !loadingProviderModels ? (
+                      <div className="chat-model-menu-empty">
+                        {models.length === 0 ? (
+                          <>
+                            No models available. Connect providers in{" "}
+                            <Link to="/providers">Providers</Link> or configure models in{" "}
+                            <Link to="/models">Provider Priority Manager</Link>.
+                          </>
+                        ) : (
+                          "No models match your search."
+                        )}
+                      </div>
+                    ) : (
+                      filteredModelGroups.map((group) => (
+                        <div key={group.group} className="chat-model-group">
+                          <div className="chat-model-group-header">
+                            <span>{group.group}</span>
+                            <Badge size="sm">{group.items.length}</Badge>
+                          </div>
+                          <div className="chat-model-grid">
+                            {group.items.map((model) => {
+                              const isActive = model.id === activeModelId;
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  className={cn("chat-model-option", isActive && "is-active")}
+                                  onClick={() => handleSelectModel(model.id)}
+                                >
+                                  <span className="chat-model-option-name">{model.name}</span>
+                                  <span className="chat-model-option-id">{model.requestModel || model.id}</span>
+                                  {isActive ? <span className="material-symbols-outlined">check_circle</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    )}
+
+                    {loadingProviderGroups.map((provider) => (
+                      <div key={`loading-${provider.id}`} className="chat-model-group chat-model-group-loading">
+                        <div className="chat-model-group-header">
+                          <span>{provider.label}</span>
+                          <Badge size="sm">…</Badge>
+                        </div>
+                        <div className="chat-model-menu-loading">
+                          <span className="material-symbols-outlined animate-spin">progress_activity</span>
+                          Discovering supported models…
+                        </div>
+                      </div>
+                    ))}
+
+                    {providerError ? <div className="chat-model-menu-error">{providerError}</div> : null}
+                  </div>
+                </div>
               </div>
             ) : null}
           </div>
