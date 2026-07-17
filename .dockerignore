@@ -1,0 +1,7 @@
+.git
+bin
+tproxy
+*.db
+web/node_modules
+web/dist
+coverage

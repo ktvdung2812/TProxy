@@ -1,0 +1,802 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	Server        ServerConfig        `yaml:"server"`
+	Database      DatabaseConfig      `yaml:"database"`
+	Security      SecurityConfig      `yaml:"security"`
+	Routing       RoutingConfig       `yaml:"routing"`
+	Retention     RetentionConfig     `yaml:"retention"`
+	Limits        LimitPolicy         `yaml:"limits" json:"limits"`
+	Teams         []TeamPolicyConfig  `yaml:"teams" json:"teams"`
+	ProxyPools    []ProxyPoolConfig   `yaml:"proxy-pools"`
+	ClientAPIKeys []ClientAPIKey      `yaml:"client-api-keys"`
+	Providers     []ProviderConfig    `yaml:"providers"`
+	Models        []PublicModelConfig `yaml:"models"`
+	Combos        []ComboConfig       `yaml:"combos"`
+}
+
+type ProxyPoolConfig struct {
+	ID      string `yaml:"id" json:"id"`
+	Name    string `yaml:"name" json:"name"`
+	URL     string `yaml:"url" json:"url,omitempty"`
+	URLEnv  string `yaml:"url-env" json:"url_env,omitempty"`
+	Enabled *bool  `yaml:"enabled" json:"enabled,omitempty"`
+}
+
+func (p ProxyPoolConfig) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
+
+type RoutingConfig struct {
+	Strategy           string         `yaml:"strategy" json:"strategy"`
+	SessionAffinity    bool           `yaml:"session-affinity" json:"session_affinity"`
+	SessionAffinityTTL string         `yaml:"session-affinity-ttl" json:"session_affinity_ttl"`
+	Cooldown           CooldownConfig `yaml:"cooldown" json:"cooldown"`
+	Prewarm            PrewarmConfig  `yaml:"prewarm" json:"prewarm"`
+}
+
+type CooldownConfig struct {
+	Default       string `yaml:"default" json:"default"`
+	Max           string `yaml:"max" json:"max"`
+	BackoffBase   string `yaml:"backoff-base" json:"backoff_base"`
+	PermanentAuth string `yaml:"permanent-auth" json:"permanent_auth"`
+	Status401     string `yaml:"status-401" json:"status_401"`
+	Status402     string `yaml:"status-402" json:"status_402"`
+	Status403     string `yaml:"status-403" json:"status_403"`
+	Status404     string `yaml:"status-404" json:"status_404"`
+	Status429     string `yaml:"status-429" json:"status_429"`
+	Status5xx     string `yaml:"status-5xx" json:"status_5xx"`
+}
+
+type PrewarmConfig struct {
+	Enabled              *bool  `yaml:"enabled" json:"enabled"`
+	CheckInterval        string `yaml:"check-interval" json:"check_interval"`
+	PrewarmBeforeExpiry  string `yaml:"before-expiry" json:"before_expiry"`
+	MaxConcurrentPrewarm int    `yaml:"max-concurrent" json:"max_concurrent"`
+	TopNAccounts         int    `yaml:"top-n" json:"top_n"`
+}
+
+type RetentionConfig struct {
+	UsageEvents     string `yaml:"usage-events" json:"usage_events"`
+	RequestLogs     string `yaml:"request-logs" json:"request_logs"`
+	AuditEvents     string `yaml:"audit-events" json:"audit_events"`
+	MediaJobs       string `yaml:"media-jobs" json:"media_jobs"`
+	OAuthSessions   string `yaml:"oauth-sessions" json:"oauth_sessions"`
+	CleanupInterval string `yaml:"cleanup-interval" json:"cleanup_interval"`
+}
+
+type TeamPolicyConfig struct {
+	ID     string      `yaml:"id" json:"id"`
+	Limits LimitPolicy `yaml:"limits" json:"limits"`
+}
+
+type ServerConfig struct {
+	Host                  string `yaml:"host"`
+	Port                  int    `yaml:"port"`
+	AllowLocalWithoutKey  bool   `yaml:"allow-local-without-key"`
+	AllowRemoteManagement bool   `yaml:"allow-remote-management"`
+	AllowUpstreamModels   bool   `yaml:"allow-upstream-models" json:"allow_upstream_models"`
+}
+
+type DatabaseConfig struct {
+	Driver string `yaml:"driver"`
+	DSN    string `yaml:"dsn"`
+}
+
+type SecurityConfig struct {
+	MasterKeyEnv        string `yaml:"master-key-env"`
+	ManagementSecretEnv string `yaml:"management-secret-env"`
+	PluginsEnabled      bool   `yaml:"plugins-enabled" json:"plugins_enabled"`
+}
+
+type ClientAPIKey struct {
+	ID     string          `yaml:"id"`
+	Name   string          `yaml:"name"`
+	KeyEnv string          `yaml:"key-env"`
+	Models []string        `yaml:"models"`
+	Policy ClientKeyPolicy `yaml:"policy" json:"policy"`
+}
+
+type ClientKeyPolicy struct {
+	Endpoints []string          `yaml:"endpoints" json:"endpoints,omitempty"`
+	Team      string            `yaml:"team" json:"team,omitempty"`
+	Tags      map[string]string `yaml:"tags" json:"tags,omitempty"`
+	Limits    LimitPolicy       `yaml:"limits" json:"limits,omitempty"`
+}
+
+type LimitPolicy struct {
+	RequestsPerMinute int     `yaml:"requests-per-minute" json:"requests_per_minute,omitempty"`
+	ConcurrentStreams int     `yaml:"concurrent-streams" json:"concurrent_streams,omitempty"`
+	MaxInputBytes     int64   `yaml:"max-input-bytes" json:"max_input_bytes,omitempty"`
+	MaxOutputTokens   int     `yaml:"max-output-tokens" json:"max_output_tokens,omitempty"`
+	MediaJobs         int     `yaml:"media-jobs" json:"media_jobs,omitempty"`
+	BudgetUSDPerDay   float64 `yaml:"budget-usd-per-day" json:"budget_usd_per_day,omitempty"`
+}
+
+type ProviderConfig struct {
+	ID          string             `yaml:"id" json:"id"`
+	Type        string             `yaml:"type" json:"type"`
+	Name        string             `yaml:"name" json:"name"`
+	BaseURL     string             `yaml:"base-url" json:"base_url"`
+	Enabled     bool               `yaml:"enabled" json:"enabled"`
+	Headers     map[string]string  `yaml:"headers" json:"headers"`
+	Config      map[string]any     `yaml:"config" json:"config"`
+	Limits      LimitPolicy        `yaml:"limits" json:"limits"`
+	OAuth       *OAuthConfig       `yaml:"oauth,omitempty" json:"oauth,omitempty"`
+	ProxyPools  []string           `yaml:"proxy-pools" json:"proxy_pools"`
+	Credentials []CredentialConfig `yaml:"credentials" json:"credentials"`
+}
+
+type OAuthConfig struct {
+	DiscoveryURL              string            `yaml:"discovery-url" json:"discovery_url"`
+	AuthorizationURL          string            `yaml:"authorization-url" json:"authorization_url"`
+	TokenURL                  string            `yaml:"token-url" json:"token_url"`
+	UserInfoURL               string            `yaml:"user-info-url" json:"user_info_url"`
+	DeviceCodeURL             string            `yaml:"device-code-url" json:"device_code_url"`
+	DeviceTokenURL            string            `yaml:"device-token-url" json:"device_token_url"`
+	DeviceVerificationURL     string            `yaml:"device-verification-url" json:"device_verification_url"`
+	DeviceExchangeRedirectURL string            `yaml:"device-exchange-redirect-url" json:"device_exchange_redirect_url"`
+	DeviceFlow                string            `yaml:"device-flow" json:"device_flow"`
+	DeviceRequestFormat       string            `yaml:"device-request-format" json:"device_request_format"`
+	ClientID                  string            `yaml:"client-id,omitempty" json:"client_id,omitempty"`
+	ClientIDEnv               string            `yaml:"client-id-env" json:"client_id_env"`
+	ClientSecretEnv           string            `yaml:"client-secret-env" json:"client_secret_env"`
+	RequireClientSecret       bool              `yaml:"require-client-secret" json:"require_client_secret"`
+	Scopes                    []string          `yaml:"scopes" json:"scopes"`
+	RedirectURL               string            `yaml:"redirect-url" json:"redirect_url"`
+	TokenRequestFormat        string            `yaml:"token-request-format" json:"token_request_format"`
+	ListenForCallback         bool              `yaml:"listen-for-callback" json:"listen_for_callback"`
+	IncludeStateInToken       bool              `yaml:"include-state-in-token-request" json:"include_state_in_token_request"`
+	ExtraAuthParams           map[string]string `yaml:"extra-auth-params" json:"extra_auth_params"`
+	ExtraTokenParams          map[string]string `yaml:"extra-token-params" json:"extra_token_params"`
+	ExtraRefreshParams        map[string]string `yaml:"extra-refresh-params" json:"extra_refresh_params"`
+	RefreshSafetyWindow       string            `yaml:"refresh-safety-window" json:"refresh_safety_window"`
+}
+
+type CredentialConfig struct {
+	ID         string         `yaml:"id" json:"id"`
+	Label      string         `yaml:"label" json:"label"`
+	Email      string         `yaml:"email" json:"email"`
+	AuthType   string         `yaml:"auth-type" json:"auth_type"`
+	SecretEnv  string         `yaml:"secret-env" json:"secret_env"`
+	Secret     string         `yaml:"-" json:"secret,omitempty"`
+	Priority   int            `yaml:"priority" json:"priority"`
+	Weight     int            `yaml:"weight" json:"weight"`
+	Enabled    *bool          `yaml:"enabled" json:"enabled"`
+	Metadata   map[string]any `yaml:"metadata" json:"metadata"`
+	ProxyPools []string       `yaml:"proxy-pools" json:"proxy_pools"`
+}
+
+func (c CredentialConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+type PublicModelConfig struct {
+	ID                   string              `yaml:"id" json:"id"`
+	DisplayName          string              `yaml:"display-name" json:"display_name"`
+	Aliases              []string            `yaml:"aliases" json:"aliases"`
+	Enabled              bool                `yaml:"enabled" json:"enabled"`
+	ExposeUpstreamName   bool                `yaml:"expose-upstream-name" json:"expose_upstream_name"`
+	RewriteResponseModel bool                `yaml:"rewrite-response-model" json:"rewrite_response_model"`
+	Capabilities         []string            `yaml:"capabilities" json:"capabilities"`
+	Limits               map[string]any      `yaml:"limits" json:"limits"`
+	Routes               []RouteTargetConfig `yaml:"routes" json:"routes"`
+}
+
+type ComboConfig struct {
+	ID                   string            `yaml:"id" json:"id"`
+	DisplayName          string            `yaml:"display-name" json:"display_name"`
+	Enabled              bool              `yaml:"enabled" json:"enabled"`
+	RewriteResponseModel bool              `yaml:"rewrite-response-model" json:"rewrite_response_model"`
+	Capabilities         []string          `yaml:"capabilities" json:"capabilities"`
+	Limits               map[string]any    `yaml:"limits" json:"limits"`
+	Policy               map[string]any    `yaml:"policy" json:"policy"`
+	Items                []ComboItemConfig `yaml:"items" json:"items"`
+}
+
+type ComboItemConfig struct {
+	PublicModelID string `yaml:"public-model" json:"public_model_id"`
+	RouteTargetID string `yaml:"route-target" json:"route_target_id,omitempty"`
+}
+
+type RouteTargetConfig struct {
+	ID            string         `yaml:"id" json:"id"`
+	Provider      string         `yaml:"provider" json:"provider"`
+	UpstreamModel string         `yaml:"upstream-model" json:"upstream_model"`
+	Priority      int            `yaml:"priority" json:"priority"`
+	Weight        int            `yaml:"weight" json:"weight"`
+	Enabled       *bool          `yaml:"enabled" json:"enabled"`
+	Conditions    map[string]any `yaml:"conditions" json:"conditions"`
+	Pricing       *PricingConfig `yaml:"pricing,omitempty" json:"pricing,omitempty"`
+}
+
+type PricingConfig struct {
+	InputPerMillion     float64 `yaml:"input-per-million" json:"input_per_million"`
+	OutputPerMillion    float64 `yaml:"output-per-million" json:"output_per_million"`
+	ReasoningPerMillion float64 `yaml:"reasoning-per-million" json:"reasoning_per_million"`
+	Request             float64 `yaml:"request" json:"request"`
+}
+
+func (r RouteTargetConfig) IsEnabled() bool {
+	return r.Enabled == nil || *r.Enabled
+}
+
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	var cfg Config
+	if err = yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	applyDefaults(&cfg)
+	if cfg.Database.Driver == "sqlite" && !filepath.IsAbs(cfg.Database.DSN) {
+		cfg.Database.DSN = filepath.Join(filepath.Dir(path), cfg.Database.DSN)
+	}
+	if err = cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func applyDefaults(cfg *Config) {
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "127.0.0.1"
+	}
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 28120
+	}
+	if cfg.Database.Driver == "" {
+		cfg.Database.Driver = "sqlite"
+	}
+	if cfg.Database.DSN == "" {
+		cfg.Database.DSN = "tproxy.db"
+	}
+	if cfg.Security.MasterKeyEnv == "" {
+		cfg.Security.MasterKeyEnv = "TPROXY_MASTER_KEY"
+	}
+	if cfg.Security.ManagementSecretEnv == "" {
+		cfg.Security.ManagementSecretEnv = "TPROXY_MANAGEMENT_SECRET"
+	}
+	if cfg.Routing.Strategy == "" {
+		cfg.Routing.Strategy = "round-robin"
+	}
+	if cfg.Routing.SessionAffinityTTL == "" {
+		cfg.Routing.SessionAffinityTTL = "1h"
+	}
+	if cfg.Retention.UsageEvents == "" {
+		cfg.Retention.UsageEvents = "2160h"
+	}
+	if cfg.Retention.RequestLogs == "" {
+		cfg.Retention.RequestLogs = "720h"
+	}
+	if cfg.Retention.AuditEvents == "" {
+		cfg.Retention.AuditEvents = "2160h"
+	}
+	if cfg.Retention.MediaJobs == "" {
+		cfg.Retention.MediaJobs = "720h"
+	}
+	if cfg.Retention.OAuthSessions == "" {
+		cfg.Retention.OAuthSessions = "24h"
+	}
+	if cfg.Retention.CleanupInterval == "" {
+		cfg.Retention.CleanupInterval = "1h"
+	}
+	for index := range cfg.Providers {
+		ApplyProviderDefaults(&cfg.Providers[index])
+	}
+}
+
+func ApplyProviderDefaults(provider *ProviderConfig) {
+	if provider == nil {
+		return
+	}
+	switch provider.Type {
+	case "codex":
+		if provider.Name == "" {
+			provider.Name = "OpenAI Codex"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://chatgpt.com/backend-api/codex"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "https://auth.openai.com/oauth/authorize", "https://auth.openai.com/oauth/token", "app_EMoamEEZ73f0CkXaXp7hrann", "http://localhost:1455/auth/callback")
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://auth.openai.com/api/accounts/deviceauth/usercode"
+		}
+		if provider.OAuth.DeviceTokenURL == "" {
+			provider.OAuth.DeviceTokenURL = "https://auth.openai.com/api/accounts/deviceauth/token"
+		}
+		if provider.OAuth.DeviceVerificationURL == "" {
+			provider.OAuth.DeviceVerificationURL = "https://auth.openai.com/codex/device"
+		}
+		if provider.OAuth.DeviceExchangeRedirectURL == "" {
+			provider.OAuth.DeviceExchangeRedirectURL = "https://auth.openai.com/deviceauth/callback"
+		}
+		provider.OAuth.DeviceFlow = "codex"
+		provider.OAuth.DeviceRequestFormat = "json"
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"openid", "email", "profile", "offline_access"}
+		}
+		if provider.OAuth.ExtraAuthParams == nil {
+			provider.OAuth.ExtraAuthParams = map[string]string{}
+		}
+		for key, value := range map[string]string{"prompt": "login", "id_token_add_organizations": "true", "codex_cli_simplified_flow": "true"} {
+			if _, exists := provider.OAuth.ExtraAuthParams[key]; !exists {
+				provider.OAuth.ExtraAuthParams[key] = value
+			}
+		}
+		if provider.OAuth.ExtraRefreshParams == nil {
+			provider.OAuth.ExtraRefreshParams = map[string]string{"scope": "openid profile email"}
+		}
+		provider.OAuth.ListenForCallback = true
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "120h"
+		}
+	case "claude":
+		if provider.Name == "" {
+			provider.Name = "Anthropic Claude"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.anthropic.com"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "https://claude.ai/oauth/authorize", "https://api.anthropic.com/v1/oauth/token", "9d1c250a-e61b-44d9-88ed-5944d1962f5e", "http://localhost:54545/callback")
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"}
+		}
+		if provider.OAuth.ExtraAuthParams == nil {
+			provider.OAuth.ExtraAuthParams = map[string]string{"code": "true"}
+		} else if _, exists := provider.OAuth.ExtraAuthParams["code"]; !exists {
+			provider.OAuth.ExtraAuthParams["code"] = "true"
+		}
+		provider.OAuth.TokenRequestFormat = "json"
+		provider.OAuth.IncludeStateInToken = true
+		provider.OAuth.ListenForCallback = true
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "4h"
+		}
+	case "kimi":
+		if provider.Name == "" {
+			provider.Name = "Kimi Code"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.kimi.com/coding"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "", "https://auth.kimi.com/api/oauth/token", "17e5f671-d194-4dfb-9706-5516cb48c098", "")
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://auth.kimi.com/api/oauth/device_authorization"
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		provider.OAuth.DeviceRequestFormat = "form"
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+	case "xai":
+		if provider.Name == "" {
+			provider.Name = "xAI Grok"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://cli-chat-proxy.grok.com/v1"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		if provider.OAuth.DiscoveryURL == "" {
+			provider.OAuth.DiscoveryURL = "https://auth.x.ai/.well-known/openid-configuration"
+		}
+		if provider.OAuth.ClientID == "" && provider.OAuth.ClientIDEnv == "" {
+			provider.OAuth.ClientID = "b1a00492-073a-47ea-816f-4c329264a828"
+		}
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"openid", "profile", "email", "offline_access", "grok-cli:access", "api:access"}
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		provider.OAuth.DeviceRequestFormat = "form"
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+	case "copilot":
+		if provider.Name == "" {
+			provider.Name = "GitHub Copilot"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.githubcopilot.com"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "", "https://github.com/login/oauth/access_token", "Iv1.b507a08c87ecfe98", "")
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://github.com/login/device/code"
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		provider.OAuth.DeviceRequestFormat = "form"
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"read:user"}
+		}
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "12h"
+		}
+	case "vertex-partner":
+		if provider.Name == "" {
+			provider.Name = "Vertex Partner"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://aiplatform.googleapis.com/v1"
+		}
+	case "antigravity":
+		if provider.Name == "" {
+			provider.Name = "Google Antigravity"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://cloudcode-pa.googleapis.com"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token", "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com", "http://localhost:51121/oauth-callback")
+		if provider.OAuth.UserInfoURL == "" {
+			provider.OAuth.UserInfoURL = "https://www.googleapis.com/oauth2/v2/userinfo?alt=json"
+		}
+		if provider.OAuth.ClientSecretEnv == "" {
+			provider.OAuth.ClientSecretEnv = "TPROXY_ANTIGRAVITY_CLIENT_SECRET"
+		}
+		provider.OAuth.RequireClientSecret = true
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{
+				"https://www.googleapis.com/auth/cloud-platform",
+				"https://www.googleapis.com/auth/userinfo.email",
+				"https://www.googleapis.com/auth/userinfo.profile",
+				"https://www.googleapis.com/auth/cclog",
+				"https://www.googleapis.com/auth/experimentsandconfigs",
+			}
+		}
+		if provider.OAuth.ExtraAuthParams == nil {
+			provider.OAuth.ExtraAuthParams = map[string]string{}
+		}
+		for key, value := range map[string]string{"access_type": "offline", "prompt": "consent"} {
+			if _, exists := provider.OAuth.ExtraAuthParams[key]; !exists {
+				provider.OAuth.ExtraAuthParams[key] = value
+			}
+		}
+		provider.OAuth.ListenForCallback = true
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+	case "tavily":
+		if provider.Name == "" {
+			provider.Name = "Tavily Search"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.tavily.com"
+		}
+	case "elevenlabs":
+		if provider.Name == "" {
+			provider.Name = "ElevenLabs Audio"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.elevenlabs.io"
+		}
+	case "image":
+		if provider.Name == "" {
+			provider.Name = "Image generation provider"
+		}
+	case "video":
+		if provider.Name == "" {
+			provider.Name = "Video generation provider"
+		}
+	case "vertex":
+		if provider.Name == "" {
+			provider.Name = "Google Vertex AI"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://aiplatform.googleapis.com"
+		}
+	}
+}
+
+func setOAuthDefault(oauth *OAuthConfig, authorizationURL, tokenURL, clientID, redirectURL string) {
+	if oauth.AuthorizationURL == "" {
+		oauth.AuthorizationURL = authorizationURL
+	}
+	if oauth.TokenURL == "" {
+		oauth.TokenURL = tokenURL
+	}
+	if oauth.ClientID == "" && oauth.ClientIDEnv == "" {
+		oauth.ClientID = clientID
+	}
+	if oauth.RedirectURL == "" {
+		oauth.RedirectURL = redirectURL
+	}
+	if oauth.TokenRequestFormat == "" {
+		oauth.TokenRequestFormat = "form"
+	}
+}
+
+func (cfg *Config) Validate() error {
+	applyDefaults(cfg)
+	if err := validateLimitPolicy("global", cfg.Limits); err != nil {
+		return err
+	}
+	teamIDs := make(map[string]struct{}, len(cfg.Teams))
+	for _, team := range cfg.Teams {
+		if strings.TrimSpace(team.ID) == "" {
+			return errors.New("team policy id is required")
+		}
+		if _, exists := teamIDs[team.ID]; exists {
+			return fmt.Errorf("duplicate team policy %q", team.ID)
+		}
+		teamIDs[team.ID] = struct{}{}
+		if err := validateLimitPolicy("team "+team.ID, team.Limits); err != nil {
+			return err
+		}
+	}
+	if cfg.Server.AllowRemoteManagement && Env(cfg.Security.ManagementSecretEnv) == "" {
+		return errors.New("remote management requires a configured management secret")
+	}
+	for _, provider := range cfg.Providers {
+		if err := validateLimitPolicy("provider "+provider.ID, provider.Limits); err != nil {
+			return err
+		}
+		if provider.Type == "plugin-http" && !cfg.Security.PluginsEnabled {
+			return fmt.Errorf("provider %q uses plugin-http but security.plugins-enabled is false", provider.ID)
+		}
+	}
+	if cfg.Database.Driver != "sqlite" {
+		return fmt.Errorf("unsupported database driver %q", cfg.Database.Driver)
+	}
+	strategy := cfg.Routing.Strategy
+	if strategy == "" {
+		strategy = "round-robin"
+	}
+	if strategy != "round-robin" && strategy != "fill-first" {
+		return fmt.Errorf("unsupported routing strategy %q", strategy)
+	}
+	ttl := cfg.Routing.SessionAffinityTTL
+	if ttl == "" {
+		ttl = "1h"
+	}
+	if _, err := time.ParseDuration(ttl); err != nil {
+		return fmt.Errorf("invalid session affinity ttl: %w", err)
+	}
+	for name, value := range map[string]string{"usage-events": cfg.Retention.UsageEvents, "request-logs": cfg.Retention.RequestLogs, "audit-events": cfg.Retention.AuditEvents, "media-jobs": cfg.Retention.MediaJobs, "oauth-sessions": cfg.Retention.OAuthSessions, "cleanup-interval": cfg.Retention.CleanupInterval} {
+		parsed, err := time.ParseDuration(value)
+		if err != nil || parsed <= 0 {
+			return fmt.Errorf("invalid retention %s duration %q", name, value)
+		}
+	}
+	proxyPoolIDs := make(map[string]struct{}, len(cfg.ProxyPools))
+	for _, pool := range cfg.ProxyPools {
+		if strings.TrimSpace(pool.ID) == "" {
+			return errors.New("proxy pool id is required")
+		}
+		if _, exists := proxyPoolIDs[pool.ID]; exists {
+			return fmt.Errorf("duplicate proxy pool id %q", pool.ID)
+		}
+		proxyPoolIDs[pool.ID] = struct{}{}
+		proxyURL := pool.URL
+		if proxyURL == "" && pool.URLEnv != "" {
+			proxyURL = Env(pool.URLEnv)
+		}
+		if err := validateProxyURL(proxyURL); err != nil {
+			return fmt.Errorf("proxy pool %q: %w", pool.ID, err)
+		}
+	}
+	providerIDs := make(map[string]struct{}, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		if strings.TrimSpace(provider.ID) == "" {
+			return errors.New("provider id is required")
+		}
+		if _, exists := providerIDs[provider.ID]; exists {
+			return fmt.Errorf("duplicate provider id %q", provider.ID)
+		}
+		providerIDs[provider.ID] = struct{}{}
+		for _, poolID := range provider.ProxyPools {
+			if _, exists := proxyPoolIDs[poolID]; !exists {
+				return fmt.Errorf("provider %q references unknown proxy pool %q", provider.ID, poolID)
+			}
+		}
+		switch provider.Type {
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot":
+		default:
+			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
+		}
+		if provider.OAuth != nil {
+			if err := validateOAuth(provider.ID, provider.OAuth); err != nil {
+				return err
+			}
+		}
+		if provider.Type == "vertex" && !strings.Contains(provider.BaseURL, "/projects/") && !strings.Contains(provider.BaseURL, "/publishers/") {
+			if strings.TrimSpace(fmt.Sprint(provider.Config["project"])) == "" {
+				return fmt.Errorf("provider %q vertex config.project is required when base-url is not project scoped", provider.ID)
+			}
+		}
+		credentialIDs := make(map[string]struct{}, len(provider.Credentials))
+		for _, credential := range provider.Credentials {
+			if strings.TrimSpace(credential.ID) == "" {
+				return fmt.Errorf("provider %q credential id is required", provider.ID)
+			}
+			if _, exists := credentialIDs[credential.ID]; exists {
+				return fmt.Errorf("provider %q has duplicate credential id %q", provider.ID, credential.ID)
+			}
+			credentialIDs[credential.ID] = struct{}{}
+			for _, poolID := range credential.ProxyPools {
+				if _, exists := proxyPoolIDs[poolID]; !exists {
+					return fmt.Errorf("provider %q credential %q references unknown proxy pool %q", provider.ID, credential.ID, poolID)
+				}
+			}
+			switch credential.AuthType {
+			case "", "api_key", "oauth", "service_account", "none":
+			default:
+				return fmt.Errorf("provider %q credential %q has unsupported auth type %q", provider.ID, credential.ID, credential.AuthType)
+			}
+			if credential.AuthType == "oauth" && provider.OAuth == nil {
+				return fmt.Errorf("provider %q credential %q requires oauth configuration", provider.ID, credential.ID)
+			}
+		}
+	}
+	modelIDs := make(map[string]struct{}, len(cfg.Models))
+	aliasIDs := make(map[string]string)
+	for _, model := range cfg.Models {
+		if strings.TrimSpace(model.ID) == "" {
+			return errors.New("public model id is required")
+		}
+		if _, exists := modelIDs[model.ID]; exists {
+			return fmt.Errorf("duplicate public model id %q", model.ID)
+		}
+		modelIDs[model.ID] = struct{}{}
+		for _, alias := range model.Aliases {
+			if owner, exists := aliasIDs[alias]; exists && owner != model.ID {
+				return fmt.Errorf("alias %q is shared by %q and %q", alias, owner, model.ID)
+			}
+			aliasIDs[alias] = model.ID
+		}
+		for _, route := range model.Routes {
+			if _, exists := providerIDs[route.Provider]; !exists {
+				return fmt.Errorf("model %q route references unknown provider %q", model.ID, route.Provider)
+			}
+			if strings.TrimSpace(route.UpstreamModel) == "" {
+				return fmt.Errorf("model %q route upstream model is required", model.ID)
+			}
+			if route.Pricing != nil && (route.Pricing.InputPerMillion < 0 || route.Pricing.OutputPerMillion < 0 || route.Pricing.ReasoningPerMillion < 0 || route.Pricing.Request < 0) {
+				return fmt.Errorf("model %q route pricing values must be non-negative", model.ID)
+			}
+		}
+	}
+	for _, key := range cfg.ClientAPIKeys {
+		if err := validateLimitPolicy("client API key "+key.ID, key.Policy.Limits); err != nil {
+			return err
+		}
+	}
+	comboIDs := make(map[string]struct{}, len(cfg.Combos))
+	for _, combo := range cfg.Combos {
+		if strings.TrimSpace(combo.ID) == "" {
+			return errors.New("combo id is required")
+		}
+		if _, exists := modelIDs[combo.ID]; exists {
+			return fmt.Errorf("combo %q conflicts with a public model", combo.ID)
+		}
+		if _, exists := comboIDs[combo.ID]; exists {
+			return fmt.Errorf("duplicate combo id %q", combo.ID)
+		}
+		comboIDs[combo.ID] = struct{}{}
+		if len(combo.Items) == 0 {
+			return fmt.Errorf("combo %q must contain at least one item", combo.ID)
+		}
+		for _, item := range combo.Items {
+			if item.PublicModelID == "" {
+				return fmt.Errorf("combo %q item public-model is required", combo.ID)
+			}
+			if _, exists := modelIDs[item.PublicModelID]; !exists {
+				return fmt.Errorf("combo %q references unknown public model %q", combo.ID, item.PublicModelID)
+			}
+		}
+	}
+	return nil
+}
+
+func validateLimitPolicy(scope string, limits LimitPolicy) error {
+	if limits.RequestsPerMinute < 0 || limits.ConcurrentStreams < 0 || limits.MaxInputBytes < 0 || limits.MaxOutputTokens < 0 || limits.MediaJobs < 0 || limits.BudgetUSDPerDay < 0 {
+		return fmt.Errorf("%s limits must be non-negative", scope)
+	}
+	return nil
+}
+
+func validateProxyURL(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("proxy URL is required")
+	}
+	if strings.EqualFold(value, "direct") || strings.EqualFold(value, "none") {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return errors.New("proxy URL must include a scheme and host")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		return nil
+	default:
+		return fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
+	}
+}
+
+func validateOAuth(providerID string, oauth *OAuthConfig) error {
+	if strings.TrimSpace(oauth.TokenURL) == "" && strings.TrimSpace(oauth.DiscoveryURL) == "" {
+		return fmt.Errorf("provider %q oauth token-url or discovery-url is required", providerID)
+	}
+	if strings.TrimSpace(oauth.ClientIDEnv) == "" && strings.TrimSpace(oauth.ClientID) == "" {
+		return fmt.Errorf("provider %q oauth client-id or client-id-env is required", providerID)
+	}
+	if oauth.RequireClientSecret && strings.TrimSpace(oauth.ClientSecretEnv) == "" {
+		return fmt.Errorf("provider %q oauth client-secret-env is required", providerID)
+	}
+	if strings.TrimSpace(oauth.AuthorizationURL) == "" && strings.TrimSpace(oauth.DeviceCodeURL) == "" && strings.TrimSpace(oauth.DiscoveryURL) == "" {
+		return fmt.Errorf("provider %q oauth requires authorization-url, device-code-url or discovery-url", providerID)
+	}
+	for name, value := range map[string]string{
+		"discovery-url":                oauth.DiscoveryURL,
+		"authorization-url":            oauth.AuthorizationURL,
+		"token-url":                    oauth.TokenURL,
+		"user-info-url":                oauth.UserInfoURL,
+		"device-code-url":              oauth.DeviceCodeURL,
+		"device-token-url":             oauth.DeviceTokenURL,
+		"device-verification-url":      oauth.DeviceVerificationURL,
+		"device-exchange-redirect-url": oauth.DeviceExchangeRedirectURL,
+		"redirect-url":                 oauth.RedirectURL,
+	} {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("provider %q oauth %s must be an absolute http(s) URL", providerID, name)
+		}
+	}
+	if oauth.RefreshSafetyWindow != "" {
+		window, err := time.ParseDuration(oauth.RefreshSafetyWindow)
+		if err != nil || window < 0 {
+			return fmt.Errorf("provider %q oauth refresh-safety-window is invalid", providerID)
+		}
+	}
+	format := strings.ToLower(strings.TrimSpace(oauth.TokenRequestFormat))
+	if format != "" && format != "form" && format != "json" {
+		return fmt.Errorf("provider %q oauth token-request-format must be form or json", providerID)
+	}
+	deviceFormat := strings.ToLower(strings.TrimSpace(oauth.DeviceRequestFormat))
+	if deviceFormat != "" && deviceFormat != "form" && deviceFormat != "json" {
+		return fmt.Errorf("provider %q oauth device-request-format must be form or json", providerID)
+	}
+	deviceFlow := strings.ToLower(strings.TrimSpace(oauth.DeviceFlow))
+	if deviceFlow != "" && deviceFlow != "rfc8628" && deviceFlow != "codex" {
+		return fmt.Errorf("provider %q oauth device-flow is unsupported", providerID)
+	}
+	return nil
+}
+
+func Env(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(name))
+}
