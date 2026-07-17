@@ -1,0 +1,179 @@
+server:
+  host: 127.0.0.1
+  port: 28120
+  allow-local-without-key: false
+  allow-remote-management: false
+  allow-upstream-models: false
+
+database:
+  driver: sqlite
+  dsn: tproxy.db
+
+security:
+  master-key-env: TPROXY_MASTER_KEY
+  management-secret-env: TPROXY_MANAGEMENT_SECRET
+  plugins-enabled: false
+
+routing:
+  strategy: round-robin
+  session-affinity: true
+  session-affinity-ttl: 1h
+
+retention:
+  usage-events: 2160h
+  request-logs: 720h
+  audit-events: 2160h
+  media-jobs: 720h
+  oauth-sessions: 24h
+  cleanup-interval: 1h
+
+limits:
+  requests-per-minute: 600
+  concurrent-streams: 64
+  max-input-bytes: 33554432
+  max-output-tokens: 65536
+  media-jobs: 32
+  budget-usd-per-day: 0
+
+teams:
+  - id: engineering
+    limits:
+      requests-per-minute: 300
+      concurrent-streams: 32
+
+# Proxy URLs are encrypted in SQLite. Provider/credential entries can bind
+# one or more IDs below; rotation follows the same scheduler as credentials.
+proxy-pools:
+  - id: direct-egress
+    name: Direct connection
+    url: direct
+    enabled: true
+
+client-api-keys:
+  - id: local
+    name: Local development
+    key-env: TPROXY_API_KEY
+    policy:
+      team: engineering
+      limits:
+        requests-per-minute: 120
+        concurrent-streams: 16
+        max-input-bytes: 16777216
+        max-output-tokens: 32768
+        media-jobs: 8
+        budget-usd-per-day: 0
+
+providers:
+  - id: openai-main
+    type: openai-compatible
+    name: OpenAI-compatible primary
+    base-url: https://api.openai.com
+    enabled: true
+    proxy-pools: [direct-egress]
+    # OAuth providers can use the same adapter with browser PKCE or device flow.
+    # oauth:
+    #   authorization-url: https://provider.example/oauth/authorize
+    #   token-url: https://provider.example/oauth/token
+    #   device-code-url: https://provider.example/oauth/device/code
+    #   client-id-env: TPROXY_PROVIDER_CLIENT_ID
+    #   client-secret-env: TPROXY_PROVIDER_CLIENT_SECRET
+    #   scopes: [profile, inference]
+    #   redirect-url: http://127.0.0.1:28120/api/admin/oauth/callback
+    #   refresh-safety-window: 2m
+    #   extra-auth-params: {}
+    #   extra-token-params: {}
+    credentials:
+      - id: openai-primary
+        label: Primary account
+        auth-type: api_key
+        secret-env: OPENAI_API_KEY
+        priority: 100
+
+  - id: ollama-local
+    type: ollama
+    name: Local Ollama
+    base-url: http://127.0.0.1:11434
+    enabled: false
+    credentials:
+      - id: ollama-no-auth
+        label: Local runtime
+        auth-type: none
+        priority: 10
+
+  # Provider-specific OAuth profiles use secure defaults for browser PKCE,
+  # token request format and first-party headers.
+  # - id: codex-subscription
+  #   type: codex
+  #   enabled: true
+  #   credentials:
+  #     - id: codex-account
+  #       label: Codex subscription
+  #       auth-type: oauth
+  #       priority: 100
+  # - id: claude-subscription
+  #   type: claude
+  #   enabled: true
+  #   credentials:
+  #     - id: claude-account
+  #       label: Claude subscription
+  #       auth-type: oauth
+  #       priority: 100
+  # - id: kimi-code
+  #   type: kimi
+  #   enabled: true
+  #   credentials:
+  #     - id: kimi-account
+  #       label: Kimi Code account
+  #       auth-type: oauth
+  #       priority: 100
+  # - id: antigravity
+  #   type: antigravity
+  #   enabled: true
+  #   # Set TPROXY_ANTIGRAVITY_CLIENT_SECRET before starting browser OAuth.
+  #   credentials:
+  #     - id: antigravity-account
+  #       label: Google Antigravity account
+  #       auth-type: oauth
+  #       priority: 100
+  # - id: tavily-search
+  #   type: tavily
+  #   enabled: true
+  #   credentials:
+  #     - id: tavily-primary
+  #       label: Tavily API key
+  #       auth-type: api_key
+  #       secret-env: TAVILY_API_KEY
+  #       priority: 100
+  # - id: elevenlabs-audio
+  #   type: elevenlabs
+  #   enabled: true
+  #   credentials:
+  #     - id: elevenlabs-primary
+  #       label: ElevenLabs API key
+  #       auth-type: api_key
+  #       secret-env: ELEVENLABS_API_KEY
+  #       priority: 100
+
+models:
+  - id: td-coder-pro
+    display-name: TD Coder Pro
+    aliases: [coder, gpt-latest]
+    enabled: true
+    expose-upstream-name: false
+    rewrite-response-model: true
+    capabilities: [text, vision, tools, reasoning]
+    routes:
+      - id: coder-openai
+        provider: openai-main
+        upstream-model: gpt-5.4
+        priority: 100
+        weight: 1
+        pricing:
+          input-per-million: 2.5
+          output-per-million: 10
+          reasoning-per-million: 10
+      - id: coder-ollama
+        provider: ollama-local
+        upstream-model: qwen3-coder
+        priority: 10
+        weight: 1

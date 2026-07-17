@@ -1,0 +1,11 @@
+/bin/
+/tproxy
+/*.db
+*.db-shm
+*.db-wal
+/web/node_modules/
+/web/*.tsbuildinfo
+.env
+.env.run
+config.yaml
+models.dev.json

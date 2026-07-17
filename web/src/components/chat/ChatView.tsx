@@ -1,0 +1,671 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Badge, Button, Input, cn } from "../ui";
+import { streamChatCompletion } from "./api";
+import type { ChatAttachment, ChatModelOption, ChatSession } from "./types";
+import {
+  STORAGE_KEYS,
+  buildUserContent,
+  cloneSession,
+  createId,
+  fileToDataUrl,
+  formatRelativeTime,
+  makeSessionTitle,
+  safeParse,
+  textValue,
+} from "./utils";
+
+type Props = {
+  models: ChatModelOption[];
+  loadingProviderModels?: boolean;
+  providerError?: string;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
+  onError: (message: string) => void;
+};
+
+const PRESET_PROMPTS = [
+  { label: "Explain simply", prompt: "Explain this concept in simple terms:" },
+  { label: "Code review", prompt: "Review this code and suggest improvements:" },
+  { label: "Debug help", prompt: "Help me debug this issue:" },
+  { label: "Summarize", prompt: "Summarize the following:" },
+];
+
+export function ChatView({
+  models,
+  loadingProviderModels = false,
+  providerError = "",
+  apiKey,
+  onApiKeyChange,
+  onError,
+}: Props) {
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    const saved = safeParse<ChatSession[]>(localStorage.getItem(STORAGE_KEYS.sessions), []);
+    return Array.isArray(saved)
+      ? saved.map((session) => ({
+          ...session,
+          messages: Array.isArray(session.messages) ? session.messages : [],
+        }))
+      : [];
+  });
+  const [activeSessionId, setActiveSessionId] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.activeSessionId) || "",
+  );
+  const [activeModelId, setActiveModelId] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.activeModelId) || "",
+  );
+  const [draft, setDraft] = useState(() => localStorage.getItem(STORAGE_KEYS.draft) || "");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [isSending, setIsSending] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState("");
+  const [streamingText, setStreamingText] = useState("");
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initializedRef = useRef(false);
+
+  const modelIndex = useMemo(() => {
+    const map = new Map<string, ChatModelOption>();
+    for (const model of models) map.set(model.id, model);
+    return map;
+  }, [models]);
+
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, ChatModelOption[]>();
+    for (const model of models) {
+      const items = groups.get(model.group) || [];
+      items.push(model);
+      groups.set(model.group, items);
+    }
+    return Array.from(groups.entries())
+      .map(([group, items]) => ({ group, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
+      .sort((a, b) => a.group.localeCompare(b.group));
+  }, [models]);
+
+  const activeModel = useMemo(() => {
+    if (activeModelId && modelIndex.has(activeModelId)) return modelIndex.get(activeModelId)!;
+    if (activeSessionId) {
+      const session = sessions.find((item) => item.id === activeSessionId);
+      if (session?.modelId && modelIndex.has(session.modelId)) return modelIndex.get(session.modelId)!;
+    }
+    return models[0] || null;
+  }, [activeModelId, modelIndex, activeSessionId, sessions, models]);
+
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.id === activeSessionId) || null,
+    [sessions, activeSessionId],
+  );
+  const currentMessages = currentSession?.messages || [];
+  const sessionItems = useMemo(
+    () => [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [sessions],
+  );
+  const canSend = !isSending && !!activeModel && !!apiKey.trim() && (draft.trim().length > 0 || attachments.length > 0);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
+    localStorage.setItem(STORAGE_KEYS.activeSessionId, activeSessionId);
+    localStorage.setItem(STORAGE_KEYS.activeModelId, activeModelId);
+    localStorage.setItem(STORAGE_KEYS.draft, draft);
+  }, [sessions, activeSessionId, activeModelId, draft]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target as Node)) {
+        setModelMenuOpen(false);
+      }
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [currentMessages, streamingText]);
+
+  useEffect(() => {
+    if (initializedRef.current || models.length === 0) return;
+
+    const defaultModel = activeModelId && modelIndex.has(activeModelId)
+      ? modelIndex.get(activeModelId)!
+      : models[0];
+
+    if (sessions.length > 0) {
+      const session = sessions.find((item) => item.id === activeSessionId) || sessions[0];
+      const sessionModel = session?.modelId && modelIndex.has(session.modelId)
+        ? modelIndex.get(session.modelId)!
+        : defaultModel;
+      initializedRef.current = true;
+      setActiveSessionId(session.id);
+      setActiveModelId(sessionModel.id);
+      return;
+    }
+
+    const session: ChatSession = {
+      id: createId(),
+      title: "New chat",
+      modelId: defaultModel.id,
+      modelName: defaultModel.name,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+    };
+
+    initializedRef.current = true;
+    setSessions([session]);
+    setActiveSessionId(session.id);
+    setActiveModelId(defaultModel.id);
+  }, [models, modelIndex, sessions, activeSessionId, activeModelId]);
+
+  const updateSession = (sessionId: string, updater: (session: ChatSession) => ChatSession) => {
+    setSessions((prev) => prev.map((session) => (session.id === sessionId ? updater(cloneSession(session)) : session)));
+  };
+
+  const ensureSessionForModel = (model: ChatModelOption): ChatSession => ({
+    id: createId(),
+    title: "New chat",
+    modelId: model.id,
+    modelName: model.name,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    messages: [],
+  });
+
+  const handleNewChat = () => {
+    if (!activeModel) return;
+    const session = ensureSessionForModel(activeModel);
+    setSessions((prev) => [session, ...prev]);
+    setActiveSessionId(session.id);
+    setActiveModelId(session.modelId);
+    setDraft("");
+    setAttachments([]);
+    setStreamingMessageId("");
+    setStreamingText("");
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    setActiveSessionId(sessionId);
+    setActiveModelId(session.modelId);
+  };
+
+  const handleDeleteSession = (sessionId: string) => {
+    const nextSessions = sessions.filter((session) => session.id !== sessionId);
+    setSessions(nextSessions);
+    if (activeSessionId === sessionId) {
+      const fallback = nextSessions[0] || null;
+      if (fallback) {
+        setActiveSessionId(fallback.id);
+        setActiveModelId(fallback.modelId);
+      } else {
+        setActiveSessionId("");
+        setActiveModelId(activeModel?.id || "");
+      }
+    }
+  };
+
+  const handleSelectModel = (modelId: string) => {
+    const model = modelIndex.get(modelId);
+    if (!model) return;
+
+    const current = sessions.find((session) => session.id === activeSessionId);
+    if (current && current.messages.length > 0) {
+      const session = ensureSessionForModel(model);
+      setSessions((prev) => [session, ...prev]);
+      setActiveSessionId(session.id);
+    } else if (current) {
+      setSessions((prev) => prev.map((item) => (item.id === current.id ? {
+        ...item,
+        modelId: model.id,
+        modelName: model.name,
+      } : item)));
+    } else {
+      const session = ensureSessionForModel(model);
+      setSessions((prev) => [session, ...prev]);
+      setActiveSessionId(session.id);
+    }
+
+    setActiveModelId(model.id);
+    setModelMenuOpen(false);
+  };
+
+  const handleAttachFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    if (images.length === 0) {
+      event.target.value = "";
+      return;
+    }
+
+    const converted = await Promise.all(images.map(async (file) => ({
+      id: createId(),
+      name: file.name,
+      type: file.type,
+      dataUrl: await fileToDataUrl(file),
+    })));
+
+    setAttachments((prev) => [...prev, ...converted]);
+    event.target.value = "";
+  };
+
+  const removeAttachment = (attachmentId: string) => {
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId));
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
+  };
+
+  const sendMessage = async () => {
+    const model = activeModel;
+    if (!model || !apiKey.trim()) {
+      if (!apiKey.trim()) onError("API key required. Set your tproxy client API key in chat settings.");
+      return;
+    }
+
+    const userText = draft.trim();
+    if (!userText && attachments.length === 0) return;
+
+    let sessionId = activeSessionId;
+    let session = sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      const created = ensureSessionForModel(model);
+      sessionId = created.id;
+      session = created;
+      setSessions((prev) => [created, ...prev]);
+      setActiveSessionId(sessionId);
+    }
+
+    const userMessage = {
+      id: createId(),
+      role: "user" as const,
+      content: userText,
+      attachments: attachments.map((attachment) => ({ ...attachment })),
+      createdAt: new Date().toISOString(),
+    };
+
+    const assistantMessageId = createId();
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: "assistant" as const,
+      content: "",
+      createdAt: new Date().toISOString(),
+      status: "streaming" as const,
+    };
+
+    const nextMessages = [...(session.messages || []), userMessage, assistantMessage];
+    setSessions((prev) => prev.map((item) => (item.id === sessionId ? {
+      ...item,
+      modelId: model.id,
+      modelName: model.name,
+      messages: nextMessages,
+      updatedAt: new Date().toISOString(),
+      title: item.title === "New chat" ? makeSessionTitle(userText) : item.title,
+    } : item)));
+    setDraft("");
+    setAttachments([]);
+    setIsSending(true);
+    setStreamingMessageId(assistantMessageId);
+    setStreamingText("");
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    const requestMessages = nextMessages
+      .filter((message) => !(message.role === "assistant" && message.id === assistantMessageId))
+      .map((message) => ({
+        role: message.role,
+        content: message.role === "user" ? buildUserContent(message) : message.content,
+      }));
+
+    try {
+      const assistantText = await streamChatCompletion(
+        apiKey.trim(),
+        model.requestModel || model.id,
+        requestMessages,
+        {
+          signal: abortRef.current.signal,
+          onDelta: (text) => {
+            setStreamingText(text);
+            updateSession(sessionId, (currentSession) => ({
+              ...currentSession,
+              messages: currentSession.messages.map((message) => (
+                message.id === assistantMessageId
+                  ? { ...message, content: text, status: "streaming" }
+                  : message
+              )),
+              updatedAt: new Date().toISOString(),
+            }));
+          },
+        },
+      );
+
+      updateSession(sessionId, (currentSession) => ({
+        ...currentSession,
+        messages: currentSession.messages.map((message) => (
+          message.id === assistantMessageId
+            ? { ...message, content: assistantText || message.content, status: "done" }
+            : message
+        )),
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      const errorText = cause instanceof Error ? cause.message : "Failed to send message";
+      updateSession(sessionId, (currentSession) => ({
+        ...currentSession,
+        messages: currentSession.messages.map((message) => (
+          message.id === assistantMessageId
+            ? { ...message, content: message.content || `Error: ${errorText}`, status: "error" }
+            : message
+        )),
+        updatedAt: new Date().toISOString(),
+      }));
+      onError(errorText);
+    } finally {
+      setIsSending(false);
+      setStreamingMessageId("");
+      setStreamingText("");
+      abortRef.current = null;
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (canSend) void sendMessage();
+    }
+  };
+
+  const applyPreset = (prompt: string) => {
+    setDraft((current) => (current.trim() ? `${current}\n\n${prompt} ` : `${prompt} `));
+  };
+
+  return (
+    <section className="chat-page">
+      <aside className={cn("chat-sidebar", !sidebarOpen && "is-collapsed")}>
+        <div className="chat-sidebar-header">
+          <Button variant="primary" size="sm" icon="add" block onClick={handleNewChat} disabled={!activeModel}>
+            New chat
+          </Button>
+          <button
+            type="button"
+            className="chat-sidebar-toggle"
+            onClick={() => setSidebarOpen((value) => !value)}
+            aria-label={sidebarOpen ? "Collapse history" : "Expand history"}
+          >
+            <span className="material-symbols-outlined">{sidebarOpen ? "left_panel_close" : "left_panel_open"}</span>
+          </button>
+        </div>
+
+        {sidebarOpen ? (
+          <div className="chat-session-list custom-scrollbar">
+            {sessionItems.length === 0 ? (
+              <div className="chat-session-empty">No conversations yet.</div>
+            ) : sessionItems.map((session) => {
+              const isActive = session.id === activeSessionId;
+              const latestMessage = [...session.messages].reverse().find((message) => message.role === "user");
+              return (
+                <div key={session.id} className={cn("chat-session-item", isActive && "is-active")}>
+                  <button type="button" className="chat-session-button" onClick={() => handleSelectSession(session.id)}>
+                    <span className="chat-session-title">{session.title}</span>
+                    <span className="chat-session-preview">
+                      {textValue(latestMessage?.content) || "Empty chat"}
+                    </span>
+                    <span className="chat-session-time">{formatRelativeTime(session.updatedAt)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-session-delete"
+                    onClick={() => handleDeleteSession(session.id)}
+                    aria-label="Delete chat"
+                  >
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </aside>
+
+      <div className="chat-main">
+        <div className="chat-toolbar">
+          <div ref={modelMenuRef} className="chat-model-picker">
+            <button
+              type="button"
+              className="chat-model-trigger"
+              onClick={() => setModelMenuOpen((value) => !value)}
+              disabled={models.length === 0}
+            >
+              <span className="material-symbols-outlined">smart_toy</span>
+              <div className="chat-model-trigger-text">
+                <span className="chat-model-name">{activeModel?.name || "Select model"}</span>
+                <span className="chat-model-id">{activeModel?.requestModel || activeModel?.id || "No models configured"}</span>
+              </div>
+              <span className="material-symbols-outlined">expand_more</span>
+            </button>
+
+            {modelMenuOpen ? (
+              <div className="chat-model-menu custom-scrollbar">
+                {modelGroups.length === 0 ? (
+                  <div className="chat-model-menu-empty">
+                    {loadingProviderModels
+                      ? "Discovering models from configured providers..."
+                      : (
+                        <>
+                          No models available. Connect providers in{" "}
+                          <Link to="/providers">Providers</Link> or configure virtual models in{" "}
+                          <Link to="/models">Virtual models</Link>.
+                        </>
+                      )}
+                  </div>
+                ) : modelGroups.map((group) => (
+                  <div key={group.group} className="chat-model-group">
+                    <div className="chat-model-group-header">
+                      <span>{group.group}</span>
+                      <Badge size="sm">{group.items.length}</Badge>
+                    </div>
+                    <div className="chat-model-grid">
+                      {group.items.map((model) => {
+                        const isActive = model.id === activeModelId;
+                        return (
+                          <button
+                            key={model.id}
+                            type="button"
+                            className={cn("chat-model-option", isActive && "is-active")}
+                            onClick={() => handleSelectModel(model.id)}
+                          >
+                            <span className="chat-model-option-name">{model.name}</span>
+                            <span className="chat-model-option-id">{model.requestModel || model.id}</span>
+                            {isActive ? <span className="material-symbols-outlined">check_circle</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {loadingProviderModels ? (
+                  <div className="chat-model-menu-loading">Loading provider models...</div>
+                ) : null}
+                {providerError ? (
+                  <div className="chat-model-menu-error">{providerError}</div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="chat-toolbar-actions">
+            <div ref={settingsRef} className="chat-settings">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="settings"
+                onClick={() => setSettingsOpen((value) => !value)}
+              >
+                Settings
+              </Button>
+              {settingsOpen ? (
+                <div className="chat-settings-panel">
+                  <label className="chat-settings-label">Client API key</label>
+                  <Input
+                    type="password"
+                    icon="vpn_key"
+                    value={apiKey}
+                    onChange={(event) => onApiKeyChange(event.target.value)}
+                    placeholder="tproxy API key"
+                  />
+                  <p className="chat-settings-hint">
+                    Uses <code>/v1/chat/completions</code>. Create a key in{" "}
+                    <Link to="/apis">APIs</Link>.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="chat-messages custom-scrollbar">
+          {currentMessages.length === 0 ? (
+            <div className="chat-empty">
+              <div className="chat-empty-icon">
+                <span className="material-symbols-outlined">chat</span>
+              </div>
+              <h2>Start a conversation</h2>
+              <p>
+                Chat with virtual models, combos, or any model discovered from your configured provider accounts.
+              </p>
+              <div className="chat-presets">
+                {PRESET_PROMPTS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className="chat-preset"
+                    onClick={() => applyPreset(preset.prompt)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="chat-thread">
+              {currentMessages.map((message) => {
+                const isUser = message.role === "user";
+                const isAssistant = message.role === "assistant";
+                const isStreaming = isAssistant && message.id === streamingMessageId && message.status === "streaming";
+                const content = textValue(message.content) || (isAssistant ? streamingText : "");
+
+                return (
+                  <div key={message.id} className={cn("chat-message", isUser ? "is-user" : "is-assistant")}>
+                    <div className="chat-message-meta">
+                      <span>{isUser ? "You" : activeModel?.name || "Assistant"}</span>
+                    </div>
+
+                    {message.attachments?.length ? (
+                      <div className="chat-attachments">
+                        {message.attachments.map((attachment) => (
+                          <a
+                            key={attachment.id}
+                            href={attachment.dataUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="chat-attachment"
+                          >
+                            <img src={attachment.dataUrl} alt={attachment.name} />
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="chat-message-content">
+                      {content}
+                      {isAssistant && isStreaming && !streamingText ? (
+                        <span className="chat-cursor">▋</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        <div className="chat-composer-wrap">
+          {attachments.length > 0 ? (
+            <div className="chat-composer-attachments">
+              {attachments.map((attachment) => (
+                <div key={attachment.id} className="chat-composer-attachment">
+                  <span>{attachment.name}</span>
+                  <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label="Remove attachment">
+                    <span className="material-symbols-outlined">close</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="chat-composer">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message AI…"
+              rows={1}
+              className="chat-composer-input custom-scrollbar"
+            />
+            <div className="chat-composer-actions">
+              <button
+                type="button"
+                className="chat-composer-icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!activeModel}
+                aria-label="Attach image"
+              >
+                <span className="material-symbols-outlined">attach_file</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="sr-only"
+                onChange={(event) => void handleAttachFiles(event)}
+              />
+              <span className="chat-composer-model">{activeModel?.name || "No model"}</span>
+              <div className="chat-composer-send">
+                {isSending ? (
+                  <button type="button" className="chat-stop-btn" onClick={handleStop} aria-label="Stop">
+                    <span className="material-symbols-outlined">stop</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={cn("chat-send-btn", canSend && "is-ready")}
+                  onClick={() => void sendMessage()}
+                  disabled={!canSend}
+                  aria-label="Send"
+                >
+                  <span className="material-symbols-outlined">arrow_upward</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <p className="chat-footer-note">Responses stream through your tproxy gateway.</p>
+        </div>
+      </div>
+    </section>
+  );
+}

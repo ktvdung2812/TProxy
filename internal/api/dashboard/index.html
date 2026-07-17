@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>tproxy control center</title>
+    <!-- Fonts: Inter (UI) + Material Symbols Outlined (icons) — mirrors 9router design system -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
+      rel="stylesheet"
+    />
+    <script>
+      // Apply persisted theme before first paint to avoid flash of incorrect theme.
+      (function () {
+        try {
+          var saved = localStorage.getItem("tproxy-theme");
+          var useDark = saved ? saved === "dark" : true; // default to dark
+          var root = document.documentElement;
+          root.classList.toggle("dark", useDark);
+          root.classList.toggle("light", !useDark);
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+        // Reveal icon ligatures once the icon font is ready (matches 9router globals.css).
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(function () {
+            document.documentElement.classList.add("fonts-loaded");
+          });
+        } else {
+          document.documentElement.classList.add("fonts-loaded");
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/dashboard/assets/index-Dpb1Sgv2.js"></script>
+    <link rel="stylesheet" crossorigin href="/dashboard/assets/index-BWgNblAk.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
