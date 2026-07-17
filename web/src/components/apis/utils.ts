@@ -100,12 +100,45 @@ export function formatLimitSummary(key: ApiKeyRecord): string {
   return parts.length ? parts.join(" · ") : "No limits";
 }
 
+type ExampleModelSource = {
+  ID: string;
+  Enabled?: boolean;
+};
+
+type ExampleComboSource = {
+  id: string;
+  enabled?: boolean;
+};
+
+/** Public model IDs exposed via Provider Priority Manager (and combo IDs). */
+export function buildExampleModelOptions(
+  models: ExampleModelSource[] | null | undefined,
+  combos: ExampleComboSource[] | null | undefined,
+): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = [];
+
+  for (const model of models || []) {
+    if (!model.Enabled) continue;
+    options.push({ value: model.ID, label: model.ID });
+  }
+
+  for (const combo of combos || []) {
+    if (!combo.enabled) continue;
+    options.push({ value: combo.id, label: combo.id });
+  }
+
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export const PROXY_ENDPOINTS: ProxyEndpoint[] = [
   { path: "/v1/models", methods: ["GET"], description: "List virtual models available to the client." },
   { path: "/v1/models/info", methods: ["GET"], description: "Detailed model metadata and routing hints." },
   { path: "/v1/chat/completions", methods: ["POST"], description: "OpenAI-compatible chat completions.", capability: "text" },
-  { path: "/v1/responses", methods: ["POST"], description: "OpenAI Responses API.", capability: "text" },
+  { path: "/v1/responses", methods: ["POST"], description: "OpenAI Responses API (Codex CLI wire_api=responses).", capability: "text" },
+  { path: "/v1/responses/compact", methods: ["POST"], description: "Compact Responses API context (Codex).", capability: "text" },
   { path: "/v1/responses/ws", methods: ["GET"], description: "WebSocket transport for Responses API.", capability: "text" },
+  { path: "/responses", methods: ["POST"], description: "Responses API alias (Codex-compatible).", capability: "text" },
+  { path: "/codex/*", methods: ["POST"], description: "Codex CLI alias to Responses API.", capability: "text" },
   { path: "/v1/messages", methods: ["POST"], description: "Anthropic-compatible messages API.", capability: "text" },
   { path: "/v1/messages/count_tokens", methods: ["POST"], description: "Token counting for Anthropic messages.", capability: "text" },
   { path: "/v1/embeddings", methods: ["POST"], description: "Text embeddings.", capability: "embeddings" },

@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, Field, Input, Select } from "../ui";
 import type { CLITool } from "../../cli-tools/constants";
+import { ApiKeySelect, type ApiKeyOption } from "./ApiKeySelect";
+import { CLIToolApplyPanel } from "./CLIToolApplyPanel";
 
 type ModelOption = {
   value: string;
@@ -12,7 +14,8 @@ type ModelOption = {
 type Props = {
   tool: CLITool;
   models: ModelOption[];
-  apiKeyNames: string[];
+  apiKeys: ApiKeyOption[];
+  secret: string;
 };
 
 function normalizeBaseUrl(origin: string): string {
@@ -20,7 +23,7 @@ function normalizeBaseUrl(origin: string): string {
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 }
 
-export function ToolGuideCard({ tool, models, apiKeyNames }: Props) {
+export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(() => models[0]?.value ?? "");
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -91,25 +94,7 @@ export function ToolGuideCard({ tool, models, apiKeyNames }: Props) {
     );
   };
 
-  const renderApiKeySelector = () => (
-    <div className="cli-tool-field-stack">
-      <Input
-        value={apiKey}
-        onChange={(event) => setApiKey(event.target.value)}
-        placeholder="Paste your tproxy API key"
-      />
-      {apiKeyNames.length > 0 ? (
-        <p className="cli-tool-hint">
-          Existing keys: {apiKeyNames.join(", ")}. Create or copy a key in{" "}
-          <Link to="/apis">APIs</Link>.
-        </p>
-      ) : (
-        <p className="cli-tool-hint">
-          No API keys yet. Create one in <Link to="/apis">APIs</Link>.
-        </p>
-      )}
-    </div>
-  );
+  const renderApiKeySelector = () => <ApiKeySelect apiKeys={apiKeys} value={apiKey} onChange={setApiKey} />;
 
   const renderModelSelector = () => (
     <div className="cli-tool-field-stack">
@@ -128,7 +113,7 @@ export function ToolGuideCard({ tool, models, apiKeyNames }: Props) {
       </Field>
       {models.length === 0 ? (
         <p className="cli-tool-hint">
-          Add a <Link to="/models">virtual model</Link> or <Link to="/combos">combo</Link> first.
+          Add a <Link to="/models">model</Link> or <Link to="/combos">combo</Link> first.
         </p>
       ) : null}
     </div>
@@ -236,7 +221,17 @@ export function ToolGuideCard({ tool, models, apiKeyNames }: Props) {
         </div>
         <Badge size="sm">{tool.configType}</Badge>
       </div>
-      <div className="cli-tool-guide-body">{renderGuideSteps()}</div>
+      <div className="cli-tool-guide-body">
+        <CLIToolApplyPanel
+          tool={tool}
+          secret={secret}
+          apiKey={apiKey}
+          model={model}
+          baseUrl={baseUrl}
+          onApiKeyChange={setApiKey}
+        />
+        {renderGuideSteps()}
+      </div>
       {tool.settingsFile ? (
         <p className="cli-tool-hint">
           Config file: <code>{tool.settingsFile}</code>

@@ -5,14 +5,15 @@ import { buildModelOptions, ToolGuideCard } from "./ToolGuideCard";
 type SnapshotSlice = {
   models: { ID: string; DisplayName?: string; Enabled?: boolean }[] | null;
   combos: { id: string; display_name?: string; enabled?: boolean }[] | null;
-  api_keys: { id: string; name: string }[] | null;
+  api_keys: { id: string; name: string; enabled?: boolean }[] | null;
 };
 
 type Props = {
   snapshot: SnapshotSlice;
+  secret: string;
 };
 
-export function CLIToolDetailView({ snapshot }: Props) {
+export function CLIToolDetailView({ snapshot, secret }: Props) {
   const { toolId } = useParams<{ toolId: string }>();
   const tool = toolId ? getAnyTool(toolId) : undefined;
 
@@ -33,7 +34,11 @@ export function CLIToolDetailView({ snapshot }: Props) {
   }
 
   const models = buildModelOptions(snapshot.models ?? [], snapshot.combos ?? [], tool.defaultModels);
-  const apiKeyNames = (snapshot.api_keys ?? []).map((key) => key.name || key.id);
+  const apiKeys = (snapshot.api_keys ?? []).map((key) => ({
+    id: key.id,
+    name: key.name || key.id,
+    enabled: key.enabled,
+  }));
   const isMitm = tool.configType === "mitm";
 
   return (
@@ -55,7 +60,7 @@ export function CLIToolDetailView({ snapshot }: Props) {
           <code>{tool.mitmDomain}</code>
         </div>
       ) : null}
-      <ToolGuideCard tool={tool} models={models} apiKeyNames={apiKeyNames} />
+      <ToolGuideCard tool={tool} models={models} apiKeys={apiKeys} secret={secret} />
     </section>
   );
 }

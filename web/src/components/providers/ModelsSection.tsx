@@ -237,7 +237,6 @@ export function ModelsSection({
               <thead>
                 <tr>
                   <th>Model</th>
-                  <th>Provider</th>
                   <th>Capabilities</th>
                   <th>Accounts</th>
                   <th style={{ textAlign: "right" }}>Actions</th>
@@ -266,7 +265,6 @@ export function ModelsSection({
                           ) : null}
                         </div>
                       </td>
-                      <td>{model.owned_by || "—"}</td>
                       <td>
                         <div className="model-table-capabilities">
                           {model.capabilities?.map((cap) => (
@@ -401,7 +399,7 @@ export function ModelsSection({
         <EmptyState
           icon="route"
           text="No virtual models route to this provider yet."
-          hint="Create a virtual model with a route targeting this provider from the Virtual models page."
+          hint="Create a model with a route targeting this provider from the Provider Priority Manager page."
         />
       )}
     </Card>

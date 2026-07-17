@@ -21,7 +21,7 @@ func TestCodexAdapterTranslatesResponsesAndParsesSSE(t *testing.T) {
 		if r.URL.Path != "/responses" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer codex-access" || r.Header.Get("Originator") != "codex-tui" || r.Header.Get("ChatGPT-Account-ID") != "acct-123" {
+		if r.Header.Get("Authorization") != "Bearer codex-access" || r.Header.Get("Originator") != "codex_cli_rs" || r.Header.Get("ChatGPT-Account-ID") != "acct-123" {
 			t.Fatalf("headers = %+v", r.Header)
 		}
 		var body map[string]any
@@ -379,7 +379,7 @@ func TestCodexDiscoveryUsesCodexModelsEndpoint(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer codex-token" {
 			t.Errorf("authorization=%q", r.Header.Get("Authorization"))
 		}
-		if r.Header.Get("Originator") != "codex-tui" {
+		if r.Header.Get("Originator") != "codex_cli_rs" {
 			t.Errorf("originator=%q", r.Header.Get("Originator"))
 		}
 		if r.Header.Get("ChatGPT-Account-ID") != "acct-123" {

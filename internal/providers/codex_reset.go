@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -63,7 +64,7 @@ func (r *Registry) CodexResetCredits(ctx context.Context, provider store.Provide
 		return CodexResetCredits{}, &ProviderError{Code: "authorization_required", Message: "credential has no access token", Status: http.StatusUnauthorized}
 	}
 	ctx = withCredentialProxy(ctx, credential)
-	body, status, err := r.quotaGET(ctx, codexResetCreditsURL, codexHeaders(provider, credential, false))
+	body, status, err := r.quotaGET(ctx, codexResetCreditsURL, codexHeaders(provider, credential, false, canonical.Request{}))
 	if err != nil {
 		return CodexResetCredits{}, err
 	}
@@ -92,7 +93,7 @@ func (r *Registry) ConsumeCodexResetCredit(ctx context.Context, provider store.P
 	}
 	ctx = withCredentialProxy(ctx, credential)
 	encoded, _ := json.Marshal(map[string]string{"redeem_request_id": redeemRequestID})
-	body, status, err := r.quotaJSON(ctx, http.MethodPost, codexResetCreditsConsumeURL, codexHeaders(provider, credential, false), encoded)
+	body, status, err := r.quotaJSON(ctx, http.MethodPost, codexResetCreditsConsumeURL, codexHeaders(provider, credential, false, canonical.Request{}), encoded)
 	if err != nil {
 		return CodexResetConsumeResult{}, err
 	}

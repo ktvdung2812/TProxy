@@ -91,7 +91,7 @@ func (r *Registry) pingJSON(ctx context.Context, provider store.Provider, creden
 	headers := authHeaders(provider, credential)
 	headers.Set("Content-Type", "application/json")
 	if provider.Type == "codex" {
-		headers = codexHeaders(provider, credential, false)
+		headers = codexHeaders(provider, credential, false, canonical.Request{})
 		headers.Set("Content-Type", "application/json")
 	}
 	target := endpoint(provider.BaseURL, path)

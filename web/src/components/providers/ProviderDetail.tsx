@@ -203,6 +203,7 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
       <CredentialModelsModal
         open={modelsCredential !== null}
         credential={modelsCredential}
+        providerId={provider.ID}
         secret={secret}
         onClose={() => setModelsCredential(null)}
       />

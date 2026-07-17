@@ -845,6 +845,26 @@ type APIKeySummary struct {
 	LastUsed time.Time              `json:"last_used_at,omitempty"`
 }
 
+func (s *Store) ImportClientAPIKey(ctx context.Context, id, name, plaintext string, models []string, enabled bool) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(plaintext) == "" {
+		return errors.New("api key id and plaintext are required")
+	}
+	if len(models) == 0 {
+		models = []string{"*"}
+	}
+	encodedModels, _ := json.Marshal(models)
+	encodedPolicy, _ := json.Marshal(config.ClientKeyPolicy{})
+	_, err := s.db.ExecContext(ctx, `INSERT INTO api_keys(id,name,key_hash,models_json,policy_json,enabled) VALUES(?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_hash=excluded.key_hash,models_json=excluded.models_json,policy_json=excluded.policy_json,enabled=excluded.enabled`,
+		id, name, security.HashAPIKey(plaintext), string(encodedModels), string(encodedPolicy), boolInt(enabled))
+	return err
+}
+
+func (s *Store) SetCredentialEnabled(ctx context.Context, credentialID string, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE credentials SET enabled=? WHERE id=?`, boolInt(enabled), credentialID)
+	return err
+}
+
 func (s *Store) CreateAPIKey(ctx context.Context, id, name string, models []string, policies ...config.ClientKeyPolicy) (string, string, error) {
 	if strings.TrimSpace(id) == "" {
 		id = security.NewID("key_")

@@ -36,10 +36,26 @@ export type CLITool = {
   mitmDomain?: string;
 };
 
-const CUSTOM_APPLY_NOTE: CLIToolNote = {
-  type: "warning",
-  text: "Auto-apply to local config files requires the tproxy CLI-tools API (coming in a later release). Use the manual steps below for now.",
-};
+/** Tools with backend auto-apply (localhost) — mirrors 9router CLI-tools API */
+export const AUTO_APPLY_TOOL_IDS = [
+  "claude",
+  "codex",
+  "openclaw",
+  "opencode",
+  "cline",
+  "droid",
+  "kilo",
+  "deepseek-tui",
+  "hermes",
+  "grok-build",
+  "jcode",
+] as const;
+
+export type AutoApplyToolId = (typeof AUTO_APPLY_TOOL_IDS)[number];
+
+export function isAutoApplyTool(toolId: string): toolId is AutoApplyToolId {
+  return (AUTO_APPLY_TOOL_IDS as readonly string[]).includes(toolId);
+}
 
 const CUSTOM_GUIDE_STEPS: CLIToolGuideStep[] = [
   { step: 1, title: "API Key", type: "apiKeySelector" },
@@ -60,7 +76,6 @@ export const CLI_TOOLS: Record<string, CLITool> = {
     notes: [
       { type: "info", text: "Set ANTHROPIC_BASE_URL to your tproxy endpoint and use a client API key from APIs." },
       { type: "info", text: "Use a combo ID (for example claude-code-fallback) as your default model to get ordered fallback across virtual models." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Install Claude Code", desc: "npm install -g @anthropic-ai/claude-code" },
@@ -92,7 +107,6 @@ claude`,
     settingsFile: "~/.openclaw/openclaw.json",
     notes: [
       { type: "info", text: "Open Claw stores provider config under models.providers. Add a tproxy provider entry with your base URL and API key." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Install Open Claw", desc: "Follow the Open Claw installation guide for your platform." },
@@ -128,7 +142,6 @@ claude`,
     settingsFile: "~/.codex/config.toml",
     notes: [
       { type: "info", text: "Codex reads ~/.codex/config.toml. Point base_url at tproxy's OpenAI-compatible /v1 endpoint." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Install Codex", desc: "Follow OpenAI's Codex CLI installation guide." },
@@ -150,7 +163,6 @@ api_key = "{{apiKey}}"`,
     configType: "custom",
     notes: [
       { type: "info", text: "Configure OpenCode to use tproxy as an OpenAI-compatible provider." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: CUSTOM_GUIDE_STEPS,
     codeBlock: {
@@ -173,7 +185,6 @@ api_key = "{{apiKey}}"`,
     notes: [
       { type: "info", text: "Cowork routes Claude Desktop through a custom inference endpoint. Point it at tproxy with your API key and allowed models." },
       { type: "info", text: "Add a combo ID such as cowork-fallback to allowed models for ordered fallback across virtual models." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Open Cowork settings", desc: "Configure third-party inference in Claude Desktop Cowork." },
@@ -190,7 +201,6 @@ api_key = "{{apiKey}}"`,
     configType: "custom",
     notes: [
       { type: "info", text: "Hermes Agent uses a model config with base_url, api_key, and model fields." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: CUSTOM_GUIDE_STEPS,
     codeBlock: {
@@ -213,7 +223,6 @@ api_key = "{{apiKey}}"`,
     configType: "custom",
     notes: [
       { type: "info", text: "Droid supports custom model providers. Add a tproxy entry under customModels." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: CUSTOM_GUIDE_STEPS,
     codeBlock: {
@@ -259,7 +268,6 @@ api_key = "{{apiKey}}"`,
     color: "#00D1B2",
     description: "Cline AI Coding Assistant",
     configType: "custom",
-    notes: [CUSTOM_APPLY_NOTE],
     guideSteps: [
       { step: 1, title: "Open Cline settings", desc: "Choose API Provider → OpenAI Compatible" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
@@ -274,7 +282,6 @@ api_key = "{{apiKey}}"`,
     configType: "custom",
     notes: [
       { type: "info", text: "Kilo Code VS Code extension supports OpenAI-compatible endpoints." },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Open Kilo settings", desc: "Select API Provider → OpenAI Compatible" },
@@ -422,7 +429,6 @@ amp --model "{{model}}"
         text: "DeepSeek TUI uses ~/.deepseek/config.toml. Set the provider to openai mode with your base_url, api_key, and model.",
       },
       { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
-      CUSTOM_APPLY_NOTE,
     ],
     defaultModels: [
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", alias: "deepseek-v4-pro" },
@@ -462,7 +468,6 @@ model = "{{model}}"`,
         type: "warning",
         text: "Install via: curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash",
       },
-      CUSTOM_APPLY_NOTE,
     ],
     defaultModels: [
       { id: "claude-opus-4-7", name: "Claude Opus 4.7", alias: "opus" },
@@ -507,7 +512,6 @@ model = "{{model}}"`,
         text: 'After setup, run grok (or /model tproxy) to use the routed model.',
       },
       { type: "warning", text: "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml" },
-      CUSTOM_APPLY_NOTE,
     ],
     guideSteps: [
       { step: 1, title: "Install Grok Build", desc: "Follow xAI's Grok CLI installation guide." },

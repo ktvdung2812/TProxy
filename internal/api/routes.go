@@ -36,8 +36,38 @@ type ingressRoute struct {
 	GeminiAction    string
 }
 
-func classifyProxyIngress(path string) (ingressRoute, bool) {
+func normalizeProxyPath(path string) string {
 	path = strings.Split(path, "?")[0]
+	switch {
+	case path == "/responses":
+		return "/v1/responses"
+	case path == "/codex", strings.HasPrefix(path, "/codex/"):
+		return "/v1/responses"
+	case path == "/v1/v1":
+		return "/v1"
+	case strings.HasPrefix(path, "/v1/v1/"):
+		return "/v1/" + strings.TrimPrefix(path, "/v1/v1/")
+	}
+
+	for _, prefix := range knownProviderRoutePrefixes {
+		doublePrefix := "/" + prefix + "/v1/v1/"
+		if strings.HasPrefix(path, doublePrefix) {
+			return "/" + prefix + "/v1/" + strings.TrimPrefix(path, doublePrefix)
+		}
+		if path == "/"+prefix+"/v1/v1" {
+			return "/" + prefix + "/v1"
+		}
+	}
+
+	if strings.HasPrefix(path, "/anthropic/anthropic/") {
+		return "/anthropic/" + strings.TrimPrefix(path, "/anthropic/anthropic/")
+	}
+
+	return path
+}
+
+func classifyProxyIngress(path string) (ingressRoute, bool) {
+	path = normalizeProxyPath(strings.Split(path, "?")[0])
 	if path == "" {
 		return ingressRoute{}, false
 	}
@@ -135,4 +165,49 @@ func attachIngressMetadata(r *http.Request, request *canonical.Request) {
 	if route.DisableFallback {
 		request.Metadata["disable_fallback"] = true
 	}
+	captureIngressClientHeaders(r, request)
+}
+
+var ingressClientHeaderNames = []string{
+	"anthropic-beta",
+	"user-agent",
+	"x-claude-code-session-id",
+	"anthropic-dangerous-direct-browser-access",
+	"x-app",
+	"x-stainless-helper-method",
+	"x-stainless-retry-count",
+	"x-stainless-runtime-version",
+	"x-stainless-package-version",
+	"x-stainless-runtime",
+	"x-stainless-lang",
+	"x-stainless-arch",
+	"x-stainless-os",
+	"x-stainless-timeout",
+	"package-version",
+	"runtime-version",
+	"os",
+	"arch",
+	"originator",
+	"version",
+	"session_id",
+	"chatgpt-account-id",
+}
+
+func captureIngressClientHeaders(r *http.Request, request *canonical.Request) {
+	if request == nil || r == nil {
+		return
+	}
+	client := map[string]string{}
+	for _, name := range ingressClientHeaderNames {
+		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
+			client[strings.ToLower(name)] = value
+		}
+	}
+	if len(client) == 0 {
+		return
+	}
+	if request.Metadata == nil {
+		request.Metadata = map[string]any{}
+	}
+	request.Metadata["client_headers"] = client
 }

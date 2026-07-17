@@ -23,8 +23,13 @@ Model entries include advertised capabilities, limits and an endpoint kind. Disa
 ```http
 POST /v1/chat/completions
 POST /v1/responses
+POST /v1/responses/compact
 GET  /v1/responses/ws
+POST /responses
+POST /codex/*
 ```
+
+Codex CLI uses `wire_api = "responses"` and calls `POST /v1/responses`. Compatibility aliases `/responses` and `/codex/*` route to the same handler.
 
 Both streaming and non-streaming requests are supported. `model` accepts a public model ID or alias.
 
@@ -33,7 +38,10 @@ Both streaming and non-streaming requests are supported. `model` accepts a publi
 ```http
 POST /v1/messages
 POST /v1/messages/count_tokens
+POST /anthropic/v1/messages
 ```
+
+Claude Code sets `ANTHROPIC_BASE_URL` to `{host}/v1` and appends `/messages`. Accidentally doubled paths such as `/v1/v1/messages` are normalized automatically. Client headers such as `anthropic-beta` and `x-claude-code-session-id` are forwarded upstream on an allowlist.
 
 ## Gemini-compatible routes
 

@@ -1,7 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "./ui";
-import { isRouteActive, PRIMARY_ROUTES, SYSTEM_ROUTES } from "../navigation";
-import { useLocation } from "react-router-dom";
+import { isRouteActive, NAV_SECTIONS } from "../navigation";
 
 type SidebarProps = {
   onClose?: () => void;
@@ -53,13 +52,14 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
       </div>
 
       <nav className="sidebar-nav custom-scrollbar">
-        {PRIMARY_ROUTES.map((item) => (
-          <NavButton key={item.id} item={item} onClose={onClose} collapsed={collapsed} />
-        ))}
-
-        {!collapsed && <p className="nav-section-label">System</p>}
-        {SYSTEM_ROUTES.map((item) => (
-          <NavButton key={item.id} item={item} onClose={onClose} collapsed={collapsed} />
+        {NAV_SECTIONS.map((section) => (
+          <div key={section.id} className="nav-section">
+            {!collapsed && <p className="nav-section-label">{section.label}</p>}
+            {collapsed && section.id !== NAV_SECTIONS[0]?.id ? <div className="nav-section-divider" aria-hidden /> : null}
+            {section.routes.map((item) => (
+              <NavButton key={item.id} item={item} onClose={onClose} collapsed={collapsed} />
+            ))}
+          </div>
         ))}
       </nav>
 

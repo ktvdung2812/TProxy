@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../ui";
+import { ImportDataCard } from "../import/ImportDataCard";
+import { ImportModal } from "../import/ImportModal";
 import { AddProviderModal } from "./AddProviderModal";
 import { ProviderDetail } from "./ProviderDetail";
 import { ProviderList } from "./ProviderList";
@@ -46,6 +48,7 @@ export function ProvidersView({
   const [authBusy, setAuthBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [showOAuth, setShowOAuth] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [oauthProviderId, setOauthProviderId] = useState<string | null>(null);
   const [oauthProviderType, setOauthProviderType] = useState<string | null>(null);
   const importInputId = "tproxy-auth-bundle-import";
@@ -237,6 +240,15 @@ export function ProvidersView({
 
   return (
     <>
+      <ImportDataCard onOpen={() => setShowImport(true)} />
+      <ImportModal
+        open={showImport}
+        secret={secret}
+        onClose={() => setShowImport(false)}
+        onNotice={onNotice}
+        onError={onError}
+        onMutated={onMutated}
+      />
       <ProviderList
         providers={providers}
         credentials={credentials}
