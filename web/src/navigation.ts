@@ -101,6 +101,14 @@ export const NAV_SECTIONS: NavSection[] = [
         description: "Token usage, estimated cost, and request history.",
       },
       {
+        id: "token-saver",
+        path: "/token-saver",
+        label: "Token Saver",
+        icon: "compress",
+        title: "Token Saver",
+        description: "RTK tool-output compression and CLI hook setup.",
+      },
+      {
         id: "quota",
         path: "/quota",
         label: "Quota Tracker",

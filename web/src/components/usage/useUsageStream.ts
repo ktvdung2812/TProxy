@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import type { UsageActiveRequest, UsageRecentRequest, UsageStats } from "./api";
+import { useEffect, useRef } from "react";
+import type { UsageStats } from "./api";
+import { sameUsageLiveSnapshot, type UsageLiveSnapshot } from "./utils";
 
 export type UsageLiveUpdate = Pick<UsageStats, "activeRequests" | "recentRequests" | "errorProvider">;
 
@@ -8,6 +9,13 @@ export function useUsageStream(
   enabled: boolean,
   onUpdate: (update: UsageLiveUpdate) => void,
 ) {
+  const onUpdateRef = useRef(onUpdate);
+  const lastSnapshotRef = useRef<UsageLiveSnapshot | null>(null);
+
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
   useEffect(() => {
     if (!enabled) return undefined;
 
@@ -20,16 +28,28 @@ export function useUsageStream(
     source.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as UsageLiveUpdate;
-        onUpdate({
-          activeRequests: (data.activeRequests || []) as UsageActiveRequest[],
-          recentRequests: (data.recentRequests || []) as UsageRecentRequest[],
+        const next = {
+          activeRequests: data.activeRequests || [],
+          recentRequests: data.recentRequests || [],
           errorProvider: data.errorProvider || "",
+        };
+        if (lastSnapshotRef.current && sameUsageLiveSnapshot(lastSnapshotRef.current, next)) {
+          return;
+        }
+        lastSnapshotRef.current = next;
+        onUpdateRef.current({
+          activeRequests: next.activeRequests,
+          recentRequests: next.recentRequests,
+          errorProvider: next.errorProvider,
         });
       } catch {
         // Ignore malformed SSE payloads.
       }
     };
 
-    return () => source.close();
-  }, [secret, enabled, onUpdate]);
+    return () => {
+      lastSnapshotRef.current = null;
+      source.close();
+    };
+  }, [secret, enabled]);
 }

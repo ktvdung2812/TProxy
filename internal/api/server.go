@@ -31,7 +31,6 @@ import (
 	"github.com/tproxy/tproxy/internal/router"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
-	"github.com/tproxy/tproxy/internal/tokenizer"
 	"gopkg.in/yaml.v3"
 )
 
@@ -418,6 +417,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	request := parseClaude(body, requestID)
 	preserveClaudeClientModel(&request)
 	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
+	s.applyClaudeTierReasoningEffort(&request)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeClaude)
 }
@@ -1057,16 +1057,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			s.liveUsage.End(request.RequestID)
 		}
 	}()
-	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-TProxy-Token-Saver")), "off") {
-		stats := tokenizer.Compress(&request)
-		if stats.TokensSaved > 0 {
-			if request.Metadata == nil {
-				request.Metadata = map[string]any{}
-			}
-			request.Metadata["tokens_saved"] = stats.TokensSaved
-			w.Header().Set("X-TProxy-Tokens-Saved", fmt.Sprint(stats.TokensSaved))
-		}
-	}
+	s.applyTokenSaver(&request, w, r)
 	if request.Stream {
 		stream, errStream := s.router.ExecuteStream(r.Context(), *model, request)
 		if errStream != nil {
@@ -1470,7 +1461,24 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"retention": s.cfg.Retention, "payload_capture": false, "allow_remote_management": s.allowRemoteMgmt, "token_saver": map[string]any{"enabled": true, "per_request_opt_out": true}})
+		tokenSaver, err := s.store.TokenSaverSettings(r.Context())
+		if err != nil {
+			tokenSaver = store.DefaultTokenSaverSettings()
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"retention":               s.cfg.Retention,
+			"payload_capture":         false,
+			"allow_remote_management": s.allowRemoteMgmt,
+			"token_saver": map[string]any{
+				"enabled":              true,
+				"rtk_enabled":          tokenSaver.RTKEnabled,
+				"per_request_opt_out":  tokenSaver.PerRequestOptOut,
+				"cli_hook_recommended": tokenSaver.CLIHookRecommended,
+				"upstream_project":     "https://github.com/rtk-ai/rtk",
+			},
+		})
+	case "/api/admin/settings/token-saver":
+		s.adminTokenSaverSettings(w, r)
 	case "/api/admin/import/9router":
 		s.adminImport9router(w, r)
 	case "/api/admin/ninerouter/presets":

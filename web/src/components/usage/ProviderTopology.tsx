@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Controls,
   Handle,
@@ -29,13 +29,14 @@ type Props = {
 };
 
 const FE_ACTIVE_TIMEOUT_MS = 60_000;
-const FE_ACTIVE_TICK_MS = 1_000;
+const FE_ACTIVE_TICK_MS = 5_000;
+const FIT_VIEW_OPTS = { padding: 0.2, duration: 200 };
 
 function getProviderColor(type: string): string {
   return getProviderTypeInfo(type).color || "#477453";
 }
 
-function ProviderNode({ data }: NodeProps) {
+const ProviderNode = memo(function ProviderNode({ data }: NodeProps) {
   const { label, color, providerId, providerType, active } = data as {
     label: string;
     color: string;
@@ -74,9 +75,9 @@ function ProviderNode({ data }: NodeProps) {
       ) : null}
     </div>
   );
-}
+});
 
-function RouterNode({ data }: NodeProps) {
+const RouterNode = memo(function RouterNode({ data }: NodeProps) {
   const activeCount = Number((data as { activeCount?: number }).activeCount || 0);
   return (
     <div className="usage-flow-router-node">
@@ -89,64 +90,28 @@ function RouterNode({ data }: NodeProps) {
       {activeCount > 0 ? <span className="usage-flow-router-count">{activeCount}</span> : null}
     </div>
   );
-}
+});
 
 const nodeTypes = { provider: ProviderNode, router: RouterNode };
 
-function buildLayout(
-  providers: ProviderItem[],
-  activeSet: Set<string>,
-  lastSet: Set<string>,
-  errorSet: Set<string>,
-): { nodes: Node[]; edges: Edge[] } {
+type ProviderLayout = {
+  nodeId: string;
+  provider: ProviderItem;
+  position: { x: number; y: number };
+  sourceHandle: string;
+  targetHandle: string;
+};
+
+function buildProviderLayout(providers: ProviderItem[]): ProviderLayout[] {
   const nodeW = 180;
   const nodeH = 30;
-  const routerW = 120;
-  const routerH = 44;
   const nodeGap = 24;
   const count = providers.length;
   const minRx = ((nodeW + nodeGap) * count) / (2 * Math.PI);
   const rx = Math.max(320, minRx);
   const ry = Math.max(200, rx * 0.55);
 
-  if (count === 0) {
-    return {
-      nodes: [{
-        id: "router",
-        type: "router",
-        position: { x: 0, y: 0 },
-        data: { activeCount: 0 },
-        draggable: false,
-      }],
-      edges: [],
-    };
-  }
-
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
-
-  nodes.push({
-    id: "router",
-    type: "router",
-    position: { x: -routerW / 2, y: -routerH / 2 },
-    data: { activeCount: activeSet.size },
-    draggable: false,
-  });
-
-  const edgeStyle = (active: boolean, last: boolean, error: boolean) => {
-    if (error) return { stroke: "#ef4444", strokeWidth: 2.5, opacity: 0.9 };
-    if (active) return { stroke: "#57b37c", strokeWidth: 2.5, opacity: 0.9 };
-    if (last) return { stroke: "#c9a45c", strokeWidth: 2, opacity: 0.7 };
-    return { stroke: "var(--color-border)", strokeWidth: 1, opacity: 0.3 };
-  };
-
-  providers.forEach((provider, index) => {
-    const providerKey = provider.id.toLowerCase();
-    const color = getProviderColor(provider.type);
-    const active = activeSet.has(providerKey) || activeSet.has(provider.name.toLowerCase());
-    const last = !active && (lastSet.has(providerKey) || lastSet.has(provider.name.toLowerCase()));
-    const error = !active && (errorSet.has(providerKey) || errorSet.has(provider.name.toLowerCase()));
-    const nodeId = `provider-${provider.id}`;
+  return providers.map((provider, index) => {
     const angle = -Math.PI / 2 + (2 * Math.PI * index) / count;
     const cx = rx * Math.cos(angle);
     const cy = ry * Math.sin(angle);
@@ -164,32 +129,103 @@ function buildLayout(
       targetHandle = "right";
     }
 
-    nodes.push({
-      id: nodeId,
-      type: "provider",
+    return {
+      nodeId: `provider-${provider.id}`,
+      provider,
       position: { x: cx - nodeW / 2, y: cy - nodeH / 2 },
+      sourceHandle,
+      targetHandle,
+    };
+  });
+}
+
+function edgeStyle(active: boolean, last: boolean, error: boolean) {
+  if (error) return { stroke: "#ef4444", strokeWidth: 2.5, opacity: 0.9 };
+  if (active) return { stroke: "#57b37c", strokeWidth: 2.5, opacity: 0.9 };
+  if (last) return { stroke: "#c9a45c", strokeWidth: 2, opacity: 0.7 };
+  return { stroke: "var(--color-border)", strokeWidth: 1, opacity: 0.3 };
+}
+
+function buildFlowGraph(
+  layout: ProviderLayout[],
+  activeSet: Set<string>,
+  lastSet: Set<string>,
+  errorSet: Set<string>,
+): { nodes: Node[]; edges: Edge[] } {
+  const routerW = 120;
+  const routerH = 44;
+
+  if (layout.length === 0) {
+    return {
+      nodes: [{
+        id: "router",
+        type: "router",
+        position: { x: 0, y: 0 },
+        data: { activeCount: 0 },
+        draggable: false,
+      }],
+      edges: [],
+    };
+  }
+
+  const nodes: Node[] = [{
+    id: "router",
+    type: "router",
+    position: { x: -routerW / 2, y: -routerH / 2 },
+    data: { activeCount: activeSet.size },
+    draggable: false,
+  }];
+  const edges: Edge[] = [];
+
+  for (const item of layout) {
+    const providerKey = item.provider.id.toLowerCase();
+    const color = getProviderColor(item.provider.type);
+    const active = activeSet.has(providerKey) || activeSet.has(item.provider.name.toLowerCase());
+    const last = !active && (lastSet.has(providerKey) || lastSet.has(item.provider.name.toLowerCase()));
+    const error = !active && (errorSet.has(providerKey) || errorSet.has(item.provider.name.toLowerCase()));
+
+    nodes.push({
+      id: item.nodeId,
+      type: "provider",
+      position: item.position,
       data: {
-        label: provider.name || provider.id,
+        label: item.provider.name || item.provider.id,
         color,
-        providerId: provider.id,
-        providerType: provider.type,
+        providerId: item.provider.id,
+        providerType: item.provider.type,
         active,
       },
       draggable: false,
     });
 
     edges.push({
-      id: `e-${nodeId}`,
+      id: `e-${item.nodeId}`,
       source: "router",
-      sourceHandle,
-      target: nodeId,
-      targetHandle,
+      sourceHandle: item.sourceHandle,
+      target: item.nodeId,
+      targetHandle: item.targetHandle,
       animated: active,
       style: edgeStyle(active, last, error),
     });
-  });
+  }
 
   return { nodes, edges };
+}
+
+function useDebouncedFitView(
+  rfInstance: React.MutableRefObject<{ fitView: (options?: { padding?: number; duration?: number }) => void } | null>,
+) {
+  const timerRef = useRef<number | null>(null);
+
+  return useCallback(() => {
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current);
+    }
+    timerRef.current = window.setTimeout(() => {
+      rfInstance.current?.fitView(FIT_VIEW_OPTS);
+      timerRef.current = null;
+    }, 150);
+  }, [rfInstance]);
 }
 
 export function ProviderTopology({
@@ -199,8 +235,17 @@ export function ProviderTopology({
   errorProvider = "",
   aside,
 }: Props) {
+  const sortedProviders = useMemo(
+    () => [...providers].sort((left, right) => left.id.localeCompare(right.id)),
+    [providers],
+  );
+
   const activeKey = useMemo(
-    () => activeRequests.map((item) => item.provider?.toLowerCase()).filter(Boolean).sort().join(","),
+    () => activeRequests
+      .map((item) => item.provider?.toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join(","),
     [activeRequests],
   );
   const lastKey = lastProvider.toLowerCase();
@@ -240,40 +285,40 @@ export function ProviderTopology({
     return filtered;
   }, [rawActiveSet, tick]);
 
-  const { nodes, edges } = useMemo(
-    () => buildLayout(providers, activeSet, lastSet, errorSet),
-    [providers, activeSet, lastSet, errorSet],
+  const providerLayout = useMemo(
+    () => buildProviderLayout(sortedProviders),
+    [sortedProviders],
   );
 
-  const providersKey = useMemo(
-    () => providers.map((provider) => provider.id).sort().join(","),
-    [providers],
+  const { nodes, edges } = useMemo(
+    () => buildFlowGraph(providerLayout, activeSet, lastSet, errorSet),
+    [providerLayout, activeSet, lastSet, errorSet],
   );
 
   const rfInstance = useRef<{ fitView: (options?: { padding?: number; duration?: number }) => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const fitOpts = { padding: 0.2, duration: 200 };
+  const providerCountRef = useRef(sortedProviders.length);
+  const scheduleFitView = useDebouncedFitView(rfInstance);
 
   const onInit = useCallback((instance: { fitView: (options?: { padding?: number; duration?: number }) => void }) => {
     rfInstance.current = instance;
-    window.setTimeout(() => instance.fitView(fitOpts), 50);
+    window.setTimeout(() => instance.fitView(FIT_VIEW_OPTS), 50);
   }, []);
 
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return undefined;
-    const observer = new ResizeObserver(() => {
-      rfInstance.current?.fitView(fitOpts);
-    });
+    const observer = new ResizeObserver(() => scheduleFitView());
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [scheduleFitView]);
 
   useEffect(() => {
-    if (!rfInstance.current) return undefined;
-    const id = window.setTimeout(() => rfInstance.current?.fitView(fitOpts), 50);
-    return () => window.clearTimeout(id);
-  }, [nodes.length]);
+    if (providerCountRef.current === sortedProviders.length) return undefined;
+    providerCountRef.current = sortedProviders.length;
+    scheduleFitView();
+    return undefined;
+  }, [sortedProviders.length, scheduleFitView]);
 
   return (
     <div className="usage-topology-shell">
@@ -286,16 +331,15 @@ export function ProviderTopology({
       </div>
       <div className={aside ? "usage-topology-body" : undefined}>
         <div ref={containerRef} className="usage-flow-canvas">
-          {providers.length === 0 ? (
-            <div className="usage-flow-empty">No providers configured</div>
+          {sortedProviders.length === 0 ? (
+            <div className="usage-flow-empty">No providers with connections</div>
           ) : (
             <ReactFlow
-              key={providersKey}
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
               fitView
-              fitViewOptions={fitOpts}
+              fitViewOptions={FIT_VIEW_OPTS}
               minZoom={0.1}
               maxZoom={2}
               onInit={onInit}

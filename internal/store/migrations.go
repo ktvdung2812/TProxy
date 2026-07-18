@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 18
+const sqliteCurrentSchemaVersion = 19
 
 type sqliteMigration struct {
 	version int
@@ -56,6 +56,9 @@ var sqliteMigrations = []sqliteMigration{
 	{version: 16, apply: createCredentialModelCooldownSchema},
 	{version: 17, apply: createAppSettingsSchema},
 	{version: 18, apply: migrateCredentialRotationState},
+	{version: 19, apply: func(ctx context.Context, tx *sql.Tx) error {
+		return addColumnIfMissing(ctx, tx, "usage_events", "cached_tokens", `ALTER TABLE usage_events ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
+	}},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {

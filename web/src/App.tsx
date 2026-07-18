@@ -18,6 +18,7 @@ import { ProvidersView } from "./components/providers/ProvidersView";
 import { ProviderLogo } from "./components/providers/ProviderLogo";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
 import { UsageView } from "./components/usage/UsageView";
+import { TokenSaverView } from "./components/token-saver/TokenSaverView";
 import { ApisView } from "./components/apis/ApisView";
 import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
@@ -27,8 +28,10 @@ import { MappingView } from "./components/mapping/MappingView";
 import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
+import { LogsView } from "./components/logs/LogsView";
+import { fetchAuditEvents, type AuditEvent } from "./components/logs/api";
 import { matchRoute } from "./navigation";
-import { useRequestLogStream } from "./hooks/useRequestLogStream";
+import { useRequestLogStream, type RequestLog } from "./hooks/useRequestLogStream";
 
 /* ============================================================
    Types — unchanged from the original control center
@@ -120,9 +123,6 @@ const emptySnapshot: Snapshot = {
   usage: { requests: 0, errors: 0, input_tokens: 0, output_tokens: 0, tokens_saved: 0, estimated_cost_usd: 0 },
 };
 
-type RequestLog = { request_id: string; client_api_key_id?: string; method: string; path: string; status: number; latency_ms: number; error_code?: string; created_at: string };
-type AuditEvent = { action: string; resource_type?: string; status: number; created_at: string };
-
 function compactNumber(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
@@ -193,9 +193,8 @@ function App() {
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
       setSnapshot(data);
-      const auditResponse = await fetch("/api/admin/audit?limit=50", { headers: authHeaders });
-      if (auditResponse.ok) setAudit((await auditResponse.json()).data || []);
       if (secret) localStorage.setItem("tproxy-management-secret", secret);
+      void refreshAudit();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load tproxy state");
     } finally {
@@ -206,6 +205,15 @@ function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const refreshAudit = useCallback(async () => {
+    try {
+      const items = await fetchAuditEvents(secret);
+      setAudit(items);
+    } catch {
+      // Silent — full error is surfaced by the snapshot loader.
+    }
+  }, [secret]);
 
   const adminRequest = useCallback(async (path: string, method: string, body?: unknown) => {
     setNotice("");
@@ -354,6 +362,7 @@ function App() {
               <Route path="/proxy-pools" element={<ProxyPoolsPage />} />
               <Route path="/quota" element={<QuotaPage />} />
               <Route path="/usage" element={<UsagePage />} />
+              <Route path="/token-saver" element={<TokenSaverPage />} />
               <Route path="/apis" element={<ApisPage />} />
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/cli-tools" element={<CLIToolsPage />} />
@@ -372,7 +381,18 @@ function App() {
   }
 
   function UsagePage() {
-    return <UsageView secret={secret} providers={snapshot.providers} onError={setError} />;
+    return (
+      <UsageView
+        secret={secret}
+        providers={snapshot.providers}
+        credentials={snapshot.credentials || {}}
+        onError={setError}
+      />
+    );
+  }
+
+  function TokenSaverPage() {
+    return <TokenSaverView secret={secret} onError={setError} onNotice={setNotice} />;
   }
 
   function ApisPage() {
@@ -462,7 +482,7 @@ function App() {
         <div className="metrics">
           <Metric icon="bolt" label="Requests" value={compactNumber(snapshot.usage?.requests)} hint="all recorded attempts" />
           <Metric icon="error" label="Error attempts" value={compactNumber(snapshot.usage?.errors)} hint="retry and fallback included" variant="warning" />
-          <Metric icon="savings" label="Tokens saved" value={compactNumber(snapshot.usage?.tokens_saved || 0)} hint="tool output compression" variant="success" />
+          <Metric icon="savings" label="Tokens saved" value={compactNumber(snapshot.usage?.tokens_saved || 0)} hint="RTK tool output compression" variant="success" />
           <Metric icon="payments" label="Estimated cost" value={usd(snapshot.usage?.estimated_cost_usd || 0)} hint="models.dev pricing" />
           <Metric icon="key" label="Active credentials" value={String(activeCredentials)} hint="available account records" />
         </div>
@@ -657,47 +677,12 @@ function App() {
 
   function LogsPage() {
     return (
-      <section className="section">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Operations</p>
-                  <h2>Request logs and audit</h2>
-                  <p>Recent requests and admin changes.</p>
-                </div>
-                <span className="meta">{logs.length} requests · {audit.length} changes</span>
-              </div>
-              <Card pad="md">
-                <div className="row-table">
-                  {logs.map((item) => (
-                    <div className="row compact-row" key={`${item.request_id}-${item.created_at}`}>
-                      <div className="compact-row-main">
-                        <strong>{item.method} {item.path}</strong>
-                        <span className="compact-row-meta">{item.client_api_key_id || "local"}</span>
-                      </div>
-                      <span className="compact-row-stat">
-                        {item.status >= 400 ? <Badge variant="error" size="sm">{item.status}</Badge> : <Badge variant="success" size="sm">{item.status}</Badge>}
-                      </span>
-                      <span className="compact-row-stat">{item.latency_ms} ms</span>
-                      <code className="compact-row-code">{item.error_code || "ok"}</code>
-                    </div>
-                  ))}
-                  {logs.length === 0 && <EmptyState icon="receipt_long" text="No requests logged yet." />}
-                </div>
-                <div className="row-table audit-list">
-                  {audit.map((item, index) => (
-                    <div className="row compact-row" key={`${item.action}-${item.created_at}-${index}`}>
-                      <code className="compact-row-status">{item.status}</code>
-                      <div className="compact-row-main">
-                        <strong>{item.action}</strong>
-                        <span className="compact-row-meta">{item.resource_type || "admin"}</span>
-                      </div>
-                      <span className="compact-row-stat">{new Date(item.created_at).toLocaleString()}</span>
-                    </div>
-                  ))}
-                  {audit.length === 0 && <EmptyState icon="history" text="No audit events yet." />}
-                </div>
-              </Card>
-      </section>
+      <LogsView
+        logs={logs}
+        audit={audit}
+        streaming={logsStreamEnabled}
+        onRefreshAudit={refreshAudit}
+      />
     );
   }
 }

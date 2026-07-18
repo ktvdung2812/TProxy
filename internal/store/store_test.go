@@ -63,6 +63,9 @@ PRAGMA user_version=1;`)
 			t.Fatalf("missing migrated column %s.%s", table, column)
 		}
 	}
+	if exists, existsErr := sqliteColumnExists(context.Background(), opened.db, "usage_events", "cached_tokens"); existsErr != nil || !exists {
+		t.Fatalf("missing migrated column usage_events.cached_tokens exists=%v err=%v", exists, existsErr)
+	}
 	for table, column := range map[string]string{"api_keys": "policy_json", "request_logs": "metadata_json", "audit_events": "metadata_json", "model_aliases": "scope_team_id"} {
 		exists, existsErr := sqliteColumnExists(context.Background(), opened.db, table, column)
 		if existsErr != nil || !exists {
@@ -1205,5 +1208,73 @@ func TestTouchCredentialRotationPersistsState(t *testing.T) {
 	}
 	if credential.ConsecutiveUseCount != 2 || credential.LastUsedAt.IsZero() {
 		t.Fatalf("credential rotation state = %+v", credential)
+	}
+}
+
+func TestSeedSkipsPlaceholderCredentials(t *testing.T) {
+	t.Setenv("TPROXY_TEST_SEED_SECRET", "real-api-key")
+
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "seed-skip.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{
+		{
+			ID: "openai-main", Type: "openai-compatible", Name: "OpenAI", Enabled: true,
+			Credentials: []config.CredentialConfig{
+				{ID: "openai-primary", AuthType: "api_key", SecretEnv: "TPROXY_TEST_SEED_SECRET"},
+				{ID: "openai-missing", AuthType: "api_key", SecretEnv: "TPROXY_UNSET_SECRET"},
+				{ID: "openai-oauth", AuthType: "oauth", Label: "OAuth placeholder"},
+			},
+		},
+		{
+			ID: "ollama-local", Type: "ollama", Name: "Ollama", Enabled: false,
+			Credentials: []config.CredentialConfig{
+				{ID: "ollama-none", AuthType: "none"},
+			},
+		},
+		{
+			ID: "ollama-enabled", Type: "ollama", Name: "Local Ollama", Enabled: true, BaseURL: "http://127.0.0.1:11434",
+			Credentials: []config.CredentialConfig{
+				{ID: "ollama-local-none", AuthType: "none"},
+			},
+		},
+	}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	openAICreds, err := dataStore.Credentials(context.Background(), "openai-main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(openAICreds) != 1 || openAICreds[0].ID != "openai-primary" {
+		t.Fatalf("openai credentials = %+v", openAICreds)
+	}
+
+	disabledCreds, err := dataStore.Credentials(context.Background(), "ollama-local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disabledCreds) != 0 {
+		t.Fatalf("disabled provider credentials = %+v", disabledCreds)
+	}
+
+	enabledNoneCreds, err := dataStore.Credentials(context.Background(), "ollama-enabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enabledNoneCreds) != 1 || enabledNoneCreds[0].ID != "ollama-local-none" {
+		t.Fatalf("enabled none-auth credentials = %+v", enabledNoneCreds)
 	}
 }

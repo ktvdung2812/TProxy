@@ -22,6 +22,8 @@ export type CredentialQuota = {
     }>;
   };
   quotas: Record<string, QuotaEntry>;
+  credential_enabled?: boolean;
+  quota_auto_disabled?: boolean;
 };
 
 export type CodexResetCredits = {

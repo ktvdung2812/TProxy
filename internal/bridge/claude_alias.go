@@ -33,6 +33,7 @@ type Resolver struct {
 	defaults            Config
 	env                 Overrides
 	overrides           Overrides
+	reasoningEffort     ReasoningEffortOverrides
 	placeholderToTarget map[string]string
 }
 
@@ -105,6 +106,40 @@ func (r *Resolver) SetOverrides(overrides Overrides) {
 	defer r.mu.Unlock()
 	r.overrides = cloneOverrides(overrides)
 	r.placeholderToTarget = buildPlaceholderIndex(r.defaults, r.env, r.overrides)
+}
+
+func (r *Resolver) SetReasoningEffortOverrides(overrides ReasoningEffortOverrides) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reasoningEffort = cloneReasoningEffortOverrides(overrides)
+}
+
+func (r *Resolver) CurrentReasoningEffortOverrides() ReasoningEffortOverrides {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return cloneReasoningEffortOverrides(r.reasoningEffort)
+}
+
+func (r *Resolver) ReasoningEffortForClientModel(model string) string {
+	role, ok := PlaceholderRole(model)
+	if !ok {
+		return ""
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return NormalizeReasoningEffort(r.reasoningEffort[role])
+}
+
+func (r *Resolver) EffectiveReasoningEffortMapping() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]string, len(Roles))
+	for _, role := range Roles {
+		if effort := NormalizeReasoningEffort(r.reasoningEffort[role]); effort != "" {
+			out[string(role)] = effort
+		}
+	}
+	return out
 }
 
 func (r *Resolver) EnvOverrides() Overrides {

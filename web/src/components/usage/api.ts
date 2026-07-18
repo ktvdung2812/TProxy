@@ -17,6 +17,7 @@ export type UsageBucketEntry = {
 };
 
 export type UsageRecentRequest = {
+  requestId?: string;
   timestamp: string;
   model: string;
   provider: string;
@@ -27,6 +28,7 @@ export type UsageRecentRequest = {
 };
 
 export type UsageActiveRequest = {
+  request_id?: string;
   provider?: string;
   model?: string;
   account?: string;
@@ -69,6 +71,7 @@ export type UsageEvent = {
   input_tokens: number;
   output_tokens: number;
   reasoning_tokens: number;
+  cached_tokens: number;
   tokens_saved: number;
   estimated_cost_usd: number;
   latency_ms: number;

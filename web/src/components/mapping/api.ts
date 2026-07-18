@@ -1,8 +1,12 @@
+import type { MappingTier, ReasoningEffort } from "./codegen";
+
 export type ClaudeMappingResponse = {
-  defaults: Record<"fable" | "opus" | "sonnet" | "haiku", string>;
+  defaults: Record<MappingTier, string>;
   env_defaults: Record<string, string>;
-  overrides: Record<"fable" | "opus" | "sonnet" | "haiku", string>;
-  effective: Record<"fable" | "opus" | "sonnet" | "haiku", string>;
+  overrides: Record<MappingTier, string>;
+  reasoning_effort_overrides: Partial<Record<MappingTier, ReasoningEffort>>;
+  effective_reasoning_effort: Partial<Record<MappingTier, ReasoningEffort>>;
+  effective: Record<MappingTier, string>;
   effective_resolved: Record<string, { raw: string; resolved: string; route: "codex-bridge" | "claude-native" | "virtual-model" }>;
   default_codex_provider: string;
   placeholders: Array<{ name: string; role: string; resolves: string }>;
@@ -31,7 +35,11 @@ export function fetchClaudeMapping(secret: string) {
 
 export function saveClaudeMapping(
   secret: string,
-  payload: { overrides: Record<string, string>; default_codex_provider?: string },
+  payload: {
+    overrides: Record<string, string>;
+    reasoning_effort_overrides?: Partial<Record<MappingTier, ReasoningEffort>>;
+    default_codex_provider?: string;
+  },
 ) {
   return adminFetch<ClaudeMappingResponse>(secret, "/api/admin/mapping/claude", "PUT", payload);
 }

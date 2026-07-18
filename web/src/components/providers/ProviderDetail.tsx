@@ -4,6 +4,7 @@ import { CooldownTimer } from "./CooldownTimer";
 import { CredentialModelsModal } from "./CredentialModelsModal";
 import { EditConnectionModal } from "./EditConnectionModal";
 import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
+import { ConnectionStatsInline } from "./ConnectionStatsInline";
 import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
 import { AddCredentialModal } from "./AddCredentialModal";
@@ -207,7 +208,16 @@ export function ProviderDetail({
       </div>
 
       {/* Connections card */}
-      <Card pad="md" className="section" title="Connections" icon="vpn_key"
+      <Card
+        pad="md"
+        className="section"
+        title={
+          <span className="connection-card-head-title">
+            Connections
+            <ConnectionStatsInline credentials={credentials} />
+          </span>
+        }
+        icon="vpn_key"
         action={
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <ModelAvailabilityBadge credentials={credentials} />

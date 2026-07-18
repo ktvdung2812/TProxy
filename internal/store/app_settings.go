@@ -44,26 +44,67 @@ func (s *Store) SetAppSettingJSON(ctx context.Context, key string, value map[str
 	return err
 }
 
-func (s *Store) ClaudeAliasOverrides(ctx context.Context) (bridge.Overrides, error) {
-	raw, err := s.GetAppSettingJSON(ctx, bridge.AppSettingClaudeAliases)
-	if err != nil {
-		return nil, err
-	}
-	overrides := bridge.Overrides{}
-	for _, role := range bridge.Roles {
-		if value, ok := raw[string(role)].(string); ok && value != "" {
-			overrides[role] = value
-		}
-	}
-	return overrides, nil
+type ClaudeAliasSettings struct {
+	Models          bridge.Overrides
+	ReasoningEffort bridge.ReasoningEffortOverrides
 }
 
-func (s *Store) SaveClaudeAliasOverrides(ctx context.Context, overrides bridge.Overrides) error {
+func (s *Store) ClaudeAliasSettings(ctx context.Context) (ClaudeAliasSettings, error) {
+	raw, err := s.GetAppSettingJSON(ctx, bridge.AppSettingClaudeAliases)
+	if err != nil {
+		return ClaudeAliasSettings{}, err
+	}
+	settings := ClaudeAliasSettings{
+		Models:          bridge.Overrides{},
+		ReasoningEffort: bridge.ReasoningEffortOverrides{},
+	}
+	for _, role := range bridge.Roles {
+		if value, ok := raw[string(role)].(string); ok && value != "" {
+			settings.Models[role] = value
+		}
+	}
+	if nested, ok := raw["reasoning_effort"].(map[string]any); ok {
+		for _, role := range bridge.Roles {
+			if value, ok := nested[string(role)].(string); ok && value != "" {
+				settings.ReasoningEffort[role] = value
+			}
+		}
+	}
+	return settings, nil
+}
+
+func (s *Store) SaveClaudeAliasSettings(ctx context.Context, settings ClaudeAliasSettings) error {
 	payload := map[string]any{}
 	for _, role := range bridge.Roles {
-		if value := overrides[role]; value != "" {
+		if value := settings.Models[role]; value != "" {
 			payload[string(role)] = value
 		}
 	}
+	reasoning := map[string]any{}
+	for _, role := range bridge.Roles {
+		if effort := bridge.NormalizeReasoningEffort(settings.ReasoningEffort[role]); effort != "" {
+			reasoning[string(role)] = effort
+		}
+	}
+	if len(reasoning) > 0 {
+		payload["reasoning_effort"] = reasoning
+	}
 	return s.SetAppSettingJSON(ctx, bridge.AppSettingClaudeAliases, payload)
+}
+
+func (s *Store) ClaudeAliasOverrides(ctx context.Context) (bridge.Overrides, error) {
+	settings, err := s.ClaudeAliasSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return settings.Models, nil
+}
+
+func (s *Store) SaveClaudeAliasOverrides(ctx context.Context, overrides bridge.Overrides) error {
+	settings, err := s.ClaudeAliasSettings(ctx)
+	if err != nil {
+		return err
+	}
+	settings.Models = overrides
+	return s.SaveClaudeAliasSettings(ctx, settings)
 }

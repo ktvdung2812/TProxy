@@ -2,12 +2,15 @@ package providers
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/canonical"
 )
 
 const codexToolNameMaxLen = 64
+
+var codexToolNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 type codexStreamState struct {
 	responseID                string
@@ -325,17 +328,31 @@ func restoreCodexToolName(name string, reverse map[string]string) string {
 	return name
 }
 
-func buildCodexToolNameMaps(tools []map[string]any) (map[string]string, map[string]string) {
-	shortMap := map[string]string{}
-	reverseMap := map[string]string{}
-	used := map[string]struct{}{}
+func buildCodexToolNameMaps(tools []map[string]any, input any) (map[string]string, map[string]string) {
+	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		function, _ := tool["function"].(map[string]any)
 		name := stringValue(function["name"])
 		if name == "" {
 			name = stringValue(tool["name"])
 		}
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	names = append(names, collectCodexFunctionCallNames(input)...)
+	return buildCodexToolNameMapsFromNames(names)
+}
+
+func buildCodexToolNameMapsFromNames(names []string) (map[string]string, map[string]string) {
+	shortMap := map[string]string{}
+	reverseMap := map[string]string{}
+	used := map[string]struct{}{}
+	for _, name := range names {
 		if name == "" {
+			continue
+		}
+		if _, exists := shortMap[name]; exists {
 			continue
 		}
 		candidate := shortenCodexToolName(name)
@@ -364,7 +381,45 @@ func buildCodexToolNameMaps(tools []map[string]any) (map[string]string, map[stri
 	return shortMap, reverseMap
 }
 
+func collectCodexFunctionCallNames(input any) []string {
+	switch value := input.(type) {
+	case []any:
+		names := make([]string, 0)
+		for _, item := range value {
+			mapped, ok := item.(map[string]any)
+			if !ok || stringValue(mapped["type"]) != "function_call" {
+				continue
+			}
+			if name := stringValue(mapped["name"]); name != "" {
+				names = append(names, name)
+			}
+		}
+		return names
+	default:
+		return nil
+	}
+}
+
+func codexWireToolName(name string, shortMap map[string]string) string {
+	if name == "" {
+		return name
+	}
+	if short := shortMap[name]; short != "" {
+		return short
+	}
+	return shortenCodexToolName(name)
+}
+
+func sanitizeCodexToolName(name string) string {
+	sanitized := codexToolNameSanitizer.ReplaceAllString(name, "_")
+	if sanitized == "" {
+		return "tool"
+	}
+	return sanitized
+}
+
 func shortenCodexToolName(name string) string {
+	name = sanitizeCodexToolName(name)
 	if len(name) <= codexToolNameMaxLen {
 		return name
 	}
@@ -385,10 +440,7 @@ func codexToolsWithShortNames(tools []map[string]any, shortMap map[string]string
 	for _, tool := range tools {
 		if function, ok := tool["function"].(map[string]any); ok {
 			name := stringValue(function["name"])
-			shortName := shortMap[name]
-			if shortName == "" {
-				shortName = name
-			}
+			shortName := codexWireToolName(name, shortMap)
 			mapped := map[string]any{
 				"type":        "function",
 				"name":        shortName,

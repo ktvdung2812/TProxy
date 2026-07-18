@@ -13,6 +13,7 @@ import {
   fmtTime,
   groupUsageRows,
   sortUsageRows,
+  sameUsageLiveSnapshot,
   type UsageTableView,
   type UsageValueMode,
 } from "./utils";
@@ -72,12 +73,22 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
   const applyLiveUpdate = useCallback((update: Pick<UsageStats, "activeRequests" | "recentRequests" | "errorProvider">) => {
     setStats((current) => {
       if (!current) return current;
-      return {
-        ...current,
+      const next = {
         activeRequests: update.activeRequests ?? [],
         recentRequests: update.recentRequests ?? [],
         errorProvider: update.errorProvider,
       };
+      if (sameUsageLiveSnapshot(
+        {
+          activeRequests: current.activeRequests ?? [],
+          recentRequests: current.recentRequests ?? [],
+          errorProvider: current.errorProvider,
+        },
+        next,
+      )) {
+        return current;
+      }
+      return { ...current, ...next };
     });
   }, []);
 
@@ -239,6 +250,11 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
     };
   }, [stats, tableView, sortBy, sortOrder]);
 
+  const recentAside = useMemo(
+    () => <RecentRequests requests={stats?.recentRequests ?? []} />,
+    [stats?.recentRequests],
+  );
+
   if (!stats && !loading) {
     return <div className="usage-empty">Failed to load usage statistics.</div>;
   }
@@ -265,7 +281,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
         activeRequests={stats.activeRequests}
         lastProvider={stats.recentRequests?.[0]?.provider || ""}
         errorProvider={stats.errorProvider || ""}
-        aside={<RecentRequests requests={stats.recentRequests ?? []} />}
+        aside={recentAside}
       />
       <UsageChart secret={secret} period={period} onError={onError} />
       <div className="usage-table-toolbar">

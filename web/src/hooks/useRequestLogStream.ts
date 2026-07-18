@@ -5,9 +5,15 @@ export type RequestLog = {
   client_api_key_id?: string;
   method: string;
   path: string;
+  protocol?: string;
+  public_model_id?: string;
+  provider_id?: string;
+  credential_id?: string;
+  attempt?: number;
   status: number;
   latency_ms: number;
   error_code?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
 };
 

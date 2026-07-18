@@ -2,6 +2,43 @@ import type { ClaudeMappingResponse } from "./api";
 
 export type MappingTier = "fable" | "opus" | "sonnet" | "haiku";
 
+export type ReasoningEffort = "" | "none" | "low" | "medium" | "high" | "xhigh" | "max";
+
+const REASONING_EFFORT_BASE_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: "", label: "Default" },
+  { value: "none", label: "None" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+];
+
+const REASONING_EFFORT_MAX_OPTION = { value: "max" as const, label: "Max" };
+
+export const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  ...REASONING_EFFORT_BASE_OPTIONS,
+  REASONING_EFFORT_MAX_OPTION,
+];
+
+export function reasoningEffortOptionsForTarget(
+  target: string,
+  current: ReasoningEffort = "",
+): Array<{ value: ReasoningEffort; label: string }> {
+  const model = target.trim().toLowerCase();
+  const options: Array<{ value: ReasoningEffort; label: string }> = [...REASONING_EFFORT_BASE_OPTIONS];
+  const isGpt56 = model.includes("gpt-5.6") || model.includes("codex-gpt-5.6");
+  if (!model || isGpt56) {
+    options.push(REASONING_EFFORT_MAX_OPTION);
+  }
+  if (current && !options.some((option) => option.value === current)) {
+    const fallback = REASONING_EFFORT_OPTIONS.find((option) => option.value === current);
+    if (fallback) {
+      options.push(fallback);
+    }
+  }
+  return options;
+}
+
 export const MAPPING_TIERS: MappingTier[] = ["fable", "opus", "sonnet", "haiku"];
 
 export const TIER_ENV_VARS: Record<MappingTier, string> = {

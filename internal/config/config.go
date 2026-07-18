@@ -416,7 +416,14 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 			provider.Name = "xAI Grok"
 		}
 		if provider.BaseURL == "" {
-			provider.BaseURL = "https://cli-chat-proxy.grok.com/v1"
+			if provider.ID == "xai-api" {
+				provider.BaseURL = "https://api.x.ai/v1"
+				if provider.Name == "xAI Grok" {
+					provider.Name = "xAI Developer API"
+				}
+			} else {
+				provider.BaseURL = "https://cli-chat-proxy.grok.com/v1"
+			}
 		}
 		if provider.OAuth == nil {
 			provider.OAuth = &OAuthConfig{}
@@ -434,6 +441,12 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		provider.OAuth.DeviceRequestFormat = "form"
 		if provider.OAuth.RefreshSafetyWindow == "" {
 			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+		if provider.OAuth.ExtraAuthParams == nil {
+			provider.OAuth.ExtraAuthParams = map[string]string{}
+		}
+		if _, exists := provider.OAuth.ExtraAuthParams["referrer"]; !exists {
+			provider.OAuth.ExtraAuthParams["referrer"] = "tproxy"
 		}
 	case "copilot":
 		if provider.Name == "" {

@@ -465,7 +465,28 @@ func (r *Router) checkCredentialHealth(ctx context.Context, provider store.Provi
 
 // CredentialQuota fetches upstream quota windows for a credential.
 func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CredentialQuota, error) {
-	return r.registry.CredentialQuota(ctx, provider, credential)
+	quota, err := r.registry.CredentialQuota(ctx, provider, credential)
+	if err != nil {
+		return quota, err
+	}
+	if len(quota.Quotas) > 0 {
+		depleted := providers.QuotaAtZero(quota)
+		if changed, syncErr := r.store.SyncCredentialQuotaState(ctx, credential, depleted); syncErr == nil && changed {
+			_ = r.store.SyncProviderHealth(ctx, provider.ID)
+			if refreshed, refreshErr := r.store.CredentialByID(ctx, credential.ID); refreshErr == nil {
+				enabled := refreshed.Enabled
+				autoDisabled := store.QuotaAutoDisabled(refreshed.Metadata)
+				quota.CredentialEnabled = &enabled
+				quota.QuotaAutoDisabled = &autoDisabled
+			}
+		} else if len(quota.Quotas) > 0 {
+			enabled := credential.Enabled
+			autoDisabled := store.QuotaAutoDisabled(credential.Metadata)
+			quota.CredentialEnabled = &enabled
+			quota.QuotaAutoDisabled = &autoDisabled
+		}
+	}
+	return quota, nil
 }
 
 // CodexResetCredits fetches Codex reset-credit inventory for a credential.
@@ -549,7 +570,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if errExecute == nil {
 			r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
 			r.clearSuccessfulCooldown(ctx, selection)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			if model.RewriteResponseModel {
 				response.Model = model.ID
 			}
@@ -1021,7 +1042,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 		if status == 200 {
 			r.clearSuccessfulCooldown(context.Background(), selection)
 		}
-		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
 	}()
 	return out
 }

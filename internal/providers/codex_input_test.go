@@ -200,6 +200,33 @@ func TestCodexSanitizeInputItemsStripsEphemeralMessageID(t *testing.T) {
 	}
 }
 
+func TestCodexNormalizeInputItemsSanitizesHistoryFunctionCallNames(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.4",
+		Raw: map[string]any{
+			"model": "gpt-5.4",
+			"input": []any{
+				map[string]any{
+					"type":      "function_call",
+					"call_id":   "call_history",
+					"name":      "mcp__plugin.context7/query-docs",
+					"arguments": `{}`,
+				},
+			},
+		},
+	})
+	input, ok := body["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input = %#v", body["input"])
+	}
+	item, _ := input[0].(map[string]any)
+	name := item["name"].(string)
+	if name == "" || codexToolNameSanitizer.MatchString(name) {
+		t.Fatalf("function_call name not sanitized: %q", name)
+	}
+}
+
 func TestCodexBodyClaudeSystemArrayUsesStringInstructions(t *testing.T) {
 	body := codexBody(canonical.Request{
 		Source: canonical.ProtocolClaude,

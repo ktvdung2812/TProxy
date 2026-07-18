@@ -26,13 +26,15 @@ type QuotaEntry struct {
 
 // CredentialQuota is upstream quota data for one credential.
 type CredentialQuota struct {
-	CredentialID string                `json:"credential_id"`
-	ProviderID   string                `json:"provider_id"`
-	ProviderType string                `json:"provider_type"`
-	Plan         string                `json:"plan,omitempty"`
-	Message      string                `json:"message,omitempty"`
-	ResetCredits *CodexResetCredits    `json:"reset_credits,omitempty"`
-	Quotas       map[string]QuotaEntry `json:"quotas"`
+	CredentialID      string                `json:"credential_id"`
+	ProviderID        string                `json:"provider_id"`
+	ProviderType      string                `json:"provider_type"`
+	Plan              string                `json:"plan,omitempty"`
+	Message           string                `json:"message,omitempty"`
+	ResetCredits      *CodexResetCredits    `json:"reset_credits,omitempty"`
+	Quotas            map[string]QuotaEntry `json:"quotas"`
+	CredentialEnabled *bool                 `json:"credential_enabled,omitempty"`
+	QuotaAutoDisabled *bool                 `json:"quota_auto_disabled,omitempty"`
 }
 
 var quotaSupportedTypes = map[string]bool{

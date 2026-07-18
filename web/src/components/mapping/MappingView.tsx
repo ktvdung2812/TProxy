@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiKeyOption } from "../cli-tools/ApiKeySelect";
-import { Badge, Button, Card, Field, Input, cn } from "../ui";
+import { Badge, Button, Card, Field, Input, Select, cn } from "../ui";
 import { fetchClaudeMapping, saveClaudeMapping, type ClaudeMappingResponse } from "./api";
+import { REASONING_EFFORT_OPTIONS, reasoningEffortOptionsForTarget, type ReasoningEffort } from "./codegen";
 import { MappingCodeTab } from "./MappingCodeTab";
 
 type Props = {
@@ -33,6 +34,12 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
     sonnet: "",
     haiku: "",
   });
+  const [reasoningEffortOverrides, setReasoningEffortOverrides] = useState<Record<string, ReasoningEffort>>({
+    fable: "",
+    opus: "",
+    sonnet: "",
+    haiku: "",
+  });
   const [defaultCodexProvider, setDefaultCodexProvider] = useState("codex");
 
   const load = useCallback(async () => {
@@ -45,6 +52,12 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
         opus: response.overrides?.opus || "",
         sonnet: response.overrides?.sonnet || "",
         haiku: response.overrides?.haiku || "",
+      });
+      setReasoningEffortOverrides({
+        fable: response.reasoning_effort_overrides?.fable || "",
+        opus: response.reasoning_effort_overrides?.opus || "",
+        sonnet: response.reasoning_effort_overrides?.sonnet || "",
+        haiku: response.reasoning_effort_overrides?.haiku || "",
       });
       setDefaultCodexProvider(response.default_codex_provider || "codex");
     } catch (cause) {
@@ -73,6 +86,7 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
     try {
       const response = await saveClaudeMapping(secret, {
         overrides,
+        reasoning_effort_overrides: reasoningEffortOverrides,
         default_codex_provider: defaultCodexProvider,
       });
       setData(response);
@@ -142,8 +156,10 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
               <strong>Tier routing</strong>
               <p>
                 Map each tier to a virtual model ID (for example <code>mapping-fable</code>), a{" "}
-                <code>provider:upstream-model</code> selector, or leave blank for built-in defaults. Env vars such as{" "}
-                <code>ANTHROPIC_DEFAULT_FABLE_MODEL</code> override config when set on the tproxy process.
+                <code>provider:upstream-model</code> selector, or leave blank for built-in defaults. Use the reasoning
+                dropdown for Codex targets (GPT 5.6 models also support <strong>Max</strong> reasoning).
+                Env vars such as <code>ANTHROPIC_DEFAULT_FABLE_MODEL</code> override config when set on the tproxy
+                process.
               </p>
             </div>
           </div>
@@ -184,16 +200,41 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
                   ) : data?.effective_resolved?.[tier.id] ? (
                     <Badge variant="primary" size="sm">Codex bridge</Badge>
                   ) : null}
+                  {data?.effective_reasoning_effort?.[tier.id] ? (
+                    <Badge variant="info" size="sm">effort: {data.effective_reasoning_effort[tier.id]}</Badge>
+                  ) : null}
                   {data?.env_defaults?.[tier.id] ? (
                     <Badge variant="default" size="sm">env: {data.env_defaults[tier.id]}</Badge>
                   ) : null}
                 </div>
-                <Input
-                  list={`mapping-models-${tier.id}`}
-                  value={overrides[tier.id] || ""}
-                  placeholder={data?.defaults?.[tier.id] || "provider:model"}
-                  onChange={(event) => setOverrides((current) => ({ ...current, [tier.id]: event.target.value }))}
-                />
+                <div className="mapping-tier-controls">
+                  <Input
+                    list={`mapping-models-${tier.id}`}
+                    value={overrides[tier.id] || ""}
+                    placeholder={data?.defaults?.[tier.id] || "provider:model"}
+                    onChange={(event) => setOverrides((current) => ({ ...current, [tier.id]: event.target.value }))}
+                  />
+                  <Select
+                    className="mapping-tier-effort"
+                    aria-label={`${tier.label} reasoning effort`}
+                    value={reasoningEffortOverrides[tier.id] || ""}
+                    onChange={(event) =>
+                      setReasoningEffortOverrides((current) => ({
+                        ...current,
+                        [tier.id]: event.target.value as ReasoningEffort,
+                      }))
+                    }
+                  >
+                    {reasoningEffortOptionsForTarget(
+                      overrides[tier.id] || data?.effective_resolved?.[tier.id]?.resolved || "",
+                      reasoningEffortOverrides[tier.id] || "",
+                    ).map((option) => (
+                      <option key={option.value || "default"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
                 <datalist id={`mapping-models-${tier.id}`}>
                   {modelOptions.map((option) => (
                     <option key={option.value} value={option.value}>

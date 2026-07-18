@@ -28,8 +28,8 @@ func TestUsageStatsAggregatesByModelAndAccount(t *testing.T) {
 	now := time.Date(2026, 7, 17, 15, 30, 0, 0, time.UTC)
 
 	events := []UsageEvent{
-		{RequestID: "r1", PublicModelID: "gpt-test", ProviderID: "openai", UpstreamModel: "gpt-4o", CredentialID: "cred-1", ClientAPIKeyID: "key-1", Status: 200, InputTokens: 10, OutputTokens: 5, TokensSaved: 2, EstimatedCostUSD: 0.01, CreatedAt: now},
-		{RequestID: "r2", PublicModelID: "gpt-test", ProviderID: "openai", UpstreamModel: "gpt-4o", CredentialID: "cred-1", ClientAPIKeyID: "key-1", Status: 200, InputTokens: 20, OutputTokens: 8, TokensSaved: 1, EstimatedCostUSD: 0.02, CreatedAt: now.Add(time.Minute)},
+		{RequestID: "r1", PublicModelID: "gpt-test", ProviderID: "openai", UpstreamModel: "gpt-4o", CredentialID: "cred-1", ClientAPIKeyID: "key-1", Status: 200, InputTokens: 10, OutputTokens: 5, CachedTokens: 2, TokensSaved: 99, EstimatedCostUSD: 0.01, CreatedAt: now},
+		{RequestID: "r2", PublicModelID: "gpt-test", ProviderID: "openai", UpstreamModel: "gpt-4o", CredentialID: "cred-1", ClientAPIKeyID: "key-1", Status: 200, InputTokens: 20, OutputTokens: 8, CachedTokens: 1, TokensSaved: 50, EstimatedCostUSD: 0.02, CreatedAt: now.Add(time.Minute)},
 	}
 	for _, event := range events {
 		if err := dataStore.AddUsage(ctx, event); err != nil {

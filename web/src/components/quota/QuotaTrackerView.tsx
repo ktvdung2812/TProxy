@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteCredential, saveCredential } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
@@ -15,6 +15,7 @@ import {
   REFRESH_INTERVAL_MS,
   type AccountFilter,
   type QuotaVisibility,
+  buildProviderCountMap,
   earliestResetAt,
   filterQuotasByVisibility,
   getConnectionLabel,
@@ -22,6 +23,7 @@ import {
   getQuotaVisibilityKey,
   isConnectionDepleted,
   quotaEntries,
+  runWithConcurrency,
 } from "./utils";
 
 const QUOTA_PROVIDER_TYPES = new Set([
@@ -108,6 +110,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   const [resettingLimitId, setResettingLimitId] = useState<string | null>(null);
   const [activeCredentialIds, setActiveCredentialIds] = useState<Set<string>>(() => new Set());
   const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
+  const credentialsRef = useRef(credentials);
+  const refreshingRef = useRef(false);
+  const refreshAllRef = useRef<() => Promise<void>>(async () => {});
+
+  credentialsRef.current = credentials;
 
   const applyLiveUsage = useCallback((update: { activeRequests?: Array<{ credential_id?: string }> }) => {
     const next = new Set<string>();
@@ -142,25 +149,54 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     return rows;
   }, [eligible, providerFilter, accountFilter]);
 
+  const providerCounts = useMemo(
+    () => buildProviderCountMap(eligible, quotaProviderKey),
+    [eligible],
+  );
+
   const sortedCredentials = useMemo(() => {
-    if (!expiringFirst) return filteredCredentials;
     return [...filteredCredentials].sort((a, b) => {
-      const diff = earliestResetAt(quotaById[a.id]) - earliestResetAt(quotaById[b.id]);
-      if (diff !== 0) return diff;
+      if (a.enabled !== b.enabled) {
+        return a.enabled ? -1 : 1;
+      }
+      const providerA = quotaProviderKey(a);
+      const providerB = quotaProviderKey(b);
+      const countDiff = (providerCounts[providerB] || 0) - (providerCounts[providerA] || 0);
+      if (countDiff !== 0) {
+        return countDiff;
+      }
+      if (providerA !== providerB) {
+        return providerA.localeCompare(providerB);
+      }
+      if (expiringFirst) {
+        const diff = earliestResetAt(quotaById[a.id]) - earliestResetAt(quotaById[b.id]);
+        if (diff !== 0) return diff;
+      }
       return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
     });
-  }, [filteredCredentials, expiringFirst, quotaById]);
+  }, [filteredCredentials, expiringFirst, quotaById, providerCounts]);
+
+  const credentialIdsKey = useMemo(
+    () => sortedCredentials.map((item) => item.id).join("\u0000"),
+    [sortedCredentials],
+  );
 
   const loadQuota = useCallback(
-    async (credentialId: string) => {
+    async (credentialId: string): Promise<boolean> => {
       setLoading((current) => ({ ...current, [credentialId]: true }));
       setErrors((current) => ({ ...current, [credentialId]: "" }));
       try {
         const quota = await fetchCredentialQuota(secret, credentialId);
         setQuotaById((current) => ({ ...current, [credentialId]: quota }));
+        if (typeof quota.credential_enabled === "boolean") {
+          const credential = credentialsRef.current.find((item) => item.id === credentialId);
+          return Boolean(credential && credential.enabled !== quota.credential_enabled);
+        }
+        return false;
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : "Failed to fetch quota";
         setErrors((current) => ({ ...current, [credentialId]: message }));
+        return false;
       } finally {
         setLoading((current) => ({ ...current, [credentialId]: false }));
       }
@@ -178,23 +214,32 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   }, [secret]);
 
   const refreshAll = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     setRefreshingAll(true);
     setCountdown(60);
     try {
-      await Promise.all([
-        loadProxyUsage(),
-        ...sortedCredentials.map((item) => loadQuota(item.id)),
-      ]);
+      await loadProxyUsage();
+      const changed = await runWithConcurrency(
+        sortedCredentials.map((item) => item.id),
+        (credentialId) => loadQuota(credentialId),
+      );
+      if (changed.some(Boolean)) {
+        onMutated?.();
+      }
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to refresh quota");
     } finally {
+      refreshingRef.current = false;
       setRefreshingAll(false);
     }
-  }, [sortedCredentials, loadQuota, loadProxyUsage, onError]);
+  }, [sortedCredentials, loadQuota, loadProxyUsage, onError, onMutated]);
+
+  refreshAllRef.current = refreshAll;
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    void refreshAllRef.current();
+  }, [credentialIdsKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -216,7 +261,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   useEffect(() => {
     if (!autoRefresh) return;
     const refreshTimer = window.setInterval(() => {
-      void refreshAll();
+      void refreshAllRef.current();
     }, REFRESH_INTERVAL_MS);
     const countdownTimer = window.setInterval(() => {
       setCountdown((value) => (value <= 1 ? 60 : value - 1));
@@ -225,7 +270,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
       window.clearInterval(refreshTimer);
       window.clearInterval(countdownTimer);
     };
-  }, [autoRefresh, refreshAll]);
+  }, [autoRefresh]);
 
   const setCredentialEnabled = async (credential: CredentialRow, enabled: boolean) => {
     setTogglingId(credential.id);
@@ -315,7 +360,9 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         onError(result.message || "No Codex reset credits available.");
         return;
       }
-      await loadQuota(credential.id);
+      await loadQuota(credential.id).then((changed) => {
+        if (changed) onMutated?.();
+      });
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to reset Codex limit");
     } finally {
@@ -490,6 +537,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             const resetCreditCount = getCodexResetCreditCount(quota);
             const isResettingLimit = resettingLimitId === credential.id;
 
+            const isQuotaAutoDisabled = quota?.quota_auto_disabled === true;
+
             return (
               <article
                 key={credential.id}
@@ -506,6 +555,9 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                       <div className="quota-tracker-card-titles">
                         <h3>{info.name}</h3>
                         {getConnectionLabel(credential) ? <p>{getConnectionLabel(credential)}</p> : null}
+                        {isQuotaAutoDisabled ? (
+                          <p className="quota-tracker-card-email">Paused automatically — quota at 0%</p>
+                        ) : null}
                         {secondary ? <p className="quota-tracker-card-email">{secondary}</p> : null}
                       </div>
                     </div>
@@ -560,7 +612,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                       type="button"
                       className="quota-tracker-icon-btn"
                       disabled={busy || rowBusy}
-                      onClick={() => void loadQuota(credential.id)}
+                      onClick={() => {
+                        void loadQuota(credential.id).then((changed) => {
+                          if (changed) onMutated?.();
+                        });
+                      }}
                       aria-label="Refresh quota"
                       title="Refresh quota"
                     >

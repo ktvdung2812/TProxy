@@ -21,6 +21,9 @@ func sanitizeOpenAIUpstreamBody(provider store.Provider, body map[string]any, st
 		stripGLMImageContent(body, model)
 		applyGLMThinking(body)
 	}
+	if provider.Type == "xai" {
+		applyXAICompletionsCompat(body)
+	}
 	if stream && !openAISupportsStreamOptions(provider) {
 		delete(body, "stream_options")
 	}

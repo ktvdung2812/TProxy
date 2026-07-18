@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
@@ -244,7 +245,7 @@ func NewRegistry() *Registry {
 		"video":                &openAIAdapter{client: client},
 		"ollama":               &openAIAdapter{client: client},
 		"kimi":                 &openAIAdapter{client: client},
-		"xai":                  &openAIAdapter{client: client},
+		"xai":                  newXAIAdapter(client),
 		"anthropic-compatible": &anthropicAdapter{client: client},
 		"claude":               &anthropicAdapter{client: client},
 		"codex":                &codexAdapter{client: client},
@@ -313,6 +314,9 @@ func authHeaders(provider store.Provider, credential store.Credential) http.Head
 				headers.Set("X-Msh-Device-Id", deviceID)
 			}
 		}
+	}
+	if provider.Type == "xai" {
+		applyGrokCLIHeaders(headers, provider.BaseURL)
 	}
 	return headers
 }
@@ -591,7 +595,7 @@ func codexBody(request canonical.Request) map[string]any {
 			request.Raw["reasoning_effort"] = effort
 		}
 	}
-	shortMap, reverseMap := buildCodexToolNameMaps(request.Tools)
+	shortMap, reverseMap := buildCodexToolNameMaps(request.Tools, codexInputForToolMaps(request))
 	var body map[string]any
 	if request.Source == canonical.ProtocolResponses && request.Raw != nil {
 		encoded, _ := json.Marshal(request.Raw)
@@ -653,6 +657,7 @@ func codexNormalizeReasoning(body map[string]any) {
 		}
 	}
 	delete(body, "reasoning_effort")
+	effort = bridge.NormalizeReasoningEffort(effort)
 	if effort == "" {
 		effort = "low"
 	}
@@ -661,6 +666,7 @@ func codexNormalizeReasoning(body map[string]any) {
 		delete(body, "include")
 		return
 	}
+	effort = bridge.CodexWireReasoningEffort(effort)
 	body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
 	body["include"] = []any{"reasoning.encrypted_content"}
 }
@@ -678,10 +684,7 @@ func codexToolChoice(toolChoice any, shortMap map[string]string) any {
 	if name == "" {
 		return toolChoice
 	}
-	shortName := shortMap[name]
-	if shortName == "" {
-		shortName = name
-	}
+	shortName := codexWireToolName(name, shortMap)
 	return map[string]any{
 		"type": "function",
 		"function": map[string]any{
@@ -697,6 +700,16 @@ func codexReverseToolNames(body map[string]any) map[string]string {
 		return map[string]string{}
 	}
 	return reverse
+}
+
+func codexInputForToolMaps(request canonical.Request) any {
+	if request.Raw == nil {
+		return nil
+	}
+	if input, ok := request.Raw["input"]; ok {
+		return input
+	}
+	return nil
 }
 
 func codexTools(tools []map[string]any) []map[string]any {
@@ -791,8 +804,12 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	body := codexBody(request)
+	return a.streamResponses(ctx, provider, credential, request, body, codexHeaders(provider, credential, true, request))
+}
+
+func (a *codexAdapter) streamResponses(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request, body map[string]any, headers http.Header) (<-chan canonical.Event, error) {
 	reverseMap := codexReverseToolNames(body)
-	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/responses"), correlationHeaders(codexHeaders(provider, credential, true, request), request.RequestID), body)
+	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/responses"), correlationHeaders(headers, request.RequestID), body)
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
 	}
@@ -896,7 +913,29 @@ func codexEventsFromJSON(out chan<- canonical.Event, raw map[string]any, reverse
 
 func parseResponsesUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
-	return canonical.Usage{InputTokens: numberValue(firstValue(usage, "input_tokens", "prompt_tokens")), OutputTokens: numberValue(firstValue(usage, "output_tokens", "completion_tokens")), ReasoningTokens: numberValue(firstValue(usage, "reasoning_tokens"))}
+	return canonical.Usage{
+		InputTokens:     numberValue(firstValue(usage, "input_tokens", "prompt_tokens")),
+		OutputTokens:    numberValue(firstValue(usage, "output_tokens", "completion_tokens")),
+		ReasoningTokens: numberValue(firstValue(usage, "reasoning_tokens")),
+		CachedTokens:    parseUsageCachedTokens(usage),
+	}
+}
+
+func parseUsageCachedTokens(usage map[string]any) int {
+	if usage == nil {
+		return 0
+	}
+	if cached := numberValue(firstValue(usage, "cached_tokens", "cache_read_input_tokens")); cached > 0 {
+		return cached
+	}
+	for _, detailsKey := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		if details, ok := usage[detailsKey].(map[string]any); ok {
+			if cached := numberValue(details["cached_tokens"]); cached > 0 {
+				return cached
+			}
+		}
+	}
+	return 0
 }
 
 func nestedMapValue(raw map[string]any, parent, child string) any {
@@ -1522,7 +1561,11 @@ func mapSlice(value any) []map[string]any {
 func marshalString(value any) string { data, _ := json.Marshal(value); return string(data) }
 func parseOpenAIUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
-	result := canonical.Usage{InputTokens: numberValue(firstValue(usage, "prompt_tokens", "input_tokens")), OutputTokens: numberValue(firstValue(usage, "completion_tokens", "output_tokens"))}
+	result := canonical.Usage{
+		InputTokens:  numberValue(firstValue(usage, "prompt_tokens", "input_tokens")),
+		OutputTokens: numberValue(firstValue(usage, "completion_tokens", "output_tokens")),
+		CachedTokens: parseUsageCachedTokens(usage),
+	}
 	if details, ok := usage["completion_tokens_details"].(map[string]any); ok {
 		result.ReasoningTokens = numberValue(details["reasoning_tokens"])
 	}
