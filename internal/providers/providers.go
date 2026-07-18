@@ -471,6 +471,9 @@ func parseOpenAIStream(ctx context.Context, response *http.Response) <-chan cano
 		scanner := bufio.NewScanner(response.Body)
 		scanner.Buffer(make([]byte, 64<<10), 2<<20)
 		started := false
+		// OpenAI-compatible servers may send a usage-only chunk after the first
+		// finish_reason, so defer the canonical terminal event until SSE completion.
+		finishReason := ""
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -483,7 +486,7 @@ func parseOpenAIStream(ctx context.Context, response *http.Response) <-chan cano
 			}
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
-				out <- canonical.Event{Type: canonical.EventMessageEnd}
+				out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finishReason}
 				return
 			}
 			var raw map[string]any
@@ -514,12 +517,13 @@ func parseOpenAIStream(ctx context.Context, response *http.Response) <-chan cano
 				out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: call}
 			}
 			if finish := stringValue(choice["finish_reason"]); finish != "" {
-				out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finish}
-				return
+				finishReason = finish
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			out <- canonical.Event{Type: canonical.EventError, Err: err}
+		} else if finishReason != "" {
+			out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finishReason}
 		}
 	}()
 	return out
@@ -932,6 +936,10 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 		defer response.Body.Close()
 		scanner := bufio.NewScanner(response.Body)
 		scanner.Buffer(make([]byte, 64<<10), 2<<20)
+		// Anthropic splits prompt/cache usage into message_start and output usage
+		// into message_delta. Emit cumulative snapshots because the router records
+		// the latest usage event as authoritative.
+		var streamUsage canonical.Usage
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -950,6 +958,11 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 			case "message_start":
 				msg, _ := raw["message"].(map[string]any)
 				out <- canonical.Event{Type: canonical.EventMessageStart, ID: stringValue(msg["id"]), Model: stringValue(msg["model"])}
+				if usage, ok := msg["usage"].(map[string]any); ok {
+					streamUsage = mergeStreamUsage(streamUsage, parseClaudeUsage(usage))
+					current := streamUsage
+					out <- canonical.Event{Type: canonical.EventUsage, Usage: &current}
+				}
 			case "content_block_delta":
 				delta, _ := raw["delta"].(map[string]any)
 				if text := stringValue(delta["text"]); text != "" {
@@ -969,8 +982,9 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 			case "message_delta":
 				delta, _ := raw["delta"].(map[string]any)
 				if usage, ok := raw["usage"].(map[string]any); ok {
-					u := parseClaudeUsage(usage)
-					out <- canonical.Event{Type: canonical.EventUsage, Usage: &u}
+					streamUsage = mergeStreamUsage(streamUsage, parseClaudeUsage(usage))
+					current := streamUsage
+					out <- canonical.Event{Type: canonical.EventUsage, Usage: &current}
 				}
 				if stop := stringValue(delta["stop_reason"]); stop != "" {
 					out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: stop}
@@ -1268,6 +1282,11 @@ func (a *geminiAdapter) ExecuteStream(ctx context.Context, provider store.Provid
 			if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &raw) != nil {
 				continue
 			}
+			if usage, ok := raw["usageMetadata"].(map[string]any); ok {
+				// Gemini commonly attaches usage to the same chunk as finishReason.
+				u := parseGeminiUsage(usage)
+				out <- canonical.Event{Type: canonical.EventUsage, Usage: &u}
+			}
 			candidates, _ := raw["candidates"].([]any)
 			if len(candidates) > 0 {
 				candidate, _ := candidates[0].(map[string]any)
@@ -1290,10 +1309,6 @@ func (a *geminiAdapter) ExecuteStream(ctx context.Context, provider store.Provid
 					out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finish}
 					return
 				}
-			}
-			if usage, ok := raw["usageMetadata"].(map[string]any); ok {
-				u := parseGeminiUsage(usage)
-				out <- canonical.Event{Type: canonical.EventUsage, Usage: &u}
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -1358,6 +1373,23 @@ func parseOpenAIUsage(value any) canonical.Usage {
 func parseClaudeUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
 	return canonical.Usage{InputTokens: numberValue(usage["input_tokens"]), OutputTokens: numberValue(usage["output_tokens"]), CachedTokens: numberValue(usage["cache_read_input_tokens"])}
+}
+
+// mergeStreamUsage preserves fields omitted from partial stream usage chunks.
+func mergeStreamUsage(current, update canonical.Usage) canonical.Usage {
+	if update.InputTokens > 0 {
+		current.InputTokens = update.InputTokens
+	}
+	if update.OutputTokens > 0 {
+		current.OutputTokens = update.OutputTokens
+	}
+	if update.ReasoningTokens > 0 {
+		current.ReasoningTokens = update.ReasoningTokens
+	}
+	if update.CachedTokens > 0 {
+		current.CachedTokens = update.CachedTokens
+	}
+	return current
 }
 func parseGeminiUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
