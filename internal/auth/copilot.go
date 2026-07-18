@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -62,23 +63,28 @@ func (m *Manager) ensureCopilotCredential(ctx context.Context, provider store.Pr
 	if err != nil {
 		return updated, err
 	}
+	endpoint, endpointErr := validateCopilotAPIEndpoint(apiToken.APIEndpoint)
+	if endpointErr != nil {
+		return updated, &Error{code: "oauth_configuration_invalid", permanent: true, err: endpointErr}
+	}
+	apiToken.APIEndpoint = endpoint
 	updated.Secret = apiToken.JWT
 	updated.TokenType = "Bearer"
 	if updated.Metadata == nil {
 		updated.Metadata = map[string]any{}
 	}
-	updated.Metadata["copilot_api_token"] = apiToken.JWT
+	// The derived Copilot token is short-lived credential material. Keep it in
+	// the process cache only; metadata_json is plaintext and must never contain
+	// access tokens. Endpoint and expiry metadata remain safe to persist so the
+	// adapter can route requests after a restart (the token is exchanged again).
+	delete(updated.Metadata, "copilot_api_token")
 	updated.Metadata["copilot_api_endpoint"] = apiToken.APIEndpoint
 	updated.Metadata["copilot_token_expires_at"] = apiToken.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	updated.Metadata["copilot_exchange_unsupported"] = apiToken.JWT == githubToken
-	if err = m.store.UpdateCredentialMetadata(ctx, credential.ID, updated.Metadata); err != nil {
+	if err = m.store.UpdateCredentialMetadata(ctx, credential.ID, credentialMetadataForPersistence(updated)); err != nil {
 		return updated, err
 	}
 	return updated, nil
-}
-
-func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Provider, credential store.Credential, force bool) (store.Credential, error) {
-	return m.EnsureValid(ctx, provider, credential, force)
 }
 
 func (m *Manager) ensureCopilotAPIToken(ctx context.Context, credentialID, githubToken string, metadata map[string]any, force bool) (copilotAPIToken, error) {
@@ -88,10 +94,6 @@ func (m *Manager) ensureCopilotAPIToken(ctx context.Context, credentialID, githu
 			if entry.ExpiresAt.Sub(m.now()) > copilotTokenBuffer {
 				return entry, nil
 			}
-		}
-		if persisted := readPersistedCopilotToken(metadata); persisted != nil && persisted.ExpiresAt.Sub(m.now()) > copilotTokenBuffer {
-			copilotTokenCache.Store(credentialID, *persisted)
-			return *persisted, nil
 		}
 	}
 	if _, unsupported := copilotUnsupported.Load(credentialID); unsupported || metadataBool(metadata, "copilot_exchange_unsupported") {
@@ -149,7 +151,7 @@ func (m *Manager) exchangeCopilotToken(ctx context.Context, credentialID, github
 		return copilotAPIToken{}, &Error{code: "authorization_required", permanent: true, err: fmt.Errorf("copilot token exchange failed (%d)", response.StatusCode)}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return copilotAPIToken{}, &Error{code: "oauth_provider_unavailable", err: fmt.Errorf("copilot token exchange failed (%d): %s", response.StatusCode, strings.TrimSpace(string(body)))}
+		return copilotAPIToken{}, &Error{code: "oauth_provider_unavailable", err: fmt.Errorf("copilot token exchange failed (%d)", response.StatusCode)}
 	}
 	var payload struct {
 		Token     string `json:"token"`
@@ -165,6 +167,9 @@ func (m *Manager) exchangeCopilotToken(ctx context.Context, credentialID, github
 	if endpoint == "" {
 		endpoint = copilotDefaultAPI
 	}
+	if _, err := validateCopilotAPIEndpoint(endpoint); err != nil {
+		return copilotAPIToken{}, &Error{code: "oauth_configuration_invalid", permanent: true, err: err}
+	}
 	expiresAt := m.now().Add(30 * time.Minute)
 	if payload.ExpiresAt > 0 {
 		expiresAt = time.Unix(payload.ExpiresAt, 0)
@@ -172,27 +177,27 @@ func (m *Manager) exchangeCopilotToken(ctx context.Context, credentialID, github
 	return copilotAPIToken{JWT: payload.Token, APIEndpoint: endpoint, ExpiresAt: expiresAt}, nil
 }
 
-func readPersistedCopilotToken(metadata map[string]any) *copilotAPIToken {
-	if metadata == nil {
-		return nil
-	}
-	jwt := stringValue(metadata["copilot_api_token"])
-	if jwt == "" {
-		return nil
-	}
-	endpoint := stringValue(metadata["copilot_api_endpoint"])
+// validateCopilotAPIEndpoint constrains the endpoint returned by GitHub's
+// token exchange. It is later used as an HTTP base URL with a bearer token, so
+// accepting an arbitrary host would turn a provider response into an SSRF and
+// credential-exfiltration primitive.
+func validateCopilotAPIEndpoint(raw string) (string, error) {
+	endpoint := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if endpoint == "" {
 		endpoint = copilotDefaultAPI
 	}
-	rawExpires := stringValue(metadata["copilot_token_expires_at"])
-	if rawExpires == "" {
-		return nil
+	parsed, err := url.Parse(endpoint)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("Copilot API endpoint must be an HTTPS GitHub Copilot URL")
 	}
-	expiresAt, err := time.Parse(time.RFC3339Nano, rawExpires)
-	if err != nil {
-		return nil
+	if port := parsed.Port(); port != "" && port != "443" {
+		return "", errors.New("Copilot API endpoint must use the HTTPS port")
 	}
-	return &copilotAPIToken{JWT: jwt, APIEndpoint: endpoint, ExpiresAt: expiresAt}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if host != "githubcopilot.com" && !strings.HasSuffix(host, ".githubcopilot.com") && host != "copilot-api.githubusercontent.com" {
+		return "", errors.New("Copilot API endpoint is outside the githubcopilot.com domain")
+	}
+	return endpoint, nil
 }
 
 func metadataBool(metadata map[string]any, key string) bool {

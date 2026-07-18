@@ -227,10 +227,12 @@ func (m *Manager) Close() {
 	if m == nil {
 		return
 	}
+	// Cancel request contexts before waiting on prewarm workers so an in-flight
+	// token exchange can terminate promptly during gateway shutdown.
+	m.cancel()
 	if m.prewarm != nil {
 		m.prewarm.Stop()
 	}
-	m.cancel()
 	m.mu.Lock()
 	for _, item := range m.sessions {
 		m.stopSession(item)
@@ -301,20 +303,27 @@ func (m *Manager) resolveOAuthConfig(ctx context.Context, provider store.Provide
 	if err = json.Unmarshal(data, &discovery); err != nil {
 		return nil, &Error{code: "oauth_provider_unavailable", err: errors.New("invalid OAuth discovery response")}
 	}
-	if discovery.TokenEndpoint == "" || discovery.DeviceAuthorizationEndpoint == "" {
-		return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: errors.New("OAuth discovery response is missing required endpoints")}
+	if discovery.TokenEndpoint == "" {
+		return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: errors.New("OAuth discovery response is missing the token endpoint")}
 	}
 	if err = validateDiscoveredEndpoint(resolved.DiscoveryURL, discovery.TokenEndpoint, provider.Type); err != nil {
 		return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: err}
 	}
-	if err = validateDiscoveredEndpoint(resolved.DiscoveryURL, discovery.DeviceAuthorizationEndpoint, provider.Type); err != nil {
-		return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: err}
+	if discovery.DeviceAuthorizationEndpoint != "" {
+		if err = validateDiscoveredEndpoint(resolved.DiscoveryURL, discovery.DeviceAuthorizationEndpoint, provider.Type); err != nil {
+			return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: err}
+		}
+		resolved.DeviceCodeURL = discovery.DeviceAuthorizationEndpoint
+	}
+	if discovery.AuthorizationEndpoint != "" {
+		if err = validateDiscoveredEndpoint(resolved.DiscoveryURL, discovery.AuthorizationEndpoint, provider.Type); err != nil {
+			return nil, &Error{code: "oauth_configuration_invalid", permanent: true, err: err}
+		}
+		if resolved.AuthorizationURL == "" {
+			resolved.AuthorizationURL = discovery.AuthorizationEndpoint
+		}
 	}
 	resolved.TokenURL = discovery.TokenEndpoint
-	resolved.DeviceCodeURL = discovery.DeviceAuthorizationEndpoint
-	if resolved.AuthorizationURL == "" {
-		resolved.AuthorizationURL = discovery.AuthorizationEndpoint
-	}
 	m.mu.Lock()
 	m.discovery[provider.ID] = discoveryEntry{config: resolved, expiresAt: m.now().Add(time.Hour)}
 	m.mu.Unlock()
@@ -471,16 +480,17 @@ func (m *Manager) startLocalCallback(item *session) error {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(parsed.Path, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		state, code, providerError, parseErr := localCallbackValues(r)
+		if parseErr != nil {
+			http.Error(w, "Invalid OAuth callback", http.StatusBadRequest)
 			return
 		}
-		if r.URL.Query().Get("error") != "" {
+		if providerError != "" {
 			m.failSession(item, "oauth_authorization_rejected")
 			http.Error(w, "OAuth authorization was rejected", http.StatusBadRequest)
 			return
 		}
-		_, completeErr := m.CompleteCallback(r.Context(), r.URL.Query().Get("state"), r.URL.Query().Get("code"))
+		_, completeErr := m.CompleteCallback(r.Context(), state, code)
 		if completeErr != nil {
 			http.Error(w, completeErr.Error(), http.StatusBadRequest)
 			return
@@ -502,6 +512,35 @@ func (m *Manager) startLocalCallback(item *session) error {
 	return nil
 }
 
+func localCallbackValues(r *http.Request) (state, code, providerError string, err error) {
+	if r == nil {
+		return "", "", "", errors.New("OAuth callback request is missing")
+	}
+	switch r.Method {
+	case http.MethodGet:
+		values := r.URL.Query()
+		return values.Get("state"), values.Get("code"), values.Get("error"), nil
+	case http.MethodPost:
+		if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+			var payload struct {
+				State string `json:"state"`
+				Code  string `json:"code"`
+				Error string `json:"error"`
+			}
+			if decodeErr := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); decodeErr != nil {
+				return "", "", "", decodeErr
+			}
+			return strings.TrimSpace(payload.State), strings.TrimSpace(payload.Code), strings.TrimSpace(payload.Error), nil
+		}
+		if parseErr := r.ParseForm(); parseErr != nil {
+			return "", "", "", parseErr
+		}
+		return r.PostForm.Get("state"), r.PostForm.Get("code"), r.PostForm.Get("error"), nil
+	default:
+		return "", "", "", errors.New("OAuth callback method is unsupported")
+	}
+}
+
 func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (SessionStatus, error) {
 	state = strings.TrimSpace(state)
 	code = strings.TrimSpace(code)
@@ -511,27 +550,36 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (Ses
 	m.mu.Lock()
 	var item *session
 	for _, candidate := range m.sessions {
-		if candidate.state == state {
+		candidate.mu.Lock()
+		candidateState := candidate.state
+		candidate.mu.Unlock()
+		if candidateState == state {
 			item = candidate
 			break
 		}
 	}
+	m.mu.Unlock()
 	if item == nil {
-		m.mu.Unlock()
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
 	item.mu.Lock()
-	if m.now().After(item.expiresAt) || item.status != "pending" {
-		item.status = "expired"
+	if item.status != "pending" {
 		item.mu.Unlock()
-		m.mu.Unlock()
+		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+	}
+	if m.now().After(item.expiresAt) {
+		item.status = "expired"
+		item.errorCode = "invalid_state"
+		clearSessionSecretsLocked(item)
+		item.mu.Unlock()
+		m.stopSession(item)
 		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
 	}
 	item.status = "consumed"
 	item.consumedAt = m.now()
 	providerID, credentialID, verifier, redirectURL, expectedState := item.providerID, item.credentialID, item.verifier, item.redirectURL, item.state
+	label, email := item.label, item.email
 	item.mu.Unlock()
-	m.mu.Unlock()
 
 	provider, err := m.store.Provider(ctx, providerID)
 	if err != nil || provider.OAuth == nil {
@@ -558,12 +606,15 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (Ses
 		m.failSession(item, Code(err))
 		return m.statusFor(item), err
 	}
-	token, email, err := m.prepareProviderToken(ctx, *provider, token, item.email)
+	token, email, err = m.prepareProviderToken(ctx, *provider, token, email)
 	if err != nil {
 		m.failSession(item, Code(err))
 		return m.statusFor(item), err
 	}
-	if err = m.store.SaveOAuthCredential(ctx, providerID, credentialID, item.label, email, token); err != nil {
+	if !m.beginSessionCommit(item, "consumed") {
+		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+	}
+	if err = m.store.SaveOAuthCredential(ctx, providerID, credentialID, label, email, token); err != nil {
 		m.failSession(item, "oauth_credential_save_failed")
 		return m.statusFor(item), err
 	}
@@ -591,12 +642,13 @@ func (m *Manager) CancelSession(sessionID string) error {
 		return &Error{code: "invalid_state", permanent: true}
 	}
 	item.mu.Lock()
-	if item.status == "complete" || item.status == "cancelled" {
+	if item.status == "complete" || item.status == "cancelled" || item.status == "committing" {
 		item.mu.Unlock()
 		return nil
 	}
 	item.status = "cancelled"
 	item.consumedAt = m.now()
+	clearSessionSecretsLocked(item)
 	item.mu.Unlock()
 	m.stopSession(item)
 	return nil
@@ -613,13 +665,20 @@ func (m *Manager) CredentialStatus(ctx context.Context, credentialID string) (Cr
 			return CredentialStatus{}, credentialsErr
 		}
 		for _, credential := range credentials {
-			if credential.ID != credentialID || credential.AuthType != "oauth" {
+			if credential.ID != credentialID || (credential.AuthType != "oauth" && credential.AuthType != "service_account") {
 				continue
 			}
 			result := CredentialStatus{CredentialID: credential.ID, ProviderID: provider.ID, Status: credential.Status, TokenType: credential.TokenType}
 			if credential.OAuthToken != nil && !credential.OAuthToken.ExpiresAt.IsZero() {
 				expires := credential.OAuthToken.ExpiresAt
 				result.ExpiresAt = &expires
+			}
+			if result.ExpiresAt == nil {
+				if raw := stringValue(credential.Metadata["vertex_access_expires_at"]); raw != "" {
+					if expires, parseErr := time.Parse(time.RFC3339Nano, raw); parseErr == nil {
+						result.ExpiresAt = &expires
+					}
+				}
 			}
 			return result, nil
 		}
@@ -636,6 +695,14 @@ func (m *Manager) EnsureValid(ctx context.Context, provider store.Provider, cred
 	case credential.AuthType != "oauth":
 		return credential, nil
 	}
+	return m.ensureOAuthCredential(ctx, provider, credential, force)
+}
+
+// ensureOAuthCredential validates an ordinary OAuth credential and coordinates
+// refreshes so concurrent requests share one in-flight exchange. Provider
+// adapters such as Copilot call this helper before applying their own token
+// transformation; keeping the generic path separate avoids recursive dispatch.
+func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Provider, credential store.Credential, force bool) (store.Credential, error) {
 	token := credential.OAuthToken
 	if token == nil {
 		token = &store.OAuthToken{AccessToken: credential.Secret, TokenType: credential.TokenType}
@@ -690,6 +757,9 @@ func (m *Manager) ForceRefreshCredential(ctx context.Context, credentialID strin
 	provider, err := m.store.Provider(ctx, credential.ProviderID)
 	if err != nil {
 		return CredentialStatus{}, err
+	}
+	if credential.AuthType == "service_account" && provider.Type != "vertex" && provider.Type != "vertex-partner" {
+		return CredentialStatus{}, errors.New("service account refresh is only supported for Vertex providers")
 	}
 	if _, err = m.EnsureValid(ctx, *provider, credential, true); err != nil {
 		status, statusErr := m.CredentialStatus(ctx, credentialID)
@@ -762,12 +832,12 @@ type deviceCodeResponse struct {
 
 func (m *Manager) requestDeviceCode(ctx context.Context, cfg config.OAuthConfig) (deviceCodeResponse, error) {
 	form := url.Values{}
+	for key, value := range cfg.ExtraAuthParams {
+		form.Set(key, value)
+	}
 	form.Set("client_id", m.clientID(cfg))
 	if len(cfg.Scopes) > 0 {
 		form.Set("scope", strings.Join(cfg.Scopes, " "))
-	}
-	for key, value := range cfg.ExtraAuthParams {
-		form.Set(key, value)
 	}
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
@@ -820,6 +890,7 @@ func (m *Manager) pollDevice(item *session) {
 			return
 		}
 		providerID, deviceCode, deviceUserCode, interval := item.providerID, item.deviceCode, item.deviceUserCode, item.interval
+		label, email := item.label, item.email
 		item.mu.Unlock()
 		provider, err := m.store.Provider(m.rootCtx, providerID)
 		if err != nil || provider.OAuth == nil {
@@ -839,12 +910,15 @@ func (m *Manager) pollDevice(item *session) {
 			token, pending, err = m.exchangeDeviceCode(m.rootCtx, *oauthConfig, deviceCode)
 		}
 		if err == nil {
-			token, email, prepareErr := m.prepareProviderToken(m.rootCtx, *provider, token, item.email)
+			token, email, prepareErr := m.prepareProviderToken(m.rootCtx, *provider, token, email)
 			if prepareErr != nil {
 				m.failSession(item, Code(prepareErr))
 				return
 			}
-			if err = m.store.SaveOAuthCredential(m.rootCtx, providerID, item.credentialID, item.label, email, token); err != nil {
+			if !m.beginSessionCommit(item, "polling") {
+				return
+			}
+			if err = m.store.SaveOAuthCredential(m.rootCtx, providerID, item.credentialID, label, email, token); err != nil {
 				m.failSession(item, "oauth_credential_save_failed")
 				return
 			}
@@ -857,6 +931,9 @@ func (m *Manager) pollDevice(item *session) {
 		}
 		if Code(err) == "slow_down" {
 			interval += 5 * time.Second
+			item.mu.Lock()
+			item.interval = interval
+			item.mu.Unlock()
 		}
 		if interval <= 0 {
 			interval = 5 * time.Second
@@ -869,12 +946,15 @@ func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig
 	if m.clientID(cfg) == "" {
 		return store.OAuthToken{}, false, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
-	form := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "device_code": {deviceCode}, "client_id": {m.clientID(cfg)}}
-	if secret := m.clientSecret(cfg); secret != "" {
-		form.Set("client_secret", secret)
-	}
+	form := url.Values{}
 	for key, value := range cfg.ExtraTokenParams {
 		form.Set(key, value)
+	}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", deviceCode)
+	form.Set("client_id", m.clientID(cfg))
+	if secret := m.clientSecret(cfg); secret != "" {
+		form.Set("client_secret", secret)
 	}
 	data, status, err := m.postForm(ctx, cfg.TokenURL, form)
 	if err != nil {
@@ -882,7 +962,8 @@ func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig
 	}
 	if status < 200 || status >= 300 {
 		oauthErr := oauthHTTPError(data, status, true)
-		return store.OAuthToken{}, Code(oauthErr) == "authorization_pending", oauthErr
+		pending := Code(oauthErr) == "authorization_pending" || Code(oauthErr) == "slow_down"
+		return store.OAuthToken{}, pending, oauthErr
 	}
 	var pendingPayload map[string]any
 	if json.Unmarshal(data, &pendingPayload) == nil {
@@ -930,15 +1011,20 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg config.OAuthConfig, code
 	if m.clientID(cfg) == "" {
 		return store.OAuthToken{}, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {m.clientID(cfg)}, "code_verifier": {verifier}, "redirect_uri": {redirectURL}}
+	form := url.Values{}
+	for key, value := range cfg.ExtraTokenParams {
+		form.Set(key, value)
+	}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("client_id", m.clientID(cfg))
+	form.Set("code_verifier", verifier)
+	form.Set("redirect_uri", redirectURL)
 	if cfg.IncludeStateInToken {
 		form.Set("state", state)
 	}
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
-	}
-	for key, value := range cfg.ExtraTokenParams {
-		form.Set(key, value)
 	}
 	data, status, err := m.postTokenRequest(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
 	if err != nil {
@@ -954,15 +1040,18 @@ func (m *Manager) exchangeRefresh(ctx context.Context, cfg config.OAuthConfig, r
 	if m.clientID(cfg) == "" {
 		return store.OAuthToken{}, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
-	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}, "client_id": {m.clientID(cfg)}}
-	if secret := m.clientSecret(cfg); secret != "" {
-		form.Set("client_secret", secret)
-	}
+	form := url.Values{}
 	for key, value := range cfg.ExtraTokenParams {
 		form.Set(key, value)
 	}
 	for key, value := range cfg.ExtraRefreshParams {
 		form.Set(key, value)
+	}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", m.clientID(cfg))
+	if secret := m.clientSecret(cfg); secret != "" {
+		form.Set("client_secret", secret)
 	}
 	data, status, err := m.postTokenRequest(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
 	if err != nil {
@@ -1022,11 +1111,15 @@ func oauthHTTPError(data []byte, status int, refresh bool) error {
 	var raw map[string]any
 	if json.Unmarshal(data, &raw) == nil {
 		if value := stringValue(raw["error"]); value != "" {
-			code = value
+			code = normalizeOAuthErrorCode(value)
 		}
 	}
-	if code == "invalid_grant" || code == "invalid_client" || code == "unauthorized_client" {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated":
 		permanent = refresh
+	}
+	if refresh && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+		permanent = true
 	}
 	if status >= 500 || status == http.StatusTooManyRequests {
 		permanent = false
@@ -1035,6 +1128,18 @@ func oauthHTTPError(data []byte, status int, refresh bool) error {
 		permanent = false
 	}
 	return &Error{code: code, permanent: permanent}
+}
+
+// normalizeOAuthErrorCode prevents provider-controlled error strings from
+// becoming status codes, audit fields, or API responses. Only the small set
+// of protocol values used by the polling/refresh state machines is exposed.
+func normalizeOAuthErrorCode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "authorization_pending", "slow_down", "expired_token", "access_denied", "invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated", "temporarily_unavailable", "server_error":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "oauth_provider_unavailable"
+	}
 }
 
 func parseToken(data []byte, now time.Time) (store.OAuthToken, error) {
@@ -1113,6 +1218,9 @@ func authorizationURL(cfg config.OAuthConfig, state, verifier, redirectURL, clie
 		return cfg.AuthorizationURL
 	}
 	query := parsed.Query()
+	for key, value := range cfg.ExtraAuthParams {
+		query.Set(key, value)
+	}
 	query.Set("response_type", "code")
 	query.Set("client_id", clientID)
 	query.Set("redirect_uri", redirectURL)
@@ -1121,9 +1229,6 @@ func authorizationURL(cfg config.OAuthConfig, state, verifier, redirectURL, clie
 	query.Set("code_challenge_method", "S256")
 	if len(cfg.Scopes) > 0 {
 		query.Set("scope", strings.Join(cfg.Scopes, " "))
-	}
-	for key, value := range cfg.ExtraAuthParams {
-		query.Set(key, value)
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
@@ -1144,8 +1249,15 @@ func pkceChallenge(verifier string) string {
 
 func validateRedirectURL(value string) error {
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return errors.New("OAuth redirect URL must be an absolute http(s) URL")
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return errors.New("OAuth redirect URL must be an absolute http(s) URL")
+	}
+	if scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
+		return errors.New("OAuth redirect URL must use HTTPS for non-loopback hosts")
 	}
 	return nil
 }
@@ -1176,9 +1288,10 @@ func (m *Manager) statusFor(item *session) SessionStatus {
 func (m *Manager) expireIfNeeded(item *session) {
 	expired := false
 	item.mu.Lock()
-	if m.now().After(item.expiresAt) && item.status != "complete" && item.status != "cancelled" && item.status != "failed" && item.status != "expired" {
+	if m.now().After(item.expiresAt) && item.status != "complete" && item.status != "cancelled" && item.status != "failed" && item.status != "expired" && item.status != "committing" {
 		item.status = "expired"
 		item.errorCode = "invalid_state"
+		clearSessionSecretsLocked(item)
 		expired = true
 	}
 	item.mu.Unlock()
@@ -1187,26 +1300,53 @@ func (m *Manager) expireIfNeeded(item *session) {
 	}
 }
 
+// beginSessionCommit atomically claims the final credential write. A
+// cancellation that wins before this transition prevents persistence; after
+// the transition the database commit is allowed to finish consistently.
+func (m *Manager) beginSessionCommit(item *session, expectedStatus string) bool {
+	item.mu.Lock()
+	defer item.mu.Unlock()
+	if item.status != expectedStatus {
+		return false
+	}
+	item.status = "committing"
+	return true
+}
+
 func (m *Manager) completeSession(item *session) {
 	item.mu.Lock()
 	item.status = "complete"
 	item.errorCode = ""
+	clearSessionSecretsLocked(item)
 	item.mu.Unlock()
 	m.stopSession(item)
 }
 
 func (m *Manager) failSession(item *session, code string) {
 	item.mu.Lock()
+	if item.status == "cancelled" || item.status == "complete" || item.status == "expired" {
+		item.mu.Unlock()
+		return
+	}
 	item.status = "failed"
 	item.errorCode = code
+	clearSessionSecretsLocked(item)
 	item.mu.Unlock()
 	m.stopSession(item)
+}
+
+func clearSessionSecretsLocked(item *session) {
+	item.state = ""
+	item.verifier = ""
+	item.deviceCode = ""
+	item.deviceUserCode = ""
 }
 
 func (m *Manager) stopSession(item *session) {
 	item.mu.Lock()
 	server := item.callbackServer
 	item.callbackServer = nil
+	clearSessionSecretsLocked(item)
 	if !item.cancelClosed {
 		close(item.cancel)
 		item.cancelClosed = true
@@ -1247,6 +1387,21 @@ func stringValue(value any) string {
 		return text
 	}
 	return fmt.Sprint(value)
+}
+
+// credentialMetadataForPersistence returns a copy suitable for the store's
+// metadata column. Proxy-pool IDs are normally decoded into Credential's
+// dedicated field, so callers rewriting metadata must add them back or an
+// otherwise unrelated token refresh would silently drop egress bindings.
+func credentialMetadataForPersistence(credential store.Credential) map[string]any {
+	metadata := make(map[string]any, len(credential.Metadata)+1)
+	for key, value := range credential.Metadata {
+		metadata[key] = value
+	}
+	if len(credential.ProxyPoolIDs) > 0 {
+		metadata["proxy_pool_ids"] = append([]string(nil), credential.ProxyPoolIDs...)
+	}
+	return metadata
 }
 
 func firstValue(values map[string]any, keys ...string) any {

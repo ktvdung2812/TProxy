@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,12 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 	_ "modernc.org/sqlite"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestBrowserPKCEStateSingleUseAndEncryptedToken(t *testing.T) {
 	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
@@ -202,6 +209,320 @@ func TestPermanentRefreshRejectionRequiresAuthorization(t *testing.T) {
 	}
 }
 
+func TestRefreshUnauthorizedResponseRequiresAuthorization(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`refresh-secret must not be returned`))
+	}))
+	defer providerServer.Close()
+	dataStore, _ := newAuthStore(t, oauthConfig(providerServer.URL))
+	if err := dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "oauth-account", "", "", store.OAuthToken{AccessToken: "old-access", RefreshToken: "refresh-secret", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := dataStore.Provider(context.Background(), "oauth-provider")
+	credentials, _ := dataStore.Credentials(context.Background(), "oauth-provider")
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	_, err := manager.EnsureValid(context.Background(), *provider, credentials[0], false)
+	if err == nil || !IsPermanent(err) || strings.Contains(err.Error(), "refresh-secret") {
+		t.Fatalf("refresh error = %v permanent=%v", err, IsPermanent(err))
+	}
+	credentials, _ = dataStore.Credentials(context.Background(), "oauth-provider")
+	if credentials[0].Status != "auth_required" {
+		t.Fatalf("credential status = %q, want auth_required", credentials[0].Status)
+	}
+}
+
+func TestOAuthProviderErrorCodeCannotExposeSecretText(t *testing.T) {
+	err := oauthHTTPError([]byte(`{"error":"refresh-secret"}`), http.StatusBadRequest, true)
+	if Code(err) != "oauth_provider_unavailable" || strings.Contains(Code(err), "refresh-secret") || strings.Contains(err.Error(), "refresh-secret") {
+		t.Fatalf("provider error was not normalized: code=%q err=%v", Code(err), err)
+	}
+}
+
+func TestOAuthExtraParamsCannotOverrideProtocolFields(t *testing.T) {
+	authorization := authorizationURL(config.OAuthConfig{
+		AuthorizationURL: "https://login.example/authorize",
+		ExtraAuthParams: map[string]string{
+			"client_id":             "attacker-client",
+			"state":                 "attacker-state",
+			"code_challenge":        "attacker-challenge",
+			"code_challenge_method": "plain",
+		},
+	}, "expected-state", "expected-verifier", "https://gateway.example/callback", "expected-client")
+	parsed, err := url.Parse(authorization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("client_id") != "expected-client" || query.Get("state") != "expected-state" || query.Get("code_challenge") != pkceChallenge("expected-verifier") || query.Get("code_challenge_method") != "S256" {
+		t.Fatalf("authorization protocol fields were overridden: %v", query)
+	}
+
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.Form.Get("grant_type") != "refresh_token" || r.Form.Get("refresh_token") != "expected-refresh" || r.Form.Get("client_id") != "expected-client" {
+			t.Errorf("refresh protocol fields were overridden: %v", r.Form)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"refreshed-access","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	manager := NewManager(nil, providerServer.Client())
+	defer manager.Close()
+	_, err = manager.exchangeRefresh(context.Background(), config.OAuthConfig{
+		TokenURL: providerServer.URL,
+		ClientID: "expected-client",
+		ExtraTokenParams: map[string]string{
+			"grant_type":    "client_credentials",
+			"refresh_token": "attacker-refresh",
+			"client_id":     "attacker-client",
+		},
+	}, "expected-refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBrowserOnlyDiscoveryDoesNotRequireDeviceEndpoint(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	var tokenCalls atomic.Int32
+	var providerServer *httptest.Server
+	providerServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/discovery":
+			_, _ = w.Write([]byte(`{"authorization_endpoint":"` + providerServer.URL + `/authorize","token_endpoint":"` + providerServer.URL + `/token"}`))
+		case "/token":
+			tokenCalls.Add(1)
+			_, _ = w.Write([]byte(`{"access_token":"discovery-access","refresh_token":"discovery-refresh","expires_in":3600}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer providerServer.Close()
+	cfg := oauthConfig(providerServer.URL)
+	cfg.Providers[0].OAuth.AuthorizationURL = ""
+	cfg.Providers[0].OAuth.TokenURL = ""
+	cfg.Providers[0].OAuth.DiscoveryURL = providerServer.URL + "/discovery"
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", CredentialID: "discovery-account", Mode: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorization, _ := url.Parse(started.AuthorizationURL)
+	if _, err = manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "discovery-code"); err != nil {
+		t.Fatal(err)
+	}
+	if tokenCalls.Load() != 1 {
+		t.Fatalf("token calls = %d", tokenCalls.Load())
+	}
+}
+
+func TestDeviceFlowTreatsSlowDownAsPending(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"slow_down"}`))
+	}))
+	defer providerServer.Close()
+	manager := NewManager(nil, providerServer.Client())
+	defer manager.Close()
+	token, pending, err := manager.exchangeDeviceCode(context.Background(), config.OAuthConfig{ClientID: "device-client", TokenURL: providerServer.URL + "/token"}, "device-code")
+	if !pending || Code(err) != "slow_down" || token.AccessToken != "" {
+		t.Fatalf("slow_down result token=%+v pending=%v err=%v", token, pending, err)
+	}
+}
+
+func TestCancelledBrowserFlowCannotPersistCredential(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	requestStarted := make(chan struct{})
+	release := make(chan struct{})
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"cancelled-access","refresh_token":"cancelled-refresh","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	dataStore, _ := newAuthStore(t, oauthConfig(providerServer.URL))
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", CredentialID: "cancelled-account", Mode: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorization, _ := url.Parse(started.AuthorizationURL)
+	result := make(chan error, 1)
+	go func() {
+		_, callbackErr := manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "cancelled-code")
+		result <- callbackErr
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("token exchange did not start")
+	}
+	if err = manager.CancelSession(started.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if callbackErr := <-result; callbackErr == nil || Code(callbackErr) != "invalid_state" {
+		t.Fatalf("callback error after cancellation = %v", callbackErr)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "oauth-provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 0 {
+		t.Fatalf("cancelled callback persisted credentials: %+v", credentials)
+	}
+}
+
+func TestCopilotOAuthUsesGenericRefreshPathAndDoesNotPersistDerivedToken(t *testing.T) {
+	dataStore, _ := newAuthStore(t, &config.Config{Providers: []config.ProviderConfig{{
+		ID: "copilot", Type: "copilot", Enabled: true,
+		OAuth: &config.OAuthConfig{ClientID: "copilot-client", TokenURL: "https://oauth.example/token", RefreshSafetyWindow: "1m"},
+	}}})
+	if err := dataStore.SaveOAuthCredential(context.Background(), "copilot", "copilot-account", "", "", store.OAuthToken{AccessToken: "github-access", RefreshToken: "github-refresh", ExpiresAt: time.Now().Add(24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.UpdateCredentialMetadata(context.Background(), "copilot-account", map[string]any{"copilot_exchange_unsupported": true, "proxy_pool_ids": []string{"egress"}}); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := dataStore.Provider(context.Background(), "copilot")
+	credentials, _ := dataStore.Credentials(context.Background(), "copilot")
+	manager := NewManager(dataStore, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected Copilot exchange request: %s", request.URL)
+		return nil, nil
+	})})
+	defer manager.Close()
+	updated, err := manager.EnsureValid(context.Background(), *provider, credentials[0], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Secret != "github-access" {
+		t.Fatalf("derived token = %q", updated.Secret)
+	}
+	credentials, _ = dataStore.Credentials(context.Background(), "copilot")
+	if got := stringValue(credentials[0].Metadata["copilot_api_token"]); got != "" {
+		t.Fatalf("derived token persisted in metadata: %q", got)
+	}
+	if len(credentials[0].ProxyPoolIDs) != 1 || credentials[0].ProxyPoolIDs[0] != "egress" {
+		t.Fatalf("proxy pool binding was dropped: %+v", credentials[0].ProxyPoolIDs)
+	}
+}
+
+func TestCopilotExchangeErrorRedactsResponseBody(t *testing.T) {
+	manager := NewManager(nil, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(`upstream refresh-secret`)), Header: make(http.Header)}, nil
+	})})
+	defer manager.Close()
+	_, err := manager.exchangeCopilotToken(context.Background(), "copilot-account", "github-secret")
+	if err == nil || strings.Contains(err.Error(), "refresh-secret") {
+		t.Fatalf("exchange error leaked response body: %v", err)
+	}
+}
+
+func TestCopilotExchangeRejectsUnsafeEndpoint(t *testing.T) {
+	manager := NewManager(nil, &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"token":"copilot-api-token","expires_at":4102444800,"endpoints":{"api":"https://evil.example"}}`)),
+			Header:     make(http.Header),
+		}, nil
+	})})
+	defer manager.Close()
+	_, err := manager.exchangeCopilotToken(context.Background(), "copilot-account", "github-secret")
+	if err == nil || Code(err) != "oauth_configuration_invalid" || strings.Contains(err.Error(), "copilot-api-token") {
+		t.Fatalf("unsafe endpoint result = %v code=%s", err, Code(err))
+	}
+}
+
+func TestCopilotAPIEndpointAllowlist(t *testing.T) {
+	accepted := []string{
+		"https://api.githubcopilot.com",
+		"https://edge.githubcopilot.com/v1",
+		"https://copilot-api.githubusercontent.com/",
+	}
+	for _, endpoint := range accepted {
+		got, err := validateCopilotAPIEndpoint(endpoint)
+		if err != nil || got == "" {
+			t.Errorf("endpoint %q rejected: %v", endpoint, err)
+		}
+	}
+	rejected := []string{
+		"http://api.githubcopilot.com",
+		"https://githubcopilot.com:8443",
+		"https://evil.example",
+		"https://api.githubcopilot.com@evil.example",
+		"https://127.0.0.1",
+	}
+	for _, endpoint := range rejected {
+		if _, err := validateCopilotAPIEndpoint(endpoint); err == nil {
+			t.Errorf("endpoint %q unexpectedly accepted", endpoint)
+		}
+	}
+}
+
+func TestValidateRedirectURLRequiresSecureRemoteTransport(t *testing.T) {
+	accepted := []string{
+		"http://127.0.0.1:8317/oauth/callback",
+		"http://localhost:1455/auth/callback",
+		"https://gateway.example.com/api/admin/oauth/callback",
+	}
+	for _, redirectURL := range accepted {
+		if err := validateRedirectURL(redirectURL); err != nil {
+			t.Errorf("redirect %q rejected: %v", redirectURL, err)
+		}
+	}
+	rejected := []string{
+		"http://gateway.example.com/oauth/callback",
+		"https://user:password@gateway.example.com/oauth/callback",
+		"https://gateway.example.com/oauth/callback#fragment",
+		"javascript:alert(1)",
+	}
+	for _, redirectURL := range rejected {
+		if err := validateRedirectURL(redirectURL); err == nil {
+			t.Errorf("redirect %q unexpectedly accepted", redirectURL)
+		}
+	}
+}
+
+func TestTerminalSessionClearsAuthorizationMaterial(t *testing.T) {
+	manager := NewManager(nil, nil)
+	defer manager.Close()
+	item := &session{
+		state:          "oauth-state-secret",
+		verifier:       "pkce-verifier-secret",
+		deviceCode:     "device-code-secret",
+		deviceUserCode: "device-user-code",
+		status:         "pending",
+		cancel:         make(chan struct{}),
+	}
+	manager.completeSession(item)
+	item.mu.Lock()
+	defer item.mu.Unlock()
+	if item.state != "" || item.verifier != "" || item.deviceCode != "" || item.deviceUserCode != "" {
+		t.Fatalf("terminal session retained authorization material: %+v", item)
+	}
+}
+
+func TestFailSessionPreservesCancellation(t *testing.T) {
+	manager := NewManager(nil, nil)
+	defer manager.Close()
+	item := &session{status: "cancelled", cancel: make(chan struct{})}
+	manager.failSession(item, "oauth_provider_unavailable")
+	item.mu.Lock()
+	defer item.mu.Unlock()
+	if item.status != "cancelled" {
+		t.Fatalf("cancelled session changed to %q", item.status)
+	}
+}
+
 func TestDeviceFlowPollsUntilAuthorized(t *testing.T) {
 	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
 	var polls atomic.Int32
@@ -278,6 +599,45 @@ func TestLocalCallbackListenerCompletesBrowserFlow(t *testing.T) {
 	authorization, _ := url.Parse(started.AuthorizationURL)
 	callbackURL := "http://" + callbackAddress + "/oauth/callback?state=" + url.QueryEscape(authorization.Query().Get("state")) + "&code=local-code"
 	response, err := http.Get(callbackURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("callback status=%d", response.StatusCode)
+	}
+	status, err := manager.SessionStatus(started.SessionID)
+	if err != nil || status.Status != "complete" {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
+func TestLocalCallbackListenerAcceptsFormPost(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"post-access","refresh_token":"post-refresh","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	callbackProbe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackAddress := callbackProbe.Addr().String()
+	_ = callbackProbe.Close()
+	cfg := oauthConfig(providerServer.URL)
+	cfg.Providers[0].OAuth.RedirectURL = "http://" + callbackAddress + "/oauth/callback"
+	cfg.Providers[0].OAuth.ListenForCallback = true
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", CredentialID: "post-account", Mode: "browser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorization, _ := url.Parse(started.AuthorizationURL)
+	callbackURL := "http://" + callbackAddress + "/oauth/callback"
+	response, err := http.PostForm(callbackURL, url.Values{"state": {authorization.Query().Get("state")}, "code": {"post-code"}})
 	if err != nil {
 		t.Fatal(err)
 	}
