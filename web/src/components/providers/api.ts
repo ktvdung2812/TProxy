@@ -147,11 +147,11 @@ export function checkCredentialHealth(secret: string, id: string) {
   );
 }
 
-export function discoverProviderModels(secret: string, id: string) {
+export function discoverProviderModels(secret: string, id: string, refresh = false) {
   return adminFetch<{ provider_id: string; data: DiscoveredModel[]; error?: { message: string } }>(
     secret,
     `/api/admin/providers/${encodeURIComponent(id)}/models`,
-    "GET",
+    refresh ? "POST" : "GET",
   );
 }
 
@@ -341,5 +341,64 @@ export function deleteModelAlias(secret: string, alias: string, apiKeyId?: strin
     `/api/admin/aliases/${encodeURIComponent(alias)}${query ? `?${query}` : ""}`,
     "DELETE",
   );
+}
+
+export type ProviderRotationStrategy = {
+  strategy?: string;
+  sticky_round_robin_limit?: number;
+};
+
+export type AccountRotationSettings = {
+  strategy: string;
+  sticky_round_robin_limit: number;
+  provider_strategies?: Record<string, ProviderRotationStrategy>;
+};
+
+export const ROTATION_STRATEGIES = [
+  { id: "", label: "Use global default" },
+  { id: "fill-first", label: "Fill first (priority order)" },
+  { id: "round-robin", label: "Sticky round-robin" },
+  { id: "weighted-round-robin", label: "Weighted round-robin" },
+] as const;
+
+export function fetchAccountRotation(secret: string) {
+  return adminFetch<AccountRotationSettings>(secret, "/api/admin/rotation", "GET");
+}
+
+export function saveAccountRotation(secret: string, settings: AccountRotationSettings) {
+  return adminFetch<AccountRotationSettings>(secret, "/api/admin/rotation", "PUT", settings);
+}
+
+export function resetAccountRotationState(secret: string, providerId?: string) {
+  return adminFetch<{ ok: boolean; provider_id?: string }>(secret, "/api/admin/rotation/reset", "POST", {
+    provider_id: providerId || "",
+  });
+}
+
+export const GLOBAL_ROTATION_STRATEGIES = [
+  { id: "fill-first", label: "Fill first (priority order)" },
+  { id: "round-robin", label: "Sticky round-robin (9router default)" },
+  { id: "weighted-round-robin", label: "Weighted round-robin" },
+] as const;
+
+export function rotationStrategyLabel(strategy: string) {
+  return ROTATION_STRATEGIES.find((item) => item.id === strategy)?.label || strategy || "default";
+}
+
+export function effectiveProviderRotation(
+  providerId: string,
+  settings: AccountRotationSettings,
+): { strategy: string; stickyRoundRobinLimit: number; isOverride: boolean } {
+  const override = settings.provider_strategies?.[providerId];
+  const strategy = override?.strategy?.trim() || settings.strategy || "round-robin";
+  const stickyRoundRobinLimit =
+    override?.sticky_round_robin_limit && override.sticky_round_robin_limit > 0
+      ? override.sticky_round_robin_limit
+      : settings.sticky_round_robin_limit || 3;
+  return {
+    strategy,
+    stickyRoundRobinLimit,
+    isOverride: Boolean(override?.strategy || override?.sticky_round_robin_limit),
+  };
 }
 

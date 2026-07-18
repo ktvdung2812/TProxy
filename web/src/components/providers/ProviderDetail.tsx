@@ -8,6 +8,7 @@ import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
 import { AddCredentialModal } from "./AddCredentialModal";
 import { ProviderConnectionActions } from "./ProviderConnectionActions";
+import { ProviderRotationCard } from "./ProviderRotationCard";
 import {
   catalogWithPreset,
   resolveConnectionProfile,
@@ -240,6 +241,15 @@ export function ProviderDetail({
         )}
       </Card>
 
+      <ProviderRotationCard
+        providerId={provider.ID}
+        providerName={provider.Name || provider.ID}
+        accountCount={credentials.length}
+        secret={secret}
+        onSaved={onNotice}
+        onError={onError}
+      />
+
       {/* Models routing + aliases */}
       <ModelsSection
         providerId={provider.ID}
@@ -380,8 +390,8 @@ function ConnectionRow({
           label: credential.label,
           email: credential.email,
           auth_type: credential.auth_type as "api_key" | "oauth" | "service_account" | "none",
-          priority: 0,
-          weight: 1,
+          priority: credential.priority ?? 0,
+          weight: credential.weight ?? 1,
           enabled: !credential.enabled,
           proxy_pools: credential.proxy_pool_ids,
         },
@@ -454,6 +464,17 @@ function ConnectionRow({
         <div className="connection-badges">
           <Badge variant={status.tone} size="sm" dot>{status.label}</Badge>
           <Badge variant="default" size="sm">{credential.auth_type}</Badge>
+          {(credential.priority ?? 0) > 0 && (
+            <Badge variant="default" size="sm">prio {credential.priority}</Badge>
+          )}
+          {(credential.consecutive_use_count ?? 0) > 0 && (
+            <Badge variant="info" size="sm">sticky {credential.consecutive_use_count}</Badge>
+          )}
+          {credential.last_used_at && (
+            <Badge variant="default" size="sm" title={new Date(credential.last_used_at).toLocaleString()}>
+              used {formatRelativeTime(credential.last_used_at)}
+            </Badge>
+          )}
           {hasProxy && (
             <Badge variant="info" size="sm" icon="lan">{credential.proxy_pool_ids!.length} proxy</Badge>
           )}
@@ -480,4 +501,17 @@ function ConnectionRow({
       </div>
     </div>
   );
+}
+
+function formatRelativeTime(value: string) {
+  const target = Date.parse(value);
+  if (Number.isNaN(target)) return "recently";
+  const deltaMs = Date.now() - target;
+  const minutes = Math.round(deltaMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }

@@ -48,11 +48,18 @@ type ProxyPoolConfig struct {
 func (p ProxyPoolConfig) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
 
 type RoutingConfig struct {
-	Strategy           string         `yaml:"strategy" json:"strategy"`
-	SessionAffinity    bool           `yaml:"session-affinity" json:"session_affinity"`
-	SessionAffinityTTL string         `yaml:"session-affinity-ttl" json:"session_affinity_ttl"`
-	Cooldown           CooldownConfig `yaml:"cooldown" json:"cooldown"`
-	Prewarm            PrewarmConfig  `yaml:"prewarm" json:"prewarm"`
+	Strategy              string                            `yaml:"strategy" json:"strategy"`
+	StickyRoundRobinLimit int                               `yaml:"sticky-round-robin-limit" json:"sticky_round_robin_limit"`
+	ProviderStrategies    map[string]ProviderRotationConfig `yaml:"provider-strategies" json:"provider_strategies,omitempty"`
+	SessionAffinity       bool                              `yaml:"session-affinity" json:"session_affinity"`
+	SessionAffinityTTL    string                            `yaml:"session-affinity-ttl" json:"session_affinity_ttl"`
+	Cooldown              CooldownConfig                    `yaml:"cooldown" json:"cooldown"`
+	Prewarm               PrewarmConfig                     `yaml:"prewarm" json:"prewarm"`
+}
+
+type ProviderRotationConfig struct {
+	Strategy              string `yaml:"strategy" json:"strategy,omitempty"`
+	StickyRoundRobinLimit int    `yaml:"sticky-round-robin-limit" json:"sticky_round_robin_limit,omitempty"`
 }
 
 type CooldownConfig struct {
@@ -282,6 +289,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Routing.Strategy == "" {
 		cfg.Routing.Strategy = "round-robin"
+	}
+	if cfg.Routing.StickyRoundRobinLimit <= 0 {
+		cfg.Routing.StickyRoundRobinLimit = 3
 	}
 	if cfg.Routing.SessionAffinityTTL == "" {
 		cfg.Routing.SessionAffinityTTL = "1h"
@@ -625,8 +635,13 @@ func (cfg *Config) Validate() error {
 	if strategy == "" {
 		strategy = "round-robin"
 	}
-	if strategy != "round-robin" && strategy != "fill-first" {
+	if strategy != "round-robin" && strategy != "fill-first" && strategy != "weighted-round-robin" {
 		return fmt.Errorf("unsupported routing strategy %q", strategy)
+	}
+	for providerID, providerStrategy := range cfg.Routing.ProviderStrategies {
+		if providerStrategy.Strategy != "" && providerStrategy.Strategy != "round-robin" && providerStrategy.Strategy != "fill-first" && providerStrategy.Strategy != "weighted-round-robin" {
+			return fmt.Errorf("unsupported routing strategy %q for provider %q", providerStrategy.Strategy, providerID)
+		}
 	}
 	ttl := cfg.Routing.SessionAffinityTTL
 	if ttl == "" {

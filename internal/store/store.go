@@ -59,10 +59,12 @@ type Credential struct {
 	Priority      int
 	Weight        int
 	Enabled       bool
-	CooldownUntil time.Time
-	LastErrorCode string
-	LastError     string
-	LastValidated time.Time
+	CooldownUntil         time.Time
+	LastErrorCode         string
+	LastError             string
+	LastValidated         time.Time
+	LastUsedAt            time.Time
+	ConsecutiveUseCount   int
 }
 
 type ProxyPool struct {
@@ -1241,48 +1243,19 @@ func (s *Store) ProviderByPrefix(ctx context.Context, prefix string) (*Provider,
 	return &item, nil
 }
 
+const credentialSelectColumns = `id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,cooldown_until,last_error_code,last_error,last_validated_at,last_used_at,consecutive_use_count`
+
 func (s *Store) Credentials(ctx context.Context, providerID string) ([]Credential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,cooldown_until,last_error_code,last_error,last_validated_at FROM credentials WHERE provider_id=? ORDER BY priority DESC,id`, providerID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+credentialSelectColumns+` FROM credentials WHERE provider_id=? ORDER BY priority DESC,id`, providerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []Credential
 	for rows.Next() {
-		var item Credential
-		var secret, metadata, cooldown, validated string
-		var enabled int
-		if err := rows.Scan(&item.ID, &item.ProviderID, &item.AuthType, &item.Status, &item.Label, &item.Email, &secret, &metadata, &item.Priority, &item.Weight, &enabled, &cooldown, &item.LastErrorCode, &item.LastError, &validated); err != nil {
+		item, err := s.scanCredentialRow(rows.Scan)
+		if err != nil {
 			return nil, err
-		}
-		item.Enabled = enabled != 0
-		_ = json.Unmarshal([]byte(metadata), &item.Metadata)
-		decodeCredentialMetadata(&item)
-		if secret != "" {
-			plaintext, decryptErr := s.encryptor.Decrypt(secret)
-			err = decryptErr
-			if err != nil {
-				return nil, fmt.Errorf("decrypt credential %s: %w", item.ID, err)
-			}
-			if item.AuthType == "oauth" {
-				var token OAuthToken
-				if json.Unmarshal([]byte(plaintext), &token) == nil && token.AccessToken != "" {
-					item.OAuthToken = &token
-					item.Secret = token.AccessToken
-					item.TokenType = token.TokenType
-				} else {
-					item.Secret = plaintext
-					item.OAuthToken = &OAuthToken{AccessToken: plaintext, TokenType: "Bearer"}
-				}
-			} else {
-				item.Secret = plaintext
-			}
-		}
-		if cooldown != "" {
-			item.CooldownUntil, _ = time.Parse(time.RFC3339Nano, cooldown)
-		}
-		if validated != "" {
-			item.LastValidated, _ = time.Parse(time.RFC3339Nano, validated)
 		}
 		items = append(items, item)
 	}
@@ -1290,14 +1263,19 @@ func (s *Store) Credentials(ctx context.Context, providerID string) ([]Credentia
 }
 
 func (s *Store) CredentialByID(ctx context.Context, credentialID string) (Credential, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,cooldown_until,last_error_code,last_error,last_validated_at FROM credentials WHERE id=?`, credentialID)
+	row := s.db.QueryRowContext(ctx, `SELECT `+credentialSelectColumns+` FROM credentials WHERE id=?`, credentialID)
+	return s.scanCredentialRow(row.Scan)
+}
+
+func (s *Store) scanCredentialRow(scan func(dest ...any) error) (Credential, error) {
 	var item Credential
-	var secret, metadata, cooldown, validated string
-	var enabled int
-	if err := row.Scan(&item.ID, &item.ProviderID, &item.AuthType, &item.Status, &item.Label, &item.Email, &secret, &metadata, &item.Priority, &item.Weight, &enabled, &cooldown, &item.LastErrorCode, &item.LastError, &validated); err != nil {
+	var secret, metadata, cooldown, validated, lastUsed string
+	var enabled, consecutiveUseCount int
+	if err := scan(&item.ID, &item.ProviderID, &item.AuthType, &item.Status, &item.Label, &item.Email, &secret, &metadata, &item.Priority, &item.Weight, &enabled, &cooldown, &item.LastErrorCode, &item.LastError, &validated, &lastUsed, &consecutiveUseCount); err != nil {
 		return Credential{}, err
 	}
 	item.Enabled = enabled != 0
+	item.ConsecutiveUseCount = consecutiveUseCount
 	_ = json.Unmarshal([]byte(metadata), &item.Metadata)
 	decodeCredentialMetadata(&item)
 	if secret != "" {
@@ -1324,6 +1302,9 @@ func (s *Store) CredentialByID(ctx context.Context, credentialID string) (Creden
 	}
 	if validated != "" {
 		item.LastValidated, _ = time.Parse(time.RFC3339Nano, validated)
+	}
+	if lastUsed != "" {
+		item.LastUsedAt, _ = time.Parse(time.RFC3339Nano, lastUsed)
 	}
 	return item, nil
 }
@@ -2069,9 +2050,11 @@ type CredentialSummary struct {
 	Priority      int        `json:"priority"`
 	Weight        int        `json:"weight"`
 	Enabled       bool       `json:"enabled"`
-	CooldownUntil *time.Time `json:"cooldown_until,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	ProxyPoolIDs  []string   `json:"proxy_pool_ids,omitempty"`
+	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
+	LastError           string     `json:"last_error,omitempty"`
+	ProxyPoolIDs        []string   `json:"proxy_pool_ids,omitempty"`
+	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
+	ConsecutiveUseCount int        `json:"consecutive_use_count,omitempty"`
 }
 type UsageSummary struct {
 	Requests         int     `json:"requests"`
@@ -2154,7 +2137,17 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 				value := c.CooldownUntil
 				cooldown = &value
 			}
-			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status, Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown, LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs})
+			var lastUsed *time.Time
+			if !c.LastUsedAt.IsZero() {
+				value := c.LastUsedAt
+				lastUsed = &value
+			}
+			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{
+				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status,
+				Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown,
+				LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
+				ConsecutiveUseCount: c.ConsecutiveUseCount,
+			})
 		}
 	}
 	row := s.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN status>=400 OR status=0 THEN 1 ELSE 0 END),0),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(tokens_saved),0),COALESCE(SUM(estimated_cost_usd),0) FROM usage_events`)

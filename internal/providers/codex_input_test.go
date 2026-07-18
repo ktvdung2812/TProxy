@@ -119,6 +119,87 @@ func TestCodexMessagesToInputMapsSystemRoleToInstructions(t *testing.T) {
 	}
 }
 
+func TestCodexSanitizeInputItemsStripsOrphanReasoningID(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.4",
+		Raw: map[string]any{
+			"model": "gpt-5.4",
+			"input": []any{
+				map[string]any{
+					"type": "reasoning",
+					"id":   "rs_resp_req_test_0",
+					"summary": []any{
+						map[string]any{"type": "summary_text", "text": "thinking"},
+					},
+				},
+				map[string]any{
+					"type":    "message",
+					"role":    "user",
+					"content": []any{map[string]any{"type": "input_text", "text": "next"}},
+				},
+			},
+		},
+	})
+	input, ok := body["input"].([]any)
+	if !ok || len(input) != 2 {
+		t.Fatalf("input = %#v", body["input"])
+	}
+	reasoning, _ := input[0].(map[string]any)
+	if _, exists := reasoning["id"]; exists {
+		t.Fatalf("orphan reasoning id should be stripped: %#v", reasoning)
+	}
+	if body["store"] != false {
+		t.Fatalf("store = %#v", body["store"])
+	}
+}
+
+func TestCodexSanitizeInputItemsKeepsReasoningIDWithEncryptedContent(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.4",
+		Raw: map[string]any{
+			"model": "gpt-5.4",
+			"input": []any{
+				map[string]any{
+					"type":                "reasoning",
+					"id":                  "rs_good",
+					"encrypted_content":   "opaque-signature",
+					"summary":             []any{},
+				},
+			},
+		},
+	})
+	input, _ := body["input"].([]any)
+	reasoning, _ := input[0].(map[string]any)
+	if reasoning["id"] != "rs_good" {
+		t.Fatalf("reasoning with encrypted_content should keep id: %#v", reasoning)
+	}
+}
+
+func TestCodexSanitizeInputItemsStripsEphemeralMessageID(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.4",
+		Raw: map[string]any{
+			"model": "gpt-5.4",
+			"input": []any{
+				map[string]any{
+					"type":    "message",
+					"id":      "msg_resp_req_test_0",
+					"role":    "assistant",
+					"content": []any{map[string]any{"type": "output_text", "text": "hi"}},
+				},
+			},
+		},
+	})
+	input, _ := body["input"].([]any)
+	message, _ := input[0].(map[string]any)
+	if _, exists := message["id"]; exists {
+		t.Fatalf("ephemeral message id should be stripped: %#v", message)
+	}
+}
+
 func TestCodexBodyClaudeSystemArrayUsesStringInstructions(t *testing.T) {
 	body := codexBody(canonical.Request{
 		Source: canonical.ProtocolClaude,

@@ -58,7 +58,7 @@ export function ModelsSection({
     setDiscovering(true);
     setDiscoveryError(null);
 
-    discoverProviderModels(secret, providerId)
+    discoverProviderModels(secret, providerId, discoverNonce > 0)
       .then((result) => {
         if (cancelled) return;
         setAvailableModels(result.data || []);

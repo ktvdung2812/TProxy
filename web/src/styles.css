@@ -2977,6 +2977,29 @@ button:disabled,
   margin-bottom: 8px;
 }
 .connection-row:last-child { margin-bottom: 0; }
+
+.provider-rotation-summary {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.provider-rotation-hint {
+  color: var(--color-warning);
+}
+
+.provider-rotation-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.provider-rotation-form select,
+.provider-rotation-form input {
+  width: 100%;
+}
+
 .connection-row-test-ok { border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border-subtle)); }
 .connection-row-test-error { border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border-subtle)); }
 .connection-auth-icon {

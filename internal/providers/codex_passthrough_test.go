@@ -1,0 +1,48 @@
+package providers
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/tproxy/tproxy/internal/canonical"
+)
+
+func TestParseCodexResponsesPassthroughSSEForwardsEvents(t *testing.T) {
+	body := strings.NewReader("" +
+		"event: response.created\n" +
+		"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+		"event: response.output_text.delta\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+		"event: response.completed\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n" +
+		"data: [DONE]\n\n")
+	out := make(chan canonical.Event, 8)
+	parseCodexResponsesPassthroughSSE(context.Background(), body, out)
+	close(out)
+
+	var events []canonical.Event
+	for event := range out {
+		events = append(events, event)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3: %#v", len(events), events)
+	}
+	if events[0].Type != canonical.EventResponsesSSE || events[0].SSEEvent != "response.created" {
+		t.Fatalf("first event = %#v", events[0])
+	}
+	if events[2].SSEEvent != "response.completed" {
+		t.Fatalf("last passthrough event = %#v", events[2])
+	}
+}
+
+func TestCodexNormalizeReasoningSetsInclude(t *testing.T) {
+	body := map[string]any{
+		"reasoning": map[string]any{"effort": "medium"},
+	}
+	codexNormalizeReasoning(body)
+	include, ok := body["include"].([]any)
+	if !ok || len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Fatalf("include = %#v", body["include"])
+	}
+}

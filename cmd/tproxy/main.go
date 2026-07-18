@@ -117,6 +117,7 @@ func run() error {
 	requestRouter.SetModelsRegistry(modelsRegistry)
 	requestRouter.SetAllowUpstreamModels(cfg.Server.AllowUpstreamModels)
 	requestRouter.ConfigureRouting(cfg.Routing)
+	_ = requestRouter.SyncAccountRotationSettings(context.Background())
 	server := api.NewServer(cfg, dataStore, requestRouter)
 	server.StartBackground(runCtx)
 	defer server.Close()

@@ -81,9 +81,12 @@ type Credential = {
   auth_type: string;
   enabled: boolean;
   status?: string;
+  priority?: number;
   cooldown_until?: string;
   last_error?: string;
   proxy_pool_ids?: string[];
+  last_used_at?: string;
+  consecutive_use_count?: number;
 };
 
 type Snapshot = {

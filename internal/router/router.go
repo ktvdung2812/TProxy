@@ -26,21 +26,27 @@ import (
 )
 
 type Router struct {
-	store           *store.Store
-	registry        *providers.Registry
-	refresher       CredentialRefresher
-	mu              sync.Mutex
-	rotation        map[string]int
-	cooldown        time.Duration
-	cooldowns       CooldownSettings
-	allowUpstream   bool
-	strategy        string
-	sessionAffinity bool
-	sessionTTL      time.Duration
-	sessions        map[string]sessionBinding
-	providerStreams map[string]int
-	pricing         *pricing.Catalog
-	modelsRegistry  *pricing.ModelsRegistry
+	store                 *store.Store
+	registry              *providers.Registry
+	refresher             CredentialRefresher
+	mu                    sync.Mutex
+	selectionMu           sync.Mutex
+	discoveryMu           sync.Mutex
+	rotation              map[string]int
+	discoveryCache        map[string]discoveryCacheEntry
+	discoveryInflight     map[string]*discoveryFlight
+	cooldown              time.Duration
+	cooldowns             CooldownSettings
+	allowUpstream         bool
+	strategy              string
+	stickyRoundRobinLimit int
+	providerStrategies    map[string]store.ProviderRotationStrategy
+	sessionAffinity       bool
+	sessionTTL            time.Duration
+	sessions              map[string]sessionBinding
+	providerStreams       map[string]int
+	pricing               *pricing.Catalog
+	modelsRegistry        *pricing.ModelsRegistry
 }
 
 type CredentialRefresher interface {
@@ -86,7 +92,12 @@ type RawProxyOptions struct {
 }
 
 func New(dataStore *store.Store, registry *providers.Registry) *Router {
-	return &Router{store: dataStore, registry: registry, rotation: make(map[string]int), cooldown: time.Minute, cooldowns: CooldownSettingsFromConfig(config.CooldownConfig{}), strategy: "round-robin", sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int)}
+	return &Router{
+		store: dataStore, registry: registry, rotation: make(map[string]int), cooldown: time.Minute,
+		cooldowns: CooldownSettingsFromConfig(config.CooldownConfig{}), strategy: StrategyRoundRobin,
+		stickyRoundRobinLimit: defaultStickyRoundRobinLimit, providerStrategies: map[string]store.ProviderRotationStrategy{},
+		sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int),
+	}
 }
 
 func (r *Router) SetCredentialRefresher(refresher CredentialRefresher) {
@@ -213,18 +224,63 @@ func (r *Router) IsModelCatalogVisible(ctx context.Context, model store.PublicMo
 func (r *Router) ConfigureRouting(cfg config.RoutingConfig) {
 	strategy := cfg.Strategy
 	if strategy == "" {
-		strategy = "round-robin"
+		strategy = StrategyRoundRobin
 	}
 	ttl, err := time.ParseDuration(cfg.SessionAffinityTTL)
 	if err != nil || ttl <= 0 {
 		ttl = time.Hour
 	}
+	stickyLimit := cfg.StickyRoundRobinLimit
+	if stickyLimit <= 0 {
+		stickyLimit = defaultStickyRoundRobinLimit
+	}
+	providerStrategies := map[string]store.ProviderRotationStrategy{}
+	for providerID, providerCfg := range cfg.ProviderStrategies {
+		providerStrategies[providerID] = store.ProviderRotationStrategy{
+			Strategy:              providerCfg.Strategy,
+			StickyRoundRobinLimit: providerCfg.StickyRoundRobinLimit,
+		}
+	}
 	r.mu.Lock()
 	r.strategy = strategy
+	r.stickyRoundRobinLimit = stickyLimit
+	r.providerStrategies = providerStrategies
 	r.sessionAffinity = cfg.SessionAffinity
 	r.sessionTTL = ttl
 	r.cooldowns = CooldownSettingsFromConfig(cfg.Cooldown)
 	r.cooldown = r.cooldowns.Fallback
+	r.mu.Unlock()
+}
+
+func (r *Router) SyncAccountRotationSettings(ctx context.Context) error {
+	settings, err := r.store.AccountRotationSettings(ctx)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if settings.Strategy != "" {
+		r.strategy = settings.Strategy
+	}
+	if settings.StickyRoundRobinLimit > 0 {
+		r.stickyRoundRobinLimit = settings.StickyRoundRobinLimit
+	}
+	if len(settings.ProviderStrategies) > 0 {
+		merged := map[string]store.ProviderRotationStrategy{}
+		for key, value := range r.providerStrategies {
+			merged[key] = value
+		}
+		for key, value := range settings.ProviderStrategies {
+			merged[key] = value
+		}
+		r.providerStrategies = merged
+	}
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Router) ResetRotationRuntimeState() {
+	r.mu.Lock()
+	r.rotation = make(map[string]int)
 	r.mu.Unlock()
 }
 
@@ -420,90 +476,6 @@ func (r *Router) CodexResetCredits(ctx context.Context, provider store.Provider,
 // ConsumeCodexResetCredit spends one Codex reset credit for a credential.
 func (r *Router) ConsumeCodexResetCredit(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CodexResetConsumeResult, error) {
 	return r.registry.ConsumeCodexResetCredit(ctx, provider, credential, "")
-}
-
-func (r *Router) DiscoverProviderModels(ctx context.Context, providerID string) ([]providers.DiscoveredModel, error) {
-	provider, err := r.store.Provider(ctx, providerID)
-	if err != nil {
-		return nil, err
-	}
-	credentials, err := r.store.Credentials(ctx, providerID)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	candidates := store.EligibleCredentials(credentials, now)
-	if len(candidates) == 0 {
-		for _, credential := range credentials {
-			if credential.Enabled {
-				candidates = append(candidates, credential)
-			}
-		}
-	}
-	if len(candidates) == 0 && len(credentials) > 0 {
-		candidates = append(candidates, credentials[0])
-	}
-
-	merged := make(map[string]providers.DiscoveredModel)
-	credentialIDsByModel := make(map[string]map[string]struct{})
-	var lastErr error
-	healthyCount := 0
-
-	for _, credential := range candidates {
-		items, discoverErr := r.registry.DiscoverModels(ctx, *provider, credential)
-		if discoverErr != nil {
-			lastErr = discoverErr
-			if credential.ID != "" {
-				r.setCredentialCooldown(ctx, credential.ID, "", discoverErr)
-			}
-			continue
-		}
-		healthyCount++
-		if credential.ID != "" {
-			_ = r.store.ClearCooldown(ctx, credential.ID)
-		}
-		for _, item := range items {
-			if item.ID == "" {
-				continue
-			}
-			if _, ok := merged[item.ID]; !ok {
-				merged[item.ID] = item
-			}
-			if credentialIDsByModel[item.ID] == nil {
-				credentialIDsByModel[item.ID] = make(map[string]struct{})
-			}
-			if credential.ID != "" {
-				credentialIDsByModel[item.ID][credential.ID] = struct{}{}
-			}
-		}
-	}
-
-	items := make([]providers.DiscoveredModel, 0, len(merged))
-	for id, item := range merged {
-		ids := make([]string, 0, len(credentialIDsByModel[id]))
-		for credentialID := range credentialIDsByModel[id] {
-			ids = append(ids, credentialID)
-		}
-		sort.Strings(ids)
-		item.CredentialIDs = ids
-		items = append(items, item)
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-
-	status := "healthy"
-	message := ""
-	if healthyCount == 0 && lastErr != nil {
-		status = "degraded"
-		message = lastErr.Error()
-	} else if healthyCount > 0 && healthyCount < len(candidates) && lastErr != nil {
-		status = "degraded"
-		message = lastErr.Error()
-	}
-	_ = r.store.SetProviderHealth(ctx, providerID, status, message, now)
-	if len(items) == 0 && lastErr != nil {
-		return nil, lastErr
-	}
-	return items, nil
 }
 
 func (r *Router) DiscoverCredentialModels(ctx context.Context, provider store.Provider, credential store.Credential) ([]providers.DiscoveredModel, error) {
@@ -1199,7 +1171,10 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 		eligible := store.EligibleCredentials(credentials, now)
 		eligible = r.filterModelCooldowns(ctx, eligible, route.UpstreamModel, now)
-		eligible = r.rotate(route.ID, route.Priority, eligible)
+		eligible, errOrder := r.orderCredentials(ctx, provider.ID, route.ID, route.Priority, eligible)
+		if errOrder != nil {
+			return nil, errOrder
+		}
 		for _, credential := range eligible {
 			selection := Selection{Model: model, Route: route, Provider: *provider, Credential: credential}
 			proxyAvailable, proxyErr := r.assignProxy(ctx, &selection)
@@ -1352,47 +1327,6 @@ func (r *Router) assignProxy(ctx context.Context, selection *Selection) (bool, e
 	return false, nil
 }
 
-func (r *Router) rotate(providerID string, priority int, credentials []store.Credential) []store.Credential {
-	if len(credentials) < 2 {
-		return credentials
-	}
-	r.mu.Lock()
-	strategy := r.strategy
-	r.mu.Unlock()
-	if strategy == "fill-first" {
-		return credentials
-	}
-	key := fmt.Sprintf("%s:%d", providerID, priority)
-	r.mu.Lock()
-	totalWeight := 0
-	for _, credential := range credentials {
-		weight := credential.Weight
-		if weight <= 0 {
-			weight = 1
-		}
-		totalWeight += weight
-	}
-	slot := r.rotation[key] % totalWeight
-	r.rotation[key] = (slot + 1) % totalWeight
-	r.mu.Unlock()
-	index := 0
-	for candidateIndex, credential := range credentials {
-		weight := credential.Weight
-		if weight <= 0 {
-			weight = 1
-		}
-		if slot < weight {
-			index = candidateIndex
-			break
-		}
-		slot -= weight
-	}
-	result := make([]store.Credential, 0, len(credentials))
-	result = append(result, credentials[index:]...)
-	result = append(result, credentials[:index]...)
-	return result
-}
-
 func (r *Router) rotateRoutes(modelID string, routes []store.RouteTarget) []store.RouteTarget {
 	if len(routes) < 2 {
 		return routes
@@ -1400,7 +1334,7 @@ func (r *Router) rotateRoutes(modelID string, routes []store.RouteTarget) []stor
 	r.mu.Lock()
 	strategy := r.strategy
 	r.mu.Unlock()
-	if strategy == "fill-first" {
+	if strategy == StrategyFillFirst {
 		return routes
 	}
 	result := make([]store.RouteTarget, 0, len(routes))
@@ -1634,7 +1568,7 @@ func disableFallback(request canonical.Request) bool {
 }
 
 func shouldFallbackStatus(status int) bool {
-	return status == 0 || status == http.StatusUnauthorized || status == http.StatusPaymentRequired || status == http.StatusForbidden || status == http.StatusNotFound || store.IsRetryableStatus(status)
+	return status == http.StatusUnauthorized || status == http.StatusPaymentRequired || status == http.StatusForbidden || status == http.StatusNotFound || store.IsRetryableStatus(status)
 }
 
 func (r *Router) clearSuccessfulCooldown(ctx context.Context, selection Selection) {

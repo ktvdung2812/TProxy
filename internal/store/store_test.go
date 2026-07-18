@@ -1093,3 +1093,117 @@ func containsBytes(haystack, needle []byte) bool {
 	}
 	return false
 }
+
+func TestAccountRotationSettingsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rotation.db")
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(path, encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	ctx := context.Background()
+	defaults, err := dataStore.AccountRotationSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.StickyRoundRobinLimit != 3 {
+		t.Fatalf("default sticky limit = %d", defaults.StickyRoundRobinLimit)
+	}
+	settings := AccountRotationSettings{
+		Strategy:              "fill-first",
+		StickyRoundRobinLimit: 5,
+		ProviderStrategies: map[string]ProviderRotationStrategy{
+			"codex-main": {Strategy: "round-robin", StickyRoundRobinLimit: 7},
+		},
+	}
+	if err := dataStore.SaveAccountRotationSettings(ctx, settings); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := dataStore.AccountRotationSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Strategy != "fill-first" || loaded.StickyRoundRobinLimit != 5 || loaded.ProviderStrategies["codex-main"].StickyRoundRobinLimit != 7 {
+		t.Fatalf("loaded settings = %+v", loaded)
+	}
+}
+
+func TestResetProviderRotationStateClearsCounters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rotation-reset.db")
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(path, encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	ctx := context.Background()
+	if err := dataStore.SaveProvider(ctx, config.ProviderConfig{ID: "provider-a", Type: "openai-compatible", Name: "Provider A", BaseURL: "http://127.0.0.1:9", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SaveCredential(ctx, "provider-a", config.CredentialConfig{ID: "cred-a", Label: "A", AuthType: "none", Priority: 1, Enabled: boolPtr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.TouchCredentialRotation(ctx, "cred-a", 2, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.ResetProviderRotationState(ctx, "provider-a"); err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(ctx, "cred-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !credential.LastUsedAt.IsZero() || credential.ConsecutiveUseCount != 0 {
+		t.Fatalf("credential rotation state = %+v", credential)
+	}
+}
+
+func TestTouchCredentialRotationPersistsState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rotation-touch.db")
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(path, encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	ctx := context.Background()
+	if err := dataStore.SaveProvider(ctx, config.ProviderConfig{ID: "provider-a", Type: "openai-compatible", Name: "Provider A", BaseURL: "http://127.0.0.1:9", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SaveCredential(ctx, "provider-a", config.CredentialConfig{ID: "cred-a", AuthType: "api_key", Secret: "secret", Enabled: boolPtr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	usedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := dataStore.TouchCredentialRotation(ctx, "cred-a", 2, usedAt); err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(ctx, "cred-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.ConsecutiveUseCount != 2 || credential.LastUsedAt.IsZero() {
+		t.Fatalf("credential rotation state = %+v", credential)
+	}
+}

@@ -97,27 +97,33 @@ func translateCodexEvent(raw map[string]any, state *codexStreamState) []canonica
 
 	case "response.output_item.added":
 		item, _ := raw["item"].(map[string]any)
-		if stringValue(item["type"]) != "function_call" {
+		if item == nil {
 			return nil
 		}
-		state.functionCallIndex++
-		state.hasReceivedArgumentsDelta = false
-		state.hasToolCallAnnounced = true
-		toolName := restoreCodexToolName(stringValue(item["name"]), state.reverseToolNameMap)
-		return []canonical.Event{{
-			Type:  canonical.EventToolCallDelta,
-			ID:    state.responseID,
-			Model: state.model,
-			ToolCall: map[string]any{
-				"index": state.functionCallIndex,
-				"id":    stringValue(item["call_id"]),
-				"type":  "function",
-				"function": map[string]any{
-					"name":      toolName,
-					"arguments": "",
+		switch stringValue(item["type"]) {
+		case "reasoning":
+			return codexReasoningEvents(state, item)
+		case "function_call":
+			state.functionCallIndex++
+			state.hasReceivedArgumentsDelta = false
+			state.hasToolCallAnnounced = true
+			toolName := restoreCodexToolName(stringValue(item["name"]), state.reverseToolNameMap)
+			return []canonical.Event{{
+				Type:  canonical.EventToolCallDelta,
+				ID:    state.responseID,
+				Model: state.model,
+				ToolCall: map[string]any{
+					"index": state.functionCallIndex,
+					"id":    stringValue(item["call_id"]),
+					"type":  "function",
+					"function": map[string]any{
+						"name":      toolName,
+						"arguments": "",
+					},
 				},
-			},
-		}}
+			}}
+		}
+		return nil
 
 	case "response.output_item.done":
 		item, _ := raw["item"].(map[string]any)
@@ -125,6 +131,8 @@ func translateCodexEvent(raw map[string]any, state *codexStreamState) []canonica
 			return nil
 		}
 		switch stringValue(item["type"]) {
+		case "reasoning":
+			return codexReasoningEvents(state, item)
 		case "message":
 			if state.hasEmittedContent {
 				return nil
@@ -272,6 +280,42 @@ func textFromCodexMessageItem(item map[string]any) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+func codexReasoningEvents(state *codexStreamState, item map[string]any) []canonical.Event {
+	if stringValue(item["type"]) != "reasoning" {
+		return nil
+	}
+	reasoning := codexReasoningSummaryText(item)
+	encrypted := strings.TrimSpace(stringValue(item["encrypted_content"]))
+	itemID := strings.TrimSpace(stringValue(item["id"]))
+	if reasoning == "" && encrypted == "" && itemID == "" {
+		return nil
+	}
+	return []canonical.Event{{
+		Type:               canonical.EventReasoningDelta,
+		ID:                 state.responseID,
+		Model:              state.model,
+		Reasoning:          reasoning,
+		ReasoningEncrypted: encrypted,
+		ReasoningItemID:    itemID,
+	}}
+}
+
+func codexReasoningSummaryText(item map[string]any) string {
+	if summary, ok := item["summary"].([]any); ok {
+		var parts []string
+		for _, entry := range summary {
+			block, _ := entry.(map[string]any)
+			if text := strings.TrimSpace(stringValue(block["text"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
 }
 
 func restoreCodexToolName(name string, reverse map[string]string) string {
