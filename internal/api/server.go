@@ -138,6 +138,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.health)
 	mux.Handle("/dashboard/", s.dashboard())
 	mux.Handle("/assets/", s.dashboard())
+	// OAuth providers cannot attach the management bearer when redirecting the
+	// browser. This exact callback route relies on opaque, single-use state; the
+	// rest of the admin subtree remains behind management authentication.
+	mux.HandleFunc("/api/admin/oauth/callback", s.oauthCallback)
 	mux.Handle("/api/admin/", s.managementAuth(http.HandlerFunc(s.admin)))
 
 	proxy := s.clientAuth(http.HandlerFunc(s.proxyIngress))
@@ -500,8 +504,10 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 	}
 	requestedModel = resolveIngressModel(r, requestedModel)
 	pinnedProvider := ""
+	disableFallback := false
 	if route, ok := ingressRouteFromContext(r); ok {
 		pinnedProvider = route.RouteProvider
+		disableFallback = route.DisableFallback
 	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	model, err := s.router.Resolve(r.Context(), requestedModel, key)
@@ -529,7 +535,7 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 	if clientKey != nil {
 		team = clientKey.Policy.Team
 	}
-	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, ClientAPIKeyID: clientKeyID, Team: team, PinnedProvider: pinnedProvider})
+	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, Team: team, PinnedProvider: pinnedProvider})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, providers.Code(err), err.Error(), requestID)
 		return
@@ -2153,9 +2159,13 @@ func (s *Server) adminAuthImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
 		return
 	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(r.Body, int64(store.MaxAuthBundleBytes)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if len(data) > store.MaxAuthBundleBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "auth bundle exceeds the maximum import size", useClientRequestID(r))
 		return
 	}
 	if err = s.store.ImportAuthBundle(r.Context(), data); err != nil {
@@ -2302,11 +2312,11 @@ func (s *Server) adminCodexResetCredits(w http.ResponseWriter, r *http.Request, 
 		}
 		if result.NoCredit {
 			writeJSON(w, http.StatusConflict, map[string]any{
-				"ok":       false,
-				"reset":    false,
-				"code":     result.Code,
+				"ok":        false,
+				"reset":     false,
+				"code":      result.Code,
 				"no_credit": true,
-				"message":  result.Message,
+				"message":   result.Message,
 			})
 			return
 		}
@@ -2657,7 +2667,16 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.RedirectURL == "" {
-		request.RedirectURL = defaultOAuthCallbackURL(r)
+		provider, providerErr := s.store.Provider(r.Context(), request.ProviderID)
+		hasConfiguredRedirect := providerErr == nil && provider.OAuth != nil && strings.TrimSpace(provider.OAuth.RedirectURL) != ""
+		if !hasConfiguredRedirect && security.IsLoopback(r) {
+			callbackURL, callbackErr := defaultOAuthCallbackURL(r)
+			if callbackErr != nil {
+				writeError(w, http.StatusBadRequest, "oauth_configuration_invalid", callbackErr.Error(), useClientRequestID(r))
+				return
+			}
+			request.RedirectURL = callbackURL
+		}
 	}
 	result, err := s.auth.StartAuthorization(r.Context(), request)
 	if err != nil {
@@ -2674,6 +2693,11 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	state, code, providerError := oauthCallbackValues(r)
 	if providerError != "" {
+		_, err := s.auth.RejectCallback(state, providerError)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, auth.Code(err), err.Error(), useClientRequestID(r))
+			return
+		}
 		writeError(w, http.StatusBadRequest, "oauth_authorization_rejected", "OAuth authorization was rejected", useClientRequestID(r))
 		return
 	}
@@ -2736,14 +2760,49 @@ func (s *Server) oauthCancel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "session_id": sessionID})
 }
 
-func defaultOAuthCallbackURL(r *http.Request) string {
+func defaultOAuthCallbackURL(r *http.Request) (string, error) {
+	host, err := loopbackCallbackHost(r.Host)
+	if err != nil {
+		return "", err
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
-	} else if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded == "http" || forwarded == "https" {
+	} else if forwarded := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); forwarded != "" {
+		// Dynamic callbacks are derived only for loopback callers. Trusting the
+		// forwarded scheme here therefore assumes a local reverse proxy.
+		if forwarded != "http" && forwarded != "https" {
+			return "", errors.New("OAuth callback forwarded scheme must be http or https")
+		}
 		scheme = forwarded
 	}
-	return scheme + "://" + r.Host + "/api/admin/oauth/callback"
+	return scheme + "://" + host + "/api/admin/oauth/callback", nil
+}
+
+func loopbackCallbackHost(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, "/\\?#@ \t\r\n") {
+		return "", errors.New("OAuth callback host is invalid")
+	}
+	parsed, err := url.Parse("http://" + raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("OAuth callback host is invalid")
+	}
+	hostname := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	ip := net.ParseIP(hostname)
+	if hostname != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return "", errors.New("OAuth callback host must be loopback or explicitly configured")
+	}
+	if strings.HasSuffix(parsed.Host, ":") {
+		return "", errors.New("OAuth callback port is invalid")
+	}
+	if port := parsed.Port(); port != "" {
+		value, parseErr := strconv.Atoi(port)
+		if parseErr != nil || value < 1 || value > 65535 {
+			return "", errors.New("OAuth callback port is invalid")
+		}
+	}
+	return parsed.Host, nil
 }
 
 func oauthCallbackValues(r *http.Request) (state, code, providerError string) {
@@ -2834,7 +2893,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		metadata := map[string]any{"remote_addr": r.RemoteAddr}
 		state.ErrorCode = writer.Header().Get("X-TProxy-Error-Code")
 		_ = s.store.AddRequestLog(context.Background(), store.RequestLog{RequestID: state.RequestID, ClientAPIKeyID: state.ClientAPIKeyID, Method: r.Method, Path: r.URL.Path, Protocol: state.Protocol, PublicModelID: state.PublicModelID, ProviderID: state.ProviderID, CredentialID: state.CredentialID, Attempt: state.Attempt, Status: status, LatencyMS: time.Since(started).Milliseconds(), ErrorCode: state.ErrorCode, Metadata: metadata, CreatedAt: time.Now().UTC()})
-		if strings.HasPrefix(r.URL.Path, "/api/admin/") && r.Method != http.MethodGet && r.Method != http.MethodOptions {
+		isOAuthCallback := r.URL.Path == "/api/admin/oauth/callback"
+		if strings.HasPrefix(r.URL.Path, "/api/admin/") && !isOAuthCallback && r.Method != http.MethodGet && r.Method != http.MethodOptions {
 			_ = s.store.AddAuditEvent(context.Background(), store.AuditEvent{Actor: "management", Action: r.Method + " " + r.URL.Path, ResourceType: "admin", Status: status, Metadata: map[string]any{"request_id": state.RequestID}, CreatedAt: time.Now().UTC()})
 			if status < http.StatusBadRequest {
 				_ = s.store.RecordConfigVersion(context.Background(), "admin:"+r.Method+" "+r.URL.Path, s.cfg)

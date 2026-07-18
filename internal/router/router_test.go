@@ -70,6 +70,184 @@ func TestFallbackAndPublicModelRewrite(t *testing.T) {
 	}
 }
 
+func TestDisableFallbackStopsAfterCredentialPreparationFailure(t *testing.T) {
+	var secondaryCalls atomic.Int32
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"secondary","model":"upstream-success","choices":[{"message":{"role":"assistant","content":"unexpected fallback"},"finish_reason":"stop"}]}`))
+	}))
+	defer secondary.Close()
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("first provider should not receive a request when credential preparation fails")
+	}))
+	defer failing.Close()
+	cfg := fallbackConfig(failing.URL, secondary.URL)
+	cfg.Providers[0].Credentials[0].AuthType = "oauth"
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	requestRouter.SetCredentialRefresher(failingCredentialRefresher{})
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "no-fallback-prepare",
+		Metadata:  map[string]any{"disable_fallback": true},
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "credential preparation failed") {
+		t.Fatalf("expected preparation error without fallback, got %v", err)
+	}
+	if secondaryCalls.Load() != 0 {
+		t.Fatalf("disable_fallback dispatched to secondary provider %d times", secondaryCalls.Load())
+	}
+}
+
+func TestDisableFallbackStopsStreamingCredentialPreparationFailure(t *testing.T) {
+	var secondaryCalls atomic.Int32
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"secondary\",\"model\":\"upstream-success\",\"choices\":[{\"delta\":{\"content\":\"unexpected fallback\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer secondary.Close()
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("first provider should not receive a request when credential preparation fails")
+	}))
+	defer failing.Close()
+	cfg := fallbackConfig(failing.URL, secondary.URL)
+	cfg.Providers[0].Credentials[0].AuthType = "oauth"
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	requestRouter.SetCredentialRefresher(failingCredentialRefresher{})
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.ExecuteStream(context.Background(), *model, canonical.Request{
+		RequestID: "no-fallback-stream-prepare",
+		Stream:    true,
+		Metadata:  map[string]any{"disable_fallback": true},
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "credential preparation failed") {
+		t.Fatalf("expected streaming preparation error without fallback, got %v", err)
+	}
+	if secondaryCalls.Load() != 0 {
+		t.Fatalf("disable_fallback dispatched streaming request to secondary provider %d times", secondaryCalls.Load())
+	}
+}
+
+func TestDisableFallbackStopsRawProxyAfterFirstFailure(t *testing.T) {
+	var secondaryCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"first failed"}}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"upstream-success"}`))
+	}))
+	defer second.Close()
+	cfg := fallbackConfig(first.URL, second.URL)
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.ProxyWithOptions(context.Background(), *model, "no-fallback-raw", "/v1/images/generations", []byte(`{"model":"coder","prompt":"hello"}`), "application/json", router.RawProxyOptions{
+		Method:             http.MethodPost,
+		Headers:            make(http.Header),
+		RetryNetworkErrors: true,
+		DisableFallback:    true,
+	})
+	if err == nil {
+		t.Fatal("expected first raw proxy failure")
+	}
+	if secondaryCalls.Load() != 0 {
+		t.Fatalf("disable_fallback dispatched raw request to secondary provider %d times", secondaryCalls.Load())
+	}
+}
+
+func TestDisableFallbackStopsRawProxyWhenAdapterLacksRawSupport(t *testing.T) {
+	var secondaryCalls atomic.Int32
+	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"upstream-success"}`))
+	}))
+	defer secondary.Close()
+	cfg := fallbackConfig("http://127.0.0.1:1", secondary.URL)
+	cfg.Providers[0].Type = "anthropic-compatible"
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.ProxyWithOptions(context.Background(), *model, "no-fallback-unsupported-raw", "/v1/chat/completions", []byte(`{"model":"coder"}`), "application/json", router.RawProxyOptions{
+		Method:          http.MethodPost,
+		Headers:         make(http.Header),
+		DisableFallback: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support raw endpoint") {
+		t.Fatalf("expected raw adapter capability error, got %v", err)
+	}
+	if secondaryCalls.Load() != 0 {
+		t.Fatalf("disable_fallback dispatched unsupported raw request to secondary provider %d times", secondaryCalls.Load())
+	}
+}
+
+func TestDisableFallbackStopsAfterNotFoundAndRecordsCooldown(t *testing.T) {
+	var secondaryCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"model unavailable"}}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"secondary","model":"upstream-success","choices":[{"message":{"role":"assistant","content":"unexpected fallback"},"finish_reason":"stop"}]}`))
+	}))
+	defer second.Close()
+	dataStore := newStore(t, fallbackConfig(first.URL, second.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "no-fallback-not-found",
+		Metadata:  map[string]any{"disable_fallback": true},
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if providers.Status(err) != http.StatusNotFound {
+		t.Fatalf("expected first 404 without fallback, got %v", err)
+	}
+	if secondaryCalls.Load() != 0 {
+		t.Fatalf("disable_fallback dispatched 404 request to secondary provider %d times", secondaryCalls.Load())
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), "cred-failing", "upstream-fail", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("pinned 404 did not record an upstream-model cooldown")
+	}
+}
+
+type failingCredentialRefresher struct{}
+
+func (failingCredentialRefresher) EnsureValid(context.Context, store.Provider, store.Credential, bool) (store.Credential, error) {
+	return store.Credential{}, fmt.Errorf("credential preparation failed")
+}
+
 func TestStreamingRewritesEveryModelEvent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -256,6 +434,252 @@ func TestRoutePricingIsRecordedInUsage(t *testing.T) {
 	want := 0.1 + 1000*2/1_000_000.0 + 2000*4/1_000_000.0 + 1000*8/1_000_000.0
 	if math.Abs(usage[0].EstimatedCostUSD-want) > 1e-12 {
 		t.Fatalf("estimated cost=%v want=%v", usage[0].EstimatedCostUSD, want)
+	}
+}
+
+func TestSuccessfulRequestClearsOnlyCurrentUpstreamModelCooldown(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cooldown","model":"upstream-a","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+			{ID: "route-b", Provider: "provider", UpstreamModel: "upstream-b", Priority: 50},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	now := time.Now().UTC()
+	if err := dataStore.SetCooldown(context.Background(), "credential", "expired-account", "expired account cooldown", now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetModelCooldown(context.Background(), "credential", "upstream-a", "expired", "expired cooldown", now.Add(-time.Minute), http.StatusTooManyRequests, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetModelCooldown(context.Background(), "credential", "upstream-b", "active", "active cooldown", now.Add(time.Hour), http.StatusTooManyRequests, 2); err != nil {
+		t.Fatal(err)
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "upstream-a-success", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Route.UpstreamModel != "upstream-a" {
+		t.Fatalf("selected upstream=%q want upstream-a", result.Selection.Route.UpstreamModel)
+	}
+	if count := dataStore.ModelCooldownCount(context.Background(), "credential", "upstream-a"); count != 0 {
+		t.Fatalf("successful model cooldown count=%d want 0", count)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() || credential.LastErrorCode != "" || credential.LastError != "" {
+		t.Fatalf("account cooldown was not cleared after success: %+v", credential)
+	}
+	modelBUntil, err := dataStore.ModelCooldownUntil(context.Background(), "credential", "upstream-b", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelBUntil.IsZero() {
+		t.Fatal("success on upstream-a cleared upstream-b cooldown")
+	}
+}
+
+func TestModelCooldownFiltersOnlyMatchingUpstreamRoute(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"isolated","model":%q,"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`, payload["model"])
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+			{ID: "route-b", Provider: "provider", UpstreamModel: "upstream-b", Priority: 50},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	if err := dataStore.SetModelCooldown(context.Background(), "credential", "upstream-a", "active", "route-a unavailable", time.Now().Add(time.Hour), http.StatusNotFound, 1); err != nil {
+		t.Fatal(err)
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "isolated-cooldown", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Route.UpstreamModel != "upstream-b" {
+		t.Fatalf("selected upstream=%q want upstream-b", result.Selection.Route.UpstreamModel)
+	}
+}
+
+func TestNotFoundFallsBackAndSkipsCooledUpstreamModel(t *testing.T) {
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"model unavailable"}}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"secondary","model":"upstream-success","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer second.Close()
+	dataStore := newStore(t, fallbackConfig(first.URL, second.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		result, executeErr := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: fmt.Sprintf("not-found-%d", index), Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+		if executeErr != nil {
+			t.Fatal(executeErr)
+		}
+		if result.Selection.Provider.ID != "success" {
+			t.Fatalf("selected provider=%q want success", result.Selection.Provider.ID)
+		}
+	}
+	if firstCalls.Load() != 1 || secondCalls.Load() != 2 {
+		t.Fatalf("upstream calls first=%d second=%d", firstCalls.Load(), secondCalls.Load())
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), "cred-failing", "upstream-fail", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("404 fallback did not record upstream-model cooldown")
+	}
+}
+
+func TestStreamingNotFoundFallsBack(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"model unavailable"}}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"secondary\",\"model\":\"upstream-success\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer second.Close()
+	dataStore := newStore(t, fallbackConfig(first.URL, second.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.ExecuteStream(context.Background(), *model, canonical.Request{RequestID: "stream-not-found", Stream: true, Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Provider.ID != "success" {
+		t.Fatalf("selected provider=%q want success", result.Selection.Provider.ID)
+	}
+	for range result.Events {
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), "cred-failing", "upstream-fail", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("streaming 404 did not record upstream-model cooldown")
+	}
+}
+
+func TestRawNotFoundFallsBack(t *testing.T) {
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"model unavailable"}}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"upstream-success","data":[]}`))
+	}))
+	defer second.Close()
+	dataStore := newStore(t, fallbackConfig(first.URL, second.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.ProxyWithOptions(context.Background(), *model, "raw-not-found", "/v1/images/generations", []byte(`{"model":"coder","prompt":"hello"}`), "application/json", router.RawProxyOptions{Method: http.MethodPost, Headers: make(http.Header)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Provider.ID != "success" {
+		t.Fatalf("selected provider=%q want success", result.Selection.Provider.ID)
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), "cred-failing", "upstream-fail", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("raw 404 did not record upstream-model cooldown")
+	}
+}
+
+func TestUsageRecordsNormalizedTokensSavedMetadata(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"tokens-saved","model":"upstream","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}}}},
+		Models:    []config.PublicModelConfig{{ID: "model", Enabled: true, Routes: []config.RouteTargetConfig{{ID: "route", Provider: "provider", UpstreamModel: "upstream"}}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		requestID string
+		value     any
+		want      int
+	}{
+		{requestID: "tokens-int64", value: int64(7), want: 7},
+		{requestID: "tokens-json-number", value: json.Number("8"), want: 8},
+		{requestID: "tokens-negative", value: -9, want: 0},
+	}
+	for _, test := range tests {
+		if _, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: test.requestID, Metadata: map[string]any{"tokens_saved": test.value}, Messages: []canonical.Message{{Role: "user", Content: "hello"}}}); err != nil {
+			t.Fatalf("execute %s: %v", test.requestID, err)
+		}
+	}
+	usage, err := dataStore.RecentUsage(context.Background(), len(tests))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRequest := make(map[string]int, len(usage))
+	for _, event := range usage {
+		byRequest[event.RequestID] = event.TokensSaved
+	}
+	for _, test := range tests {
+		if got := byRequest[test.requestID]; got != test.want {
+			t.Fatalf("tokens_saved for %s=%d want %d", test.requestID, got, test.want)
+		}
 	}
 }
 
