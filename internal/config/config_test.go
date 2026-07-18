@@ -1,6 +1,52 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestValidateRejectsInvalidServerBinding(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  ServerConfig
+	}{
+		{name: "port below range", cfg: ServerConfig{Host: "127.0.0.1", Port: -1}},
+		{name: "port above range", cfg: ServerConfig{Host: "127.0.0.1", Port: 65536}},
+		{name: "host contains scheme", cfg: ServerConfig{Host: "http://0.0.0.0", Port: 28120}},
+		{name: "host includes port", cfg: ServerConfig{Host: "0.0.0.0:28120", Port: 28120}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := Config{Server: test.cfg}
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected invalid server binding to be rejected")
+			}
+		})
+	}
+}
+
+func TestValidateAllowsIPv6ServerBinding(t *testing.T) {
+	cfg := Config{Server: ServerConfig{Host: "  ::1  ", Port: 28120}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid IPv6 bind rejected: %v", err)
+	}
+	if cfg.Server.Host != "::1" {
+		t.Fatalf("server host was not normalized: %q", cfg.Server.Host)
+	}
+}
+
+func TestLoadConfigExampleDoesNotRequireEncryptedBootstrapSecrets(t *testing.T) {
+	for _, name := range []string{"TPROXY_MASTER_KEY", "TPROXY_API_KEY", "OPENAI_API_KEY"} {
+		t.Setenv(name, "")
+	}
+	cfg, err := Load(filepath.Join("..", "..", "config.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ProxyPools) != 0 {
+		t.Fatalf("config example bootstraps encrypted proxy pools without a master key: %+v", cfg.ProxyPools)
+	}
+}
 
 func TestValidateRejectsNonSQLiteDatabase(t *testing.T) {
 	cfg := Config{Database: DatabaseConfig{Driver: "postgres"}}
