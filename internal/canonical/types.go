@@ -74,18 +74,23 @@ const (
 	EventAudioDelta     EventType = "audio_delta"
 	EventUsage          EventType = "usage"
 	EventMessageEnd     EventType = "message_end"
+	EventResponsesSSE   EventType = "responses_sse"
 	EventError          EventType = "error"
 )
 
 type Event struct {
-	Type         EventType      `json:"type"`
-	ID           string         `json:"id,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	Text         string         `json:"text,omitempty"`
-	Reasoning    string         `json:"reasoning,omitempty"`
-	ToolCall     map[string]any `json:"tool_call,omitempty"`
-	Media        any            `json:"media,omitempty"`
-	Usage        *Usage         `json:"usage,omitempty"`
-	FinishReason string         `json:"finish_reason,omitempty"`
-	Err          error          `json:"-"`
+	Type               EventType      `json:"type"`
+	ID                 string         `json:"id,omitempty"`
+	Model              string         `json:"model,omitempty"`
+	Text               string         `json:"text,omitempty"`
+	Reasoning          string         `json:"reasoning,omitempty"`
+	ReasoningEncrypted string         `json:"reasoning_encrypted,omitempty"`
+	ReasoningItemID    string         `json:"reasoning_item_id,omitempty"`
+	ToolCall           map[string]any `json:"tool_call,omitempty"`
+	Media              any            `json:"media,omitempty"`
+	Usage              *Usage         `json:"usage,omitempty"`
+	FinishReason       string         `json:"finish_reason,omitempty"`
+	SSEEvent           string         `json:"sse_event,omitempty"`
+	SSEData            []byte         `json:"sse_data,omitempty"`
+	Err                error          `json:"-"`
 }

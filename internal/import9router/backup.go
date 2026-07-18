@@ -29,6 +29,8 @@ type ProviderConnection struct {
 	ExpiresAt            string         `json:"expiresAt"`
 	Scope                string         `json:"scope"`
 	APIKey               string         `json:"apiKey"`
+	LastUsedAt           string         `json:"lastUsedAt"`
+	ConsecutiveUseCount  int            `json:"consecutiveUseCount"`
 	ProviderSpecificData map[string]any `json:"providerSpecificData"`
 }
 

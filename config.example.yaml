@@ -18,8 +18,14 @@ security:
 
 routing:
   strategy: round-robin
+  sticky-round-robin-limit: 3
   session-affinity: true
   session-affinity-ttl: 1h
+  # Per-provider overrides (optional):
+  # provider-strategies:
+  #   codex-main:
+  #     strategy: round-robin
+  #     sticky-round-robin-limit: 5
 
 retention:
   usage-events: 2160h

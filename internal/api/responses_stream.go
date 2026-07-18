@@ -30,6 +30,8 @@ type responsesStreamWriter struct {
 	reasoningID        string
 	reasoningIndex     int
 	reasoningBuf       strings.Builder
+	reasoningEncrypted string
+	reasoningItemAdded bool
 	reasoningPartAdded bool
 	reasoningDone      bool
 
@@ -148,11 +150,14 @@ func (w *responsesStreamWriter) emitTextDelta(text string) []map[string]any {
 	return events
 }
 
-func (w *responsesStreamWriter) startReasoning(idx int) []map[string]any {
-	if w.reasoningID != "" {
+func (w *responsesStreamWriter) ensureReasoningStarted(idx int) []map[string]any {
+	if w.reasoningItemAdded {
 		return nil
 	}
-	w.reasoningID = fmt.Sprintf("rs_%s_%d", w.responseID, idx)
+	w.reasoningItemAdded = true
+	if w.reasoningID == "" {
+		w.reasoningID = fmt.Sprintf("rs_%s_%d", w.responseID, idx)
+	}
 	w.reasoningIndex = idx
 	events := w.ensureStarted()
 	events = append(events, w.emit("response.output_item.added", map[string]any{
@@ -176,11 +181,20 @@ func (w *responsesStreamWriter) startReasoning(idx int) []map[string]any {
 	return events
 }
 
-func (w *responsesStreamWriter) emitReasoningDelta(text string) []map[string]any {
-	if text == "" {
-		return nil
+func (w *responsesStreamWriter) applyReasoningMeta(itemID, encrypted string) {
+	if strings.TrimSpace(itemID) != "" {
+		w.reasoningID = strings.TrimSpace(itemID)
 	}
-	events := w.startReasoning(w.msgOutputIndex)
+	if strings.TrimSpace(encrypted) != "" {
+		w.reasoningEncrypted = strings.TrimSpace(encrypted)
+	}
+}
+
+func (w *responsesStreamWriter) emitReasoningDelta(text string) []map[string]any {
+	events := w.ensureReasoningStarted(w.msgOutputIndex)
+	if text == "" {
+		return events
+	}
 	w.reasoningBuf.WriteString(text)
 	events = append(events, w.emit("response.reasoning_summary_text.delta", map[string]any{
 		"item_id":       w.reasoningID,
@@ -192,7 +206,7 @@ func (w *responsesStreamWriter) emitReasoningDelta(text string) []map[string]any
 }
 
 func (w *responsesStreamWriter) closeReasoning() []map[string]any {
-	if w.reasoningID == "" || w.reasoningDone {
+	if !w.reasoningItemAdded || w.reasoningDone {
 		return nil
 	}
 	w.reasoningDone = true
@@ -215,13 +229,19 @@ func (w *responsesStreamWriter) closeReasoning() []map[string]any {
 		}),
 		w.emit("response.output_item.done", map[string]any{
 			"output_index": w.reasoningIndex,
-			"item": map[string]any{
-				"id":   w.reasoningID,
-				"type": "reasoning",
-				"summary": []any{
-					map[string]any{"type": "summary_text", "text": fullText},
-				},
-			},
+			"item": func() map[string]any {
+				item := map[string]any{
+					"id":   w.reasoningID,
+					"type": "reasoning",
+					"summary": []any{
+						map[string]any{"type": "summary_text", "text": fullText},
+					},
+				}
+				if w.reasoningEncrypted != "" {
+					item["encrypted_content"] = w.reasoningEncrypted
+				}
+				return item
+			}(),
 		}),
 	}
 }
@@ -384,6 +404,7 @@ func (w *responsesStreamWriter) handle(event canonical.Event) ([]map[string]any,
 	case canonical.EventTextDelta:
 		return w.emitTextDelta(event.Text), false
 	case canonical.EventReasoningDelta:
+		w.applyReasoningMeta(event.ReasoningItemID, event.ReasoningEncrypted)
 		return w.emitReasoningDelta(event.Reasoning), false
 	case canonical.EventToolCallDelta:
 		return w.emitToolCall(event.ToolCall), false
@@ -439,8 +460,20 @@ func (w *responsesStreamWriter) handle(event canonical.Event) ([]map[string]any,
 func writeResponsesStream(w http.ResponseWriter, r *http.Request, events <-chan canonical.Event, requestID, model string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	flusher, _ := w.(http.Flusher)
 	writer := newResponsesStreamWriter("resp_"+requestID, model)
+	doneSent := false
+	sendDone := func() {
+		if doneSent {
+			return
+		}
+		doneSent = true
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 	send := func(eventType string, payload map[string]any) {
 		data, err := json.Marshal(payload)
 		if err != nil {
@@ -451,13 +484,53 @@ func writeResponsesStream(w http.ResponseWriter, r *http.Request, events <-chan 
 			flusher.Flush()
 		}
 	}
+	sendPassthrough := func(eventType string, data []byte) {
+		if eventType == "" {
+			var raw map[string]any
+			if json.Unmarshal(data, &raw) == nil {
+				eventType = stringValue(raw["type"])
+			}
+		}
+		if eventType == "" {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(data))
+		} else {
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, string(data))
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 	for event := range events {
+		switch event.Type {
+		case canonical.EventResponsesSSE:
+			sendPassthrough(event.SSEEvent, event.SSEData)
+			continue
+		case canonical.EventError:
+			message := "stream error"
+			if event.Err != nil {
+				message = event.Err.Error()
+			}
+			send("error", map[string]any{
+				"error": map[string]any{
+					"type":    "api_error",
+					"message": message,
+				},
+			})
+			sendDone()
+			for range events {
+			}
+			return
+		}
 		payloads, done := writer.handle(event)
 		for _, payload := range payloads {
 			send(stringValue(payload["type"]), payload)
 		}
 		if done {
+			sendDone()
+			for range events {
+			}
 			return
 		}
 	}
+	sendDone()
 }

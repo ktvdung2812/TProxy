@@ -77,6 +77,11 @@ func Import(ctx context.Context, dataStore *store.Store, data []byte, opts Optio
 	for _, combo := range backup.Combos {
 		importer.importCombo(ctx, backup, combo)
 	}
+	if !opts.DryRun {
+		if err := importRotationSettings(ctx, dataStore, backup.Settings); err != nil {
+			return nil, err
+		}
+	}
 
 	if len(result.Errors) > 0 {
 		result.OK = false
@@ -217,6 +222,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 		if !enabled {
 			_ = i.store.SetCredentialEnabled(ctx, conn.ID, false)
 		}
+		i.touchImportedRotationState(ctx, conn)
 		i.result.Counts.Credentials++
 	case "apikey", "api_key":
 		if strings.TrimSpace(conn.APIKey) == "" {
@@ -239,6 +245,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 			i.fail(fmt.Sprintf("api key credential %q: %v", label, err))
 			return
 		}
+		i.touchImportedRotationState(ctx, conn)
 		i.result.Counts.Credentials++
 	default:
 		i.warn(fmt.Sprintf("credential %q has unsupported auth type %q", label, conn.AuthType))
@@ -407,6 +414,58 @@ func parseTime(value string) time.Time {
 		return parsed
 	}
 	return time.Time{}
+}
+
+func importRotationSettings(ctx context.Context, dataStore *store.Store, settings map[string]any) error {
+	if len(settings) == 0 {
+		return nil
+	}
+	current, err := dataStore.AccountRotationSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if value, ok := settings["stickyRoundRobinLimit"].(float64); ok && value > 0 {
+		current.StickyRoundRobinLimit = int(value)
+	}
+	if value, ok := settings["fallbackStrategy"].(string); ok && strings.TrimSpace(value) != "" {
+		current.Strategy = strings.TrimSpace(value)
+	}
+	if strategies, ok := settings["providerStrategies"].(map[string]any); ok {
+		if current.ProviderStrategies == nil {
+			current.ProviderStrategies = map[string]store.ProviderRotationStrategy{}
+		}
+		for providerName, raw := range strategies {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			providerID := ninerouter.ResolveProviderID(providerName)
+			strategy := store.ProviderRotationStrategy{}
+			if value, ok := entry["fallbackStrategy"].(string); ok {
+				strategy.Strategy = value
+			}
+			if value, ok := entry["stickyRoundRobinLimit"].(float64); ok && value > 0 {
+				strategy.StickyRoundRobinLimit = int(value)
+			}
+			current.ProviderStrategies[providerID] = strategy
+		}
+	}
+	return dataStore.SaveAccountRotationSettings(ctx, current)
+}
+
+func (i *importer) touchImportedRotationState(ctx context.Context, conn ProviderConnection) {
+	if i.dryRun {
+		return
+	}
+	usedAt := strings.TrimSpace(conn.LastUsedAt)
+	if usedAt == "" {
+		return
+	}
+	count := conn.ConsecutiveUseCount
+	if count < 0 {
+		count = 0
+	}
+	_ = i.store.TouchCredentialRotation(ctx, conn.ID, count, usedAt)
 }
 
 func firstNonEmpty(values ...string) string {

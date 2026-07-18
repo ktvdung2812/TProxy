@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 17
+const sqliteCurrentSchemaVersion = 18
 
 type sqliteMigration struct {
 	version int
@@ -55,6 +55,7 @@ var sqliteMigrations = []sqliteMigration{
 	{version: 15, apply: migrateTeamScopedAliases},
 	{version: 16, apply: createCredentialModelCooldownSchema},
 	{version: 17, apply: createAppSettingsSchema},
+	{version: 18, apply: migrateCredentialRotationState},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -317,6 +318,13 @@ func createAppSettingsSchema(ctx context.Context, tx *sql.Tx) error {
  value_json TEXT NOT NULL DEFAULT '{}'
 );`)
 	return err
+}
+
+func migrateCredentialRotationState(ctx context.Context, tx *sql.Tx) error {
+	if err := addColumnIfMissing(ctx, tx, "credentials", "last_used_at", `ALTER TABLE credentials ADD COLUMN last_used_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	return addColumnIfMissing(ctx, tx, "credentials", "consecutive_use_count", `ALTER TABLE credentials ADD COLUMN consecutive_use_count INTEGER NOT NULL DEFAULT 0`)
 }
 
 func sqliteSchemaVersion(ctx context.Context, queryer interface {

@@ -79,6 +79,7 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 	}
 	requestRouter.SetCredentialRefresher(authManager)
 	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, managementSecret: config.Env(cfg.Security.ManagementSecretEnv), allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	_ = requestRouter.SyncAccountRotationSettings(context.Background())
 	server.loadClaudeAliasResolver()
 	return server
 }
@@ -1460,6 +1461,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminConfigVersions(w, r)
 	case "/api/admin/mapping/claude":
 		s.adminClaudeMapping(w, r)
+	case "/api/admin/rotation":
+		s.adminAccountRotation(w, r)
+	case "/api/admin/rotation/reset":
+		s.adminAccountRotationReset(w, r)
 	case "/api/admin/settings":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
@@ -1498,6 +1503,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.cfg = next
 		s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 		s.router.ConfigureRouting(next.Routing)
+		_ = s.router.SyncAccountRotationSettings(r.Context())
 		s.managementSecret = config.Env(next.Security.ManagementSecretEnv)
 		s.allowRemoteMgmt = next.Server.AllowRemoteManagement
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config_path": s.configPath})
@@ -1810,7 +1816,13 @@ func (s *Server) adminProviderModels(w http.ResponseWriter, r *http.Request, pro
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or POST required", useClientRequestID(r))
 		return
 	}
-	items, err := s.router.DiscoverProviderModels(r.Context(), providerID)
+	var items []providers.DiscoveredModel
+	var err error
+	if r.Method == http.MethodPost {
+		items, err = s.router.RefreshProviderModels(r.Context(), providerID)
+	} else {
+		items, err = s.router.DiscoverProviderModels(r.Context(), providerID)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "provider_not_found", "provider not found", useClientRequestID(r))

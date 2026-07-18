@@ -355,6 +355,8 @@ export function ProvidersView({
         onAddAnthropic={() => openAdd("anthropic-compatible")}
         onTestSection={(section, ids) => void handleTestSection(ids, section)}
         testingSection={testingSection}
+        onNotice={onNotice}
+        onError={onError}
       />
       <div className="auth-bundle-toolbar">
         <button type="button" className="auth-bundle-btn" onClick={() => void handleExportAuth()} disabled={authBusy}>

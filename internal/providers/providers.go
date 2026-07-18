@@ -626,12 +626,7 @@ func codexBody(request canonical.Request) map[string]any {
 	if request.ToolChoice != nil {
 		body["tool_choice"] = codexToolChoice(request.ToolChoice, shortMap)
 	}
-	if request.Raw != nil {
-		if effort, ok := request.Raw["reasoning_effort"].(string); ok && strings.TrimSpace(effort) != "" {
-			body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
-			body["include"] = []any{"reasoning.encrypted_content"}
-		}
-	}
+	codexNormalizeReasoning(body)
 	for key, value := range request.Reasoning {
 		body[key] = value
 	}
@@ -642,6 +637,32 @@ func codexBody(request canonical.Request) map[string]any {
 	delete(body, "safety_identifier")
 	body["_codex_reverse_tool_names"] = reverseMap
 	return body
+}
+
+func codexNormalizeReasoning(body map[string]any) {
+	effort := ""
+	if reasoning, ok := body["reasoning"].(map[string]any); ok {
+		effort = strings.TrimSpace(stringValue(reasoning["effort"]))
+		if stringValue(reasoning["summary"]) == "" {
+			reasoning["summary"] = "auto"
+		}
+	}
+	if effort == "" {
+		if value, ok := body["reasoning_effort"].(string); ok {
+			effort = strings.TrimSpace(value)
+		}
+	}
+	delete(body, "reasoning_effort")
+	if effort == "" {
+		effort = "low"
+	}
+	if effort == "none" {
+		delete(body, "reasoning")
+		delete(body, "include")
+		return
+	}
+	body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
+	body["include"] = []any{"reasoning.encrypted_content"}
 }
 
 func codexToolChoice(toolChoice any, shortMap map[string]string) any {
@@ -793,6 +814,10 @@ func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provide
 			codexEventsFromJSON(out, raw, reverseMap)
 			return
 		}
+		if request.Source == canonical.ProtocolResponses {
+			parseCodexResponsesPassthroughSSE(ctx, response.Body, out)
+			return
+		}
 		parseCodexSSE(ctx, response.Body, out, reverseMap)
 	}()
 	return out, nil
@@ -849,6 +874,10 @@ func codexEventsFromJSON(out chan<- canonical.Event, raw map[string]any, reverse
 				continue
 			}
 			switch stringValue(mapped["type"]) {
+			case "reasoning":
+				for _, event := range translateCodexEvent(map[string]any{"type": "response.output_item.done", "item": mapped}, state) {
+					out <- event
+				}
 			case "message":
 				for _, event := range translateCodexEvent(map[string]any{"type": "response.output_item.done", "item": mapped}, state) {
 					out <- event

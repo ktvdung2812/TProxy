@@ -9,7 +9,7 @@
 - Encrypted provider secrets and hashed client API keys.
 - Public models, aliases, route targets and upstream response-name rewriting.
 - Ordered cross-provider fallback, credential rotation and cooldown.
-- Round-robin/fill-first/weighted scheduling and session affinity with TTL.
+- Round-robin/fill-first/weighted-round-robin scheduling, sticky account round-robin (9router-style), and session affinity with TTL.
 - OpenAI Chat Completions and Responses, including SSE normalization.
 - Authenticated Responses WebSocket transport with public-model rewriting.
 - Claude Messages and count-token compatibility.
@@ -47,7 +47,7 @@
 
 ## Partially implemented
 
-- Dashboard provides overview, provider health/discovery, credential, model, combo, alias, route, usage, logs/audit and policy editors. Advanced route drag/drop remains.
+- Dashboard account rotation settings per provider on `/dashboard/providers/:id` with strategy overrides and credential rotation stats.
 - Image/video capability-specific upstreams use specialized provider aliases and durable SQLite video status polling; provider-specific image/video APIs beyond the canonical HTTP contract remain adapter extensions.
 - Search supports Tavily; additional search providers and provider-specific ranking/citation options remain.
 - Usage records contain token counts and estimated route cost when pricing is configured; global/team/client daily budgets and client-key resource limits are enforced before fallback.

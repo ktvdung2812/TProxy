@@ -77,6 +77,11 @@ func codexNormalizeInputValue(input any, shortMap map[string]string) any {
 }
 
 func codexNormalizeInputItems(items []any, shortMap map[string]string) []any {
+	result := codexSanitizeInputItems(codexNormalizeInputItemsRaw(items, shortMap))
+	return result
+}
+
+func codexNormalizeInputItemsRaw(items []any, shortMap map[string]string) []any {
 	result := make([]any, 0, len(items))
 	for _, item := range items {
 		mapped, ok := item.(map[string]any)
@@ -112,6 +117,65 @@ func codexNormalizeInputItems(items []any, shortMap map[string]string) []any {
 		result = append(result, normalized)
 	}
 	return result
+}
+
+// codexSanitizeInputItems strips orphan reasoning item IDs from follow-up requests.
+// Codex does not persist output items when store=false, so clients that echo
+// reasoning items with only summary (no encrypted_content) must not send an id.
+func codexSanitizeInputItems(items []any) []any {
+	result := make([]any, 0, len(items))
+	for _, item := range items {
+		mapped, ok := item.(map[string]any)
+		if !ok {
+			result = append(result, item)
+			continue
+		}
+		if stringValue(mapped["type"]) == "reasoning" {
+			result = append(result, codexSanitizeReasoningItem(mapped))
+			continue
+		}
+		result = append(result, codexStripEphemeralItemID(mapped))
+	}
+	return result
+}
+
+func codexSanitizeReasoningItem(item map[string]any) map[string]any {
+	sanitized := make(map[string]any, len(item))
+	for key, value := range item {
+		sanitized[key] = value
+	}
+	if !codexHasUsableReasoningEncryptedContent(sanitized["encrypted_content"]) {
+		delete(sanitized, "encrypted_content")
+		delete(sanitized, "id")
+	}
+	return sanitized
+}
+
+func codexHasUsableReasoningEncryptedContent(value any) bool {
+	text, ok := value.(string)
+	return ok && strings.TrimSpace(text) != ""
+}
+
+func codexIsEphemeralItemID(id string) bool {
+	id = strings.TrimSpace(id)
+	return strings.HasPrefix(id, "resp_") ||
+		strings.HasPrefix(id, "msg_") ||
+		strings.HasPrefix(id, "rs_") ||
+		strings.HasPrefix(id, "fc_")
+}
+
+func codexStripEphemeralItemID(item map[string]any) map[string]any {
+	sanitized := make(map[string]any, len(item))
+	for key, value := range item {
+		sanitized[key] = value
+	}
+	if codexHasUsableReasoningEncryptedContent(sanitized["encrypted_content"]) {
+		return sanitized
+	}
+	if id := stringValue(sanitized["id"]); codexIsEphemeralItemID(id) {
+		delete(sanitized, "id")
+	}
+	return sanitized
 }
 
 func codexContentParts(role string, content any) []any {

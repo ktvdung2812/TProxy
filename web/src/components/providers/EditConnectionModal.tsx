@@ -41,8 +41,8 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
     if (open && credential) {
       setLabel(credential.label || "");
       setEmail(credential.email || "");
-      setPriority(0);
-      setWeight(1);
+      setPriority(credential.priority ?? 0);
+      setWeight(credential.weight ?? 1);
       setEnabled(credential.enabled);
       setNewSecret("");
       setProxyPoolIds(credential.proxy_pool_ids || []);

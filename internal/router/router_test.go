@@ -880,6 +880,7 @@ func TestConcurrentAccountSchedulingLoad(t *testing.T) {
 	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "account-a", AuthType: "none"}, {ID: "account-b", AuthType: "none"}, {ID: "account-c", AuthType: "none"}}}}, Models: []config.PublicModelConfig{{ID: "load-model", Enabled: true, Routes: []config.RouteTargetConfig{{Provider: "provider", UpstreamModel: "upstream"}}}}}
 	dataStore := newStore(t, cfg)
 	requestRouter := router.New(dataStore, providers.NewRegistry())
+	requestRouter.ConfigureRouting(config.RoutingConfig{Strategy: router.StrategyWeightedRoundRobin})
 	model, err := requestRouter.Resolve(context.Background(), "load-model", nil)
 	if err != nil {
 		t.Fatal(err)

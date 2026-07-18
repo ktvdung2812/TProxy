@@ -73,6 +73,40 @@ func TestResponsesStreamWriterReasoningLifecycle(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamWriterReasoningEncryptedContent(t *testing.T) {
+	writer := newResponsesStreamWriter("resp_enc", "gpt-5.6-terra")
+	var doneItem map[string]any
+	collect := func(event canonical.Event) {
+		payloads, _ := writer.handle(event)
+		for _, payload := range payloads {
+			if stringValue(payload["type"]) != "response.output_item.done" {
+				continue
+			}
+			item, _ := payload["item"].(map[string]any)
+			if stringValue(item["type"]) == "reasoning" {
+				doneItem = item
+			}
+		}
+	}
+
+	collect(canonical.Event{
+		Type:               canonical.EventReasoningDelta,
+		ReasoningItemID:    "rs_upstream_1",
+		ReasoningEncrypted: "opaque-signature",
+	})
+	collect(canonical.Event{Type: canonical.EventMessageEnd})
+
+	if doneItem == nil {
+		t.Fatal("missing reasoning output_item.done")
+	}
+	if doneItem["id"] != "rs_upstream_1" {
+		t.Fatalf("reasoning id = %#v", doneItem["id"])
+	}
+	if doneItem["encrypted_content"] != "opaque-signature" {
+		t.Fatalf("encrypted_content = %#v", doneItem["encrypted_content"])
+	}
+}
+
 func TestResponsesStreamWriterToolLifecycle(t *testing.T) {
 	writer := newResponsesStreamWriter("resp_tool", "gpt-5.6-terra")
 	var types []string
