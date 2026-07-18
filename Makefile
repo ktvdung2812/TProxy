@@ -1,10 +1,11 @@
 .PHONY: build dashboard test vet verify run clean
 
 dashboard:
-	npm --prefix web install
+	npm --prefix web ci
 	npm --prefix web run build
 
 build: dashboard
+	mkdir -p bin
 	go build -o bin/tproxy ./cmd/tproxy
 
 test:
