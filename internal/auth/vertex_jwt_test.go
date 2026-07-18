@@ -103,6 +103,32 @@ func TestVertexMetadataPersistenceErrorsAreReturned(t *testing.T) {
 	}
 }
 
+func TestForceRefreshReportsVertexServiceAccountStatus(t *testing.T) {
+	const email = "force-vertex@test.iam.gserviceaccount.com"
+	vertexTokenCache.Delete(email)
+	t.Cleanup(func() { vertexTokenCache.Delete(email) })
+	dataStore, _ := newAuthStore(t, &config.Config{Providers: []config.ProviderConfig{{ID: "vertex", Type: "vertex", Enabled: true}}})
+	if err := dataStore.SaveCredential(context.Background(), "vertex", config.CredentialConfig{ID: "vertex-force", AuthType: "service_account", Secret: mustVertexServiceAccount(t, email)}); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"access_token":"vertex-force-access","expires_in":3600}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	manager := NewManager(dataStore, client)
+	defer manager.Close()
+	status, err := manager.ForceRefreshCredential(context.Background(), "vertex-force")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "healthy" || status.ExpiresAt == nil {
+		t.Fatalf("service account status = %+v", status)
+	}
+}
+
 func mustVertexServiceAccount(t *testing.T, email string) string {
 	t.Helper()
 	raw, err := json.Marshal(vertexServiceAccount{Type: "service_account", ClientEmail: email, PrivateKey: testPrivateKeyPEM(t), ProjectID: "demo-project"})
