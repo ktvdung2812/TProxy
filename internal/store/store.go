@@ -292,7 +292,7 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 					return rollback(fmt.Errorf("encrypt credential %s: %w", credentialCfg.ID, err))
 				}
 			}
-			metadata, _ := json.Marshal(credentialMetadata(credentialCfg))
+			metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
 			if credentialCfg.Weight <= 0 {
 				credentialCfg.Weight = 1
 			}
@@ -406,7 +406,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 				return rollback(err)
 			}
 		}
-		metadata, _ := json.Marshal(credentialMetadata(credentialCfg))
+		metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
 		if credentialCfg.Weight <= 0 {
 			credentialCfg.Weight = 1
 		}
@@ -633,7 +633,7 @@ func (s *Store) SaveCredential(ctx context.Context, providerID string, credentia
 			return err
 		}
 	}
-	metadata, _ := json.Marshal(credentialMetadata(credentialCfg))
+	metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
 	if credentialCfg.Weight <= 0 {
 		credentialCfg.Weight = 1
 	}
@@ -757,8 +757,14 @@ func (s *Store) ProxyPoolConfigs(ctx context.Context) ([]config.ProxyPoolConfig,
 }
 
 func (s *Store) SetProxyPoolHealth(ctx context.Context, id, status, message string, testedAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE proxy_pools SET status=?,last_error=?,last_tested_at=?,updated_at=? WHERE id=?`, status, message, testedAt.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), id)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE proxy_pools SET status=?,last_error=?,last_tested_at=?,updated_at=? WHERE id=?`, status, security.RedactText(message), testedAt.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) DeleteProxyPool(ctx context.Context, id string) error {
@@ -861,8 +867,14 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_hash=excluded.key_hash,mode
 }
 
 func (s *Store) SetCredentialEnabled(ctx context.Context, credentialID string, enabled bool) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE credentials SET enabled=? WHERE id=?`, boolInt(enabled), credentialID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET enabled=? WHERE id=?`, boolInt(enabled), credentialID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) CreateAPIKey(ctx context.Context, id, name string, models []string, policies ...config.ClientKeyPolicy) (string, string, error) {
@@ -1304,16 +1316,28 @@ func (s *Store) CredentialByID(ctx context.Context, credentialID string) (Creden
 }
 
 func (s *Store) SetCooldown(ctx context.Context, credentialID, code, message string, until time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE credentials SET cooldown_until=?,status=CASE WHEN status='auth_required' THEN status ELSE 'cooldown' END,last_error_code=?,last_error=? WHERE id=?`, until.UTC().Format(time.RFC3339Nano), code, message, credentialID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET cooldown_until=?,status=CASE WHEN status='auth_required' THEN status ELSE 'cooldown' END,last_error_code=?,last_error=? WHERE id=?`, until.UTC().Format(time.RFC3339Nano), security.RedactText(code), security.RedactText(message), credentialID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) SetProviderHealth(ctx context.Context, providerID, status, message string, checkedAt time.Time) error {
 	if status == "" {
 		status = "unknown"
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE providers SET status=?,last_error=?,last_checked_at=?,updated_at=? WHERE id=?`, status, message, checkedAt.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), providerID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE providers SET status=?,last_error=?,last_checked_at=?,updated_at=? WHERE id=?`, status, security.RedactText(message), checkedAt.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), providerID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // SyncProviderHealth recomputes provider status from enabled credential statuses.
@@ -1352,13 +1376,36 @@ func (s *Store) SyncProviderHealth(ctx context.Context, providerID string) error
 	return s.SetProviderHealth(ctx, providerID, status, message, time.Now())
 }
 
-func (s *Store) ClearCooldown(ctx context.Context, credentialID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE credentials SET cooldown_until='',status='healthy',last_error_code='',last_error='',last_validated_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), credentialID)
+// ClearCredentialCooldown restores account-level credential health without
+// changing model-specific cooldowns for other upstream routes.
+func (s *Store) ClearCredentialCooldown(ctx context.Context, credentialID string) error {
+	updated, err := s.clearCredentialCooldown(ctx, credentialID)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM credential_model_cooldowns WHERE credential_id=?`, credentialID)
+	if !updated {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// ClearCooldown restores account-level credential health and removes every
+// model-specific cooldown. It is intended for explicit administrative resets.
+func (s *Store) ClearCooldown(ctx context.Context, credentialID string) error {
+	if _, err := s.clearCredentialCooldown(ctx, credentialID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM credential_model_cooldowns WHERE credential_id=?`, credentialID)
 	return err
+}
+
+func (s *Store) clearCredentialCooldown(ctx context.Context, credentialID string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET cooldown_until='',status='healthy',last_error_code='',last_error='',last_validated_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), credentialID)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count > 0, err
 }
 
 func (s *Store) ClearProviderCooldowns(ctx context.Context, providerID string) (int64, error) {
@@ -1383,18 +1430,24 @@ func (s *Store) UpdateCredentialMetadata(ctx context.Context, credentialID strin
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	data, err := json.Marshal(metadata)
+	data, err := json.Marshal(redactPersistedMetadata(metadata))
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE credentials SET metadata_json=? WHERE id=?`, string(data), credentialID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET metadata_json=? WHERE id=?`, string(data), credentialID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) SetModelCooldown(ctx context.Context, credentialID, model, code, message string, until time.Time, status int, count int) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO credential_model_cooldowns(credential_id,model,until,code,message,status,count)
 VALUES(?,?,?,?,?,?,?) ON CONFLICT(credential_id,model) DO UPDATE SET until=excluded.until,code=excluded.code,message=excluded.message,status=excluded.status,count=excluded.count`,
-		credentialID, model, until.UTC().Format(time.RFC3339Nano), code, message, status, count)
+		credentialID, model, until.UTC().Format(time.RFC3339Nano), security.RedactText(code), security.RedactText(message), status, count)
 	return err
 }
 
@@ -1433,8 +1486,14 @@ func (s *Store) ModelCooldownCount(ctx context.Context, credentialID, model stri
 }
 
 func (s *Store) MarkCredentialAuthRequired(ctx context.Context, credentialID, code string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE credentials SET status='auth_required',cooldown_until='',last_error_code=?,last_error=? WHERE id=?`, code, "OAuth authorization is required", credentialID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET status='auth_required',cooldown_until='',last_error_code=?,last_error=? WHERE id=?`, security.RedactText(code), "OAuth authorization is required", credentialID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) SaveOAuthCredential(ctx context.Context, providerID, credentialID, label, email string, token OAuthToken) error {
@@ -1496,8 +1555,14 @@ func (s *Store) UpdateOAuthToken(ctx context.Context, credentialID string, token
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE credentials SET secret_ciphertext=?,status='healthy',cooldown_until='',last_error_code='',last_error='',last_validated_at=? WHERE id=? AND auth_type='oauth'`, ciphertext, time.Now().UTC().Format(time.RFC3339Nano), credentialID)
-	return err
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET secret_ciphertext=?,status='healthy',cooldown_until='',last_error_code='',last_error='',last_validated_at=? WHERE id=? AND auth_type='oauth'`, ciphertext, time.Now().UTC().Format(time.RFC3339Nano), credentialID)
+	if err != nil {
+		return err
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) Providers(ctx context.Context) ([]Provider, error) {
@@ -1607,7 +1672,7 @@ func (s *Store) AddRequestLog(ctx context.Context, item RequestLog) error {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now().UTC()
 	}
-	metadata, _ := json.Marshal(item.Metadata)
+	metadata, _ := json.Marshal(redactPersistedMetadata(item.Metadata))
 	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs(request_id,client_api_key_id,method,path,protocol,public_model_id,provider_id,credential_id,attempt,status,latency_ms,error_code,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.RequestID, item.ClientAPIKeyID, item.Method, item.Path, item.Protocol, item.PublicModelID, item.ProviderID, item.CredentialID, item.Attempt, item.Status, item.LatencyMS, item.ErrorCode, string(metadata), item.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
@@ -1637,7 +1702,7 @@ func (s *Store) AddAuditEvent(ctx context.Context, item AuditEvent) error {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now().UTC()
 	}
-	metadata, _ := json.Marshal(item.Metadata)
+	metadata, _ := json.Marshal(redactPersistedMetadata(item.Metadata))
 	_, err := s.db.ExecContext(ctx, `INSERT INTO audit_events(actor,action,resource_type,resource_id,status,metadata_json,created_at) VALUES(?,?,?,?,?,?,?)`, item.Actor, item.Action, item.ResourceType, item.ResourceID, item.Status, string(metadata), item.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
@@ -2120,7 +2185,7 @@ func (s *Store) ExportConfig(ctx context.Context, base *config.Config) (*config.
 		}
 		for _, credential := range credentials {
 			enabled := credential.Enabled
-			item.Credentials = append(item.Credentials, config.CredentialConfig{ID: credential.ID, Label: credential.Label, Email: credential.Email, AuthType: credential.AuthType, SecretEnv: "TPROXY_CREDENTIAL_" + exportToken(credential.ID), Priority: credential.Priority, Weight: credential.Weight, Enabled: &enabled, Metadata: credential.Metadata, ProxyPools: append([]string(nil), credential.ProxyPoolIDs...)})
+			item.Credentials = append(item.Credentials, config.CredentialConfig{ID: credential.ID, Label: credential.Label, Email: credential.Email, AuthType: credential.AuthType, SecretEnv: "TPROXY_CREDENTIAL_" + exportToken(credential.ID), Priority: credential.Priority, Weight: credential.Weight, Enabled: &enabled, Metadata: redactExportMap(credential.Metadata), ProxyPools: append([]string(nil), credential.ProxyPoolIDs...)})
 		}
 		result.Providers = append(result.Providers, item)
 	}
@@ -2252,6 +2317,42 @@ func redactSnapshotHeaders(input map[string]string) map[string]string {
 	return result
 }
 
+// redactPersistedMetadata applies the same secret boundary to request and
+// audit records that is used for management snapshots. Logs are a durable
+// store, so callers must not be able to bypass redaction by writing directly
+// through Store.AddRequestLog/AddAuditEvent.
+func redactPersistedMetadata(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	result := make(map[string]any, len(input))
+	for key, value := range input {
+		if sensitiveFieldName(key) {
+			result[key] = "[REDACTED]"
+			continue
+		}
+		result[key] = redactPersistedValue(value)
+	}
+	return result
+}
+
+func redactPersistedValue(value any) any {
+	switch item := value.(type) {
+	case map[string]any:
+		return redactPersistedMetadata(item)
+	case []any:
+		result := make([]any, len(item))
+		for index, nested := range item {
+			result[index] = redactPersistedValue(nested)
+		}
+		return result
+	case string:
+		return security.RedactText(item)
+	default:
+		return value
+	}
+}
+
 func redactExportHeaders(input map[string]string) map[string]string {
 	if len(input) == 0 {
 		return nil
@@ -2277,6 +2378,9 @@ func sensitiveFieldName(name string) bool {
 	}
 	value := normalized.String()
 	if strings.HasSuffix(value, "url") || strings.HasSuffix(value, "uri") || strings.HasSuffix(value, "endpoint") {
+		return false
+	}
+	if strings.HasSuffix(value, "tokentype") || strings.HasSuffix(value, "expiresat") || strings.HasSuffix(value, "expiresin") || strings.HasSuffix(value, "expiry") || strings.HasSuffix(value, "expiration") {
 		return false
 	}
 	return strings.Contains(value, "secret") || strings.Contains(value, "password") || strings.Contains(value, "token") || strings.Contains(value, "apikey") || strings.Contains(value, "authorization") || strings.Contains(value, "cookie") || strings.Contains(value, "privatekey")
