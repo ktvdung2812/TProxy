@@ -15,6 +15,7 @@ import (
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
 )
 
 type ProviderError struct {
@@ -106,6 +107,9 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"plugin-http":          {"*"},
 		"copilot":              {"text", "vision", "tools", "reasoning"},
 		"vertex-partner":       {"text", "vision", "tools", "reasoning", "embedding"},
+		"qwen":                 {"text", "tools"},
+		"kiro":                 {"text", "vision", "tools", "reasoning"},
+		"qoder":                {"text", "tools", "reasoning"},
 	}
 	items := append([]string(nil), capabilities[providerType]...)
 	return items
@@ -119,7 +123,7 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"openai-compatible": "openai", "image": "openai", "video": "openai", "ollama": "openai", "kimi": "openai", "xai": "openai",
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
-		"copilot": "openai", "vertex-partner": "openai",
+		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder",
 	}
 	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: providerType != "antigravity" && providerType != "tavily" && providerType != "elevenlabs", BootstrapRetry: true}, nil
 }
@@ -128,11 +132,17 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 // run from the dashboard and does not consume paid generation quota.
 func (r *Registry) HealthCheck(ctx context.Context, provider store.Provider, credential store.Credential) error {
 	if provider.Type == "tavily" || provider.Type == "elevenlabs" {
-		// These specialized APIs have no universally safe model/list endpoint;
-		// use their adapter-specific request only when an administrator asks for
-		// a capability test. A configured endpoint is still considered healthy.
 		if strings.TrimSpace(provider.BaseURL) == "" {
 			return &ProviderError{Code: "health_check_failed", Message: "provider base URL is empty"}
+		}
+		return nil
+	}
+	if shouldSkipModelDiscovery(provider) {
+		if strings.TrimSpace(provider.BaseURL) == "" {
+			return &ProviderError{Code: "health_check_failed", Message: "provider base URL is empty"}
+		}
+		if items := staticDiscoveryModels(provider); len(items) > 0 {
+			return nil
 		}
 		return nil
 	}
@@ -151,20 +161,18 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 	if provider.Type == "antigravity" {
 		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity model discovery requires a project-scoped generation request"}
 	}
-	path := "/v1/models"
+	if shouldSkipModelDiscovery(provider) {
+		if items := staticDiscoveryModels(provider); len(items) > 0 {
+			return items, nil
+		}
+		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "model discovery is not supported for this provider type"}
+	}
 	headers := authHeaders(provider, credential)
-	if provider.Type == "gemini" {
-		path = "/v1beta/models"
-	} else if provider.Type == "vertex" {
-		path = "/v1/models"
-	} else if provider.Type == "plugin-http" {
-		path = "/models"
-	} else if provider.Type == "codex" {
-		path = "/models?client_version=1.0.0"
+	if provider.Type == "codex" {
 		headers = codexHeaders(provider, credential, false, canonical.Request{})
 	}
 	ctx = withCredentialProxy(ctx, credential)
-	target := endpoint(provider.BaseURL, path)
+	target := modelsDiscoveryURL(provider)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, &ProviderError{Code: "health_check_failed", Err: err}
@@ -180,6 +188,11 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 		return nil, &ProviderError{Code: "health_check_failed", Err: readErr}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if response.StatusCode == http.StatusNotFound {
+			if items := staticDiscoveryModels(provider); len(items) > 0 {
+				return items, nil
+			}
+		}
 		return nil, upstreamResponseError(response, body)
 	}
 	var payload map[string]any
@@ -195,7 +208,7 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 			if id == "" {
 				continue
 			}
-			items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: "openai", Capabilities: r.Capabilities(provider.Type)})
+			items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: "openai", Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
 		}
 		return items, nil
 	}
@@ -218,7 +231,7 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 		if id == "" {
 			continue
 		}
-		items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: stringValue(item["owned_by"]), Capabilities: r.Capabilities(provider.Type)})
+		items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: stringValue(item["owned_by"]), Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
 	}
 	return items, nil
 }
@@ -243,6 +256,9 @@ func NewRegistry() *Registry {
 		"plugin-http":          &pluginHTTPAdapter{client: client},
 		"copilot":              &copilotAdapter{client: client, openAI: &openAIAdapter{client: client}},
 		"vertex-partner":       &openAIAdapter{client: client},
+		"qwen":                 &openAIAdapter{client: client},
+		"kiro":                 &kiroAdapter{client: client},
+		"qoder":                &qoderAdapter{client: client},
 	}}
 }
 
@@ -255,6 +271,9 @@ func (r *Registry) Adapter(providerType string) (Adapter, error) {
 }
 
 func endpoint(baseURL, path string) string {
+	if strings.HasPrefix(path, "/v1/") {
+		return openAIResourceURL(baseURL, strings.TrimPrefix(path, "/v1"))
+	}
 	base := strings.TrimRight(baseURL, "/")
 	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
 		return base + strings.TrimPrefix(path, "/v1")
@@ -325,14 +344,30 @@ func upstreamError(response *http.Response) error {
 }
 
 func upstreamResponseError(response *http.Response, data []byte) error {
+	return upstreamResponseErrorForProvider(response, data, "")
+}
+
+func upstreamResponseErrorForProvider(response *http.Response, data []byte, baseURL string) error {
 	retryAfter := ""
 	if response != nil {
 		retryAfter = response.Header.Get("Retry-After")
 	}
-	return upstreamBodyError(response.StatusCode, data, retryAfter)
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+	return upstreamBodyErrorForProvider(status, data, retryAfter, baseURL)
 }
 
-func upstreamBodyError(status int, data []byte, retryAfter string) error {
+func upstreamBodyErrorForProvider(status int, data []byte, retryAfter, baseURL string) error {
+	pe := buildUpstreamBodyError(status, data, retryAfter)
+	if baseURL != "" {
+		pe.Message = enrichGLMUpstreamMessage(baseURL, pe.Message, pe.Status)
+	}
+	return pe
+}
+
+func buildUpstreamBodyError(status int, data []byte, retryAfter string) *ProviderError {
 	message := strings.TrimSpace(string(data))
 	var parsed map[string]any
 	if json.Unmarshal(data, &parsed) == nil {
@@ -389,7 +424,14 @@ func (a *openAIAdapter) Proxy(ctx context.Context, provider store.Provider, cred
 	return &RawResponse{Status: response.StatusCode, Headers: response.Header.Clone(), Body: data, ContentType: response.Header.Get("Content-Type")}, nil
 }
 
-func openAIBody(request canonical.Request) map[string]any {
+func openAIBody(provider store.Provider, request canonical.Request) map[string]any {
+	return sanitizeOpenAIUpstreamBody(provider, buildOpenAIBody(request), request.Stream)
+}
+
+func buildOpenAIBody(request canonical.Request) map[string]any {
+	if request.Source == canonical.ProtocolClaude && len(request.Raw) > 0 {
+		return claudeopenai.ClaudeToOpenAIRequest(request.UpstreamModel, request.Raw, request.Stream)
+	}
 	if request.Source == canonical.ProtocolOpenAI && len(request.Raw) > 0 {
 		body := cloneAnyMap(request.Raw)
 		body["model"] = request.UpstreamModel
@@ -418,13 +460,14 @@ func openAIBody(request canonical.Request) map[string]any {
 func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (*canonical.Response, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	request.Stream = false
-	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/v1/chat/completions"), correlationHeaders(authHeaders(provider, credential), request.RequestID), openAIBody(request))
+	response, err := postOpenAIChat(ctx, a.client, provider, correlationHeaders(authHeaders(provider, credential), request.RequestID), openAIBody(provider, request))
 	if err != nil {
 		return nil, &ProviderError{Status: 0, Code: "upstream_network", Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, upstreamError(response)
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		return nil, upstreamResponseErrorForProvider(response, data, provider.BaseURL)
 	}
 	var raw map[string]any
 	if err = json.NewDecoder(response.Body).Decode(&raw); err != nil {
@@ -448,11 +491,13 @@ func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, cr
 func (a *openAIAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	request.Stream = true
-	body := openAIBody(request)
-	body["stream_options"] = map[string]any{"include_usage": true}
+	body := openAIBody(provider, request)
+	if openAISupportsStreamOptions(provider) {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
 	headers := correlationHeaders(authHeaders(provider, credential), request.RequestID)
 	headers.Set("Accept", "text/event-stream")
-	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/v1/chat/completions"), headers, body)
+	response, err := postOpenAIChat(ctx, a.client, provider, headers, body)
 	if err != nil {
 		return nil, &ProviderError{Status: 0, Code: "upstream_network", Err: err}
 	}
@@ -532,6 +577,21 @@ func parseOpenAIStream(ctx context.Context, response *http.Response) <-chan cano
 type codexAdapter struct{ client *http.Client }
 
 func codexBody(request canonical.Request) map[string]any {
+	if request.Source == canonical.ProtocolClaude && request.Raw != nil {
+		openAI := claudeopenai.ClaudeToOpenAIRequest(request.UpstreamModel, request.Raw, true)
+		request.Messages = canonicalMessages(openAI["messages"])
+		request.Tools = mapSlice(openAI["tools"])
+		if choice, ok := openAI["tool_choice"]; ok {
+			request.ToolChoice = choice
+		}
+		if effort, ok := openAI["reasoning_effort"].(string); ok && strings.TrimSpace(effort) != "" {
+			if request.Raw == nil {
+				request.Raw = map[string]any{}
+			}
+			request.Raw["reasoning_effort"] = effort
+		}
+	}
+	shortMap, reverseMap := buildCodexToolNameMaps(request.Tools)
 	var body map[string]any
 	if request.Source == canonical.ProtocolResponses && request.Raw != nil {
 		encoded, _ := json.Marshal(request.Raw)
@@ -539,21 +599,17 @@ func codexBody(request canonical.Request) map[string]any {
 	}
 	if body == nil {
 		body = map[string]any{}
-		if request.System != nil {
-			body["instructions"] = request.System
-		}
-		input := make([]any, 0, len(request.Messages))
-		for _, message := range request.Messages {
-			item := map[string]any{"role": message.Role, "content": message.Content}
-			if message.Name != "" {
-				item["name"] = message.Name
-			}
-			if message.ToolCallID != "" {
-				item["tool_call_id"] = message.ToolCallID
-			}
-			input = append(input, item)
-		}
-		body["input"] = input
+	}
+	instructions := codexInstructionsString(request)
+	if instructions != "" {
+		body["instructions"] = instructions
+	} else {
+		delete(body, "instructions")
+	}
+	if _, hasInput := body["input"]; hasInput {
+		body["input"] = codexNormalizeInputValue(body["input"], shortMap)
+	} else {
+		body["input"] = codexMessagesToInput(codexMessagesWithoutInstructions(request.Messages), shortMap)
 	}
 	body["model"] = request.UpstreamModel
 	body["stream"] = true
@@ -564,10 +620,17 @@ func codexBody(request canonical.Request) map[string]any {
 	delete(body, "temperature")
 	delete(body, "top_p")
 	if len(request.Tools) > 0 {
-		body["tools"] = codexTools(request.Tools)
+		body["tools"] = codexToolsWithShortNames(request.Tools, shortMap)
+		body["parallel_tool_calls"] = true
 	}
 	if request.ToolChoice != nil {
-		body["tool_choice"] = request.ToolChoice
+		body["tool_choice"] = codexToolChoice(request.ToolChoice, shortMap)
+	}
+	if request.Raw != nil {
+		if effort, ok := request.Raw["reasoning_effort"].(string); ok && strings.TrimSpace(effort) != "" {
+			body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
+			body["include"] = []any{"reasoning.encrypted_content"}
+		}
 	}
 	for key, value := range request.Reasoning {
 		body[key] = value
@@ -575,7 +638,44 @@ func codexBody(request canonical.Request) map[string]any {
 	// Codex /responses rejects requests unless store is explicitly false.
 	body["store"] = false
 	delete(body, "previous_response_id")
+	delete(body, "prompt_cache_retention")
+	delete(body, "safety_identifier")
+	body["_codex_reverse_tool_names"] = reverseMap
 	return body
+}
+
+func codexToolChoice(toolChoice any, shortMap map[string]string) any {
+	mapped, ok := toolChoice.(map[string]any)
+	if !ok {
+		return toolChoice
+	}
+	if stringValue(mapped["type"]) != "function" {
+		return toolChoice
+	}
+	function, _ := mapped["function"].(map[string]any)
+	name := stringValue(function["name"])
+	if name == "" {
+		return toolChoice
+	}
+	shortName := shortMap[name]
+	if shortName == "" {
+		shortName = name
+	}
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": shortName,
+		},
+	}
+}
+
+func codexReverseToolNames(body map[string]any) map[string]string {
+	reverse, _ := body["_codex_reverse_tool_names"].(map[string]string)
+	delete(body, "_codex_reverse_tool_names")
+	if reverse == nil {
+		return map[string]string{}
+	}
+	return reverse
 }
 
 func codexTools(tools []map[string]any) []map[string]any {
@@ -629,10 +729,28 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 				result.Model = event.Model
 			}
 		case canonical.EventTextDelta:
+			if event.ID != "" {
+				result.ID = event.ID
+			}
+			if event.Model != "" {
+				result.Model = event.Model
+			}
 			text.WriteString(event.Text)
 		case canonical.EventReasoningDelta:
+			if event.ID != "" {
+				result.ID = event.ID
+			}
+			if event.Model != "" {
+				result.Model = event.Model
+			}
 			reasoning.WriteString(event.Reasoning)
 		case canonical.EventToolCallDelta:
+			if event.ID != "" {
+				result.ID = event.ID
+			}
+			if event.Model != "" {
+				result.Model = event.Model
+			}
 			result.ToolCalls = append(result.ToolCalls, event.ToolCall)
 		case canonical.EventUsage:
 			if event.Usage != nil {
@@ -652,6 +770,7 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	body := codexBody(request)
+	reverseMap := codexReverseToolNames(body)
 	response, err := executeJSON(ctx, a.client, http.MethodPost, endpoint(provider.BaseURL, "/responses"), correlationHeaders(codexHeaders(provider, credential, true, request), request.RequestID), body)
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
@@ -671,18 +790,18 @@ func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provide
 				out <- canonical.Event{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "invalid_upstream_response", Err: decodeErr}}
 				return
 			}
-			codexEventsFromJSON(out, raw)
+			codexEventsFromJSON(out, raw, reverseMap)
 			return
 		}
-		parseCodexSSE(ctx, response.Body, out)
+		parseCodexSSE(ctx, response.Body, out, reverseMap)
 	}()
 	return out, nil
 }
 
-func parseCodexSSE(ctx context.Context, body io.Reader, out chan<- canonical.Event) {
+func parseCodexSSE(ctx context.Context, body io.Reader, out chan<- canonical.Event, reverseToolNames map[string]string) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64<<10), 4<<20)
-	started := false
+	state := newCodexStreamState(reverseToolNames)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -695,70 +814,54 @@ func parseCodexSSE(ctx context.Context, body io.Reader, out chan<- canonical.Eve
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			out <- canonical.Event{Type: canonical.EventMessageEnd}
+			if state.eventCount > 0 && !state.hasCompletedEvent && !state.hasIncompleteEvent && !state.hasFailedEvent {
+				out <- canonical.Event{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "codex_stream_missing_response_completed", Message: "Codex stream ended before response.completed"}}
+			}
+			out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: "stop"}
 			return
 		}
 		var raw map[string]any
 		if json.Unmarshal([]byte(data), &raw) != nil {
 			continue
 		}
-		codexEvent(out, raw, &started)
+		for _, event := range translateCodexEvent(raw, state) {
+			out <- event
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		out <- canonical.Event{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "upstream_stream_error", Err: err}}
-	} else if started {
-		out <- canonical.Event{Type: canonical.EventMessageEnd}
 	}
 }
 
-func codexEventsFromJSON(out chan<- canonical.Event, raw map[string]any) {
-	started := false
+func codexEventsFromJSON(out chan<- canonical.Event, raw map[string]any, reverseToolNames map[string]string) {
+	state := newCodexStreamState(reverseToolNames)
 	if response, ok := raw["response"].(map[string]any); ok {
 		raw = response
 	}
-	codexEvent(out, raw, &started)
-	if !started {
-		out <- canonical.Event{Type: canonical.EventMessageStart, ID: stringValue(raw["id"]), Model: stringValue(raw["model"])}
+	events := translateCodexEvent(map[string]any{"type": "response.created", "response": raw}, state)
+	for _, event := range events {
+		out <- event
 	}
-	out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: "stop"}
-}
-
-func codexEvent(out chan<- canonical.Event, raw map[string]any, started *bool) {
-	typeName := stringValue(raw["type"])
-	responseDetails, _ := raw["response"].(map[string]any)
-	if !*started && (typeName == "response.created" || typeName == "response.in_progress" || raw["id"] != nil) {
-		id := stringValue(raw["id"])
-		model := stringValue(raw["model"])
-		if responseDetails != nil {
-			if id == "" {
-				id = stringValue(responseDetails["id"])
+	if output, ok := raw["output"].([]any); ok {
+		for _, item := range output {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				continue
 			}
-			if model == "" {
-				model = stringValue(responseDetails["model"])
+			switch stringValue(mapped["type"]) {
+			case "message":
+				for _, event := range translateCodexEvent(map[string]any{"type": "response.output_item.done", "item": mapped}, state) {
+					out <- event
+				}
+			case "function_call":
+				for _, event := range translateCodexEvent(map[string]any{"type": "response.output_item.done", "item": mapped}, state) {
+					out <- event
+				}
 			}
 		}
-		out <- canonical.Event{Type: canonical.EventMessageStart, ID: id, Model: model}
-		*started = true
 	}
-	switch typeName {
-	case "response.output_text.delta", "output_text.delta":
-		out <- canonical.Event{Type: canonical.EventTextDelta, Text: stringValue(firstValue(raw, "delta", "text"))}
-	case "response.reasoning_summary_text.delta", "reasoning_summary_text.delta":
-		out <- canonical.Event{Type: canonical.EventReasoningDelta, Reasoning: stringValue(firstValue(raw, "delta", "text"))}
-	case "response.function_call_arguments.delta", "function_call_arguments.delta":
-		out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: map[string]any{"type": "function", "function": map[string]any{"arguments": stringValue(firstValue(raw, "delta", "arguments"))}, "id": stringValue(raw["item_id"])}}
-	case "response.completed", "response.done":
-		usage := parseResponsesUsage(firstAny(raw["usage"], nestedMapValue(raw, "response", "usage")))
-		if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.ReasoningTokens > 0 {
-			out <- canonical.Event{Type: canonical.EventUsage, Usage: &usage}
-		}
-		out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: "stop"}
-	case "response.failed", "error":
-		message := stringValue(firstAny(raw["message"], nestedMapValue(raw, "error", "message")))
-		if message == "" {
-			message = "Codex upstream response failed"
-		}
-		out <- canonical.Event{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "upstream_response_failed", Message: message}}
+	for _, event := range translateCodexEvent(map[string]any{"type": "response.completed", "response": raw}, state) {
+		out <- event
 	}
 }
 
@@ -792,6 +895,13 @@ func anthropicBody(request canonical.Request) map[string]any {
 			body["max_tokens"] = request.MaxTokens
 		}
 		return body
+	}
+	if request.Source == canonical.ProtocolOpenAI && len(request.Raw) > 0 {
+		return claudeopenai.OpenAIToClaudeRequest(request.UpstreamModel, request.Raw, request.Stream)
+	}
+	if request.Source == canonical.ProtocolOpenAI || request.Source == canonical.ProtocolResponses {
+		openAI := buildOpenAIBody(request)
+		return claudeopenai.OpenAIToClaudeRequest(request.UpstreamModel, openAI, request.Stream)
 	}
 	messages := make([]canonical.Message, 0, len(request.Messages))
 	var systemParts []string
@@ -1159,6 +1269,25 @@ func geminiBody(request canonical.Request) map[string]any {
 		body["toolConfig"] = toolConfig
 	}
 	return body
+}
+
+func canonicalMessages(value any) []canonical.Message {
+	items, _ := value.([]any)
+	result := make([]canonical.Message, 0, len(items))
+	for _, item := range items {
+		mapped, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		result = append(result, canonical.Message{
+			Role:       stringValue(mapped["role"]),
+			Content:    mapped["content"],
+			Name:       stringValue(mapped["name"]),
+			ToolCallID: stringValue(mapped["tool_call_id"]),
+			ToolCalls:  mapSlice(mapped["tool_calls"]),
+		})
+	}
+	return result
 }
 
 func cloneAnyMap(input map[string]any) map[string]any {

@@ -115,3 +115,11 @@ export function getColorEmoji(remaining: number) {
   if (remaining >= 30) return "🟡";
   return "🔴";
 }
+
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+export function formatProxyUsageLabel(usage?: { requests: number; promptTokens: number; completionTokens: number }) {
+  if (!usage) return null;
+  const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
+  return `${compactNumber.format(usage.requests || 0)} req · ${compactNumber.format(tokens)} tok`;
+}

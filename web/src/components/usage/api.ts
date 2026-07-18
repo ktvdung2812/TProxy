@@ -42,6 +42,7 @@ export type UsageStats = {
   byProvider: Record<string, UsageBucketEntry>;
   byModel: Record<string, UsageBucketEntry>;
   byAccount: Record<string, UsageBucketEntry>;
+  byCredential?: Record<string, { requests: number; promptTokens: number; completionTokens: number }>;
   byApiKey: Record<string, UsageBucketEntry>;
   byEndpoint: Record<string, UsageBucketEntry>;
   recentRequests: UsageRecentRequest[];
@@ -87,7 +88,11 @@ async function adminFetch<T>(secret: string, path: string) {
 }
 
 export function fetchUsageStats(secret: string, period: UsagePeriod) {
-  return adminFetch<UsageStats>(secret, `/api/admin/usage/stats?period=${encodeURIComponent(period)}`);
+  return adminFetch<UsageStats>(secret, `/api/admin/usage/stats?period=${encodeURIComponent(period)}`).then((data) => ({
+    ...data,
+    recentRequests: data.recentRequests ?? [],
+    activeRequests: data.activeRequests ?? [],
+  }));
 }
 
 export function fetchUsageChart(secret: string, period: UsagePeriod) {

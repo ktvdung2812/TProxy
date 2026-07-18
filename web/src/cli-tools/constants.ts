@@ -93,7 +93,12 @@ export const CLI_TOOLS: Record<string, CLITool> = {
       language: "bash",
       code: `export ANTHROPIC_BASE_URL="{{baseUrl}}"
 export ANTHROPIC_API_KEY="{{apiKey}}"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="{{model}}"
+export ANTHROPIC_MODEL="fable"
+export ANTHROPIC_DEFAULT_FABLE_MODEL="fable"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="opus"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="sonnet"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="haiku"
+export CLAUDE_CODE_SUBAGENT_MODEL="fable"
 claude`,
     },
   },

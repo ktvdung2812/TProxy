@@ -48,6 +48,14 @@ export const NAV_SECTIONS: NavSection[] = [
         title: "Combos",
         description: "Ordered fallback policies across virtual models.",
       },
+      {
+        id: "mapping",
+        path: "/mapping",
+        label: "Mapping",
+        icon: "swap_horiz",
+        title: "Protocol mapping",
+        description: "Transparent Claude tier routing — rewrite placeholders server-side without changing client model names.",
+      },
     ],
   },
   {

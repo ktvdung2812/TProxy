@@ -40,6 +40,7 @@ type Router struct {
 	sessions        map[string]sessionBinding
 	providerStreams map[string]int
 	pricing         *pricing.Catalog
+	modelsRegistry  *pricing.ModelsRegistry
 }
 
 type CredentialRefresher interface {
@@ -96,10 +97,117 @@ func (r *Router) SetCredentialRefresher(refresher CredentialRefresher) {
 
 func (r *Router) SetAllowUpstreamModels(enabled bool) { r.allowUpstream = enabled }
 
+func (r *Router) allowUpstreamModelResolution() bool {
+	if r.allowUpstream {
+		return true
+	}
+	registry := r.modelsRegistry
+	return registry != nil && registry.FilteringEnabled()
+}
+
 func (r *Router) SetPricingCatalog(catalog *pricing.Catalog) {
 	r.mu.Lock()
 	r.pricing = catalog
 	r.mu.Unlock()
+}
+
+func (r *Router) SetModelsRegistry(registry *pricing.ModelsRegistry) {
+	r.mu.Lock()
+	r.modelsRegistry = registry
+	r.mu.Unlock()
+}
+
+type CatalogDisplayEntry struct {
+	ID   string
+	Name string
+}
+
+func (r *Router) CatalogDisplayEntry(ctx context.Context, model store.PublicModel) CatalogDisplayEntry {
+	if len(model.ComboItems) > 0 {
+		return CatalogDisplayEntry{ID: model.ID, Name: catalogDisplayName(model)}
+	}
+	registry := r.modelsRegistry
+	upstream, known := r.catalogUpstreamModel(ctx, model)
+	useUpstream := model.ExposeUpstreamName
+	if registry != nil && registry.FilteringEnabled() && known {
+		useUpstream = true
+	}
+	if useUpstream && upstream != "" {
+		name := catalogDisplayName(model)
+		if registry != nil {
+			if catalogName, ok := registry.ModelDisplayName(upstream); ok {
+				name = catalogName
+			}
+		}
+		return CatalogDisplayEntry{ID: upstream, Name: name}
+	}
+	return CatalogDisplayEntry{ID: model.ID, Name: catalogDisplayName(model)}
+}
+
+func catalogDisplayName(model store.PublicModel) string {
+	if strings.TrimSpace(model.DisplayName) != "" {
+		return model.DisplayName
+	}
+	return model.ID
+}
+
+func (r *Router) catalogUpstreamModel(ctx context.Context, model store.PublicModel) (upstream string, known bool) {
+	routes, err := r.store.Routes(ctx, model.ID)
+	if err != nil {
+		return "", false
+	}
+	registry := r.modelsRegistry
+	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
+		if registry == nil || !registry.FilteringEnabled() {
+			return route.UpstreamModel, true
+		}
+		provider, err := r.store.Provider(ctx, route.ProviderID)
+		if err != nil {
+			continue
+		}
+		if registry.KnownRoute(*provider, route.UpstreamModel) {
+			return route.UpstreamModel, true
+		}
+	}
+	return "", false
+}
+
+func (r *Router) IsModelCatalogVisible(ctx context.Context, model store.PublicModel) bool {
+	registry := r.modelsRegistry
+	if registry == nil || !registry.FilteringEnabled() {
+		return true
+	}
+	if len(model.ComboItems) > 0 {
+		return true
+	}
+	if registry.KnownModelRef(model.ID) {
+		return true
+	}
+	for _, alias := range model.Aliases {
+		if registry.KnownModelRef(alias) {
+			return true
+		}
+	}
+	routes, err := r.store.Routes(ctx, model.ID)
+	if err != nil {
+		return false
+	}
+	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
+		provider, err := r.store.Provider(ctx, route.ProviderID)
+		if err != nil {
+			continue
+		}
+		if registry.KnownRoute(*provider, route.UpstreamModel) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Router) ConfigureRouting(cfg config.RoutingConfig) {
@@ -148,13 +256,18 @@ func (r *Router) Resolve(ctx context.Context, requested string, apiKey *store.AP
 		model, err = r.store.ResolveCombo(ctx, requested)
 	}
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) && r.allowUpstream {
+		if errors.Is(err, sql.ErrNoRows) && r.allowUpstreamModelResolution() {
 			model, err = r.store.ResolveUpstreamModel(ctx, requested)
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("model_not_found: %s", requested)
 		}
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+	}
+	if model == nil {
+		return nil, fmt.Errorf("model_not_found: %s", requested)
 	}
 	if !r.store.PublicModelAllowed(apiKey, model.ID) {
 		return nil, fmt.Errorf("model_forbidden: %s", model.ID)

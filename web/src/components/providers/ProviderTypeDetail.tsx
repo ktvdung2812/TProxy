@@ -1,18 +1,27 @@
 import { Badge, Button, Card, EmptyState } from "../ui";
 import type { ProviderTypeInfo } from "./catalog";
+import type { ConnectionMethod, ConnectionProfile } from "./connectionMethods";
+import { ProviderConnectionActions } from "./ProviderConnectionActions";
+import { ProviderLogo } from "./ProviderLogo";
 
 type Props = {
   catalog: ProviderTypeInfo;
+  connectionProfile: ConnectionProfile;
   onBack: () => void;
   onSetup: () => void;
-  onConnect?: () => void;
+  onConnectionMethod: (method: ConnectionMethod) => void;
   connectBusy?: boolean;
 };
 
 /** Detail page for a catalog provider type with no configured instance yet. */
-export function ProviderTypeDetail({ catalog, onBack, onSetup, onConnect, connectBusy }: Props) {
-  const connectLabel = `Connect ${catalog.name}`;
-
+export function ProviderTypeDetail({
+  catalog,
+  connectionProfile,
+  onBack,
+  onSetup,
+  onConnectionMethod,
+  connectBusy,
+}: Props) {
   return (
     <div>
       <button className="detail-back" type="button" onClick={onBack}>
@@ -21,12 +30,13 @@ export function ProviderTypeDetail({ catalog, onBack, onSetup, onConnect, connec
       </button>
 
       <div className="detail-header">
-        <span
+        <ProviderLogo
           className="provider-logo"
-          style={{ backgroundColor: `${catalog.color}22`, color: catalog.color }}
-        >
-          <span className="material-symbols-outlined">{catalog.icon}</span>
-        </span>
+          providerId={catalog.presetId}
+          providerType={catalog.type}
+          style={{ color: catalog.color }}
+          alt={`${catalog.name} logo`}
+        />
         <div className="detail-title-block">
           <h2>{catalog.name}</h2>
           <div className="detail-meta">
@@ -49,44 +59,23 @@ export function ProviderTypeDetail({ catalog, onBack, onSetup, onConnect, connec
           </div>
         </div>
         <div className="detail-header-actions">
-          {catalog.supportsOAuth && onConnect ? (
-            <>
-              <Button variant="primary" size="md" icon="lock_person" onClick={onConnect} loading={connectBusy}>
-                {connectLabel}
-              </Button>
-              <Button variant="outline" size="md" icon="tune" onClick={onSetup}>
-                Advanced setup
-              </Button>
-            </>
-          ) : (
-            <Button variant="primary" size="md" icon="add" onClick={onSetup}>
-              Set up provider
-            </Button>
-          )}
+          <Button variant="outline" size="md" icon="tune" onClick={onSetup}>
+            Advanced setup
+          </Button>
         </div>
       </div>
 
-      <Card
-        pad="md"
-        className="section"
-        title="Connections"
-        icon="vpn_key"
-        action={
-          catalog.supportsOAuth && onConnect ? (
-            <Button variant="primary" size="sm" icon="lock_person" onClick={onConnect} loading={connectBusy}>
-              {connectLabel}
-            </Button>
-          ) : undefined
-        }
-      >
+      <Card pad="md" className="section" title="Connections" icon="vpn_key">
+        <ProviderConnectionActions
+          profile={connectionProfile}
+          onMethod={onConnectionMethod}
+          busy={connectBusy}
+          size="md"
+        />
         <EmptyState
           icon="key_off"
           text="No connections yet."
-          hint={
-            catalog.supportsOAuth
-              ? `Click "${connectLabel}" to authorize your account via OAuth.`
-              : "Set up this provider, then add a credential to enable it."
-          }
+          hint="Pick a connection method above. tproxy will create the provider automatically when you connect."
         />
       </Card>
     </div>

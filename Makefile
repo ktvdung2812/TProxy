@@ -22,5 +22,8 @@ run:
 	@test -f .env.run && . ./.env.run; \
 	go run ./cmd/tproxy --config config.yaml
 
+dev:
+	npm run dev
+
 clean:
 	go clean

@@ -6,24 +6,27 @@ The gateway exposes stable public model IDs, rewrites upstream model names in re
 
 ## Development
 
+One command starts the Go gateway and the Vite dashboard dev server:
+
 ```bash
 cp config.example.yaml config.yaml
 cp .env.example .env.run
 # Edit .env.run: set TPROXY_MASTER_KEY from `go run ./cmd/tproxy --print-master-key`
+npm install
+npm run dev
+```
+
+- Dashboard (hot reload): `http://127.0.0.1:28121/dashboard/`
+- API gateway: `http://127.0.0.1:28120/v1`
+- Embedded dashboard (production build): `http://127.0.0.1:28120/dashboard/`
+- Health: `http://127.0.0.1:28120/healthz`
+
+Manual backend only:
+
+```bash
 source .env.run
 go run ./cmd/tproxy --config config.yaml
 ```
-
-Official local-development secrets (see `.env.example`):
-
-- `TPROXY_MANAGEMENT_SECRET=tproxy-local-management-secret` — dashboard admin API
-- `TPROXY_API_KEY=tproxy-local-dev-key` — client gateway access
-
-Default endpoints:
-
-- Gateway: `http://127.0.0.1:28120/v1`
-- Dashboard: `http://127.0.0.1:28120/dashboard/`
-- Health: `http://127.0.0.1:28120/healthz`
 
 ## Current implementation status
 

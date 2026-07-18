@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Badge } from "../ui";
 import type { ProviderTypeInfo } from "./catalog";
+import { ProviderLogo } from "./ProviderLogo";
 import { getProviderStats, type Credential, type Provider } from "./types";
 
 type Props = {
@@ -23,13 +24,12 @@ export function ProviderCatalogCard({ catalog, instances, credentials, to }: Pro
       className={`provider-catalog-card ${dimmed ? "disabled" : ""}`}
     >
       <div className="provider-catalog-card-inner">
-        <span
+        <ProviderLogo
           className="provider-catalog-icon"
-          style={{ backgroundColor: `${catalog.color}22`, color: catalog.color }}
-          aria-hidden
-        >
-          <span className="material-symbols-outlined">{catalog.icon}</span>
-        </span>
+          providerId={catalog.presetId}
+          providerType={catalog.type}
+          style={{ color: catalog.color }}
+        />
         <div className="provider-catalog-copy">
           <h3 className="provider-catalog-name">{catalog.name}</h3>
           <div className="provider-catalog-status">
@@ -100,9 +100,12 @@ export function CustomProviderCard({ provider, credentials, to }: CustomCardProp
   return (
     <Link to={to} className={`provider-catalog-card ${dimmed ? "disabled" : ""}`}>
       <div className="provider-catalog-card-inner">
-        <span className="provider-catalog-icon provider-catalog-icon-custom" aria-hidden>
-          <span className="material-symbols-outlined">extension</span>
-        </span>
+        <ProviderLogo
+          className="provider-catalog-icon provider-catalog-icon-custom"
+          providerId={provider.ID}
+          providerType={provider.Type}
+          fallbackIcon="extension"
+        />
         <div className="provider-catalog-copy">
           <h3 className="provider-catalog-name">{provider.Name || provider.ID}</h3>
           <div className="provider-catalog-status">

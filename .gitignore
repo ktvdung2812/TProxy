@@ -4,8 +4,11 @@
 *.db-shm
 *.db-wal
 /web/node_modules/
+/node_modules/
 /web/*.tsbuildinfo
 .env
 .env.run
-config.yaml
+/config.yaml
 models.dev.json
+models.dev-catalog.json
+/deploy/bin/

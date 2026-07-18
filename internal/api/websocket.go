@@ -141,44 +141,21 @@ func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection
 		state.Attempt = stream.Selection.Attempt
 	}
 	responseID := "resp_" + request.RequestID
-	if err = connection.WriteJSON(map[string]any{"type": "response.created", "response": map[string]any{"id": responseID, "object": "response", "model": model.ID, "status": "in_progress"}}); err != nil {
-		return err
-	}
-	var usage *canonical.Usage
+	writer := newResponsesStreamWriter(responseID, model.ID)
 	for event := range stream.Events {
-		var frame map[string]any
-		switch event.Type {
-		case canonical.EventMessageStart:
-			continue
-		case canonical.EventTextDelta:
-			frame = map[string]any{"type": "response.output_text.delta", "response_id": responseID, "delta": event.Text}
-		case canonical.EventReasoningDelta:
-			frame = map[string]any{"type": "response.reasoning_summary_text.delta", "response_id": responseID, "delta": event.Reasoning}
-		case canonical.EventToolCallDelta:
-			frame = map[string]any{"type": "response.function_call_arguments.delta", "response_id": responseID, "item": event.ToolCall}
-		case canonical.EventUsage:
-			if event.Usage != nil {
-				copyUsage := *event.Usage
-				usage = &copyUsage
+		payloads, done := writer.handle(event)
+		for _, payload := range payloads {
+			if stringValue(payload["type"]) == "error" {
+				errObj, _ := payload["error"].(map[string]any)
+				return writeWebSocketError(connection, "stream_error", stringValue(errObj["message"]), request.RequestID)
 			}
-			continue
-		case canonical.EventMessageEnd:
-			response := map[string]any{"id": responseID, "object": "response", "model": model.ID, "status": "completed"}
-			if usage != nil {
-				response["usage"] = map[string]any{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
-			}
-			frame = map[string]any{"type": "response.completed", "response": response}
-		case canonical.EventError:
-			return writeWebSocketError(connection, "stream_error", event.Err.Error(), request.RequestID)
-		}
-		if frame != nil {
-			if err = connection.WriteJSON(frame); err != nil {
+			if err = connection.WriteJSON(payload); err != nil {
 				cancel()
 				return err
 			}
-			if event.Type == canonical.EventMessageEnd {
-				return nil
-			}
+		}
+		if done {
+			return nil
 		}
 	}
 	return nil

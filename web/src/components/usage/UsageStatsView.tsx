@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NetworkTopology } from "../topology/NetworkTopology";
-import type { CredentialItem } from "../topology/utils";
 import { fetchUsageStats } from "./api";
 import type { UsagePeriod, UsageStats } from "./api";
 import { OverviewCards } from "./OverviewCards";
@@ -30,7 +28,6 @@ type Props = {
   secret: string;
   period: UsagePeriod;
   providers: ProviderItem[];
-  credentialsByProvider: Record<string, CredentialItem[]>;
   onError: (message: string) => void;
 };
 
@@ -41,7 +38,7 @@ const TABLE_OPTIONS: Array<{ value: UsageTableView; label: string }> = [
   { value: "endpoint", label: "Usage by Upstream Model" },
 ];
 
-export function UsageStatsView({ secret, period, providers, credentialsByProvider, onError }: Props) {
+export function UsageStatsView({ secret, period, providers, onError }: Props) {
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -77,8 +74,8 @@ export function UsageStatsView({ secret, period, providers, credentialsByProvide
       if (!current) return current;
       return {
         ...current,
-        activeRequests: update.activeRequests,
-        recentRequests: update.recentRequests,
+        activeRequests: update.activeRequests ?? [],
+        recentRequests: update.recentRequests ?? [],
         errorProvider: update.errorProvider,
       };
     });
@@ -266,15 +263,9 @@ export function UsageStatsView({ secret, period, providers, credentialsByProvide
       <ProviderTopology
         providers={providers}
         activeRequests={stats.activeRequests}
-        lastProvider={stats.recentRequests[0]?.provider || ""}
+        lastProvider={stats.recentRequests?.[0]?.provider || ""}
         errorProvider={stats.errorProvider || ""}
-        aside={<RecentRequests requests={stats.recentRequests} />}
-      />
-      <NetworkTopology
-        secret={secret}
-        providers={providers}
-        credentialsByProvider={credentialsByProvider}
-        activeRequests={stats.activeRequests}
+        aside={<RecentRequests requests={stats.recentRequests ?? []} />}
       />
       <UsageChart secret={secret} period={period} onError={onError} />
       <div className="usage-table-toolbar">

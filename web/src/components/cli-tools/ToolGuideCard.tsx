@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, Field, Input, Select } from "../ui";
 import type { CLITool } from "../../cli-tools/constants";
+import { getStoredApiKeySecret, getApiKeySecretsVersion, subscribeApiKeySecrets } from "../../lib/apiKeySecrets";
 import { ApiKeySelect, type ApiKeyOption } from "./ApiKeySelect";
 import { CLIToolApplyPanel } from "./CLIToolApplyPanel";
 
@@ -24,19 +25,34 @@ function normalizeBaseUrl(origin: string): string {
 }
 
 export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
-  const [apiKey, setApiKey] = useState("");
+  const enabledKeys = useMemo(() => apiKeys.filter((key) => key.enabled !== false), [apiKeys]);
+  const defaultKeyId = useMemo(() => {
+    if (enabledKeys.length === 0) return "";
+    const firstWithSecret = enabledKeys.find((key) => getStoredApiKeySecret(key.id));
+    return firstWithSecret?.id ?? enabledKeys[0].id;
+  }, [enabledKeys]);
+  const [apiKey, setApiKey] = useState(() => (defaultKeyId ? getStoredApiKeySecret(defaultKeyId) ?? "" : ""));
+  const [selectedKeyId, setSelectedKeyId] = useState(defaultKeyId);
   const [model, setModel] = useState(() => models[0]?.value ?? "");
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  useSyncExternalStore(subscribeApiKeySecrets, getApiKeySecretsVersion, () => 0);
 
   const baseUrl = useMemo(() => {
     if (typeof window === "undefined") return "http://localhost:8080/v1";
     return normalizeBaseUrl(window.location.origin);
   }, []);
 
+  const resolvedApiKey = useMemo(() => {
+    const trimmed = apiKey.trim();
+    if (trimmed) return trimmed;
+    if (selectedKeyId) return getStoredApiKeySecret(selectedKeyId) ?? "";
+    return "";
+  }, [apiKey, selectedKeyId]);
+
   const replaceVars = (text: string) =>
     text
       .replace(/\{\{baseUrl\}\}/g, baseUrl)
-      .replace(/\{\{apiKey\}\}/g, apiKey.trim() || "your-api-key")
+      .replace(/\{\{apiKey\}\}/g, resolvedApiKey)
       .replace(/\{\{model\}\}/g, model || "virtual-model-id");
 
   const copyText = async (text: string, field: string) => {
@@ -94,7 +110,14 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     );
   };
 
-  const renderApiKeySelector = () => <ApiKeySelect apiKeys={apiKeys} value={apiKey} onChange={setApiKey} />;
+  const renderApiKeySelector = () => (
+    <ApiKeySelect
+      apiKeys={apiKeys}
+      value={apiKey}
+      onChange={setApiKey}
+      onSelectedIdChange={setSelectedKeyId}
+    />
+  );
 
   const renderModelSelector = () => (
     <div className="cli-tool-field-stack">
@@ -222,15 +245,15 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
         <Badge size="sm">{tool.configType}</Badge>
       </div>
       <div className="cli-tool-guide-body">
+        {renderGuideSteps()}
         <CLIToolApplyPanel
           tool={tool}
           secret={secret}
-          apiKey={apiKey}
+          apiKey={resolvedApiKey}
           model={model}
           baseUrl={baseUrl}
           onApiKeyChange={setApiKey}
         />
-        {renderGuideSteps()}
       </div>
       {tool.settingsFile ? (
         <p className="cli-tool-hint">

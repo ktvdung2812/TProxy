@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 16
+const sqliteCurrentSchemaVersion = 17
 
 type sqliteMigration struct {
 	version int
@@ -54,6 +54,7 @@ var sqliteMigrations = []sqliteMigration{
 	{version: 14, apply: createConfigVersionSchema},
 	{version: 15, apply: migrateTeamScopedAliases},
 	{version: 16, apply: createCredentialModelCooldownSchema},
+	{version: 17, apply: createAppSettingsSchema},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -306,6 +307,14 @@ func createCredentialModelCooldownSchema(ctx context.Context, tx *sql.Tx) error 
  status INTEGER NOT NULL DEFAULT 0,
  count INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY (credential_id, model)
+);`)
+	return err
+}
+
+func createAppSettingsSchema(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_settings (
+ key TEXT PRIMARY KEY,
+ value_json TEXT NOT NULL DEFAULT '{}'
 );`)
 	return err
 }

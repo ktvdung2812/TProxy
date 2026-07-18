@@ -7,15 +7,15 @@ import { ProviderDetail } from "./ProviderDetail";
 import { ProviderList } from "./ProviderList";
 import { ProviderTypeDetail } from "./ProviderTypeDetail";
 import { resolveProviderSlug, type ProviderTypeInfo } from "./catalog";
-import { checkProviderHealth, deleteProvider, exportAuthBundle, importAuthBundle, saveProvider } from "./api";
+import { resolveConnectionProfile, type ConnectionMethod } from "./connectionMethods";
+import { checkProviderHealth, deleteProvider, exportAuthBundle, fetchNinerouterPresets, importAuthBundle, saveProvider, type NinerouterPreset } from "./api";
+import { AddCredentialModal } from "./AddCredentialModal";
 import { OAuthModal } from "./OAuthModal";
-import type { Credential, ModelAlias, Provider, PublicModel, RouteTarget } from "./types";
+import type { Credential, ModelAlias, Provider } from "./types";
 
 type Props = {
   providers: Provider[];
   credentials: Record<string, Credential[]>;
-  models: PublicModel[];
-  routes: RouteTarget[];
   aliases: ModelAlias[];
   secret: string;
   searchQuery?: string;
@@ -30,8 +30,6 @@ type Props = {
 export function ProvidersView({
   providers,
   credentials,
-  models,
-  routes,
   aliases,
   secret,
   searchQuery = "",
@@ -51,19 +49,55 @@ export function ProvidersView({
   const [showImport, setShowImport] = useState(false);
   const [oauthProviderId, setOauthProviderId] = useState<string | null>(null);
   const [oauthProviderType, setOauthProviderType] = useState<string | null>(null);
+  const [oauthPresetId, setOauthPresetId] = useState<string | null>(null);
+  const [presets, setPresets] = useState<NinerouterPreset[]>([]);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
+  const [showCatalogCredential, setShowCatalogCredential] = useState(false);
+  const [catalogCredentialMethod, setCatalogCredentialMethod] = useState<ConnectionMethod | null>(null);
+  const [catalogProviderId, setCatalogProviderId] = useState<string | null>(null);
   const importInputId = "tproxy-auth-bundle-import";
 
   useEffect(() => {
-    if (!selectedId) return;
-    if (!resolveProviderSlug(selectedId, providers)) {
+    if (!secret) {
+      setPresets([]);
+      setPresetsLoaded(true);
+      return;
+    }
+    setPresetsLoaded(false);
+    void fetchNinerouterPresets(secret)
+      .then((result) => setPresets(result.presets || []))
+      .catch(() => setPresets([]))
+      .finally(() => setPresetsLoaded(true));
+  }, [secret]);
+
+  useEffect(() => {
+    if (!selectedId || !presetsLoaded) return;
+    if (!resolveProviderSlug(selectedId, providers, presets)) {
       onSelect(null);
     }
-  }, [selectedId, providers, onSelect]);
+  }, [selectedId, providers, presets, presetsLoaded, onSelect]);
 
   const resolved = useMemo(
-    () => (selectedId ? resolveProviderSlug(selectedId, providers) : null),
-    [selectedId, providers],
+    () => (selectedId ? resolveProviderSlug(selectedId, providers, presets) : null),
+    [selectedId, providers, presets],
   );
+
+  const awaitingPresetCatalog = useMemo(() => {
+    if (!selectedId || presetsLoaded) return false;
+    return resolveProviderSlug(selectedId, providers, []) === null;
+  }, [selectedId, presetsLoaded, providers]);
+
+  if (awaitingPresetCatalog) {
+    return (
+      <section className="section">
+        <div className="section-head">
+          <p className="eyebrow">Providers</p>
+          <h2>Loading provider…</h2>
+          <p>Fetching provider catalog metadata.</p>
+        </div>
+      </section>
+    );
+  }
 
   const openAdd = (type?: string) => {
     setAddPreset(type);
@@ -71,10 +105,10 @@ export function ProvidersView({
   };
 
   const ensureCatalogProvider = async (catalog: ProviderTypeInfo): Promise<string> => {
-    const existing = providers.find((p) => p.Type === catalog.type);
+    const providerId = catalog.presetId || catalog.type;
+    const existing = providers.find((p) => p.ID === providerId);
     if (existing) return existing.ID;
 
-    const providerId = catalog.type;
     await saveProvider(secret, {
       id: providerId,
       type: catalog.type,
@@ -86,13 +120,38 @@ export function ProvidersView({
     return providerId;
   };
 
-  const handleConnectCatalog = async (catalog: ProviderTypeInfo) => {
+  const handleConnectCatalog = async (catalog: ProviderTypeInfo, method: ConnectionMethod) => {
+    if (!method.available) {
+      onError(method.unavailableReason || "This connection method is not available yet.");
+      return;
+    }
     setConnectBusy(true);
     try {
       const providerId = await ensureCatalogProvider(catalog);
-      setOauthProviderId(providerId);
-      setOauthProviderType(catalog.type);
-      setShowOAuth(true);
+      setCatalogProviderId(providerId);
+      switch (method.kind) {
+        case "oauth":
+          setOauthProviderId(providerId);
+          setOauthProviderType(catalog.type);
+          setOauthPresetId(catalog.presetId || null);
+          setShowOAuth(true);
+          break;
+        case "api_key":
+        case "cookie":
+        case "service_account":
+        case "none":
+          setCatalogCredentialMethod(method);
+          setShowCatalogCredential(true);
+          break;
+        case "import_cliproxy":
+        case "import_9router":
+          setShowImport(true);
+          break;
+        default: {
+          const _exhaustive: never = method.kind;
+          void _exhaustive;
+        }
+      }
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to prepare provider");
     } finally {
@@ -174,50 +233,88 @@ export function ProvidersView({
   if (resolved?.kind === "instance") {
     const provider = resolved.provider;
     return (
-      <ProviderDetail
-        provider={provider}
-        credentials={credentials[provider.ID] || []}
-        models={models}
-        routes={routes}
-        aliases={aliases}
-        secret={secret}
-        onBack={() => onSelect(null)}
-        onMutated={onMutated}
-        onNotice={onNotice}
-        onError={onError}
-      />
+      <>
+        <ProviderDetail
+          provider={provider}
+          credentials={credentials[provider.ID] || []}
+          aliases={aliases}
+          secret={secret}
+          presets={presets}
+          onOpenImport={() => setShowImport(true)}
+          onBack={() => onSelect(null)}
+          onMutated={onMutated}
+          onNotice={onNotice}
+          onError={onError}
+        />
+        <ImportModal
+          open={showImport}
+          secret={secret}
+          onClose={() => setShowImport(false)}
+          onNotice={onNotice}
+          onError={onError}
+          onMutated={onMutated}
+        />
+      </>
     );
   }
 
   if (resolved?.kind === "catalog") {
+    const catalog = resolved.catalog;
+    const catalogPreset = presets.find((item) => item.id === catalog.presetId) ?? null;
+    const connectionProfile = resolveConnectionProfile(catalog, catalogPreset);
     return (
       <>
         <ProviderTypeDetail
-          catalog={resolved.catalog}
+          catalog={catalog}
+          connectionProfile={connectionProfile}
           onBack={() => onSelect(null)}
-          onSetup={() => openAdd(resolved.catalog.type)}
-          onConnect={
-            resolved.catalog.supportsOAuth ? () => void handleConnectCatalog(resolved.catalog) : undefined
-          }
+          onSetup={() => openAdd(catalog.presetId || catalog.type)}
+          onConnectionMethod={(method) => void handleConnectCatalog(catalog, method)}
           connectBusy={connectBusy}
         />
         <OAuthModal
           open={showOAuth}
-          providerId={oauthProviderId || resolved.catalog.type}
-          providerType={oauthProviderType || resolved.catalog.type}
+          providerId={oauthProviderId || catalog.presetId || catalog.type}
+          providerType={oauthProviderType || catalog.type}
+          presetId={oauthPresetId || catalog.presetId}
           secret={secret}
           autoStart
           onClose={() => {
             setShowOAuth(false);
             setOauthProviderId(null);
             setOauthProviderType(null);
+            setOauthPresetId(null);
           }}
           onComplete={() => {
-            onNotice(`${resolved.catalog.name} connected`);
+            onNotice(`${catalog.name} connected`);
             onMutated();
-            onSelect(resolved.catalog.type);
+            onSelect(catalog.presetId || catalog.type);
           }}
           onError={onError}
+        />
+        <AddCredentialModal
+          open={showCatalogCredential}
+          providerId={catalogProviderId || catalog.presetId || catalog.type}
+          providerType={catalog.type}
+          secret={secret}
+          method={catalogCredentialMethod}
+          onClose={() => {
+            setShowCatalogCredential(false);
+            setCatalogCredentialMethod(null);
+          }}
+          onSaved={() => {
+            onNotice("Credential saved");
+            onMutated();
+            onSelect(catalog.presetId || catalog.type);
+          }}
+        />
+        <ImportModal
+          open={showImport}
+          secret={secret}
+          onClose={() => setShowImport(false)}
+          onNotice={onNotice}
+          onError={onError}
+          onMutated={onMutated}
         />
         <AddProviderModal
           open={showAdd}
@@ -252,6 +349,7 @@ export function ProvidersView({
       <ProviderList
         providers={providers}
         credentials={credentials}
+        secret={secret}
         searchQuery={searchQuery}
         onAddOpenAI={() => openAdd("openai-compatible")}
         onAddAnthropic={() => openAdd("anthropic-compatible")}

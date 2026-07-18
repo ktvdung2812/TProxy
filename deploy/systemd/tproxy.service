@@ -1,0 +1,22 @@
+[Unit]
+Description=tproxy AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tproxy
+Group=tproxy
+WorkingDirectory=/opt/tproxy
+EnvironmentFile=/opt/tproxy/.env
+ExecStart=/opt/tproxy/start.sh
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data /opt/tproxy
+
+[Install]
+WantedBy=multi-user.target

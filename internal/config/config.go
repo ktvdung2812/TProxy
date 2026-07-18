@@ -26,6 +26,15 @@ type Config struct {
 	Providers     []ProviderConfig    `yaml:"providers"`
 	Models        []PublicModelConfig `yaml:"models"`
 	Combos        []ComboConfig       `yaml:"combos"`
+	ClaudeAliases ClaudeAliasConfig   `yaml:"claude-aliases" json:"claude_aliases"`
+}
+
+type ClaudeAliasConfig struct {
+	Opus                 string `yaml:"opus" json:"opus"`
+	Sonnet               string `yaml:"sonnet" json:"sonnet"`
+	Haiku                string `yaml:"haiku" json:"haiku"`
+	Fable                string `yaml:"fable" json:"fable"`
+	DefaultCodexProvider string `yaml:"default-codex-provider" json:"default_codex_provider"`
 }
 
 type ProxyPoolConfig struct {
@@ -438,6 +447,49 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		if provider.OAuth.RefreshSafetyWindow == "" {
 			provider.OAuth.RefreshSafetyWindow = "12h"
 		}
+	case "qwen":
+		if provider.Name == "" {
+			provider.Name = "Qwen Code"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://portal.qwen.ai/v1"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "", "https://chat.qwen.ai/api/v1/oauth2/token", "f0304373b74a44d2b584a3fb70ca9e56", "")
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://chat.qwen.ai/api/v1/oauth2/device/code"
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		provider.OAuth.DeviceRequestFormat = "form"
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"openid", "profile", "email", "model.completion"}
+		}
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "20m"
+		}
+	case "kiro":
+		if provider.Name == "" {
+			provider.Name = "Kiro AI"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://runtime.us-east-1.kiro.dev"
+		}
+	case "qoder":
+		if provider.Name == "" {
+			provider.Name = "Qoder"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api3.qoder.sh"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		provider.OAuth.DeviceFlow = "qoder"
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "720h"
+		}
 	case "vertex-partner":
 		if provider.Name == "" {
 			provider.Name = "Vertex Partner"
@@ -621,7 +673,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot":
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}
@@ -821,4 +873,73 @@ func Env(name string) string {
 		return ""
 	}
 	return strings.TrimSpace(os.Getenv(name))
+}
+
+func Save(path string, cfg *Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err = os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+// RemoveModel deletes a public model from the declarative config file and scrubs combo references.
+func RemoveModel(path, modelID string) (*Config, error) {
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil, errors.New("model id is required")
+	}
+
+	kept := make([]PublicModelConfig, 0, len(cfg.Models))
+	found := false
+	for _, model := range cfg.Models {
+		if model.ID == modelID {
+			found = true
+			continue
+		}
+		kept = append(kept, model)
+	}
+	cfg.Models = kept
+
+	for index := range cfg.Combos {
+		items := make([]ComboItemConfig, 0, len(cfg.Combos[index].Items))
+		for _, item := range cfg.Combos[index].Items {
+			if item.PublicModelID == modelID {
+				found = true
+				continue
+			}
+			items = append(items, item)
+		}
+		cfg.Combos[index].Items = items
+	}
+
+	keptCombos := make([]ComboConfig, 0, len(cfg.Combos))
+	for _, combo := range cfg.Combos {
+		if len(combo.Items) == 0 {
+			if combo.ID != "" {
+				found = true
+			}
+			continue
+		}
+		keptCombos = append(keptCombos, combo)
+	}
+	cfg.Combos = keptCombos
+
+	if !found {
+		return cfg, nil
+	}
+	if err := Save(path, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }

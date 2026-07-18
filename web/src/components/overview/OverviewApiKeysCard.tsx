@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useApiKeySecrets } from "../../hooks/useApiKeySecrets";
+import { getStoredApiKeySecret, maskApiKeySecret } from "../../lib/apiKeySecrets";
 import { deleteApiKey, fetchApiKeyUsage, toggleApiKey } from "../apis/api";
 import type { ApiKeyRecord, ApiKeyUsage } from "../apis/types";
 import { formatLimitSummary } from "../apis/utils";
@@ -32,12 +34,8 @@ function compact(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-function maskKeyId(id: string) {
-  if (id.length <= 8) return id;
-  return `${id.slice(0, 4)}••••${id.slice(-4)}`;
-}
-
 export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Props) {
+  useApiKeySecrets();
   const { copied, copy } = useCopyToClipboard();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
   const [loadingUsage, setLoadingUsage] = useState(true);
@@ -124,6 +122,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
             const requests = usage?.requests_today || 0;
             const spent = usage?.cost_usd_today || 0;
             const models = key.models?.length ? key.models.join(", ") : "*";
+            const storedSecret = getStoredApiKeySecret(key.id);
             const usageText = loadingUsage
               ? "Loading usage…"
               : `${compact(requests)} requests today · ${usd(spent)}`;
@@ -135,17 +134,23 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
                   <div className="overview-api-key-meta-row">
                     <p className="overview-api-key-meta">
                       <span className="overview-api-key-id">
-                        <code>{maskKeyId(key.id)}</code>
-                        <button
-                          type="button"
-                          className="endpoint-row-copy small"
-                          onClick={() => copy(key.id, `id_${key.id}`)}
-                          aria-label="Copy API key"
-                        >
-                          <span className="material-symbols-outlined">
-                            {copied === `id_${key.id}` ? "check" : "content_copy"}
-                          </span>
-                        </button>
+                        {storedSecret ? (
+                          <>
+                            <code>{maskApiKeySecret(storedSecret)}</code>
+                            <button
+                              type="button"
+                              className="endpoint-row-copy small"
+                              onClick={() => copy(storedSecret, `secret_${key.id}`)}
+                              aria-label="Copy API key"
+                            >
+                              <span className="material-symbols-outlined">
+                                {copied === `secret_${key.id}` ? "check" : "content_copy"}
+                              </span>
+                            </button>
+                          </>
+                        ) : (
+                          <span className="apis-key-secret-missing">Secret not saved</span>
+                        )}
                       </span>
                       <span className="overview-api-key-sep">·</span>
                       <span>{models}</span>

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -157,5 +158,50 @@ func TestPluginProviderRequiresExplicitSecurityOptIn(t *testing.T) {
 	cfg.Security.PluginsEnabled = true
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("plugin provider with opt-in rejected: %v", err)
+	}
+}
+
+func TestRemoveModelUpdatesDeclarativeConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	initial := `server:
+  host: 127.0.0.1
+  port: 28120
+database:
+  driver: sqlite
+  dsn: tproxy.db
+models:
+  - id: td-coder-pro
+    display-name: TD Coder Pro
+    enabled: true
+  - id: keep-me
+    display-name: Keep Me
+    enabled: true
+combos:
+  - id: combo-a
+    display-name: Combo A
+    enabled: true
+    items:
+      - public-model: td-coder-pro
+`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := RemoveModel(path, "td-coder-pro")
+	if err != nil {
+		t.Fatalf("RemoveModel: %v", err)
+	}
+	if len(cfg.Models) != 1 || cfg.Models[0].ID != "keep-me" {
+		t.Fatalf("models = %+v", cfg.Models)
+	}
+	if len(cfg.Combos) != 0 {
+		t.Fatalf("empty combos should be removed, got %+v", cfg.Combos)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if len(reloaded.Models) != 1 || reloaded.Models[0].ID != "keep-me" {
+		t.Fatalf("reloaded models = %+v", reloaded.Models)
 	}
 }

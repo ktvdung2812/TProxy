@@ -43,11 +43,17 @@ func TestClaudeApplyWritesSettings(t *testing.T) {
 	if env["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:28120/v1" {
 		t.Fatalf("unexpected base url: %v", env["ANTHROPIC_BASE_URL"])
 	}
-	if env["ANTHROPIC_AUTH_TOKEN"] != "test-key" {
-		t.Fatalf("unexpected api key: %v", env["ANTHROPIC_AUTH_TOKEN"])
+	if env["ANTHROPIC_API_KEY"] != "test-key" {
+		t.Fatalf("unexpected api key: %v", env["ANTHROPIC_API_KEY"])
+	}
+	if env["ANTHROPIC_MODEL"] != "sonnet" {
+		t.Fatalf("unexpected primary model: %v", env["ANTHROPIC_MODEL"])
 	}
 	if env["ANTHROPIC_DEFAULT_SONNET_MODEL"] != "sonnet" {
-		t.Fatalf("unexpected model: %v", env["ANTHROPIC_DEFAULT_SONNET_MODEL"])
+		t.Fatalf("unexpected sonnet placeholder: %v", env["ANTHROPIC_DEFAULT_SONNET_MODEL"])
+	}
+	if env["CLAUDE_CODE_SUBAGENT_MODEL"] != "sonnet" {
+		t.Fatalf("unexpected subagent model: %v", env["CLAUDE_CODE_SUBAGENT_MODEL"])
 	}
 
 	if err := claudeReset(); err != nil {

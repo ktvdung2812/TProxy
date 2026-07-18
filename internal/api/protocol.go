@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/security"
+	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
 )
 
 func decodeBody(r *http.Request) (map[string]any, error) {
@@ -94,7 +96,11 @@ func parseMessages(value any) []canonical.Message {
 }
 
 func renderOpenAI(response *canonical.Response, requestID string) map[string]any {
-	message := map[string]any{"role": "assistant", "content": response.Content}
+	content := response.Content
+	if content == nil {
+		content = ""
+	}
+	message := map[string]any{"role": "assistant", "content": content}
 	if response.Reasoning != "" {
 		message["reasoning_content"] = response.Reasoning
 	}
@@ -110,19 +116,13 @@ func renderResponses(response *canonical.Response, requestID string) map[string]
 	return map[string]any{"id": nonEmpty(response.ID, "resp_"+requestID), "object": "response", "created_at": time.Now().Unix(), "model": response.Model, "status": "completed", "output": output, "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
 }
 
-func renderClaude(response *canonical.Response, requestID string) map[string]any {
-	blocks := []any{}
-	if text := stringValue(response.Content); text != "" {
-		blocks = append(blocks, map[string]any{"type": "text", "text": text})
+func renderClaude(response *canonical.Response, requestID, clientModel string) map[string]any {
+	if clientModel != "" && response != nil && response.Model != clientModel {
+		cloned := *response
+		cloned.Model = clientModel
+		response = &cloned
 	}
-	if response.Reasoning != "" {
-		blocks = append(blocks, map[string]any{"type": "thinking", "thinking": response.Reasoning})
-	}
-	for _, call := range response.ToolCalls {
-		fn, _ := call["function"].(map[string]any)
-		blocks = append(blocks, map[string]any{"type": "tool_use", "id": stringValue(call["id"]), "name": stringValue(fn["name"]), "input": parseJSONAny(stringValue(fn["arguments"]))})
-	}
-	return map[string]any{"id": nonEmpty(response.ID, "msg_"+requestID), "type": "message", "role": "assistant", "model": response.Model, "content": blocks, "stop_reason": nonEmpty(response.FinishReason, "end_turn"), "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens}}
+	return claudeopenai.RenderClaudeResponse(response, requestID)
 }
 
 func renderGemini(response *canonical.Response) map[string]any {
@@ -144,140 +144,122 @@ func writeError(w http.ResponseWriter, status int, code, message, requestID stri
 	writeJSON(w, status, map[string]any{"error": map[string]any{"type": "provider_error", "code": code, "message": security.RedactText(message), "request_id": requestID}})
 }
 
+func peekRequestBody(r *http.Request, limit int64) []byte {
+	if r.Body == nil {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
+	if err != nil {
+		return nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	return body
+}
+
+func requestWantsOpenAIStream(r *http.Request) bool {
+	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/chat/completions") {
+		return false
+	}
+	body := peekRequestBody(r, 1<<20)
+	return bytes.Contains(body, []byte(`"stream":true`)) || bytes.Contains(body, []byte(`"stream": true`))
+}
+
+func writeStreamAwareError(w http.ResponseWriter, r *http.Request, status int, code, message, requestID string) {
+	if requestWantsOpenAIStream(r) {
+		writeOpenAIStreamError(w, status, code, message, requestID)
+		return
+	}
+	writeError(w, status, code, message, requestID)
+}
+
+func writeOpenAIStreamError(w http.ResponseWriter, status int, code, message, requestID string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-TProxy-Error-Code", code)
+	w.WriteHeader(status)
+	payload, _ := json.Marshal(map[string]any{"error": map[string]any{"type": "provider_error", "code": code, "message": security.RedactText(message), "request_id": requestID}})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
 func writeOpenAIStream(w http.ResponseWriter, r *http.Request, events <-chan canonical.Event, requestID, model string) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher, _ := w.(http.Flusher)
-	started := false
-	for event := range events {
-		if !started {
-			started = true
-		}
-		payload := map[string]any{"id": nonEmpty(event.ID, "chatcmpl_"+requestID), "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": nonEmpty(event.Model, model), "choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": nil}}}
-		choice := payload["choices"].([]any)[0].(map[string]any)
-		delta := choice["delta"].(map[string]any)
-		switch event.Type {
-		case canonical.EventMessageStart:
+	streamID := "chatcmpl_" + requestID
+	created := time.Now().Unix()
+	hasRole := false
+	var pendingUsage *canonical.Usage
+
+	writeChunk := func(delta map[string]any, finishReason any, usage *canonical.Usage) {
+		if !hasRole {
 			delta["role"] = "assistant"
-		case canonical.EventTextDelta:
-			delta["content"] = event.Text
-		case canonical.EventReasoningDelta:
-			delta["reasoning_content"] = event.Reasoning
-		case canonical.EventToolCallDelta:
-			delta["tool_calls"] = []any{event.ToolCall}
-		case canonical.EventImageDelta:
-			delta["image"] = event.Media
-		case canonical.EventAudioDelta:
-			delta["audio"] = event.Media
-		case canonical.EventUsage:
-			if event.Usage != nil {
-				payload["usage"] = map[string]any{"prompt_tokens": event.Usage.InputTokens, "completion_tokens": event.Usage.OutputTokens, "total_tokens": event.Usage.InputTokens + event.Usage.OutputTokens}
-			}
-		case canonical.EventMessageEnd:
-			choice["finish_reason"] = nonEmpty(event.FinishReason, "stop")
+			hasRole = true
 		}
-		if event.Type == canonical.EventError {
-			writeError(w, 502, "stream_error", event.Err.Error(), requestID)
-			return
+		payload := map[string]any{
+			"id":      streamID,
+			"object":  "chat.completion.chunk",
+			"created": created,
+			"model":   model,
+			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finishReason}},
+		}
+		if usage != nil {
+			payload["usage"] = map[string]any{
+				"prompt_tokens":     usage.InputTokens,
+				"completion_tokens": usage.OutputTokens,
+				"total_tokens":      usage.InputTokens + usage.OutputTokens,
+			}
 		}
 		data, _ := json.Marshal(payload)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 		if flusher != nil {
 			flusher.Flush()
 		}
-		if event.Type == canonical.EventMessageEnd {
+	}
+
+	for event := range events {
+		if event.ID != "" {
+			streamID = event.ID
+		}
+		if event.Model != "" {
+			model = event.Model
+		}
+		switch event.Type {
+		case canonical.EventMessageStart:
+			continue
+		case canonical.EventTextDelta:
+			writeChunk(map[string]any{"content": event.Text}, nil, nil)
+		case canonical.EventReasoningDelta:
+			writeChunk(map[string]any{"reasoning_content": event.Reasoning}, nil, nil)
+		case canonical.EventToolCallDelta:
+			writeChunk(map[string]any{"tool_calls": []any{event.ToolCall}}, nil, nil)
+		case canonical.EventImageDelta:
+			writeChunk(map[string]any{"image": event.Media}, nil, nil)
+		case canonical.EventAudioDelta:
+			writeChunk(map[string]any{"audio": event.Media}, nil, nil)
+		case canonical.EventUsage:
+			if event.Usage != nil {
+				copyUsage := *event.Usage
+				pendingUsage = &copyUsage
+			}
+		case canonical.EventMessageEnd:
+			writeChunk(map[string]any{}, nonEmpty(event.FinishReason, "stop"), pendingUsage)
 			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 			if flusher != nil {
 				flusher.Flush()
 			}
 			return
-		}
-	}
-}
-
-func writeResponsesStream(w http.ResponseWriter, r *http.Request, events <-chan canonical.Event, requestID, model string) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	flusher, _ := w.(http.Flusher)
-	var usage *canonical.Usage
-	send := func(eventType string, payload any) {
-		data, _ := json.Marshal(payload)
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	for event := range events {
-		switch event.Type {
-		case canonical.EventMessageStart:
-			send("response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": "resp_" + requestID, "object": "response", "model": nonEmpty(event.Model, model), "status": "in_progress"}})
-		case canonical.EventTextDelta:
-			send("response.output_text.delta", map[string]any{"type": "response.output_text.delta", "response_id": "resp_" + requestID, "delta": event.Text})
-		case canonical.EventReasoningDelta:
-			send("response.reasoning_summary_text.delta", map[string]any{"type": "response.reasoning_summary_text.delta", "response_id": "resp_" + requestID, "delta": event.Reasoning})
-		case canonical.EventImageDelta:
-			send("response.output_image.delta", map[string]any{"type": "response.output_image.delta", "response_id": "resp_" + requestID, "delta": event.Media})
-		case canonical.EventAudioDelta:
-			send("response.output_audio.delta", map[string]any{"type": "response.output_audio.delta", "response_id": "resp_" + requestID, "delta": event.Media})
-		case canonical.EventUsage:
-			if event.Usage != nil {
-				copyUsage := *event.Usage
-				usage = &copyUsage
-			}
-		case canonical.EventMessageEnd:
-			response := map[string]any{"id": "resp_" + requestID, "model": model, "status": "completed"}
-			if usage != nil {
-				response["usage"] = map[string]any{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "total_tokens": usage.InputTokens + usage.OutputTokens}
-			}
-			send("response.completed", map[string]any{"type": "response.completed", "response": response})
-			return
 		case canonical.EventError:
-			send("error", map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": event.Err.Error()}})
+			writeOpenAIStreamError(w, 502, "stream_error", event.Err.Error(), requestID)
 			return
 		}
 	}
 }
 
 func writeClaudeStream(w http.ResponseWriter, r *http.Request, events <-chan canonical.Event, requestID, model string) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	flusher, _ := w.(http.Flusher)
-	send := func(eventType string, payload any) {
-		data, _ := json.Marshal(payload)
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	for event := range events {
-		switch event.Type {
-		case canonical.EventMessageStart:
-			send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_" + requestID, "type": "message", "role": "assistant", "model": nonEmpty(event.Model, model), "content": []any{}, "usage": map[string]any{"input_tokens": 0, "output_tokens": 0}}})
-		case canonical.EventTextDelta:
-			send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": event.Text}})
-		case canonical.EventReasoningDelta:
-			send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": event.Reasoning}})
-		case canonical.EventToolCallDelta:
-			function, _ := event.ToolCall["function"].(map[string]any)
-			if name := stringValue(function["name"]); name != "" {
-				send("content_block_start", map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "tool_use", "id": stringValue(event.ToolCall["id"]), "name": name, "input": map[string]any{}}})
-			}
-			if arguments := stringValue(function["arguments"]); arguments != "" {
-				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "input_json_delta", "partial_json": arguments}})
-			}
-		case canonical.EventUsage:
-			if event.Usage != nil {
-				send("message_delta", map[string]any{"type": "message_delta", "usage": map[string]any{"output_tokens": event.Usage.OutputTokens}})
-			}
-		case canonical.EventMessageEnd:
-			send("message_stop", map[string]any{"type": "message_stop"})
-			return
-		case canonical.EventError:
-			send("error", map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": event.Err.Error()}})
-			return
-		}
-	}
+	claudeopenai.WriteClaudeStream(w, events, requestID, model)
 }
 
 func writeGeminiStream(w http.ResponseWriter, r *http.Request, events <-chan canonical.Event) {

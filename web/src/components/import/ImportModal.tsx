@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Modal } from "../ui";
+import { storeApiKeySecretsFrom9routerBackup } from "../../lib/apiKeySecrets";
 import { import9routerBackup, importCliproxyAuth } from "./api";
 import { detectImportSource, type ImportSource } from "./utils";
 
@@ -107,6 +108,9 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
           : `Imported ${nextSource === "9router" ? "9router backup" : "CLIProxyAPI auth"}: ${summary}`,
       );
       if (!dryRun) {
+        if (nextSource === "9router") {
+          storeApiKeySecretsFrom9routerBackup(payload);
+        }
         onMutated?.();
         onClose();
       }
