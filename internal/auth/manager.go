@@ -241,8 +241,8 @@ func (m *Manager) Close() {
 	m.backgroundWG.Wait()
 }
 
-// PurgeExpiredSessions bounds the in-memory OAuth session map after terminal
-// flows have completed. Tokens and PKCE material are never persisted there.
+// PurgeExpiredSessions expires abandoned OAuth flows and bounds the in-memory
+// session map after terminal flows have exceeded the requested retention.
 func (m *Manager) PurgeExpiredSessions(retentions ...time.Duration) {
 	if m == nil {
 		return
@@ -252,17 +252,29 @@ func (m *Manager) PurgeExpiredSessions(retentions ...time.Duration) {
 	if len(retentions) > 0 && retentions[0] > 0 {
 		retention = retentions[0]
 	}
+	var expired []*session
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	for id, item := range m.sessions {
 		item.mu.Lock()
 		status := item.status
 		expiresAt := item.expiresAt
-		item.mu.Unlock()
-		terminal := status == "complete" || status == "cancelled" || status == "failed" || status == "expired"
-		if terminal && now.After(expiresAt.Add(retention)) {
+		if now.After(expiresAt) && sessionCanExpire(status) {
+			item.status = "expired"
+			item.errorCode = "invalid_state"
+			clearSessionSecretsLocked(item)
+			status = item.status
+			expired = append(expired, item)
+		}
+		if sessionIsTerminal(status) && now.After(expiresAt.Add(retention)) {
 			delete(m.sessions, id)
 		}
+		item.mu.Unlock()
+	}
+	m.mu.Unlock()
+	// Callback shutdown can wait on the HTTP server, so do it without holding
+	// the manager lock used by status and callback lookups.
+	for _, item := range expired {
+		m.stopSession(item)
 	}
 }
 
@@ -1288,7 +1300,7 @@ func (m *Manager) statusFor(item *session) SessionStatus {
 func (m *Manager) expireIfNeeded(item *session) {
 	expired := false
 	item.mu.Lock()
-	if m.now().After(item.expiresAt) && item.status != "complete" && item.status != "cancelled" && item.status != "failed" && item.status != "expired" && item.status != "committing" {
+	if m.now().After(item.expiresAt) && sessionCanExpire(item.status) {
 		item.status = "expired"
 		item.errorCode = "invalid_state"
 		clearSessionSecretsLocked(item)
@@ -1298,6 +1310,14 @@ func (m *Manager) expireIfNeeded(item *session) {
 	if expired {
 		m.stopSession(item)
 	}
+}
+
+func sessionCanExpire(status string) bool {
+	return !sessionIsTerminal(status) && status != "committing"
+}
+
+func sessionIsTerminal(status string) bool {
+	return status == "complete" || status == "cancelled" || status == "failed" || status == "expired"
 }
 
 // beginSessionCommit atomically claims the final credential write. A
