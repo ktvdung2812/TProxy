@@ -10,6 +10,8 @@ database:
   dsn: tproxy.db
 
 security:
+  # Generate this before adding a provider credential or proxy URL. Keeping the
+  # variable unset is supported for an initial health-only bootstrap.
   master-key-env: TPROXY_MASTER_KEY
   management-secret-env: TPROXY_MANAGEMENT_SECRET
   plugins-enabled: false
@@ -41,13 +43,9 @@ teams:
       requests-per-minute: 300
       concurrent-streams: 32
 
-# Proxy URLs are encrypted in SQLite. Provider/credential entries can bind
-# one or more IDs below; rotation follows the same scheduler as credentials.
-proxy-pools:
-  - id: direct-egress
-    name: Direct connection
-    url: direct
-    enabled: true
+# Direct egress is implicit. Proxy pool URLs (including "direct") are encrypted
+# in SQLite, so add pools only after TPROXY_MASTER_KEY has been configured.
+proxy-pools: []
 
 client-api-keys:
   - id: local
@@ -69,7 +67,6 @@ providers:
     name: OpenAI-compatible primary
     base-url: https://api.openai.com
     enabled: true
-    proxy-pools: [direct-egress]
     # OAuth providers can use the same adapter with browser PKCE or device flow.
     # oauth:
     #   authorization-url: https://provider.example/oauth/authorize
