@@ -697,6 +697,99 @@ func TestLocalCallbackListenerAcceptsFormPost(t *testing.T) {
 	}
 }
 
+func TestLocalCallbackProviderErrorRequiresMatchingState(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("provider token endpoint must not be called for an authorization error")
+	}))
+	defer providerServer.Close()
+
+	for _, test := range []struct {
+		name          string
+		callbackState string
+	}{
+		{name: "missing state"},
+		{name: "wrong state", callbackState: "attacker-state"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			callbackProbe, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			callbackAddress := callbackProbe.Addr().String()
+			_ = callbackProbe.Close()
+			cfg := oauthConfig(providerServer.URL)
+			cfg.Providers[0].OAuth.RedirectURL = "http://" + callbackAddress + "/oauth/callback"
+			cfg.Providers[0].OAuth.ListenForCallback = true
+			dataStore, _ := newAuthStore(t, cfg)
+			manager := NewManager(dataStore, providerServer.Client())
+			defer manager.Close()
+
+			started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", CredentialID: "rejected-account", Mode: "browser"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			authorization, err := url.Parse(started.AuthorizationURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expectedState := authorization.Query().Get("state")
+			manager.mu.Lock()
+			item := manager.sessions[started.SessionID]
+			manager.mu.Unlock()
+			item.mu.Lock()
+			handler := item.callbackServer.Handler
+			item.mu.Unlock()
+
+			callback := func(state string) *httptest.ResponseRecorder {
+				values := url.Values{"error": {"access_denied"}}
+				if state != "" {
+					values.Set("state", state)
+				}
+				request := httptest.NewRequest(http.MethodGet, "http://"+callbackAddress+"/oauth/callback?"+values.Encode(), nil)
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				return recorder
+			}
+
+			invalid := callback(test.callbackState)
+			if invalid.Code != http.StatusBadRequest {
+				t.Fatalf("invalid callback status=%d body=%s", invalid.Code, invalid.Body.String())
+			}
+			status, err := manager.SessionStatus(started.SessionID)
+			if err != nil || status.Status != "pending" || status.ErrorCode != "" {
+				t.Fatalf("invalid callback mutated session: status=%+v err=%v", status, err)
+			}
+			item.mu.Lock()
+			if item.state != expectedState || item.verifier == "" || item.cancelClosed {
+				item.mu.Unlock()
+				t.Fatalf("invalid callback cleared authorization material: %+v", item)
+			}
+			item.mu.Unlock()
+
+			valid := callback(expectedState)
+			if valid.Code != http.StatusBadRequest || !strings.Contains(valid.Body.String(), "rejected") {
+				t.Fatalf("valid rejection status=%d body=%s", valid.Code, valid.Body.String())
+			}
+			status, err = manager.SessionStatus(started.SessionID)
+			if err != nil || status.Status != "failed" || status.ErrorCode != "oauth_authorization_rejected" {
+				t.Fatalf("valid rejection status=%+v err=%v", status, err)
+			}
+			item.mu.Lock()
+			if item.state != "" || item.verifier != "" || !item.cancelClosed {
+				item.mu.Unlock()
+				t.Fatalf("rejected callback retained authorization material: %+v", item)
+			}
+			item.mu.Unlock()
+
+			reused := callback(expectedState)
+			if reused.Code != http.StatusBadRequest || !strings.Contains(strings.ToLower(reused.Body.String()), "invalid") {
+				t.Fatalf("reused rejection status=%d body=%s", reused.Code, reused.Body.String())
+			}
+		})
+	}
+}
+
 func TestJSONTokenExchangeIncludesState(t *testing.T) {
 	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
 	var received map[string]any

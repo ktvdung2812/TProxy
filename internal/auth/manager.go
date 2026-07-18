@@ -103,6 +103,8 @@ func (e *Error) Error() string {
 		return "OAuth provider configuration is invalid"
 	case "authorization_pending":
 		return "OAuth device authorization is pending"
+	case "oauth_authorization_rejected":
+		return "OAuth authorization was rejected"
 	default:
 		if e.err != nil {
 			return e.err.Error()
@@ -498,8 +500,12 @@ func (m *Manager) startLocalCallback(item *session) error {
 			return
 		}
 		if providerError != "" {
-			m.failSession(item, "oauth_authorization_rejected")
-			http.Error(w, "OAuth authorization was rejected", http.StatusBadRequest)
+			_, rejectErr := m.rejectSessionCallback(item, state, providerError)
+			if Code(rejectErr) == "invalid_state" {
+				http.Error(w, rejectErr.Error(), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, rejectErr.Error(), http.StatusBadRequest)
 			return
 		}
 		_, completeErr := m.CompleteCallback(r.Context(), state, code)
@@ -559,18 +565,7 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (Ses
 	if state == "" || code == "" {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
-	m.mu.Lock()
-	var item *session
-	for _, candidate := range m.sessions {
-		candidate.mu.Lock()
-		candidateState := candidate.state
-		candidate.mu.Unlock()
-		if candidateState == state {
-			item = candidate
-			break
-		}
-	}
-	m.mu.Unlock()
+	item := m.sessionForState(state)
 	if item == nil {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
@@ -633,6 +628,64 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (Ses
 	_ = m.store.SyncProviderHealth(ctx, providerID)
 	m.completeSession(item)
 	return m.statusFor(item), nil
+}
+
+// RejectCallback validates an OAuth denial against the pending session state,
+// records a terminal rejection, and consumes all authorization material.
+func (m *Manager) RejectCallback(state, providerError string) (SessionStatus, error) {
+	state = strings.TrimSpace(state)
+	providerError = strings.TrimSpace(providerError)
+	if state == "" || providerError == "" {
+		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
+	}
+	item := m.sessionForState(state)
+	if item == nil {
+		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
+	}
+	return m.rejectSessionCallback(item, state, providerError)
+}
+
+func (m *Manager) sessionForState(state string) *session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, candidate := range m.sessions {
+		candidate.mu.Lock()
+		candidateState := candidate.state
+		candidate.mu.Unlock()
+		if candidateState != "" && security.ConstantTimeEqual(candidateState, state) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func (m *Manager) rejectSessionCallback(item *session, state, providerError string) (SessionStatus, error) {
+	state = strings.TrimSpace(state)
+	providerError = strings.TrimSpace(providerError)
+	if item == nil || state == "" || providerError == "" {
+		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
+	}
+	now := m.now()
+	item.mu.Lock()
+	if item.status != "pending" || item.state == "" || !security.ConstantTimeEqual(item.state, state) {
+		item.mu.Unlock()
+		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+	}
+	if now.After(item.expiresAt) {
+		item.status = "expired"
+		item.errorCode = "invalid_state"
+		clearSessionSecretsLocked(item)
+		item.mu.Unlock()
+		m.stopSession(item)
+		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+	}
+	item.status = "failed"
+	item.errorCode = "oauth_authorization_rejected"
+	item.consumedAt = now
+	clearSessionSecretsLocked(item)
+	item.mu.Unlock()
+	m.stopSession(item)
+	return m.statusFor(item), &Error{code: "oauth_authorization_rejected", permanent: true}
 }
 
 func (m *Manager) SessionStatus(sessionID string) (SessionStatus, error) {
