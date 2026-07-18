@@ -88,6 +88,12 @@ func run() error {
 		return nil
 	}
 	if *importAuthPath != "" {
+		// Auth bundles reference provider IDs but intentionally contain no
+		// provider topology. Seed the configured topology before importing into a
+		// fresh database so provider validation remains strict and deterministic.
+		if err = dataStore.Seed(context.Background(), cfg); err != nil {
+			return err
+		}
 		if err = dataStore.ImportAuthFile(context.Background(), *importAuthPath); err != nil {
 			return err
 		}
