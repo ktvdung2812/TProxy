@@ -187,6 +187,9 @@ func (s *Store) applyAuthBundle(ctx context.Context, bundle authBundle) error {
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM providers`).Scan(&providerCount); err != nil {
 		return rollback(err)
 	}
+	// Snapshot the destination topology once: fresh stores seed every provider
+	// from the bundle, while existing stores keep their configured providers.
+	seedBundleProviders := providerCount == 0
 	providerSeen := make(map[string]struct{}, len(bundle.Providers))
 	for _, provider := range bundle.Providers {
 		provider.ID = strings.TrimSpace(provider.ID)
@@ -209,14 +212,13 @@ func (s *Store) applyAuthBundle(ctx context.Context, bundle authBundle) error {
 		if !errors.Is(existingErr, sql.ErrNoRows) {
 			return rollback(existingErr)
 		}
-		if providerCount != 0 {
+		if !seedBundleProviders {
 			continue
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO providers(id,type,name,base_url,enabled,status,last_error,last_checked_at,headers_json,config_json,created_at,updated_at)
 VALUES(?,?,?,'',?,'unknown','','','{}','{}',?,?)`, provider.ID, provider.Type, provider.Name, boolInt(provider.Enabled), time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return rollback(err)
 		}
-		providerCount++
 	}
 	seen := make(map[string]struct{}, len(bundle.Credentials))
 	for _, item := range bundle.Credentials {
