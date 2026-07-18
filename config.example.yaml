@@ -99,6 +99,9 @@ providers:
 
   # Provider-specific OAuth profiles use secure defaults for browser PKCE,
   # token request format and first-party headers.
+  # On a remote server, prefer device mode when supported. Browser profiles use
+  # registered loopback callback ports, so complete them through an SSH tunnel
+  # or a browser on the server instead of exposing management endpoints.
   # - id: codex-subscription
   #   type: codex
   #   enabled: true
