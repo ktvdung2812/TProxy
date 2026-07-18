@@ -11,6 +11,7 @@ import {
 } from "./api";
 import { buildManualConfigs } from "./manualConfigs";
 import { ManualConfigModal } from "./ManualConfigModal";
+import { CLIApplyScriptBlock } from "./CLIApplyScriptBlock";
 
 type Props = {
   tool: CLITool;
@@ -166,6 +167,8 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
           Manual config
         </Button>
       </div>
+
+      <CLIApplyScriptBlock configs={manualConfigs} disabled={!model || !apiKey.trim()} />
 
       {!canAutoApply ? (
         <div className="cli-tool-note cli-tool-note-info">

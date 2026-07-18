@@ -13,6 +13,7 @@ type Props = {
   apiKeys: ApiKeyOption[];
   value: string;
   onChange: (secret: string) => void;
+  onSelectedIdChange?: (id: string) => void;
   /** Render without outer Field wrapper (parent supplies label). */
   embedded?: boolean;
   emptyMessage?: string;
@@ -33,6 +34,7 @@ export function ApiKeySelect({
   apiKeys,
   value,
   onChange,
+  onSelectedIdChange,
   embedded = false,
   emptyMessage,
   missingSecretMessage,
@@ -44,20 +46,23 @@ export function ApiKeySelect({
     if (enabledKeys.length === 0) return;
     const nextId = resolveSelectedId(value, enabledKeys);
     setSelectedId(nextId);
+    onSelectedIdChange?.(nextId);
     const stored = getStoredApiKeySecret(nextId);
     if (stored && stored !== value) onChange(stored);
-  }, [enabledKeys, onChange, value]);
+  }, [enabledKeys, onChange, onSelectedIdChange, value]);
 
   useEffect(() => {
     if (value || enabledKeys.length === 0) return;
     const nextId = resolveSelectedId("", enabledKeys);
     setSelectedId(nextId);
+    onSelectedIdChange?.(nextId);
     const stored = getStoredApiKeySecret(nextId);
     if (stored) onChange(stored);
-  }, [enabledKeys, onChange, value]);
+  }, [enabledKeys, onChange, onSelectedIdChange, value]);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
+    onSelectedIdChange?.(id);
     onChange(getStoredApiKeySecret(id) ?? "");
   };
 

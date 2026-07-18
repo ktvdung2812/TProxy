@@ -13,11 +13,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { UsageActiveRequest } from "../usage/api";
+import { ProviderLogo } from "../providers/ProviderLogo";
 import { fetchTopologyClients, type TopologyClient } from "./api";
 import { ClientDetailModal } from "./ClientDetailModal";
 import {
-  FLOW_SOURCE_RIGHT,
-  FLOW_TARGET_LEFT,
+  FLOW_SOURCE_BOTTOM,
+  FLOW_TARGET_TOP,
   buildTproxyTopologyFlow,
   formatNumber,
   type CredentialItem,
@@ -81,8 +82,8 @@ function GatewayNode({ data }: NodeProps) {
   };
   return (
     <div className="topology-node topology-node-gateway">
-      <Handle id={FLOW_TARGET_LEFT} type="target" position={Position.Left} className="topology-handle" />
-      <Handle id={FLOW_SOURCE_RIGHT} type="source" position={Position.Right} className="topology-handle" />
+      <Handle id={FLOW_TARGET_TOP} type="target" position={Position.Top} className="topology-handle" />
+      <Handle id={FLOW_SOURCE_BOTTOM} type="source" position={Position.Bottom} className="topology-handle" />
       <span className="material-symbols-outlined">device_hub</span>
       <div>
         <strong>{payload.label}</strong>
@@ -96,8 +97,9 @@ function GatewayNode({ data }: NodeProps) {
 function ProviderNode({ data }: NodeProps) {
   const payload = data as {
     label: string;
+    providerId: string;
+    providerType: string;
     color: string;
-    textIcon: string;
     totalRequests: number;
     credentialCount: number;
     active: boolean;
@@ -107,11 +109,14 @@ function ProviderNode({ data }: NodeProps) {
       className={`topology-node topology-node-provider ${payload.active ? "active" : ""}`}
       style={{ borderColor: payload.active ? payload.color : "var(--color-border)" }}
     >
-      <Handle id={FLOW_TARGET_LEFT} type="target" position={Position.Left} className="topology-handle" />
-      <Handle id={FLOW_SOURCE_RIGHT} type="source" position={Position.Right} className="topology-handle" />
-      <span className="topology-node-icon" style={{ backgroundColor: `${payload.color}18`, color: payload.color }}>
-        {payload.textIcon}
-      </span>
+      <Handle id={FLOW_TARGET_TOP} type="target" position={Position.Top} className="topology-handle" />
+      <Handle id={FLOW_SOURCE_BOTTOM} type="source" position={Position.Bottom} className="topology-handle" />
+      <ProviderLogo
+        className="topology-node-icon"
+        providerId={payload.providerId}
+        providerType={payload.providerType}
+        style={{ color: payload.color }}
+      />
       <div>
         <strong>{payload.label}</strong>
         <p>{payload.credentialCount} credentials · {formatNumber(payload.totalRequests)} req</p>
@@ -130,8 +135,8 @@ function CredentialNode({ data }: NodeProps) {
   };
   return (
     <div className={`topology-node topology-node-credential ${payload.active ? "active" : ""} ${payload.enabled ? "" : "disabled"}`}>
-      <Handle id={FLOW_TARGET_LEFT} type="target" position={Position.Left} className="topology-handle" />
-      <span className="topology-dot" style={{ backgroundColor: payload.enabled ? payload.color : "#64748b" }} />
+      <Handle id={FLOW_TARGET_TOP} type="target" position={Position.Top} className="topology-handle" />
+      <span className="topology-dot" style={{ backgroundColor: payload.enabled ? payload.color : "#477453" }} />
       <div>
         <strong>{payload.label}</strong>
         <p>{formatNumber(payload.totalRequests)} requests</p>
@@ -151,7 +156,7 @@ function ClientNode({ data }: NodeProps) {
   };
   return (
     <div className={`topology-node topology-node-client ${payload.active ? "active" : ""} ${payload.stale ? "stale" : ""}`}>
-      <Handle id={FLOW_SOURCE_RIGHT} type="source" position={Position.Right} className="topology-handle" />
+      <Handle id={FLOW_SOURCE_BOTTOM} type="source" position={Position.Bottom} className="topology-handle" />
       <span className="material-symbols-outlined">laptop_mac</span>
       <div>
         <strong>{payload.label}</strong>
@@ -228,7 +233,7 @@ export function NetworkTopology({
         <span className="material-symbols-outlined">account_tree</span>
         <div>
           <strong>Request flow topology</strong>
-          <p>Clients → tproxy → providers → credentials, based on usage history.</p>
+          <p>Clients → tproxy → providers → credentials, arranged top to bottom.</p>
         </div>
       </div>
 

@@ -1,13 +1,20 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "../ui";
 import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
-import { LIST_BY_SECTION, providerDetailPath, type ProviderTypeInfo } from "./catalog";
+import { providerDetailPath, type ProviderTypeInfo } from "./catalog";
+import { fetchNinerouterPresets } from "./api";
+import {
+  APIKEY_INITIAL_VISIBLE,
+  groupPresetsBySection,
+  type PresetCatalogEntry,
+} from "./ninerouterCatalog";
 import { CustomProviderCard, ProviderCatalogCard } from "./ProviderCatalogCard";
 import type { Credential, Provider } from "./types";
 
 type Props = {
   providers: Provider[];
   credentials: Record<string, Credential[]>;
+  secret: string;
   searchQuery?: string;
   onAddOpenAI: () => void;
   onAddAnthropic: () => void;
@@ -23,37 +30,61 @@ function matchesSearch(name: string, query: string) {
   return name.toLowerCase().includes(q);
 }
 
-function providersForType(providers: Provider[], type: string) {
-  return providers.filter((p) => p.Type === type);
+function instancesForEntry(providers: Provider[], entry: ProviderTypeInfo) {
+  if (entry.presetId) {
+    const byPreset = providers.filter((p) => p.ID === entry.presetId);
+    if (byPreset.length > 0) return byPreset;
+  }
+  return providers.filter((p) => p.Type === entry.type && (!entry.presetId || p.ID === entry.presetId));
 }
 
 /** Providers list — 9router-style sections and compact cards. */
 export function ProviderList({
   providers,
   credentials,
+  secret,
   searchQuery = "",
   onAddOpenAI,
   onAddAnthropic,
   onTestSection,
   testingSection,
 }: Props) {
+  const [showAllApikey, setShowAllApikey] = useState(false);
+  const [presetSections, setPresetSections] = useState(() => groupPresetsBySection([]));
+
+  useEffect(() => {
+    setShowAllApikey(false);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!secret) return;
+    void fetchNinerouterPresets(secret)
+      .then((result) => setPresetSections(groupPresetsBySection(result.presets || [])))
+      .catch(() => setPresetSections(groupPresetsBySection([])));
+  }, [secret]);
+
   const customProviders = useMemo(
     () => providers.filter((p) => CUSTOM_TYPES.has(p.Type)),
     [providers],
   );
 
-  const filterCatalog = (items: ProviderTypeInfo[]) =>
+  const filterCatalog = (items: PresetCatalogEntry[]) =>
     items.filter((item) => matchesSearch(item.name, searchQuery));
 
   const filterCustom = (items: Provider[]) =>
     items.filter((item) => matchesSearch(item.Name || item.ID, searchQuery));
 
-  const oauthCatalog = filterCatalog(LIST_BY_SECTION.oauth);
-  const freeTierCatalog = filterCatalog(LIST_BY_SECTION.freeTier);
-  const apikeyCatalog = filterCatalog(LIST_BY_SECTION.apikey);
-  const mediaCatalog = filterCatalog(LIST_BY_SECTION.media);
-  const pluginCatalog = filterCatalog(LIST_BY_SECTION.plugin);
+  const oauthCatalog = filterCatalog(presetSections.oauth);
+  const freeTierCatalog = filterCatalog(presetSections.freeTier);
+  const apikeyCatalog = filterCatalog(presetSections.apikey);
+  const mediaCatalog = filterCatalog(presetSections.media);
+  const pluginCatalog = filterCatalog(presetSections.plugin);
   const visibleCustom = filterCustom(customProviders);
+
+  const isApikeySearching = !!searchQuery.trim();
+  const visibleApikeyCatalog =
+    isApikeySearching || showAllApikey ? apikeyCatalog : apikeyCatalog.slice(0, APIKEY_INITIAL_VISIBLE);
+  const hiddenApikeyCount = Math.max(0, apikeyCatalog.length - visibleApikeyCatalog.length);
 
   const hasResults =
     visibleCustom.length > 0 ||
@@ -63,8 +94,8 @@ export function ProviderList({
     mediaCatalog.length > 0 ||
     pluginCatalog.length > 0;
 
-  const sectionProviderIds = (catalog: ProviderTypeInfo[]) =>
-    catalog.flatMap((item) => providersForType(providers, item.type).map((p) => p.ID));
+  const sectionProviderIds = (catalog: PresetCatalogEntry[]) =>
+    catalog.flatMap((item) => instancesForEntry(providers, item).map((p) => p.ID));
 
   const oauthCredentials = useMemo(
     () => sectionProviderIds(oauthCatalog).flatMap((id) => credentials[id] || []),
@@ -80,16 +111,15 @@ export function ProviderList({
         </div>
       )}
 
-      {/* Custom compatible upstreams */}
       <ProviderSection
         title="Custom Providers (OpenAI/Anthropic Compatible)"
         actions={
           <>
             <Button size="sm" icon="add" onClick={onAddAnthropic}>
-              Add Anthropic Compatible
+              Anthropic Compatible
             </Button>
             <Button size="sm" variant="secondary" className="btn-white" icon="add" onClick={onAddOpenAI}>
-              Add OpenAI Compatible
+              OpenAI Compatible
             </Button>
           </>
         }
@@ -127,11 +157,7 @@ export function ProviderList({
             </>
           }
         >
-          <CatalogGrid
-            catalog={oauthCatalog}
-            providers={providers}
-            credentials={credentials}
-          />
+          <CatalogGrid catalog={oauthCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
@@ -146,11 +172,7 @@ export function ProviderList({
             />
           }
         >
-          <CatalogGrid
-            catalog={freeTierCatalog}
-            providers={providers}
-            credentials={credentials}
-          />
+          <CatalogGrid catalog={freeTierCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
@@ -165,31 +187,29 @@ export function ProviderList({
             />
           }
         >
-          <CatalogGrid
-            catalog={apikeyCatalog}
-            providers={providers}
-            credentials={credentials}
-          />
+          <CatalogGrid catalog={visibleApikeyCatalog} providers={providers} credentials={credentials} />
+          {!isApikeySearching && !showAllApikey && hiddenApikeyCount > 0 ? (
+            <button
+              type="button"
+              className="providers-show-more"
+              onClick={() => setShowAllApikey(true)}
+            >
+              <span className="material-symbols-outlined">expand_more</span>
+              Show all {apikeyCatalog.length} providers
+            </button>
+          ) : null}
         </ProviderSection>
       )}
 
       {mediaCatalog.length > 0 && (
         <ProviderSection title="Media Providers">
-          <CatalogGrid
-            catalog={mediaCatalog}
-            providers={providers}
-            credentials={credentials}
-          />
+          <CatalogGrid catalog={mediaCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
       {pluginCatalog.length > 0 && (
         <ProviderSection title="Plugin Providers">
-          <CatalogGrid
-            catalog={pluginCatalog}
-            providers={providers}
-            credentials={credentials}
-          />
+          <CatalogGrid catalog={pluginCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
     </div>
@@ -221,7 +241,7 @@ function CatalogGrid({
   providers,
   credentials,
 }: {
-  catalog: ProviderTypeInfo[];
+  catalog: PresetCatalogEntry[];
   providers: Provider[];
   credentials: Record<string, Credential[]>;
 }) {
@@ -229,11 +249,11 @@ function CatalogGrid({
     <div className="provider-catalog-grid">
       {catalog.map((item) => (
         <ProviderCatalogCard
-          key={item.type}
+          key={item.presetId || item.type}
           catalog={item}
-          instances={providersForType(providers, item.type)}
+          instances={instancesForEntry(providers, item)}
           credentials={credentials}
-          to={providerDetailPath(item.type)}
+          to={providerDetailPath(item.presetId || item.type)}
         />
       ))}
     </div>

@@ -16,13 +16,14 @@ function TimeAgo({ timestamp }: { timestamp: string }) {
   return <>{fmtTime(timestamp)}</>;
 }
 
-export function RecentRequests({ requests }: Props) {
+export function RecentRequests({ requests = [] }: Props) {
+  const items = requests ?? [];
   return (
     <Card pad="sm" className="usage-recent-card">
       <div className="usage-recent-head">
         <span>Recent Requests</span>
       </div>
-      {!requests.length ? (
+      {!items.length ? (
         <div className="usage-recent-empty">No requests yet.</div>
       ) : (
         <div className="usage-recent-scroll custom-scrollbar">
@@ -36,7 +37,7 @@ export function RecentRequests({ requests }: Props) {
               </tr>
             </thead>
             <tbody>
-              {requests.map((item, index) => {
+              {items.map((item, index) => {
                 const ok = !item.status || item.status === "ok" || item.status === "success" || item.status === "200";
                 return (
                   <tr key={`${item.timestamp}-${item.model}-${index}`}>

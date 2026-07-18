@@ -666,12 +666,25 @@ func (s *Store) DeleteCredential(ctx context.Context, credentialID string) error
 }
 
 func (s *Store) DeletePublicModel(ctx context.Context, modelID string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM public_models WHERE id=?`, modelID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	rollback := func(err error) error { _ = tx.Rollback(); return err }
+	if _, err = tx.ExecContext(ctx, `DELETE FROM combo_items WHERE public_model_id=?`, modelID); err != nil {
+		return rollback(err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM public_models WHERE id=?`, modelID)
+	if err != nil {
+		return rollback(err)
+	}
 	if count, _ := result.RowsAffected(); count == 0 {
-		return sql.ErrNoRows
+		return rollback(sql.ErrNoRows)
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }

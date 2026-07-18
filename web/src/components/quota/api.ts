@@ -61,6 +61,17 @@ export type QuotaSummary = {
   }>;
 };
 
+export type CredentialProxyUsage = {
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+};
+
+export type CredentialUsageResponse = {
+  period: string;
+  by_credential: Record<string, CredentialProxyUsage>;
+};
+
 async function adminFetch<T>(secret: string, path: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(path, {
     method,
@@ -77,6 +88,13 @@ async function adminFetch<T>(secret: string, path: string, method: "GET" | "POST
 
 export function fetchQuotaSummary(secret: string) {
   return adminFetch<QuotaSummary>(secret, "/api/admin/quota/summary");
+}
+
+export function fetchCredentialProxyUsage(secret: string, period: "all" | "today" | "24h" = "all") {
+  return adminFetch<CredentialUsageResponse>(
+    secret,
+    `/api/admin/quota/credential-usage?period=${encodeURIComponent(period)}`,
+  );
 }
 
 export function fetchCredentialQuota(secret: string, credentialId: string) {

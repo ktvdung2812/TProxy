@@ -16,6 +16,7 @@ type Props = {
   open: boolean;
   providerId: string;
   providerType: string;
+  presetId?: string;
   secret: string;
   credentialId?: string;
   initialLabel?: string;
@@ -28,12 +29,13 @@ type Props = {
 
 /**
  * OAuth connect modal — browser PKCE for Codex/Claude/Antigravity (9router-style),
- * device authorization only for Kimi/xAI.
+ * device authorization for Kimi/xAI/Qwen.
  */
 export function OAuthModal({
   open,
   providerId,
   providerType,
+  presetId,
   secret,
   credentialId,
   initialLabel,
@@ -44,7 +46,7 @@ export function OAuthModal({
   onError,
 }: Props) {
   const info = getProviderTypeInfo(providerType);
-  const browserFlow = usesBrowserOAuth(providerType);
+  const browserFlow = usesBrowserOAuth(providerType, presetId);
   const [phase, setPhase] = useState<Phase>("idle");
   const [label, setLabel] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -154,7 +156,7 @@ export function OAuthModal({
         credential_id: credentialId,
         label: label || initialLabel || undefined,
         email: initialEmail,
-        mode: defaultOAuthMode(providerType),
+        mode: defaultOAuthMode(providerType, presetId),
       });
       setSessionId(started.session_id);
       setStartResp(started);
@@ -185,6 +187,7 @@ export function OAuthModal({
     secret,
     providerId,
     providerType,
+    presetId,
     label,
     initialLabel,
     initialEmail,

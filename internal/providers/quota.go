@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/ninerouter"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -35,15 +36,36 @@ type CredentialQuota struct {
 }
 
 var quotaSupportedTypes = map[string]bool{
-	"codex":       true,
-	"claude":      true,
-	"copilot":     true,
-	"antigravity": true,
+	"codex":              true,
+	"claude":             true,
+	"copilot":            true,
+	"antigravity":        true,
+	"glm":                true,
+	"glm-cn":             true,
+	"minimax":            true,
+	"minimax-cn":         true,
+	"vercel-ai-gateway":  true,
+	"grok-cli":           true,
+	"xai":                true,
+	"kiro":               true,
+	"qoder":              true,
+	"codebuddy-cn":       true,
+	"github":             true,
+	"gemini-cli":         true,
+	"kimi-coding":        true,
+	"ollama":             true,
 }
 
-// SupportsQuota reports whether a provider type has an upstream quota probe.
+// SupportsQuota reports whether a provider type or preset ID has an upstream quota probe.
 func SupportsQuota(providerType string) bool {
-	return quotaSupportedTypes[strings.ToLower(strings.TrimSpace(providerType))]
+	key := strings.ToLower(strings.TrimSpace(providerType))
+	if quotaSupportedTypes[key] {
+		return true
+	}
+	if preset, ok := ninerouter.Lookup(key); ok && preset.SupportsQuota {
+		return true
+	}
+	return false
 }
 
 // CredentialQuota fetches provider-specific quota limits for a credential.
@@ -56,6 +78,9 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 	}
 	if credential.ID == "" || credential.Secret == "" {
 		return result, &ProviderError{Code: "authorization_required", Message: "credential has no access token", Status: http.StatusUnauthorized}
+	}
+	if quota, ok := r.credentialQuotaByPreset(ctx, provider, credential); ok {
+		return quota, nil
 	}
 	if !SupportsQuota(provider.Type) {
 		result.Message = fmt.Sprintf("Upstream quota API is not implemented for %s", provider.Type)
@@ -203,17 +228,6 @@ func (r *Registry) copilotQuota(ctx context.Context, credential store.Credential
 	}
 	if len(result.Quotas) == 0 {
 		result.Message = "Copilot connected. Unable to parse quota data."
-	}
-	return result, nil
-}
-
-func (r *Registry) antigravityQuota(ctx context.Context, credential store.Credential) (CredentialQuota, error) {
-	result := CredentialQuota{
-		CredentialID: credential.ID,
-		ProviderID:   credential.ProviderID,
-		ProviderType: "antigravity",
-		Quotas:       map[string]QuotaEntry{},
-		Message:      "Antigravity connected. Check Google Cloud Console for quota details.",
 	}
 	return result, nil
 }

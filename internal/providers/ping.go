@@ -51,13 +51,17 @@ func (r *Registry) pingLLM(ctx context.Context, provider store.Provider, credent
 		RequestID:     fmt.Sprintf("model-test-%d", start.UnixNano()),
 		Source:        defaultProtocol(provider.Type),
 		UpstreamModel: modelID,
-		MaxTokens:     16,
+		MaxTokens:     pingMaxTokens(provider, modelID),
 		Messages:      []canonical.Message{{Role: "user", Content: "hi"}},
 	}
 	response, err := adapter.Execute(ctx, provider, credential, request)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
-		return PingResult{OK: false, LatencyMS: latency, Error: truncatePingError(err.Error()), Status: Status(err)}
+		msg := truncatePingError(err.Error())
+		if pe, ok := err.(*ProviderError); ok {
+			msg = truncatePingError(enrichGLMUpstreamMessage(provider.BaseURL, pe.Message, pe.Status))
+		}
+		return PingResult{OK: false, LatencyMS: latency, Error: msg, Status: Status(err)}
 	}
 	if !llmPingSucceeded(response) {
 		return PingResult{OK: false, LatencyMS: latency, Error: "Provider returned no completion content for this model"}
@@ -111,7 +115,7 @@ func (r *Registry) pingJSON(ctx context.Context, provider store.Provider, creden
 		return PingResult{OK: false, LatencyMS: latency, Error: truncatePingError(readErr.Error()), Status: response.StatusCode}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		err := upstreamResponseError(response, raw)
+		err := upstreamResponseErrorForProvider(response, raw, provider.BaseURL)
 		return PingResult{OK: false, LatencyMS: latency, Error: truncatePingError(err.Error()), Status: response.StatusCode}
 	}
 	var payload map[string]any
@@ -126,6 +130,13 @@ func (r *Registry) pingJSON(ctx context.Context, provider store.Provider, creden
 		return PingResult{OK: false, LatencyMS: latency, Error: emptyMessage, Status: response.StatusCode}
 	}
 	return PingResult{OK: true, LatencyMS: latency, Status: response.StatusCode}
+}
+
+func pingMaxTokens(provider store.Provider, modelID string) int {
+	if isGLMProvider(provider) || strings.Contains(strings.ToLower(modelID), "glm") {
+		return 256
+	}
+	return 16
 }
 
 func defaultProtocol(providerType string) canonical.Protocol {

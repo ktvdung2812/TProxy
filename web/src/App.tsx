@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
+import { MatrixRain } from "./components/MatrixRain";
 import { useViewportWidth } from "./hooks/useViewportWidth";
 import { Header } from "./components/Header";
 import {
@@ -14,6 +15,7 @@ import { defaultApiKey, defaultManagementSecret, DEV_MANAGEMENT_SECRET, isLocalD
 import { ChatView } from "./components/chat/ChatView";
 import { useChatModels } from "./components/chat/useChatModels";
 import { ProvidersView } from "./components/providers/ProvidersView";
+import { ProviderLogo } from "./components/providers/ProviderLogo";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
 import { UsageView } from "./components/usage/UsageView";
 import { ApisView } from "./components/apis/ApisView";
@@ -21,10 +23,12 @@ import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
 import { ProxyPoolsView } from "./components/proxy-pools/ProxyPoolsView";
 import { CombosView } from "./components/combos/CombosView";
+import { MappingView } from "./components/mapping/MappingView";
 import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
 import { matchRoute } from "./navigation";
+import { useRequestLogStream } from "./hooks/useRequestLogStream";
 
 /* ============================================================
    Types — unchanged from the original control center
@@ -152,6 +156,13 @@ function App() {
   const [gatewayOnline, setGatewayOnline] = useState(true);
   const [healthCheckAllBusy, setHealthCheckAllBusy] = useState(false);
   const authHeaders = useMemo<Record<string, string>>(() => ({ ...(secret ? { Authorization: `Bearer ${secret}` } : {}) }), [secret]);
+  const logsStreamEnabled = location.pathname === "/logs" || location.pathname.startsWith("/logs/");
+
+  const applyLogUpdate = useCallback((items: RequestLog[]) => {
+    setLogs(items);
+  }, []);
+
+  useRequestLogStream(secret, logsStreamEnabled, applyLogUpdate);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -179,11 +190,7 @@ function App() {
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
       setSnapshot(data);
-      const [logResponse, auditResponse] = await Promise.all([
-        fetch("/api/admin/logs?limit=25", { headers: authHeaders }),
-        fetch("/api/admin/audit?limit=25", { headers: authHeaders }),
-      ]);
-      if (logResponse.ok) setLogs((await logResponse.json()).data || []);
+      const auditResponse = await fetch("/api/admin/audit?limit=50", { headers: authHeaders });
       if (auditResponse.ok) setAudit((await auditResponse.json()).data || []);
       if (secret) localStorage.setItem("tproxy-management-secret", secret);
     } catch (cause) {
@@ -264,22 +271,6 @@ function App() {
     );
   }, [snapshot.credentials, snapshot.providers]);
 
-  const routeTargets = useMemo(
-    () =>
-      Object.entries(snapshot.routes || {}).flatMap(([publicModelID, routes]) =>
-        routes.map((route) => ({
-          ID: route.ID,
-          PublicModelID: publicModelID,
-          ProviderID: route.ProviderID,
-          UpstreamModel: route.UpstreamModel,
-          Priority: route.Priority,
-          Weight: 1,
-          Enabled: route.Enabled,
-        })),
-      ),
-    [snapshot.routes],
-  );
-
   const online = gatewayOnline;
   const isMobileSidebar = viewportWidth < 1024;
   const isNarrowSidebar =
@@ -302,6 +293,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <MatrixRain />
       <div className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow")}>
         <Sidebar
           online={online}
@@ -351,6 +343,7 @@ function App() {
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/combos" element={<CombosPage />} />
+              <Route path="/mapping" element={<MappingPage />} />
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/upstreams" element={<UpstreamsPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
@@ -376,7 +369,7 @@ function App() {
   }
 
   function UsagePage() {
-    return <UsageView secret={secret} providers={snapshot.providers} credentials={snapshot.credentials} onError={setError} />;
+    return <UsageView secret={secret} providers={snapshot.providers} onError={setError} />;
   }
 
   function ApisPage() {
@@ -441,8 +434,6 @@ function App() {
       <ProvidersView
         providers={snapshot.providers || []}
         credentials={snapshot.credentials || {}}
-        models={snapshot.models || []}
-        routes={routeTargets}
         aliases={snapshot.aliases || []}
         secret={secret}
         searchQuery={providerSearch}
@@ -515,6 +506,23 @@ function App() {
         onMutated={() => void load()}
         onNotice={setNotice}
         onError={setError}
+      />
+    );
+  }
+
+  function MappingPage() {
+    return (
+      <MappingView
+        secret={secret}
+        apiKeys={snapshot.api_keys || []}
+        models={snapshot.models || []}
+        providers={(snapshot.providers || []).map((provider) => ({
+          ID: provider.ID,
+          Type: provider.Type,
+          Name: provider.Name,
+        }))}
+        onError={setError}
+        onNotice={setNotice}
       />
     );
   }
@@ -597,7 +605,11 @@ function App() {
                 <div className="row-table">
                   {(snapshot.providers || []).map((provider) => (
                     <div className="row" key={provider.ID}>
-                      <span className="provider-badge">{provider.Type.slice(0, 2).toUpperCase()}</span>
+                      <ProviderLogo
+                        className="provider-badge"
+                        providerId={provider.ID}
+                        providerType={provider.Type}
+                      />
                       <div className="row-body">
                         <div className="row-primary">
                           <strong>{provider.Name || provider.ID}</strong>
@@ -655,13 +667,15 @@ function App() {
                 <div className="row-table">
                   {logs.map((item) => (
                     <div className="row compact-row" key={`${item.request_id}-${item.created_at}`}>
-                      <div>
+                      <div className="compact-row-main">
                         <strong>{item.method} {item.path}</strong>
-                        <small>{item.client_api_key_id || "local"}</small>
+                        <span className="compact-row-meta">{item.client_api_key_id || "local"}</span>
                       </div>
-                      <span>{item.status >= 400 ? <Badge variant="error" size="sm">{item.status}</Badge> : <Badge variant="success" size="sm">{item.status}</Badge>}</span>
-                      <span>{item.latency_ms} ms</span>
-                      <code>{item.error_code || "ok"}</code>
+                      <span className="compact-row-stat">
+                        {item.status >= 400 ? <Badge variant="error" size="sm">{item.status}</Badge> : <Badge variant="success" size="sm">{item.status}</Badge>}
+                      </span>
+                      <span className="compact-row-stat">{item.latency_ms} ms</span>
+                      <code className="compact-row-code">{item.error_code || "ok"}</code>
                     </div>
                   ))}
                   {logs.length === 0 && <EmptyState icon="receipt_long" text="No requests logged yet." />}
@@ -669,12 +683,12 @@ function App() {
                 <div className="row-table audit-list">
                   {audit.map((item, index) => (
                     <div className="row compact-row" key={`${item.action}-${item.created_at}-${index}`}>
-                      <code>{item.status}</code>
-                      <div>
+                      <code className="compact-row-status">{item.status}</code>
+                      <div className="compact-row-main">
                         <strong>{item.action}</strong>
-                        <small>{item.resource_type || "admin"}</small>
+                        <span className="compact-row-meta">{item.resource_type || "admin"}</span>
                       </div>
-                      <span>{new Date(item.created_at).toLocaleString()}</span>
+                      <span className="compact-row-stat">{new Date(item.created_at).toLocaleString()}</span>
                     </div>
                   ))}
                   {audit.length === 0 && <EmptyState icon="history" text="No audit events yet." />}

@@ -1,0 +1,15 @@
+{
+  "name": "tproxy",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "bash scripts/free-ports.sh && concurrently -k -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev:web": "bash scripts/wait-for-backend.sh && npm --prefix web run dev",
+    "dev:backend": "bash scripts/dev-backend.sh",
+    "build": "npm --prefix web run build && go build -o bin/tproxy ./cmd/tproxy",
+    "start": "bash scripts/start-backend.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Field, Input, Modal } from "../ui";
 import { ADDABLE_PROVIDERS, getProviderTypeInfo, type ProviderTypeInfo } from "./catalog";
-import { saveProvider } from "./api";
+import { fetchNinerouterPresets, saveProvider, type NinerouterPreset } from "./api";
+import { ProviderLogo } from "./ProviderLogo";
 
 type Props = {
   open: boolean;
@@ -25,11 +26,30 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
   const [baseUrl, setBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [presets, setPresets] = useState<NinerouterPreset[]>([]);
+  const [presetFilter, setPresetFilter] = useState("");
+
+  useEffect(() => {
+    if (!secret) return;
+    void fetchNinerouterPresets(secret)
+      .then((result) => setPresets(result.presets || []))
+      .catch(() => setPresets([]));
+  }, [secret]);
 
   useEffect(() => {
     if (!open) return;
     setError("");
     if (presetType) {
+      const preset = presets.find((item) => item.id === presetType);
+      if (preset) {
+        const info = getProviderTypeInfo(preset.type);
+        setSelected(info);
+        setId(preset.id);
+        setName(preset.name);
+        setBaseUrl(preset.base_url || info.defaultBaseUrl || "");
+        setStep("form");
+        return;
+      }
       const info = getProviderTypeInfo(presetType);
       setSelected(info);
       setId(`${info.type}-${Date.now().toString(36).slice(-4)}`);
@@ -43,7 +63,22 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
     setId("");
     setName("");
     setBaseUrl("");
-  }, [open, presetType]);
+  }, [open, presetType, presets]);
+
+  const filteredPresets = useMemo(() => {
+    const q = presetFilter.trim().toLowerCase();
+    if (!q) return presets.slice(0, 24);
+    return presets.filter((item) => item.id.includes(q) || item.name.toLowerCase().includes(q)).slice(0, 24);
+  }, [presetFilter, presets]);
+
+  const handlePickPreset = (preset: NinerouterPreset) => {
+    const info = getProviderTypeInfo(preset.type);
+    setSelected(info);
+    setId(preset.id);
+    setName(preset.name);
+    setBaseUrl(preset.base_url || info.defaultBaseUrl || "");
+    setStep("form");
+  };
 
   const handlePick = (info: ProviderTypeInfo) => {
     setSelected(info);
@@ -86,20 +121,44 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
       size="md"
     >
       {step === "pick" ? (
-        <div className="provider-gallery">
-          {ADDABLE_PROVIDERS.map((info) => {
-            const TypeInfo = getProviderTypeInfo(info.type);
-            return (
-              <button key={info.type} type="button" className="gallery-item" onClick={() => handlePick(TypeInfo)}>
-                <span className="provider-logo">
-                  <span className="material-symbols-outlined">{info.icon}</span>
-                </span>
-                <span className="gallery-item-name">{info.name}</span>
-                <span className="gallery-item-desc">{info.description}</span>
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="provider-gallery">
+            {ADDABLE_PROVIDERS.map((info) => {
+              const TypeInfo = getProviderTypeInfo(info.type);
+              return (
+                <button key={info.type} type="button" className="gallery-item" onClick={() => handlePick(TypeInfo)}>
+                  <ProviderLogo
+                    className="provider-logo"
+                    providerType={info.type}
+                    style={{ color: info.color }}
+                  />
+                  <span className="gallery-item-name">{info.name}</span>
+                  <span className="gallery-item-desc">{info.description}</span>
+                </button>
+              );
+            })}
+          </div>
+          {presets.length > 0 ? (
+            <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
+              <Field label="9router presets" hint="Import-ready provider definitions from the 9router registry.">
+                <Input
+                  placeholder="Filter presets (glm, minimax, grok-cli…)"
+                  value={presetFilter}
+                  onChange={(e) => setPresetFilter(e.target.value)}
+                />
+              </Field>
+              <div className="provider-gallery" style={{ maxHeight: 220, overflow: "auto" }}>
+                {filteredPresets.map((preset) => (
+                  <button key={preset.id} type="button" className="gallery-item" onClick={() => handlePickPreset(preset)}>
+                    <ProviderLogo className="provider-logo" providerType={preset.type} />
+                    <span className="gallery-item-name">{preset.name}</span>
+                    <span className="gallery-item-desc">{preset.id} · {preset.type}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : (
         <form onSubmit={handleSave} style={{ display: "grid", gap: 12 }}>
           <Field label="Type">

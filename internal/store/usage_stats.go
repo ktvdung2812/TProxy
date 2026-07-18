@@ -33,21 +33,28 @@ type UsageRecentRequest struct {
 	Status           string `json:"status"`
 }
 
+type CredentialUsageSummary struct {
+	Requests         int `json:"requests"`
+	PromptTokens     int `json:"promptTokens"`
+	CompletionTokens int `json:"completionTokens"`
+}
+
 type UsageStatsPayload struct {
-	TotalRequests         int                         `json:"totalRequests"`
-	TotalPromptTokens     int                         `json:"totalPromptTokens"`
-	TotalCompletionTokens int                         `json:"totalCompletionTokens"`
-	TotalCachedTokens     int                         `json:"totalCachedTokens"`
-	TotalCost             float64                     `json:"totalCost"`
-	ByProvider            map[string]UsageBucketEntry `json:"byProvider"`
-	ByModel               map[string]UsageBucketEntry `json:"byModel"`
-	ByAccount             map[string]UsageBucketEntry `json:"byAccount"`
-	ByAPIKey              map[string]UsageBucketEntry `json:"byApiKey"`
-	ByEndpoint            map[string]UsageBucketEntry `json:"byEndpoint"`
-	RecentRequests        []UsageRecentRequest        `json:"recentRequests"`
-	ActiveRequests        []any                       `json:"activeRequests"`
-	Pending               map[string]any              `json:"pending"`
-	ErrorProvider         string                      `json:"errorProvider"`
+	TotalRequests         int                              `json:"totalRequests"`
+	TotalPromptTokens     int                              `json:"totalPromptTokens"`
+	TotalCompletionTokens int                              `json:"totalCompletionTokens"`
+	TotalCachedTokens     int                              `json:"totalCachedTokens"`
+	TotalCost             float64                          `json:"totalCost"`
+	ByProvider            map[string]UsageBucketEntry      `json:"byProvider"`
+	ByModel               map[string]UsageBucketEntry      `json:"byModel"`
+	ByAccount             map[string]UsageBucketEntry      `json:"byAccount"`
+	ByCredential          map[string]CredentialUsageSummary `json:"byCredential"`
+	ByAPIKey              map[string]UsageBucketEntry      `json:"byApiKey"`
+	ByEndpoint            map[string]UsageBucketEntry      `json:"byEndpoint"`
+	RecentRequests        []UsageRecentRequest             `json:"recentRequests"`
+	ActiveRequests        []any                            `json:"activeRequests"`
+	Pending               map[string]any                   `json:"pending"`
+	ErrorProvider         string                           `json:"errorProvider"`
 }
 
 type UsageChartPoint struct {
@@ -86,8 +93,10 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		ByProvider:     map[string]UsageBucketEntry{},
 		ByModel:        map[string]UsageBucketEntry{},
 		ByAccount:      map[string]UsageBucketEntry{},
+		ByCredential:   map[string]CredentialUsageSummary{},
 		ByAPIKey:       map[string]UsageBucketEntry{},
 		ByEndpoint:     map[string]UsageBucketEntry{},
+		RecentRequests: []UsageRecentRequest{},
 		ActiveRequests: []any{},
 		Pending:        map[string]any{"byModel": map[string]int{}, "byAccount": map[string]any{}},
 	}
@@ -154,6 +163,11 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 				entry.ConnectionID = credentialID
 				entry.AccountName = accountName
 			})
+			credentialUsage := stats.ByCredential[credentialID]
+			credentialUsage.Requests++
+			credentialUsage.PromptTokens += inputTokens
+			credentialUsage.CompletionTokens += outputTokens
+			stats.ByCredential[credentialID] = credentialUsage
 		}
 
 		apiKeyKey := "local-no-key"
@@ -346,6 +360,35 @@ func parseUsageTime(value string) time.Time {
 func usageStartOfDayUTC(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
+
+func (s *Store) CredentialUsageByPeriod(ctx context.Context, since time.Time) (map[string]CredentialUsageSummary, error) {
+	query := `SELECT credential_id, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+FROM usage_events
+WHERE credential_id != ''`
+	args := []any{}
+	if !since.IsZero() {
+		query += ` AND created_at >= ?`
+		args = append(args, since.UTC().Format(time.RFC3339Nano))
+	}
+	query += ` GROUP BY credential_id`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	usage := map[string]CredentialUsageSummary{}
+	for rows.Next() {
+		var credentialID string
+		var summary CredentialUsageSummary
+		if err := rows.Scan(&credentialID, &summary.Requests, &summary.PromptTokens, &summary.CompletionTokens); err != nil {
+			return nil, err
+		}
+		usage[credentialID] = summary
+	}
+	return usage, rows.Err()
 }
 
 func (s *Store) RecentUsageRequests(ctx context.Context, limit int, lookups UsageLookupMaps) ([]UsageRecentRequest, error) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/ninerouter"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -38,27 +39,6 @@ type Counts struct {
 	Models      int `json:"models"`
 	Combos      int `json:"combos"`
 	ProxyPools  int `json:"proxy_pools"`
-}
-
-type providerSpec struct {
-	Type    string
-	Name    string
-	BaseURL string
-}
-
-var providerSpecs = map[string]providerSpec{
-	"codex":       {Type: "codex", Name: "OpenAI Codex"},
-	"xai":         {Type: "xai", Name: "xAI (Grok)"},
-	"glm":         {Type: "openai-compatible", Name: "GLM Coding", BaseURL: "https://api.z.ai/api/coding/paas/v4"},
-	"nvidia":      {Type: "openai-compatible", Name: "NVIDIA NIM", BaseURL: "https://integrate.api.nvidia.com/v1"},
-	"opencode-go": {Type: "openai-compatible", Name: "OpenCode Go", BaseURL: "https://opencode.ai/zen/go/v1"},
-}
-
-var providerAliasToID = map[string]string{
-	"cx":  "codex",
-	"cc":  "claude",
-	"ocg": "opencode-go",
-	"glm": "glm",
 }
 
 var slugPattern = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -131,7 +111,7 @@ func providersInBackup(backup *Backup) map[string]struct{} {
 	seen := map[string]struct{}{}
 	for _, conn := range backup.ProviderConnections {
 		if conn.Provider != "" {
-			seen[conn.Provider] = struct{}{}
+			seen[ninerouter.ResolveProviderID(conn.Provider)] = struct{}{}
 		}
 	}
 	for _, combo := range backup.Combos {
@@ -146,18 +126,20 @@ func providersInBackup(backup *Backup) map[string]struct{} {
 }
 
 func (i *importer) ensureProvider(ctx context.Context, providerID string) {
-	spec, ok := providerSpecs[providerID]
+	providerID = ninerouter.ResolveProviderID(providerID)
+	preset, ok := ninerouter.Lookup(providerID)
 	if !ok {
 		i.warn(fmt.Sprintf("unsupported 9router provider %q — skipped provider bootstrap", providerID))
 		return
 	}
 	cfg := config.ProviderConfig{
 		ID:      providerID,
-		Type:    spec.Type,
-		Name:    spec.Name,
-		BaseURL: spec.BaseURL,
+		Type:    preset.Type,
+		Name:    preset.Name,
+		BaseURL: preset.BaseURL,
 		Enabled: true,
 	}
+	config.ApplyProviderDefaults(&cfg)
 	if i.dryRun {
 		i.result.Counts.Providers++
 		return
@@ -194,7 +176,8 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 	if strings.TrimSpace(conn.ID) == "" || strings.TrimSpace(conn.Provider) == "" {
 		return
 	}
-	if _, ok := providerSpecs[conn.Provider]; !ok {
+	providerID := ninerouter.ResolveProviderID(conn.Provider)
+	if _, ok := ninerouter.Lookup(providerID); !ok {
 		i.warn(fmt.Sprintf("credential %q uses unsupported provider %q", conn.Name, conn.Provider))
 		return
 	}
@@ -227,7 +210,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 			i.result.Counts.Credentials++
 			return
 		}
-		if err := i.store.SaveOAuthCredential(ctx, conn.Provider, conn.ID, label, conn.Email, token); err != nil {
+		if err := i.store.SaveOAuthCredential(ctx, providerID, conn.ID, label, conn.Email, token); err != nil {
 			i.fail(fmt.Sprintf("oauth credential %q: %v", label, err))
 			return
 		}
@@ -244,7 +227,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 			i.result.Counts.Credentials++
 			return
 		}
-		if err := i.store.SaveCredential(ctx, conn.Provider, config.CredentialConfig{
+		if err := i.store.SaveCredential(ctx, providerID, config.CredentialConfig{
 			ID:       conn.ID,
 			Label:    label,
 			Email:    conn.Email,
@@ -294,10 +277,12 @@ func (i *importer) importCombo(ctx context.Context, backup *Backup, combo Combo)
 			i.warn(fmt.Sprintf("combo %q: could not parse model %q", name, modelRef))
 			continue
 		}
-		if _, ok := providerSpecs[providerID]; !ok {
+		resolvedProvider := ninerouter.ResolveProviderID(providerID)
+		if _, ok := ninerouter.Lookup(resolvedProvider); !ok {
 			i.warn(fmt.Sprintf("combo %q: unsupported provider in model %q", name, modelRef))
 			continue
 		}
+		providerID = resolvedProvider
 		virtualModelID, err := i.ensureVirtualModel(ctx, providerID, upstreamModel)
 		if err != nil {
 			i.fail(fmt.Sprintf("combo %q model %q: %v", name, modelRef, err))
@@ -393,11 +378,8 @@ func resolveProviderID(aliasOrID string) string {
 	if aliasOrID == "" {
 		return ""
 	}
-	if mapped, ok := providerAliasToID[aliasOrID]; ok {
-		return mapped
-	}
-	if _, ok := providerSpecs[aliasOrID]; ok {
-		return aliasOrID
+	if preset, ok := ninerouter.Lookup(aliasOrID); ok {
+		return preset.ID
 	}
 	if strings.HasPrefix(aliasOrID, "openai-compatible") {
 		return ""

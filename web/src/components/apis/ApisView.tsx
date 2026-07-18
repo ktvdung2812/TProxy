@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useApiKeySecrets } from "../../hooks/useApiKeySecrets";
+import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
 import {
   Badge,
   Button,
@@ -13,7 +15,7 @@ import {
   Toggle,
 } from "../ui";
 import { createApiKey, deleteApiKey, fetchApiKeyUsage, toggleApiKey, updateApiKey } from "./api";
-import { storeApiKeySecret } from "../../lib/apiKeySecrets";
+import { getStoredApiKeySecret, maskApiKeySecret, storeApiKeySecret } from "../../lib/apiKeySecrets";
 import { ApiKeySelect } from "../cli-tools/ApiKeySelect";
 import { EndpointRow } from "./EndpointRow";
 import { SecurityWarning } from "./SecurityWarning";
@@ -48,12 +50,8 @@ function compact(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-function maskKeyId(id: string) {
-  if (id.length <= 8) return id;
-  return `${id.slice(0, 4)}••••${id.slice(-4)}`;
-}
-
 export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onMutated }: Props) {
+  useApiKeySecrets();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
   const [loadingUsage, setLoadingUsage] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -61,6 +59,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeyRecord | null>(null);
   const [formData, setFormData] = useState<ApiKeyFormData>(emptyApiKeyForm());
+  const [editSecret, setEditSecret] = useState("");
   const [saving, setSaving] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
@@ -81,6 +80,9 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     if (typeof window === "undefined") return;
     setBaseUrl(gatewayBaseUrl());
     setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
+    if (isLocalDashboardHost() && !getStoredApiKeySecret("local")) {
+      storeApiKeySecret("local", defaultApiKey());
+    }
   }, []);
 
   const loadUsage = useCallback(async () => {
@@ -127,6 +129,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
   const openEditModal = (key: ApiKeyRecord) => {
     setEditingKey(key);
     setFormData(apiKeyToForm(key));
+    setEditSecret(getStoredApiKeySecret(key.id) || "");
     setShowEditModal(true);
   };
 
@@ -155,9 +158,13 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     setSaving(true);
     try {
       await updateApiKey(secret, editingKey.id, formData);
+      if (editSecret.trim()) {
+        storeApiKeySecret(editingKey.id, editSecret.trim());
+      }
       onNotice(`API key "${formData.name}" updated`);
       setShowEditModal(false);
       setEditingKey(null);
+      setEditSecret("");
       onMutated?.();
       await loadUsage();
     } catch (error) {
@@ -396,23 +403,30 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               const budget = usage?.budget_usd_per_day || key.policy?.limits?.budget_usd_per_day;
               const spent = usage?.cost_usd_today || 0;
               const requests = usage?.requests_today || 0;
+              const storedSecret = getStoredApiKeySecret(key.id);
 
               return (
                 <div key={key.id} className={key.enabled ? "apis-key-row" : "apis-key-row is-paused"}>
                   <div className="apis-key-row-main">
                     <p className="apis-key-row-name">{key.name || key.id}</p>
                     <div className="apis-key-row-id">
-                      <code>{maskKeyId(key.id)}</code>
-                      <button
-                        type="button"
-                        className="endpoint-row-copy small"
-                        onClick={() => copy(key.id, `id_${key.id}`)}
-                        aria-label="Copy key id"
-                      >
-                        <span className="material-symbols-outlined">
-                          {copied === `id_${key.id}` ? "check" : "content_copy"}
-                        </span>
-                      </button>
+                      {storedSecret ? (
+                        <>
+                          <code>{maskApiKeySecret(storedSecret)}</code>
+                          <button
+                            type="button"
+                            className="endpoint-row-copy small"
+                            onClick={() => copy(storedSecret, `secret_${key.id}`)}
+                            aria-label="Copy API key"
+                          >
+                            <span className="material-symbols-outlined">
+                              {copied === `secret_${key.id}` ? "check" : "content_copy"}
+                            </span>
+                          </button>
+                        </>
+                      ) : (
+                        <span className="apis-key-secret-missing">Secret not saved in this browser</span>
+                      )}
                     </div>
                     <p className="apis-key-row-meta">
                       {key.models?.length ? key.models.join(", ") : "*"} · {formatLimitSummary(key)}
@@ -568,6 +582,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
         onClose={() => {
           setShowEditModal(false);
           setEditingKey(null);
+          setEditSecret("");
         }}
         title="Edit API key"
         size="lg"
@@ -584,6 +599,18 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
             <Input
               value={formData.models}
               onChange={(event) => setFormData({ ...formData, models: event.target.value })}
+            />
+          </Field>
+          <Field
+            label="API key secret"
+            hint="Stored only in this browser for copy and examples. Paste the client secret if you imported or created this key elsewhere."
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              placeholder="tp_… or paste secret from backup"
+              value={editSecret}
+              onChange={(event) => setEditSecret(event.target.value)}
             />
           </Field>
           <Field label="Team ID" hint="optional">
@@ -608,6 +635,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               onClick={() => {
                 setShowEditModal(false);
                 setEditingKey(null);
+                setEditSecret("");
               }}
             >
               Cancel

@@ -1,5 +1,5 @@
 import { cn } from "../ui";
-import { formatQuotaName, formatResetTime, getColorEmoji, getColorTone } from "./utils";
+import { formatProxyUsageLabel, formatQuotaName, formatResetTime, getColorEmoji, getColorTone } from "./utils";
 
 type QuotaRow = {
   key: string;
@@ -13,16 +13,33 @@ type QuotaRow = {
 
 type Props = {
   rows: QuotaRow[];
+  credentialActive?: boolean;
+  proxyUsage?: { requests: number; promptTokens: number; completionTokens: number };
   onHide?: (row: QuotaRow) => void;
 };
 
-export function QuotaTable({ rows, onHide }: Props) {
+function isSessionQuotaRow(row: QuotaRow) {
+  const key = row.key.trim().toLowerCase();
+  const name = row.name.trim().toLowerCase();
+  return key === "session" || name === "session";
+}
+
+export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide }: Props) {
   if (rows.length === 0) return null;
+
+  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
 
   return (
     <div className="quota-tracker-table-wrap">
       <div className="quota-tracker-table-meta">
-        {rows.length} quota{rows.length === 1 ? "" : "s"}
+        <span>
+          {rows.length} quota{rows.length === 1 ? "" : "s"}
+        </span>
+        {proxyUsageLabel ? (
+          <span className="quota-tracker-table-meta-usage" title="Local proxy usage (all time)">
+            {proxyUsageLabel}
+          </span>
+        ) : null}
       </div>
       <table className="quota-tracker-table">
         <tbody>
@@ -37,7 +54,14 @@ export function QuotaTable({ rows, onHide }: Props) {
                   <span className="quota-tracker-dot" aria-hidden>
                     {getColorEmoji(row.remaining)}
                   </span>
-                  <span className="quota-tracker-name">{formatQuotaName(row.name)}</span>
+                  <span
+                    className={cn(
+                      "quota-tracker-name",
+                      credentialActive && isSessionQuotaRow(row) && "quota-tracker-name-live",
+                    )}
+                  >
+                    {formatQuotaName(row.name)}
+                  </span>
                 </td>
                 <td className="quota-tracker-cell quota-tracker-cell-bar">
                   <div className={cn("quota-tracker-progress", `quota-tracker-progress-${tone}`, row.remaining === 0 && "quota-tracker-progress-empty")}>

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/auth"
+	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/clitools"
 	"github.com/tproxy/tproxy/internal/config"
@@ -62,6 +63,8 @@ type Server struct {
 	configPath       string
 	limiter          *requestLimiter
 	liveUsage        *LiveUsageTracker
+	liveLogs         *LiveRequestLogBuffer
+	claudeAliases    *bridge.Resolver
 	backgroundCancel context.CancelFunc
 	backgroundWG     sync.WaitGroup
 }
@@ -75,7 +78,9 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 		authManager = auth.NewManager(dataStore, nil)
 	}
 	requestRouter.SetCredentialRefresher(authManager)
-	return &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, managementSecret: config.Env(cfg.Security.ManagementSecretEnv), allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker()}
+	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, managementSecret: config.Env(cfg.Security.ManagementSecretEnv), allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	server.loadClaudeAliasResolver()
+	return server
 }
 
 func (s *Server) SetConfigPath(path string) { s.configPath = path }
@@ -121,9 +126,6 @@ func (s *Server) runRetentionCleanup(ctx context.Context) {
 	}
 	if value, err := time.ParseDuration(s.cfg.Retention.MediaJobs); err == nil && value > 0 {
 		_, _ = s.store.PruneMediaJobs(ctx, time.Now().UTC().Add(-value))
-	}
-	if value, err := time.ParseDuration(s.cfg.Retention.RequestLogs); err == nil && value > 0 {
-		_, _ = s.store.PruneRequestLogs(ctx, time.Now().UTC().Add(-value))
 	}
 	if value, err := time.ParseDuration(s.cfg.Retention.AuditEvents); err == nil && value > 0 {
 		_, _ = s.store.PruneAuditEvents(ctx, time.Now().UTC().Add(-value))
@@ -172,20 +174,20 @@ func (s *Server) clientAuth(next http.Handler) http.Handler {
 		var err error
 		if tokenErr != nil {
 			status, code, message := credentialGateStatus(tokenErr)
-			writeError(w, status, code, message, useClientRequestID(r))
+			writeStreamAwareError(w, r, status, code, message, useClientRequestID(r))
 			return
 		}
 		if token != "" {
 			key, err = s.store.AuthenticateAPIKey(r.Context(), token)
 			if err != nil {
-				writeError(w, http.StatusUnauthorized, "invalid_api_key", "invalid client API key", useClientRequestID(r))
+				writeStreamAwareError(w, r, http.StatusUnauthorized, "invalid_api_key", "invalid client API key", useClientRequestID(r))
 				return
 			}
 			if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok && key != nil {
 				state.ClientAPIKeyID = key.ID
 			}
 		} else if !s.cfg.Server.AllowLocalWithoutKey || !security.IsLoopback(r) {
-			writeError(w, http.StatusUnauthorized, "missing_api_key", "Bearer client API key is required", useClientRequestID(r))
+			writeStreamAwareError(w, r, http.StatusUnauthorized, "missing_api_key", "Bearer client API key is required", useClientRequestID(r))
 			return
 		}
 		if err = s.limiter.admitRequest(key, r.URL.Path, s.limitScopes(key)...); err != nil {
@@ -413,7 +415,8 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := useClientRequestID(r)
 	request := parseClaude(body, requestID)
-	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+	preserveClaudeClientModel(&request)
+	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeClaude)
 }
@@ -429,6 +432,8 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := parseClaude(body, useClientRequestID(r))
+	preserveClaudeClientModel(&request)
+	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
 	writeJSON(w, 200, map[string]any{"input_tokens": tokenEstimate(request)})
 }
 
@@ -1079,7 +1084,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		}
 		switch mode {
 		case renderModeClaude:
-			writeClaudeStream(w, r, stream.Events, request.RequestID, model.ID)
+			writeClaudeStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
 		case renderModeResponses:
 			writeResponsesStream(w, r, stream.Events, request.RequestID, model.ID)
 		case renderModeOpenAI:
@@ -1108,10 +1113,11 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		state.CredentialID = result.Selection.Credential.ID
 		state.Attempt = result.Selection.Attempt
 	}
+	clientModel := clientFacingModel(request, model.ID)
 	var payload any
 	switch mode {
 	case renderModeClaude:
-		payload = renderClaude(result.Response, request.RequestID)
+		payload = renderClaude(result.Response, request.RequestID, clientModel)
 	case renderModeResponses:
 		payload = renderResponses(result.Response, request.RequestID)
 	default:
@@ -1132,11 +1138,20 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	data := make([]map[string]any, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
 	for _, model := range models {
 		if !model.Enabled || !s.store.PublicModelAllowed(key, model.ID) {
 			continue
 		}
-		data = append(data, map[string]any{"id": model.ID, "object": "model", "name": model.DisplayName, "owned_by": "tproxy", "capabilities": model.Capabilities, "limits": model.Limits, "endpoint": modelEndpointKind(model), "created": time.Now().Unix()})
+		if !s.router.IsModelCatalogVisible(r.Context(), model) {
+			continue
+		}
+		display := s.router.CatalogDisplayEntry(r.Context(), model)
+		if _, exists := seen[display.ID]; exists {
+			continue
+		}
+		seen[display.ID] = struct{}{}
+		data = append(data, map[string]any{"id": display.ID, "object": "model", "name": display.Name, "owned_by": "tproxy", "capabilities": model.Capabilities, "limits": model.Limits, "endpoint": modelEndpointKind(model), "created": time.Now().Unix()})
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
@@ -1172,11 +1187,20 @@ func (s *Server) geminiModels(w http.ResponseWriter, r *http.Request) {
 	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	data := make([]map[string]any, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
 	for _, model := range models {
 		if !model.Enabled || !s.store.PublicModelAllowed(key, model.ID) {
 			continue
 		}
-		data = append(data, map[string]any{"name": "models/" + model.ID, "displayName": model.DisplayName, "supportedGenerationMethods": []string{"generateContent", "streamGenerateContent"}, "capabilities": model.Capabilities})
+		if !s.router.IsModelCatalogVisible(r.Context(), model) {
+			continue
+		}
+		display := s.router.CatalogDisplayEntry(r.Context(), model)
+		if _, exists := seen[display.ID]; exists {
+			continue
+		}
+		seen[display.ID] = struct{}{}
+		data = append(data, map[string]any{"name": "models/" + display.ID, "displayName": display.Name, "supportedGenerationMethods": []string{"generateContent", "streamGenerateContent"}, "capabilities": model.Capabilities})
 	}
 	writeJSON(w, 200, map[string]any{"models": data})
 }
@@ -1342,6 +1366,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminTopology(w, r, strings.TrimPrefix(r.URL.Path, "/api/admin/topology/"))
 		return
 	}
+	if r.URL.Path == "/api/admin/logs/stream" {
+		s.adminLogsStream(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/usage/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/usage/")
 		switch suffix {
@@ -1422,12 +1450,16 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminUsage(w, r)
 	case "/api/admin/quota/summary":
 		s.adminQuotaSummary(w, r)
+	case "/api/admin/quota/credential-usage":
+		s.adminQuotaCredentialUsage(w, r)
 	case "/api/admin/logs":
 		s.adminLogs(w, r)
 	case "/api/admin/audit":
 		s.adminAudit(w, r)
 	case "/api/admin/config/versions":
 		s.adminConfigVersions(w, r)
+	case "/api/admin/mapping/claude":
+		s.adminClaudeMapping(w, r)
 	case "/api/admin/settings":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
@@ -1436,6 +1468,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"retention": s.cfg.Retention, "payload_capture": false, "allow_remote_management": s.allowRemoteMgmt, "token_saver": map[string]any{"enabled": true, "per_request_opt_out": true}})
 	case "/api/admin/import/9router":
 		s.adminImport9router(w, r)
+	case "/api/admin/ninerouter/presets":
+		s.adminNinerouterPresets(w, r)
 	case "/api/admin/import/cliproxyapi":
 		s.adminImportCliproxyAPI(w, r)
 	case "/api/admin/config/export":
@@ -1940,7 +1974,17 @@ func (s *Server) adminDeleteModel(w http.ResponseWriter, r *http.Request, modelI
 		writeError(w, status, "model_delete_failed", err.Error(), useClientRequestID(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model_id": modelID})
+	if s.configPath != "" {
+		next, err := config.RemoveModel(s.configPath, modelID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "config_update_failed", err.Error(), useClientRequestID(r))
+			return
+		}
+		if next != nil {
+			s.cfg = next
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model_id": modelID, "config_updated": s.configPath != ""})
 }
 
 func (s *Server) adminAliases(w http.ResponseWriter, r *http.Request) {
@@ -2375,6 +2419,34 @@ func (s *Server) adminQuotaSummary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) adminQuotaCredentialUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	period := strings.TrimSpace(r.URL.Query().Get("period"))
+	if period == "" {
+		period = "all"
+	}
+	since, err := store.UsagePeriodSince(period, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	usage, err := s.store.CredentialUsageByPeriod(r.Context(), since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
+		return
+	}
+	if usage == nil {
+		usage = map[string]store.CredentialUsageSummary{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"period":      period,
+		"by_credential": usage,
+	})
+}
+
 func startOfDayUTC(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
@@ -2498,19 +2570,6 @@ func (s *Server) usageLookupMaps(ctx context.Context) store.UsageLookupMaps {
 		lookups.APIKeyNames[apiKey.ID] = name
 	}
 	return lookups
-}
-
-func (s *Server) adminLogs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
-		return
-	}
-	items, err := s.store.RecentRequestLogs(r.Context(), queryLimit(r, 50))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items, "payload_capture": false})
 }
 
 func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
@@ -2821,11 +2880,12 @@ func oauthCallbackValues(r *http.Request) (state, code, providerError string) {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedHeaders := "Authorization, Content-Type, X-Api-Key, X-Request-ID, X-Model, Idempotency-Key, X-TProxy-Token-Saver"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/admin/") {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		}
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID, Idempotency-Key, X-TProxy-Token-Saver")
+		w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -2892,7 +2952,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		}
 		metadata := map[string]any{"remote_addr": r.RemoteAddr}
 		state.ErrorCode = writer.Header().Get("X-TProxy-Error-Code")
-		_ = s.store.AddRequestLog(context.Background(), store.RequestLog{RequestID: state.RequestID, ClientAPIKeyID: state.ClientAPIKeyID, Method: r.Method, Path: r.URL.Path, Protocol: state.Protocol, PublicModelID: state.PublicModelID, ProviderID: state.ProviderID, CredentialID: state.CredentialID, Attempt: state.Attempt, Status: status, LatencyMS: time.Since(started).Milliseconds(), ErrorCode: state.ErrorCode, Metadata: metadata, CreatedAt: time.Now().UTC()})
+		s.liveLogs.Push(store.RequestLog{RequestID: state.RequestID, ClientAPIKeyID: state.ClientAPIKeyID, Method: r.Method, Path: r.URL.Path, Protocol: state.Protocol, PublicModelID: state.PublicModelID, ProviderID: state.ProviderID, CredentialID: state.CredentialID, Attempt: state.Attempt, Status: status, LatencyMS: time.Since(started).Milliseconds(), ErrorCode: state.ErrorCode, Metadata: metadata, CreatedAt: time.Now().UTC()})
 		isOAuthCallback := r.URL.Path == "/api/admin/oauth/callback"
 		if strings.HasPrefix(r.URL.Path, "/api/admin/") && !isOAuthCallback && r.Method != http.MethodGet && r.Method != http.MethodOptions {
 			_ = s.store.AddAuditEvent(context.Background(), store.AuditEvent{Actor: "management", Action: r.Method + " " + r.URL.Path, ResourceType: "admin", Status: status, Metadata: map[string]any{"request_id": state.RequestID}, CreatedAt: time.Now().UTC()})

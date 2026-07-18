@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteCredential, saveCredential } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
+import { ProviderLogo } from "../providers/ProviderLogo";
+import { useUsageStream } from "../usage/useUsageStream";
 import { ConfirmDialog, Toggle, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
-import { consumeCodexResetCredit, fetchCredentialQuota, type CredentialQuota } from "./api";
+import { consumeCodexResetCredit, fetchCredentialProxyUsage, fetchCredentialQuota, type CredentialProxyUsage, type CredentialQuota } from "./api";
 import { QuotaTable } from "./QuotaTable";
 import {
   ACCOUNT_FILTER_OPTIONS,
@@ -22,7 +24,37 @@ import {
   quotaEntries,
 } from "./utils";
 
-const QUOTA_PROVIDER_TYPES = new Set(["codex", "claude", "copilot", "antigravity"]);
+const QUOTA_PROVIDER_TYPES = new Set([
+  "codex",
+  "claude",
+  "copilot",
+  "github",
+  "antigravity",
+  "gemini-cli",
+  "glm",
+  "glm-cn",
+  "minimax",
+  "minimax-cn",
+  "kiro",
+  "qoder",
+  "qwen",
+  "xai",
+  "grok-cli",
+  "vercel-ai-gateway",
+  "codebuddy-cn",
+  "ollama",
+  "kimi",
+  "kimi-coding",
+]);
+
+function quotaProviderKey(item: Pick<CredentialRow, "providerId" | "providerType">): string {
+  if (QUOTA_PROVIDER_TYPES.has(item.providerId)) return item.providerId;
+  return item.providerType;
+}
+
+function supportsQuotaTracker(item: Pick<CredentialRow, "providerId" | "providerType">): boolean {
+  return QUOTA_PROVIDER_TYPES.has(item.providerId) || QUOTA_PROVIDER_TYPES.has(item.providerType);
+}
 
 type CredentialRow = {
   id: string;
@@ -74,21 +106,33 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   const [resetConfirmCredential, setResetConfirmCredential] = useState<CredentialRow | null>(null);
   const [resetCreditsCredential, setResetCreditsCredential] = useState<CredentialRow | null>(null);
   const [resettingLimitId, setResettingLimitId] = useState<string | null>(null);
+  const [activeCredentialIds, setActiveCredentialIds] = useState<Set<string>>(() => new Set());
+  const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
+
+  const applyLiveUsage = useCallback((update: { activeRequests?: Array<{ credential_id?: string }> }) => {
+    const next = new Set<string>();
+    for (const item of update.activeRequests || []) {
+      if (item.credential_id) next.add(item.credential_id);
+    }
+    setActiveCredentialIds(next);
+  }, []);
+
+  useUsageStream(secret, true, applyLiveUsage);
 
   const eligible = useMemo(
-    () => credentials.filter((item) => QUOTA_PROVIDER_TYPES.has(item.providerType)),
+    () => credentials.filter((item) => supportsQuotaTracker(item)),
     [credentials],
   );
 
   const providerOptions = useMemo(() => {
-    const types = new Set(eligible.map((item) => item.providerType));
+    const types = new Set(eligible.map((item) => quotaProviderKey(item)));
     return [...types].sort();
   }, [eligible]);
 
   const filteredCredentials = useMemo(() => {
     let rows = eligible;
     if (providerFilter !== "all") {
-      rows = rows.filter((item) => item.providerType === providerFilter);
+      rows = rows.filter((item) => quotaProviderKey(item) === providerFilter);
     }
     if (accountFilter === "active") {
       rows = rows.filter((item) => item.enabled);
@@ -124,17 +168,29 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     [secret],
   );
 
+  const loadProxyUsage = useCallback(async () => {
+    try {
+      const response = await fetchCredentialProxyUsage(secret, "all");
+      setProxyUsageById(response.by_credential || {});
+    } catch {
+      // Keep the last known usage if the stats endpoint is temporarily unavailable.
+    }
+  }, [secret]);
+
   const refreshAll = useCallback(async () => {
     setRefreshingAll(true);
     setCountdown(60);
     try {
-      await Promise.all(sortedCredentials.map((item) => loadQuota(item.id)));
+      await Promise.all([
+        loadProxyUsage(),
+        ...sortedCredentials.map((item) => loadQuota(item.id)),
+      ]);
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to refresh quota");
     } finally {
       setRefreshingAll(false);
     }
-  }, [sortedCredentials, loadQuota, onError]);
+  }, [sortedCredentials, loadQuota, loadProxyUsage, onError]);
 
   useEffect(() => {
     void refreshAll();
@@ -324,9 +380,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           setProviderMenuOpen(false);
                         }}
                       >
-                        <span className="quota-tracker-provider-icon" style={{ backgroundColor: `${info.color}22`, color: info.color }}>
-                          {info.textIcon}
-                        </span>
+                        <ProviderLogo
+                          className="quota-tracker-provider-icon"
+                          providerType={providerType}
+                          style={{ color: info.color }}
+                        />
                         <span>{info.name}</span>
                       </button>
                     );
@@ -418,16 +476,17 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
       ) : (
         <div className="quota-tracker-grid">
           {sortedCredentials.map((credential) => {
-            const info = getProviderTypeInfo(credential.providerType);
+            const quotaKey = quotaProviderKey(credential);
+            const info = getProviderTypeInfo(quotaKey);
             const quota = quotaById[credential.id];
             const busy = loading[credential.id];
             const error = errors[credential.id];
             const rowBusy = deletingId === credential.id || togglingId === credential.id || resettingLimitId === credential.id;
             const allEntries = quotaEntries(quota);
-            const visibleEntries = filterQuotasByVisibility(credential.providerType, allEntries, quotaVisibility);
-            const hiddenEntries = getHiddenQuotaRows(credential.providerType, allEntries, quotaVisibility);
+            const visibleEntries = filterQuotasByVisibility(quotaKey, allEntries, quotaVisibility);
+            const hiddenEntries = getHiddenQuotaRows(quotaKey, allEntries, quotaVisibility);
             const secondary = credential.email && credential.label && credential.email !== credential.label ? credential.email : null;
-            const isCodex = credential.providerType === "codex";
+            const isCodex = quotaKey === "codex" || credential.providerType === "codex";
             const resetCreditCount = getCodexResetCreditCount(quota);
             const isResettingLimit = resettingLimitId === credential.id;
 
@@ -439,9 +498,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                 <div className="quota-tracker-card-head">
                   <div className="quota-tracker-card-head-row">
                     <div className="quota-tracker-card-ident">
-                      <span className="quota-tracker-provider-icon quota-tracker-provider-icon-lg" style={{ backgroundColor: `${info.color}22`, color: info.color }}>
-                        {info.textIcon}
-                      </span>
+                      <ProviderLogo
+                        className="quota-tracker-provider-icon quota-tracker-provider-icon-lg"
+                        providerType={quotaKey}
+                        style={{ color: info.color }}
+                      />
                       <div className="quota-tracker-card-titles">
                         <h3>{info.name}</h3>
                         {getConnectionLabel(credential) ? <p>{getConnectionLabel(credential)}</p> : null}
@@ -543,7 +604,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                   ) : (
                     <QuotaTable
                       rows={visibleEntries}
-                      onHide={(row) => handleHideQuota(credential.providerType, getQuotaVisibilityKey(row))}
+                      credentialActive={activeCredentialIds.has(credential.id)}
+                      proxyUsage={
+                        proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
+                      }
+                      onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
                     />
                   )}
 
@@ -556,7 +621,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           key={row.key}
                           type="button"
                           className="quota-tracker-hidden-chip"
-                          onClick={() => handleShowQuota(credential.providerType, getQuotaVisibilityKey(row))}
+                          onClick={() => handleShowQuota(quotaKey, getQuotaVisibilityKey(row))}
                         >
                           {row.name}
                         </button>

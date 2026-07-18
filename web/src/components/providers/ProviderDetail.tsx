@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Toggle } from "../ui";
 import { CooldownTimer } from "./CooldownTimer";
 import { CredentialModelsModal } from "./CredentialModelsModal";
@@ -7,17 +7,23 @@ import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
 import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
 import { AddCredentialModal } from "./AddCredentialModal";
-import { getProviderTypeInfo } from "./catalog";
-import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, saveCredential, type ProxyPoolOption } from "./api";
-import { credentialStatusLabel, isOnCooldown, type Credential, type ModelAlias, type Provider, type PublicModel, type RouteTarget } from "./types";
+import { ProviderConnectionActions } from "./ProviderConnectionActions";
+import {
+  catalogWithPreset,
+  resolveConnectionProfile,
+  type ConnectionMethod,
+} from "./connectionMethods";
+import { ProviderLogo } from "./ProviderLogo";
+import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
+import { credentialStatusLabel, isOnCooldown, type Credential, type ModelAlias, type Provider } from "./types";
 
 type Props = {
   provider: Provider;
   credentials: Credential[];
-  models: PublicModel[];
-  routes: RouteTarget[];
   aliases: ModelAlias[];
   secret: string;
+  presets: NinerouterPreset[];
+  onOpenImport?: (source: "cliproxy" | "9router") => void;
   onBack: () => void;
   onMutated: () => void;
   onNotice: (message: string) => void;
@@ -26,9 +32,28 @@ type Props = {
 
 /** Provider detail page — header + connections card + discovered models.
  *  Ported from 9router [id]/page.js, adapted to tdproxy's snapshot model. */
-export function ProviderDetail({ provider, credentials, models, routes, aliases, secret, onBack, onMutated, onNotice, onError }: Props) {
-  const info = getProviderTypeInfo(provider.Type);
+export function ProviderDetail({
+  provider,
+  credentials,
+  aliases,
+  secret,
+  presets,
+  onOpenImport,
+  onBack,
+  onMutated,
+  onNotice,
+  onError,
+}: Props) {
+  const catalog = useMemo(
+    () => catalogWithPreset(provider.Type, provider.ID, presets),
+    [provider.Type, provider.ID, presets],
+  );
+  const connectionProfile = useMemo(
+    () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
+    [catalog, presets, provider.ID],
+  );
   const [showAddCredential, setShowAddCredential] = useState(false);
+  const [credentialMethod, setCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [showOAuth, setShowOAuth] = useState(false);
   const [reAuthCredential, setReAuthCredential] = useState<Credential | null>(null);
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
@@ -82,6 +107,35 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
     }
   };
 
+  const handleConnectionMethod = (method: ConnectionMethod) => {
+    if (!method.available) {
+      onError(method.unavailableReason || "This connection method is not available yet.");
+      return;
+    }
+    switch (method.kind) {
+      case "oauth":
+        setShowOAuth(true);
+        break;
+      case "api_key":
+      case "cookie":
+      case "service_account":
+      case "none":
+        setCredentialMethod(method);
+        setShowAddCredential(true);
+        break;
+      case "import_cliproxy":
+        onOpenImport?.("cliproxy");
+        break;
+      case "import_9router":
+        onOpenImport?.("9router");
+        break;
+      default: {
+        const _exhaustive: never = method.kind;
+        void _exhaustive;
+      }
+    }
+  };
+
   const handleDeleteCredential = async () => {
     if (!confirmDeleteCred) return;
     const cred = confirmDeleteCred;
@@ -104,9 +158,13 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
 
       {/* Header */}
       <div className="detail-header">
-        <span className="provider-logo">
-          <span className="material-symbols-outlined">{info.icon}</span>
-        </span>
+        <ProviderLogo
+          className="provider-logo"
+          providerId={provider.ID}
+          providerType={provider.Type}
+          style={{ color: catalog.color }}
+          alt={`${provider.Name || provider.ID} logo`}
+        />
         <div className="detail-title-block">
           <h2>{provider.Name || provider.ID}</h2>
           <div className="detail-meta">
@@ -122,13 +180,13 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
           </div>
           <div className="detail-meta" style={{ marginTop: 8 }}>
             {provider.BaseURL && <span className="detail-url">{provider.BaseURL}</span>}
-            {info.website && (
-              <a className="detail-link" href={info.website} target="_blank" rel="noreferrer">
+            {catalog.website && (
+              <a className="detail-link" href={catalog.website} target="_blank" rel="noreferrer">
                 Website <span className="material-symbols-outlined" style={{ fontSize: 14 }}>open_in_new</span>
               </a>
             )}
-            {info.apiKeyUrl && (
-              <a className="detail-link" href={info.apiKeyUrl} target="_blank" rel="noreferrer">
+            {catalog.apiKeyUrl && (
+              <a className="detail-link" href={catalog.apiKeyUrl} target="_blank" rel="noreferrer">
                 Get API key <span className="material-symbols-outlined" style={{ fontSize: 14 }}>key</span>
               </a>
             )}
@@ -150,16 +208,9 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
       {/* Connections card */}
       <Card pad="md" className="section" title="Connections" icon="vpn_key"
         action={
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <ModelAvailabilityBadge credentials={credentials} />
-            {info.supportsOAuth && (
-              <Button variant="primary" size="sm" icon="lock_person" onClick={() => setShowOAuth(true)}>
-                Connect {info.name}
-              </Button>
-            )}
-            <Button variant="secondary" size="sm" icon="key" onClick={() => setShowAddCredential(true)}>
-              Add credential
-            </Button>
+            <ProviderConnectionActions profile={connectionProfile} onMethod={handleConnectionMethod} />
           </div>
         }
       >
@@ -167,7 +218,7 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
           <EmptyState
             icon="key_off"
             text="No connections yet."
-            hint={info.supportsOAuth ? "Add an API key credential or connect via OAuth." : "Add an API key credential to enable this provider."}
+            hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, cookie, or import."}
           />
         ) : (
           credentials.map((cred) => (
@@ -176,7 +227,7 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
               providerId={provider.ID}
               credential={cred}
               secret={secret}
-              supportsOAuth={info.supportsOAuth}
+              supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
               onEdit={(c) => setEditingCredential(c)}
               onDeleted={(c) => setConfirmDeleteCred(c)}
               onReAuth={(c) => setReAuthCredential(c)}
@@ -193,8 +244,6 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
       <ModelsSection
         providerId={provider.ID}
         credentials={credentials}
-        models={models}
-        routes={routes}
         secret={secret}
         discoverNonce={discoverNonce}
       />
@@ -212,7 +261,11 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
         providerId={provider.ID}
         providerType={provider.Type}
         secret={secret}
-        onClose={() => setShowAddCredential(false)}
+        method={credentialMethod}
+        onClose={() => {
+          setShowAddCredential(false);
+          setCredentialMethod(null);
+        }}
         onSaved={() => {
           onNotice("Credential saved");
           onMutated();
@@ -222,6 +275,7 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
         open={showOAuth}
         providerId={provider.ID}
         providerType={provider.Type}
+        presetId={catalog.presetId}
         secret={secret}
         onClose={() => setShowOAuth(false)}
         onComplete={() => {
@@ -234,6 +288,7 @@ export function ProviderDetail({ provider, credentials, models, routes, aliases,
         open={reAuthCredential !== null}
         providerId={provider.ID}
         providerType={provider.Type}
+        presetId={catalog.presetId}
         secret={secret}
         credentialId={reAuthCredential?.id}
         initialLabel={reAuthCredential?.label}

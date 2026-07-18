@@ -280,7 +280,7 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 	}
 	var text strings.Builder
 	completed := false
-	for i := 0; i < 8 && !completed; i++ {
+	for i := 0; i < 32 && !completed; i++ {
 		var frame map[string]any
 		if err = connection.ReadJSON(&frame); err != nil {
 			t.Fatal(err)
@@ -305,12 +305,24 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 	_ = connection.Close()
 	deadline := time.Now().Add(time.Second)
 	for {
-		logs, logErr := dataStore.RecentRequestLogs(context.Background(), 10)
-		if logErr != nil {
-			t.Fatal(logErr)
+		logsRequest, err := http.NewRequest(http.MethodGet, app.URL+"/api/admin/logs?limit=10", nil)
+		if err != nil {
+			t.Fatal(err)
 		}
+		logsResponse, err := http.DefaultClient.Do(logsRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Data []store.RequestLog `json:"data"`
+		}
+		if err = json.NewDecoder(logsResponse.Body).Decode(&payload); err != nil {
+			logsResponse.Body.Close()
+			t.Fatal(err)
+		}
+		logsResponse.Body.Close()
 		found := false
-		for _, item := range logs {
+		for _, item := range payload.Data {
 			if item.Path == "/v1/responses/ws" && item.Status == http.StatusSwitchingProtocols && item.PublicModelID == "td-ws" && item.ProviderID == "ws-provider" {
 				found = true
 				break
@@ -320,9 +332,54 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("WebSocket request was not recorded: %+v", logs)
+			t.Fatalf("WebSocket request was not recorded: %+v", payload.Data)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestClaudeMessagesStreamMapsPlaceholderAndReturnsSSE(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("upstream path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.4\",\"status\":\"in_progress\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello claude\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n"))
+	}))
+	defer upstream.Close()
+
+	t.Setenv("TPROXY_TEST_API_KEY", "client-secret")
+	cfg := &config.Config{
+		Server:        config.ServerConfig{AllowLocalWithoutKey: false, AllowUpstreamModels: true},
+		Security:      config.SecurityConfig{ManagementSecretEnv: "TPROXY_TEST_MANAGEMENT"},
+		ClientAPIKeys: []config.ClientAPIKey{{ID: "test-client", Name: "Test", KeyEnv: "TPROXY_TEST_API_KEY"}},
+		Providers: []config.ProviderConfig{{
+			ID: "codex", Type: "codex", Name: "Codex", BaseURL: upstream.URL, Enabled: true,
+			Credentials: []config.CredentialConfig{{ID: "codex-credential", AuthType: "none"}},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(`{"model":"sonnet","max_tokens":256,"stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("Authorization", "Bearer client-secret")
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: message_start") || !strings.Contains(body, "event: message_stop") {
+		t.Fatalf("unexpected sse body: %s", body)
+	}
+	if !strings.Contains(body, `"model":"sonnet"`) {
+		t.Fatalf("client model not echoed: %s", body)
+	}
+	if !strings.Contains(body, "hello claude") {
+		t.Fatalf("missing assistant text: %s", body)
 	}
 }
 
@@ -1185,6 +1242,25 @@ func TestGlobalAndTeamLimitScopesAreEnforcedAtomically(t *testing.T) {
 	}
 	if limiter.windows["global"].Count != 1 {
 		t.Fatalf("global count was incremented after rejected team request: %+v", limiter.windows)
+	}
+}
+
+func TestCORSPreflightAllowsClientAPIKeyHeader(t *testing.T) {
+	cfg := &config.Config{Server: config.ServerConfig{AllowLocalWithoutKey: true}}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+	request := httptest.NewRequest(http.MethodOptions, "/v1/models", nil)
+	request.Header.Set("Origin", "vscode-file://vscode-app")
+	request.Header.Set("Access-Control-Request-Method", "GET")
+	request.Header.Set("Access-Control-Request-Headers", "authorization,x-api-key")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	allowed := response.Header().Get("Access-Control-Allow-Headers")
+	if !strings.Contains(strings.ToLower(allowed), "x-api-key") {
+		t.Fatalf("allowed headers = %q", allowed)
 	}
 }
 

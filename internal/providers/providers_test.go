@@ -595,3 +595,49 @@ func TestProviderDiscoveryUsesLightweightCatalogRequest(t *testing.T) {
 		t.Fatalf("catalog calls=%d", calls.Load())
 	}
 }
+
+func TestEndpointVersionlessOpenAIPaths(t *testing.T) {
+	cases := []struct {
+		base, path, want string
+	}{
+		{"https://api.z.ai/api/paas/v4", "/v1/models", "https://api.z.ai/api/paas/v4/models"},
+		{"https://api.z.ai/api/paas/v4/", "/v1/chat/completions", "https://api.z.ai/api/paas/v4/chat/completions"},
+		{"https://api.z.ai/api/coding/paas/v4", "/v1/models", "https://api.z.ai/api/coding/paas/v4/models"},
+		{"https://open.bigmodel.cn/api/coding/paas/v4", "/v1/chat/completions", "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"},
+		{"https://api.openai.com/v1", "/v1/models", "https://api.openai.com/v1/models"},
+		{"https://api.openai.com", "/v1/models", "https://api.openai.com/v1/models"},
+	}
+	for _, tc := range cases {
+		if got := endpoint(tc.base, tc.path); got != tc.want {
+			t.Fatalf("endpoint(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestDiscoveryPathGLMUsesModelsEndpoint(t *testing.T) {
+	provider := store.Provider{ID: "glm", Type: "openai-compatible", BaseURL: "https://api.z.ai/api/paas/v4"}
+	if got := modelsDiscoveryURL(provider); got != "https://api.z.ai/api/paas/v4/models" {
+		t.Fatalf("modelsDiscoveryURL() = %q, want https://api.z.ai/api/paas/v4/models", got)
+	}
+}
+
+func TestDiscoverGLMFallsBackOn404(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	registry := NewRegistry()
+	models, err := registry.DiscoverModels(context.Background(), store.Provider{
+		ID: "glm", Type: "openai-compatible", BaseURL: upstream.URL + "/api/paas/v4",
+	}, store.Credential{Secret: "test-key"})
+	if err != nil {
+		t.Fatalf("DiscoverModels() error: %v", err)
+	}
+	if len(models) == 0 || models[0].ID != "glm-5.2" {
+		t.Fatalf("models = %+v", models)
+	}
+}

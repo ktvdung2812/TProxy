@@ -12,23 +12,15 @@ type ProviderItem = {
   Enabled: boolean;
 };
 
-type CredentialRecord = {
-  id: string;
-  label?: string;
-  email?: string;
-  enabled?: boolean;
-};
-
 type Props = {
   secret: string;
   providers: ProviderItem[] | null;
-  credentials?: Record<string, CredentialRecord[]>;
   onError: (message: string) => void;
 };
 
 type UsageTab = "overview" | "details";
 
-export function UsageView({ secret, providers, credentials, onError }: Props) {
+export function UsageView({ secret, providers, onError }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<UsagePeriod>("today");
 
@@ -52,19 +44,6 @@ export function UsageView({ secret, providers, credentials, onError }: Props) {
     }
     return names;
   }, [providerItems]);
-
-  const credentialsByProvider = useMemo(() => {
-    const mapped: Record<string, Array<{ id: string; label?: string; email?: string; enabled?: boolean }>> = {};
-    for (const [providerId, items] of Object.entries(credentials || {})) {
-      mapped[providerId] = items.map((item) => ({
-        id: item.id,
-        label: item.label,
-        email: item.email,
-        enabled: item.enabled,
-      }));
-    }
-    return mapped;
-  }, [credentials]);
 
   const setTab = (tab: UsageTab) => {
     const next = new URLSearchParams(searchParams);
@@ -104,7 +83,6 @@ export function UsageView({ secret, providers, credentials, onError }: Props) {
           secret={secret}
           period={period}
           providers={providerItems}
-          credentialsByProvider={credentialsByProvider}
           onError={onError}
         />
       ) : (

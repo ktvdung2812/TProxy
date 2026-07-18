@@ -75,12 +75,12 @@ export function UsageChart({ secret, period, onError }: Props) {
             <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="usageGradTokens" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#57b37c" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#57b37c" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="usageGradCost" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#6ab0bf" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#6ab0bf" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} />
@@ -115,7 +115,7 @@ export function UsageChart({ secret, period, onError }: Props) {
                 <Area
                   type="monotone"
                   dataKey="tokens"
-                  stroke="#6366f1"
+                  stroke="#57b37c"
                   strokeWidth={2}
                   fill="url(#usageGradTokens)"
                   dot={false}
@@ -125,7 +125,7 @@ export function UsageChart({ secret, period, onError }: Props) {
                 <Area
                   type="monotone"
                   dataKey="cost"
-                  stroke="#f59e0b"
+                  stroke="#6ab0bf"
                   strokeWidth={2}
                   fill="url(#usageGradCost)"
                   dot={false}

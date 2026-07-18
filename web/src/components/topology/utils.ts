@@ -3,6 +3,8 @@ import { getProviderTypeInfo } from "../providers/catalog";
 import type { UsageActiveRequest } from "../usage/api";
 import type { TopologyClient } from "./api";
 
+export const FLOW_TARGET_TOP = "target-top";
+export const FLOW_SOURCE_BOTTOM = "source-bottom";
 export const FLOW_TARGET_LEFT = "target-left";
 export const FLOW_SOURCE_RIGHT = "source-right";
 
@@ -31,8 +33,8 @@ export type GatewayNodeData = {
 export type ProviderNodeData = {
   label: string;
   providerId: string;
+  providerType: string;
   color: string;
-  textIcon: string;
   todayRequests: number;
   totalRequests: number;
   credentialCount: number;
@@ -93,11 +95,7 @@ export function timeAgo(value: string, now = Date.now()): string {
 }
 
 function providerColor(type: string): string {
-  return getProviderTypeInfo(type).color || "#64748b";
-}
-
-function providerIcon(type: string): string {
-  return getProviderTypeInfo(type).textIcon || type.slice(0, 2).toUpperCase();
+  return getProviderTypeInfo(type).color || "#477453";
 }
 
 function activeProviderSet(activeRequests: UsageActiveRequest[]): Set<string> {
@@ -158,17 +156,31 @@ export function buildTproxyTopologyFlow(input: {
   const PROVIDER_H = 64;
   const CREDENTIAL_W = 180;
   const CREDENTIAL_H = 48;
-  const GAP_Y = 16;
-  const GAP_X = 120;
+  const GAP_X = 20;
+  const GAP_Y = 12;
+  const TIER_GAP = 40;
+  const BLOCK_GAP = 28;
   const LEFT = 20;
-  const gatewayX = LEFT + CLIENT_W + GAP_X;
-  const providerX = gatewayX + GATEWAY_W + GAP_X;
-  const credentialX = providerX + PROVIDER_W + GAP_X;
+  const CREDENTIAL_INDENT = 28;
+  const TOP = 20;
+  const contentWidth = Math.max(CLIENT_W, GATEWAY_W, PROVIDER_W, CREDENTIAL_W + CREDENTIAL_INDENT);
 
   const clientCount = visibleClients.length;
-  const providerCount = Math.max(enabledProviders.length, 1);
-  const contentHeight = Math.max(clientCount, providerCount) * (CLIENT_H + GAP_Y);
-  const centerY = 40 + contentHeight / 2;
+  const clientRowWidth =
+    clientCount > 0 ? clientCount * CLIENT_W + Math.max(0, clientCount - 1) * GAP_X : 0;
+  const rowWidth = Math.max(contentWidth, clientRowWidth);
+  const clientsStartX = LEFT + Math.max(0, (rowWidth - clientRowWidth) / 2);
+  const centerX = LEFT + rowWidth / 2;
+
+  let currentY = TOP;
+  const clientY = currentY;
+  if (clientCount > 0) {
+    currentY += CLIENT_H + TIER_GAP;
+  }
+
+  const gatewayX = centerX - GATEWAY_W / 2;
+  const gatewayY = currentY;
+  currentY += GATEWAY_H + TIER_GAP;
 
   let totalToday = 0;
   let totalRequests = 0;
@@ -181,7 +193,7 @@ export function buildTproxyTopologyFlow(input: {
   nodes.push({
     id: gatewayId,
     type: "gateway",
-    position: { x: gatewayX, y: centerY - GATEWAY_H / 2 },
+    position: { x: gatewayX, y: gatewayY },
     data: {
       label: "tproxy",
       totalRequests,
@@ -196,11 +208,12 @@ export function buildTproxyTopologyFlow(input: {
     const clientId = `client-${client.client_key_id}`;
     const lastSeen = Date.parse(client.last_seen_at);
     const stale = !Number.isNaN(lastSeen) && now - lastSeen >= CLIENT_IDLE_MS;
-    const y = centerY - ((clientCount * (CLIENT_H + GAP_Y)) / 2) + index * (CLIENT_H + GAP_Y);
+    const y = clientY;
+    const x = clientsStartX + index * (CLIENT_W + GAP_X);
     nodes.push({
       id: clientId,
       type: "client",
-      position: { x: LEFT, y },
+      position: { x, y },
       data: {
         label: client.client_label || client.client_key_id,
         clientKeyId: client.client_key_id,
@@ -217,12 +230,12 @@ export function buildTproxyTopologyFlow(input: {
       id: `e-${clientId}-${gatewayId}`,
       source: clientId,
       target: gatewayId,
-      sourceHandle: FLOW_SOURCE_RIGHT,
-      targetHandle: FLOW_TARGET_LEFT,
+      sourceHandle: FLOW_SOURCE_BOTTOM,
+      targetHandle: FLOW_TARGET_TOP,
       type: "flow",
       animated: !stale && client.today_requests > 0,
       data: {
-        color: stale ? "#64748b" : "#8b5cf6",
+        color: stale ? "#477453" : "#6ab0bf",
         label: client.today_requests > 0 ? `${formatNumber(client.today_requests)}/day` : undefined,
         animated: !stale && client.today_requests > 0,
       },
@@ -237,17 +250,18 @@ export function buildTproxyTopologyFlow(input: {
     const active = activeProviders.has(providerKey) || activeProviders.has(providerIdKey);
     const usage = usageByProvider.get(providerKey) || usageByProvider.get(providerIdKey) || { today: 0, total: 0 };
     const credentials = input.credentialsByProvider[provider.id] || [];
-    const y = centerY - ((providerCount * (PROVIDER_H + GAP_Y)) / 2) + index * (PROVIDER_H + GAP_Y);
+    const x = centerX - PROVIDER_W / 2;
+    const y = currentY;
 
     nodes.push({
       id: providerId,
       type: "provider",
-      position: { x: providerX, y },
+      position: { x, y },
       data: {
         label: provider.name || provider.id,
         providerId: provider.id,
+        providerType: provider.type,
         color,
-        textIcon: providerIcon(provider.type),
         todayRequests: 0,
         totalRequests: usage.total,
         credentialCount: credentials.length,
@@ -260,8 +274,8 @@ export function buildTproxyTopologyFlow(input: {
         id: `e-${gatewayId}-${providerId}`,
         source: gatewayId,
         target: providerId,
-        sourceHandle: FLOW_SOURCE_RIGHT,
-        targetHandle: FLOW_TARGET_LEFT,
+        sourceHandle: FLOW_SOURCE_BOTTOM,
+        targetHandle: FLOW_TARGET_TOP,
         type: "flow",
         animated: active,
         data: {
@@ -271,7 +285,9 @@ export function buildTproxyTopologyFlow(input: {
         },
       });
 
-    credentials.forEach((credential, credentialIndex) => {
+    currentY += PROVIDER_H + GAP_Y;
+
+    credentials.forEach((credential) => {
       const credentialId = `credential-${provider.id}-${credential.id}`;
       const credentialKey = `${providerKey}:${credential.id}`;
       const credentialLabel = (credential.label || credential.email || credential.id).toLowerCase();
@@ -279,7 +295,8 @@ export function buildTproxyTopologyFlow(input: {
       const credentialActive =
         active &&
         (activeCredentials.has(credentialLabel) || activeCredentials.has(credential.id.toLowerCase()));
-      const credentialY = y + credentialIndex * (CREDENTIAL_H + 8) - ((credentials.length - 1) * (CREDENTIAL_H + 8)) / 2;
+      const credentialX = centerX - CREDENTIAL_W / 2 + CREDENTIAL_INDENT / 2;
+      const credentialY = currentY;
 
       nodes.push({
         id: credentialId,
@@ -301,16 +318,22 @@ export function buildTproxyTopologyFlow(input: {
         id: `e-${providerId}-${credentialId}`,
         source: providerId,
         target: credentialId,
-        sourceHandle: FLOW_SOURCE_RIGHT,
-        targetHandle: FLOW_TARGET_LEFT,
+        sourceHandle: FLOW_SOURCE_BOTTOM,
+        targetHandle: FLOW_TARGET_TOP,
         type: "flow",
         animated: credentialActive,
         data: {
-          color: credential.enabled === false ? "#64748b" : color,
+          color: credential.enabled === false ? "#477453" : color,
           animated: credentialActive,
         },
       });
+
+      currentY += CREDENTIAL_H + GAP_Y;
     });
+
+    if (index < enabledProviders.length - 1) {
+      currentY += BLOCK_GAP;
+    }
   });
 
   const nodeIds = new Set(nodes.map((node) => node.id));

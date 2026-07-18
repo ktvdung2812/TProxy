@@ -1,10 +1,15 @@
 import type { CLITool } from "../../cli-tools/constants";
 import type { ManualConfigEntry } from "./ManualConfigModal";
+import {
+  buildClaudeCodeClientEnv,
+  DEFAULT_CLAUDE_PRIMARY_MODEL,
+  type MappingTier,
+} from "../mapping/codegen";
 
 function replaceVars(text: string, baseUrl: string, apiKey: string, model: string): string {
   return text
     .replace(/\{\{baseUrl\}\}/g, baseUrl)
-    .replace(/\{\{apiKey\}\}/g, apiKey || "your-api-key")
+    .replace(/\{\{apiKey\}\}/g, apiKey)
     .replace(/\{\{model\}\}/g, model || "virtual-model-id");
 }
 
@@ -14,20 +19,22 @@ export function buildManualConfigs(
   apiKey: string,
   model: string,
 ): ManualConfigEntry[] {
-  const key = apiKey.trim() || "your-api-key";
+  const key = apiKey.trim();
   const modelId = model || "virtual-model-id";
 
   if (tool.id === "claude") {
-    const env: Record<string, string> = {
-      ANTHROPIC_BASE_URL: baseUrl,
-      ANTHROPIC_AUTH_TOKEN: key,
-      ANTHROPIC_API_KEY: key,
-    };
-    if (modelId) env.ANTHROPIC_DEFAULT_SONNET_MODEL = modelId;
+    const primary = normalizeClaudePrimaryModel(modelId);
     return [
       {
         filename: tool.settingsFile ?? "~/.claude/settings.json",
-        content: JSON.stringify({ hasCompletedOnboarding: true, env }, null, 2),
+        content: JSON.stringify(
+          {
+            hasCompletedOnboarding: true,
+            env: buildClaudeCodeClientEnv({ baseUrl, apiKey: key, primaryModel: primary }),
+          },
+          null,
+          2,
+        ),
       },
     ];
   }
@@ -112,4 +119,12 @@ model = "{{model}}"`,
       content: `base_url = ${baseUrl}\napi_key = ${key}\nmodel = ${modelId}`,
     },
   ];
+}
+
+function normalizeClaudePrimaryModel(model: string): MappingTier {
+  const normalized = model.trim().toLowerCase();
+  if (normalized === "opus" || normalized === "sonnet" || normalized === "haiku" || normalized === "fable") {
+    return normalized;
+  }
+  return DEFAULT_CLAUDE_PRIMARY_MODEL;
 }

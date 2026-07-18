@@ -103,6 +103,30 @@ export type SaveProviderBody = {
   oauth?: Record<string, unknown>;
 };
 
+export type NinerouterPreset = {
+  id: string;
+  type: string;
+  name: string;
+  base_url?: string;
+  auth_type: string;
+  category: string;
+  credential_auth?: string;
+  auth_hint?: string;
+  api_key_url?: string;
+  auth_modes?: string[];
+  has_oauth?: boolean;
+  supports_quota: boolean;
+  no_auth: boolean;
+};
+
+export function fetchNinerouterPresets(secret: string) {
+  return adminFetch<{ presets: NinerouterPreset[]; aliases: Record<string, string> }>(
+    secret,
+    "/api/admin/ninerouter/presets",
+    "GET",
+  );
+}
+
 export function saveProvider(secret: string, body: SaveProviderBody) {
   return adminFetch<{ ok: boolean; provider_id: string }>(secret, "/api/admin/providers", "PUT", body);
 }

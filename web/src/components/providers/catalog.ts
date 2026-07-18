@@ -7,6 +7,8 @@
    ============================================================ */
 
 import type { Provider } from "./types";
+import type { NinerouterPreset } from "./api";
+import { findPresetCatalogEntry } from "./ninerouterCatalog";
 
 export type ProviderCategory = "oauth" | "apikey" | "media" | "plugin";
 
@@ -20,6 +22,8 @@ export type ProviderTypeInfo = {
   textIcon: string;
   category: ProviderCategory;
   listSection: ProviderListSection;
+  /** When set, this catalog row maps to a 9router preset id (e.g. glm, deepseek). */
+  presetId?: string;
   /** CSS color for the provider icon tile background. */
   color: string;
   description: string;
@@ -54,6 +58,9 @@ export const ALL_PROVIDER_TYPES = [
   "plugin-http",
   "copilot",
   "vertex-partner",
+  "qwen",
+  "kiro",
+  "qoder",
 ] as const;
 
 const CATALOG: Record<string, ProviderTypeInfo> = {
@@ -287,6 +294,48 @@ const CATALOG: Record<string, ProviderTypeInfo> = {
     supportsOAuth: false,
     defaultBaseUrl: "https://aiplatform.googleapis.com/v1",
   },
+  qwen: {
+    type: "qwen",
+    name: "Qwen Code",
+    icon: "terminal",
+    textIcon: "QW",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#10B981",
+    description: "Alibaba Qwen Code via device-code OAuth.",
+    website: "https://chat.qwen.ai",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://portal.qwen.ai/v1",
+  },
+  kiro: {
+    type: "kiro",
+    name: "Kiro AI",
+    icon: "psychology_alt",
+    textIcon: "KR",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#FF6B35",
+    description: "AWS Kiro / CodeWhisperer with AWS event-stream chat.",
+    website: "https://kiro.dev",
+    defaultAuthType: "oauth",
+    supportsOAuth: false,
+    defaultBaseUrl: "https://runtime.us-east-1.kiro.dev",
+  },
+  qoder: {
+    type: "qoder",
+    name: "Qoder",
+    icon: "auto_awesome",
+    textIcon: "QD",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#6366f1",
+    description: "Qoder agent API with COSY-signed chat and device OAuth.",
+    website: "https://qoder.sh",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://api3.qoder.sh",
+  },
 };
 
 /** Lookup provider type metadata. Returns a generic fallback for unknown types. */
@@ -316,10 +365,17 @@ export type ResolvedProviderSlug =
   | { kind: "instance"; provider: Provider }
   | { kind: "catalog"; catalog: ProviderTypeInfo };
 
-/** Resolve /providers/:slug — instance id, catalog type, or unknown. */
-export function resolveProviderSlug(slug: string, providers: Provider[]): ResolvedProviderSlug | null {
+/** Resolve /providers/:slug — instance id, preset id, catalog type, or unknown. */
+export function resolveProviderSlug(
+  slug: string,
+  providers: Provider[],
+  presets: NinerouterPreset[] = [],
+): ResolvedProviderSlug | null {
   const byId = providers.find((p) => p.ID === slug);
   if (byId) return { kind: "instance", provider: byId };
+
+  const presetCatalog = findPresetCatalogEntry(presets, slug);
+  if (presetCatalog) return { kind: "catalog", catalog: presetCatalog };
 
   const byType = providers.filter((p) => p.Type === slug);
   if (byType.length > 0) {
@@ -339,14 +395,15 @@ export function providerDetailPath(slug: string): string {
 }
 
 /** Default OAuth mode when the client does not specify one explicitly. */
-export function defaultOAuthMode(type: string): "browser" | "device" {
-  if (type === "kimi" || type === "xai") return "device";
+export function defaultOAuthMode(type: string, presetId?: string): "browser" | "device" {
+  if (presetId === "grok-cli" || presetId === "github") return "device";
+  if (type === "kimi" || type === "xai" || type === "qwen" || type === "qoder" || type === "copilot") return "device";
   return "browser";
 }
 
 /** Providers that use browser PKCE (popup + optional callback paste), not device codes. */
-export function usesBrowserOAuth(type: string): boolean {
-  return defaultOAuthMode(type) === "browser";
+export function usesBrowserOAuth(type: string, presetId?: string): boolean {
+  return defaultOAuthMode(type, presetId) === "browser";
 }
 
 /** Catalog entries grouped for the providers list sections (9router layout). */

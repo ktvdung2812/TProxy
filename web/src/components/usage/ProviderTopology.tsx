@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { getProviderTypeInfo } from "../providers/catalog";
+import { ProviderLogo } from "../providers/ProviderLogo";
 import type { UsageActiveRequest } from "./api";
 
 type ProviderItem = {
@@ -31,14 +32,15 @@ const FE_ACTIVE_TIMEOUT_MS = 60_000;
 const FE_ACTIVE_TICK_MS = 1_000;
 
 function getProviderColor(type: string): string {
-  return getProviderTypeInfo(type).color || "#64748b";
+  return getProviderTypeInfo(type).color || "#477453";
 }
 
 function ProviderNode({ data }: NodeProps) {
-  const { label, color, textIcon, active } = data as {
+  const { label, color, providerId, providerType, active } = data as {
     label: string;
     color: string;
-    textIcon: string;
+    providerId: string;
+    providerType: string;
     active: boolean;
   };
 
@@ -55,9 +57,12 @@ function ProviderNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Left} id="left" className="usage-flow-handle" />
       <Handle type="target" position={Position.Right} id="right" className="usage-flow-handle" />
 
-      <div className="usage-flow-provider-icon" style={{ backgroundColor: `${color}15` }}>
-        <span style={{ color }}>{textIcon}</span>
-      </div>
+      <ProviderLogo
+        className="usage-flow-provider-icon"
+        providerId={providerId}
+        providerType={providerType}
+        style={{ color }}
+      />
       <span className="usage-flow-provider-label" style={{ color: active ? color : "var(--color-text-main)" }}>
         {label}
       </span>
@@ -130,8 +135,8 @@ function buildLayout(
 
   const edgeStyle = (active: boolean, last: boolean, error: boolean) => {
     if (error) return { stroke: "#ef4444", strokeWidth: 2.5, opacity: 0.9 };
-    if (active) return { stroke: "#22c55e", strokeWidth: 2.5, opacity: 0.9 };
-    if (last) return { stroke: "#f59e0b", strokeWidth: 2, opacity: 0.7 };
+    if (active) return { stroke: "#57b37c", strokeWidth: 2.5, opacity: 0.9 };
+    if (last) return { stroke: "#c9a45c", strokeWidth: 2, opacity: 0.7 };
     return { stroke: "var(--color-border)", strokeWidth: 1, opacity: 0.3 };
   };
 
@@ -166,7 +171,8 @@ function buildLayout(
       data: {
         label: provider.name || provider.id,
         color,
-        textIcon: getProviderTypeInfo(provider.type).textIcon || provider.type.slice(0, 2).toUpperCase(),
+        providerId: provider.id,
+        providerType: provider.type,
         active,
       },
       draggable: false,

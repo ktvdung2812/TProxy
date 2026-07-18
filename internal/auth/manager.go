@@ -393,7 +393,7 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 	}
 	mode := strings.ToLower(strings.TrimSpace(request.Mode))
 	if mode == "" {
-		if provider.Type == "xai" || provider.Type == "kimi" {
+		if provider.Type == "xai" || provider.Type == "kimi" || provider.Type == "qwen" || provider.Type == "qoder" {
 			mode = "device"
 		} else if oauthConfig.AuthorizationURL != "" {
 			mode = "browser"
@@ -435,6 +435,18 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		item.redirectURL = redirectURL
 		item.status = "pending"
 		response.AuthorizationURL = authorizationURL(*oauthConfig, item.state, verifier, redirectURL, m.clientID(*oauthConfig))
+	} else if strings.EqualFold(oauthConfig.DeviceFlow, "qoder") {
+		flow, flowErr := initiateQoderDeviceFlow()
+		if flowErr != nil {
+			return StartResponse{}, flowErr
+		}
+		item.deviceCode = flow.Nonce
+		item.verifier = flow.CodeVerifier
+		item.deviceUserCode = flow.MachineID
+		item.interval = 2 * time.Second
+		item.status = "polling"
+		response.VerificationURI = flow.VerificationURI
+		response.IntervalSeconds = 2
 	} else {
 		if oauthConfig.DeviceCodeURL == "" {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("device OAuth requires device-code-url")}
@@ -955,6 +967,7 @@ func (m *Manager) pollDevice(item *session) {
 			return
 		}
 		providerID, deviceCode, deviceUserCode, interval := item.providerID, item.deviceCode, item.deviceUserCode, item.interval
+		verifier := item.verifier
 		label, email := item.label, item.email
 		item.mu.Unlock()
 		provider, err := m.store.Provider(m.rootCtx, providerID)
@@ -971,6 +984,8 @@ func (m *Manager) pollDevice(item *session) {
 		var pending bool
 		if strings.EqualFold(oauthConfig.DeviceFlow, "codex") {
 			token, pending, err = m.exchangeCodexDevice(m.rootCtx, *oauthConfig, deviceCode, deviceUserCode)
+		} else if strings.EqualFold(oauthConfig.DeviceFlow, "qoder") {
+			token, pending, err = m.pollQoderDevice(m.rootCtx, deviceCode, verifier, deviceUserCode)
 		} else {
 			token, pending, err = m.exchangeDeviceCode(m.rootCtx, *oauthConfig, deviceCode)
 		}
