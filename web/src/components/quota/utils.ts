@@ -1,6 +1,7 @@
 import type { CredentialQuota, QuotaEntry } from "./api";
 
 export const REFRESH_INTERVAL_MS = 60000;
+export const QUOTA_REFRESH_CONCURRENCY = 4;
 export const DEPLETED_QUOTA_THRESHOLD = 5;
 export const AUTO_REFRESH_STORAGE_KEY = "tproxy.quotaAutoRefresh";
 export const QUOTA_VISIBILITY_KEY = "tproxy.quotaVisibility";
@@ -15,6 +16,18 @@ export type AccountFilter = (typeof ACCOUNT_FILTER_OPTIONS)[number]["value"];
 
 export function getConnectionLabel(credential: { label?: string; email?: string; id: string }) {
   return credential.label?.trim() || credential.email?.trim() || null;
+}
+
+export function buildProviderCountMap<T>(
+  items: T[],
+  providerKey: (item: T) => string,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = providerKey(item);
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
 }
 
 export function calculatePercentage(used: number, total: number) {
@@ -122,4 +135,25 @@ export function formatProxyUsageLabel(usage?: { requests: number; promptTokens: 
   if (!usage) return null;
   const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
   return `${compactNumber.format(usage.requests || 0)} req · ${compactNumber.format(tokens)} tok`;
+}
+
+export async function runWithConcurrency<T, R>(
+  items: T[],
+  worker: (item: T) => Promise<R>,
+  concurrency = QUOTA_REFRESH_CONCURRENCY,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker());
+  await Promise.all(workers);
+  return results;
 }

@@ -9,7 +9,6 @@ import {
   type PresetCatalogEntry,
 } from "./ninerouterCatalog";
 import { CustomProviderCard, ProviderCatalogCard } from "./ProviderCatalogCard";
-import { GlobalAccountRotationCard } from "./GlobalAccountRotationCard";
 import type { Credential, Provider } from "./types";
 
 type Props = {
@@ -21,8 +20,6 @@ type Props = {
   onAddAnthropic: () => void;
   onTestSection?: (section: string, providerIds: string[]) => void;
   testingSection?: string | null;
-  onNotice?: (message: string) => void;
-  onError?: (message: string) => void;
 };
 
 const CUSTOM_TYPES = new Set(["openai-compatible", "anthropic-compatible"]);
@@ -51,8 +48,6 @@ export function ProviderList({
   onAddAnthropic,
   onTestSection,
   testingSection,
-  onNotice,
-  onError,
 }: Props) {
   const [showAllApikey, setShowAllApikey] = useState(false);
   const [presetSections, setPresetSections] = useState(() => groupPresetsBySection([]));
@@ -109,9 +104,6 @@ export function ProviderList({
 
   return (
     <div className="providers-page">
-      {!searchQuery.trim() && (
-        <GlobalAccountRotationCard secret={secret} onSaved={onNotice} onError={onError} />
-      )}
       {!hasResults && searchQuery.trim() && (
         <div className="providers-search-empty">
           <span className="material-symbols-outlined">search_off</span>

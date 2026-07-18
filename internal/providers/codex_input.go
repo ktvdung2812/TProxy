@@ -109,10 +109,7 @@ func codexNormalizeInputItemsRaw(items []any, shortMap map[string]string) []any 
 			normalized["output"] = codexToolOutputContent(output)
 		}
 		if stringValue(normalized["type"]) == "function_call" {
-			name := stringValue(normalized["name"])
-			if short := shortMap[name]; short != "" {
-				normalized["name"] = short
-			}
+			normalized["name"] = codexWireToolName(stringValue(normalized["name"]), shortMap)
 		}
 		result = append(result, normalized)
 	}
@@ -281,9 +278,7 @@ func codexFunctionCallItem(call map[string]any, shortMap map[string]string) map[
 	if name == "" {
 		name = stringValue(call["name"])
 	}
-	if short := shortMap[name]; short != "" {
-		name = short
-	}
+	name = codexWireToolName(name, shortMap)
 	callID := stringValue(call["id"])
 	if name == "" || callID == "" {
 		return nil

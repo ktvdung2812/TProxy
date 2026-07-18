@@ -76,12 +76,31 @@ func TestBuildCodexToolNameMapsShortensLongNames(t *testing.T) {
 	longName := "mcp__filesystem__read_file_with_a_very_long_suffix_that_exceeds_limits"
 	shortMap, reverseMap := buildCodexToolNameMaps([]map[string]any{{
 		"function": map[string]any{"name": longName},
-	}})
+	}}, nil)
 	shortName := shortMap[longName]
 	if shortName == "" || len(shortName) > codexToolNameMaxLen {
 		t.Fatalf("shortName = %q", shortName)
 	}
 	if reverseMap[shortName] != longName {
 		t.Fatalf("reverse = %#v", reverseMap)
+	}
+}
+
+func TestSanitizeCodexToolNameReplacesInvalidCharacters(t *testing.T) {
+	got := sanitizeCodexToolName("mcp__plugin.context7/query-docs")
+	want := "mcp__plugin_context7_query-docs"
+	if got != want {
+		t.Fatalf("sanitize = %q want %q", got, want)
+	}
+}
+
+func TestBuildCodexToolNameMapsSanitizesInvalidCharacters(t *testing.T) {
+	invalidName := "plugin.context7/query-docs"
+	shortMap, _ := buildCodexToolNameMaps([]map[string]any{{
+		"function": map[string]any{"name": invalidName},
+	}}, nil)
+	shortName := shortMap[invalidName]
+	if shortName == "" || codexToolNameSanitizer.MatchString(shortName) {
+		t.Fatalf("shortName = %q", shortName)
 	}
 }

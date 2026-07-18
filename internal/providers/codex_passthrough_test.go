@@ -46,3 +46,19 @@ func TestCodexNormalizeReasoningSetsInclude(t *testing.T) {
 		t.Fatalf("include = %#v", body["include"])
 	}
 }
+
+func TestCodexNormalizeReasoningMapsMaxAndUltra(t *testing.T) {
+	maxBody := map[string]any{"reasoning_effort": "max"}
+	codexNormalizeReasoning(maxBody)
+	reasoning, _ := maxBody["reasoning"].(map[string]any)
+	if reasoning["effort"] != "max" {
+		t.Fatalf("max effort = %#v", reasoning["effort"])
+	}
+
+	ultraBody := map[string]any{"reasoning_effort": "ultra"}
+	codexNormalizeReasoning(ultraBody)
+	ultraReasoning, _ := ultraBody["reasoning"].(map[string]any)
+	if ultraReasoning["effort"] != "low" {
+		t.Fatalf("ultra should fall back to low, got %#v", ultraReasoning["effort"])
+	}
+}

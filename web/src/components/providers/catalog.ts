@@ -184,7 +184,7 @@ const CATALOG: Record<string, ProviderTypeInfo> = {
     category: "oauth",
     listSection: "oauth",
     color: "#0f0f0f",
-    description: "Grok via xAI OAuth discovery + device-code flow.",
+    description: "Grok via xAI OAuth (Grok CLI subscription or api.x.ai developer API).",
     website: "https://x.ai/",
     defaultAuthType: "oauth",
     supportsOAuth: true,

@@ -14,7 +14,6 @@ import (
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
-	"github.com/tproxy/tproxy/internal/tokenizer"
 )
 
 var responsesUpgrader = websocket.Upgrader{
@@ -120,15 +119,7 @@ func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
 		state.PublicModelID = model.ID
 	}
-	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("X-TProxy-Token-Saver")), "off") {
-		stats := tokenizer.Compress(&request)
-		if stats.TokensSaved > 0 {
-			if request.Metadata == nil {
-				request.Metadata = map[string]any{}
-			}
-			request.Metadata["tokens_saved"] = stats.TokensSaved
-		}
-	}
+	s.applyTokenSaver(&request, nil, r)
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stream, err := s.router.ExecuteStream(ctx, *model, request)

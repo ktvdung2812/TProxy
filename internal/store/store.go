@@ -155,6 +155,7 @@ type UsageEvent struct {
 	InputTokens      int       `json:"input_tokens"`
 	OutputTokens     int       `json:"output_tokens"`
 	ReasoningTokens  int       `json:"reasoning_tokens"`
+	CachedTokens     int       `json:"cached_tokens"`
 	TokensSaved      int       `json:"tokens_saved"`
 	EstimatedCostUSD float64   `json:"estimated_cost_usd"`
 	LatencyMS        int64     `json:"latency_ms"`
@@ -286,7 +287,13 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 			return rollback(fmt.Errorf("seed provider %s: %w", providerCfg.ID, err))
 		}
 		for _, credentialCfg := range providerCfg.Credentials {
-			secret := config.Env(credentialCfg.SecretEnv)
+			if !seedCredentialEligible(providerCfg, credentialCfg) {
+				continue
+			}
+			secret := credentialCfg.Secret
+			if secret == "" {
+				secret = config.Env(credentialCfg.SecretEnv)
+			}
 			ciphertext := ""
 			if secret != "" {
 				ciphertext, err = s.encryptor.Encrypt(secret)
@@ -1609,6 +1616,26 @@ func credentialStatus(authType string) string {
 	return "unknown"
 }
 
+func seedCredentialEligible(providerCfg config.ProviderConfig, credentialCfg config.CredentialConfig) bool {
+	if !providerCfg.Enabled || !credentialCfg.IsEnabled() {
+		return false
+	}
+	secret := credentialCfg.Secret
+	if secret == "" && credentialCfg.SecretEnv != "" {
+		secret = config.Env(credentialCfg.SecretEnv)
+	}
+	switch strings.ToLower(strings.TrimSpace(credentialCfg.AuthType)) {
+	case "none":
+		return true
+	case "oauth":
+		return false
+	case "api_key", "service_account":
+		return secret != ""
+	default:
+		return secret != ""
+	}
+}
+
 func decodeProviderConfig(raw string, provider *Provider) {
 	if strings.TrimSpace(raw) == "" || provider == nil {
 		return
@@ -1658,7 +1685,7 @@ func decodeCredentialMetadata(credential *Credential) {
 }
 
 func (s *Store) AddUsage(ctx context.Context, event UsageEvent) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -1909,7 +1936,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 		return nil, 0, err
 	}
 
-	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	listArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.db.QueryContext(ctx, listQuery, listArgs...)
 	if err != nil {
@@ -1921,7 +1948,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, 0, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -1937,7 +1964,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1946,7 +1973,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)

@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import type { Credential } from "../providers/types";
 import { RequestDetailsTab } from "./RequestDetailsTab";
 import { UsageStatsView } from "./UsageStatsView";
+import { filterConnectedProviders } from "./providerConnections";
 import { USAGE_PERIODS } from "./utils";
 import type { UsagePeriod } from "./api";
 
@@ -15,12 +17,13 @@ type ProviderItem = {
 type Props = {
   secret: string;
   providers: ProviderItem[] | null;
+  credentials?: Record<string, Credential[]>;
   onError: (message: string) => void;
 };
 
 type UsageTab = "overview" | "details";
 
-export function UsageView({ secret, providers, onError }: Props) {
+export function UsageView({ secret, providers, credentials = {}, onError }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<UsagePeriod>("today");
 
@@ -35,6 +38,11 @@ export function UsageView({ secret, providers, onError }: Props) {
       enabled: provider.Enabled,
     })),
     [providers],
+  );
+
+  const connectedProviders = useMemo(
+    () => filterConnectedProviders(providerItems, credentials),
+    [providerItems, credentials],
   );
 
   const providerNames = useMemo(() => {
@@ -82,7 +90,7 @@ export function UsageView({ secret, providers, onError }: Props) {
         <UsageStatsView
           secret={secret}
           period={period}
-          providers={providerItems}
+          providers={connectedProviders}
           onError={onError}
         />
       ) : (

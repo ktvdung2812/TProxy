@@ -1,4 +1,4 @@
-import type { UsageBucketEntry } from "./api";
+import type { UsageBucketEntry, UsageActiveRequest, UsageRecentRequest } from "./api";
 
 export const USAGE_PERIODS = [
   { value: "today", label: "Today" },
@@ -115,4 +115,55 @@ export function groupUsageRows(rows: UsageRow[], field: UsageTableView): UsageGr
     groups.set(groupKey, existing);
   }
   return Array.from(groups.values());
+}
+
+export type UsageLiveSnapshot = {
+  activeRequests: UsageActiveRequest[];
+  recentRequests: UsageRecentRequest[];
+  errorProvider?: string;
+};
+
+export function recentRequestKey(item: UsageRecentRequest): string {
+  if (item.requestId) return item.requestId;
+  return `${item.timestamp}|${item.model}|${item.provider}|${item.promptTokens}|${item.completionTokens}`;
+}
+
+function activeRequestKey(item: UsageActiveRequest): string {
+  if (item.request_id) return item.request_id;
+  return `${item.provider || ""}|${item.model || ""}|${item.credential_id || ""}|${item.account || ""}`;
+}
+
+function sameRecentRequests(left: UsageRecentRequest[], right: UsageRecentRequest[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (
+      recentRequestKey(a) !== recentRequestKey(b)
+      || a.status !== b.status
+      || a.promptTokens !== b.promptTokens
+      || a.completionTokens !== b.completionTokens
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameActiveRequests(left: UsageActiveRequest[], right: UsageActiveRequest[]): boolean {
+  if (left.length !== right.length) return false;
+  const leftKeys = left.map(activeRequestKey).sort();
+  const rightKeys = right.map(activeRequestKey).sort();
+  for (let index = 0; index < leftKeys.length; index += 1) {
+    if (leftKeys[index] !== rightKeys[index]) return false;
+  }
+  return true;
+}
+
+export function sameUsageLiveSnapshot(left: UsageLiveSnapshot, right: UsageLiveSnapshot): boolean {
+  return (
+    (left.errorProvider || "") === (right.errorProvider || "")
+    && sameActiveRequests(left.activeRequests, right.activeRequests)
+    && sameRecentRequests(left.recentRequests, right.recentRequests)
+  );
 }

@@ -65,9 +65,6 @@ func Import(ctx context.Context, dataStore *store.Store, data []byte, opts Optio
 	for _, pool := range backup.ProxyPools {
 		importer.importProxyPool(ctx, pool)
 	}
-	for providerID := range providersInBackup(backup) {
-		importer.ensureProvider(ctx, providerID)
-	}
 	for _, conn := range backup.ProviderConnections {
 		importer.importConnection(ctx, conn)
 	}
@@ -110,24 +107,6 @@ func (i *importer) warn(message string) {
 
 func (i *importer) fail(message string) {
 	i.result.Errors = append(i.result.Errors, message)
-}
-
-func providersInBackup(backup *Backup) map[string]struct{} {
-	seen := map[string]struct{}{}
-	for _, conn := range backup.ProviderConnections {
-		if conn.Provider != "" {
-			seen[ninerouter.ResolveProviderID(conn.Provider)] = struct{}{}
-		}
-	}
-	for _, combo := range backup.Combos {
-		for _, model := range combo.Models {
-			providerID, _ := parseModelRef(model)
-			if providerID != "" {
-				seen[providerID] = struct{}{}
-			}
-		}
-	}
-	return seen
 }
 
 func (i *importer) ensureProvider(ctx context.Context, providerID string) {
@@ -186,6 +165,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 		i.warn(fmt.Sprintf("credential %q uses unsupported provider %q", conn.Name, conn.Provider))
 		return
 	}
+	i.ensureProvider(ctx, providerID)
 	label := firstNonEmpty(conn.Name, conn.Email, conn.ID)
 	enabled := conn.IsActive
 	priority := conn.Priority
@@ -332,6 +312,7 @@ func (i *importer) importCombo(ctx context.Context, backup *Backup, combo Combo)
 }
 
 func (i *importer) ensureVirtualModel(ctx context.Context, providerID, upstreamModel string) (string, error) {
+	i.ensureProvider(ctx, providerID)
 	modelID := slugify(fmt.Sprintf("%s-%s", providerID, upstreamModel))
 	if _, exists := i.models[modelID]; exists {
 		return modelID, nil

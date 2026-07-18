@@ -8,6 +8,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/store"
 )
 
 func bridgeConfigFromYAML(cfg config.ClaudeAliasConfig) bridge.Config {
@@ -23,8 +24,9 @@ func bridgeConfigFromYAML(cfg config.ClaudeAliasConfig) bridge.Config {
 func (s *Server) loadClaudeAliasResolver() {
 	resolver := bridge.NewResolver(bridgeConfigFromYAML(s.cfg.ClaudeAliases))
 	resolver.SetEnvOverrides(bridge.EnvOverrides())
-	if overrides, err := s.store.ClaudeAliasOverrides(context.Background()); err == nil {
-		resolver.SetOverrides(overrides)
+	if overrides, err := s.store.ClaudeAliasSettings(context.Background()); err == nil {
+		resolver.SetOverrides(overrides.Models)
+		resolver.SetReasoningEffortOverrides(overrides.ReasoningEffort)
 	}
 	s.claudeAliases = resolver
 }
@@ -44,6 +46,7 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	resolver := s.claudeAliasResolver()
 	defaults := resolver.Defaults()
 	overrides := resolver.CurrentOverrides()
+	reasoningEffort := resolver.CurrentReasoningEffortOverrides()
 	effective := resolver.EffectiveMapping()
 	effectiveResolved := resolver.EffectiveResolvedMapping()
 	placeholders := make([]map[string]any, 0, len(bridge.PlaceholderNames()))
@@ -76,6 +79,8 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 			string(bridge.RoleSonnet): overrides[bridge.RoleSonnet],
 			string(bridge.RoleHaiku):  overrides[bridge.RoleHaiku],
 		},
+		"reasoning_effort_overrides": reasoningEffortMap(reasoningEffort),
+		"effective_reasoning_effort": resolver.EffectiveReasoningEffortMapping(),
 		"effective":              effective,
 		"effective_resolved":       resolver.EffectiveResolvedMapping(),
 		"default_codex_provider":   defaults.DefaultCodexProvider,
@@ -86,8 +91,9 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminPutClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Overrides            map[string]string `json:"overrides"`
-		DefaultCodexProvider string            `json:"default_codex_provider"`
+		Overrides                map[string]string `json:"overrides"`
+		ReasoningEffortOverrides map[string]string `json:"reasoning_effort_overrides"`
+		DefaultCodexProvider     string            `json:"default_codex_provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
@@ -99,18 +105,40 @@ func (s *Server) adminPutClaudeMapping(w http.ResponseWriter, r *http.Request) {
 			overrides[role] = strings.TrimSpace(value)
 		}
 	}
-	if err := s.store.SaveClaudeAliasOverrides(r.Context(), overrides); err != nil {
+	reasoningEffort := bridge.ReasoningEffortOverrides{}
+	for _, role := range bridge.Roles {
+		if value, ok := payload.ReasoningEffortOverrides[string(role)]; ok {
+			if normalized := bridge.NormalizeReasoningEffort(value); normalized != "" {
+				reasoningEffort[role] = normalized
+			}
+		}
+	}
+	if err := s.store.SaveClaudeAliasSettings(r.Context(), store.ClaudeAliasSettings{
+		Models:          overrides,
+		ReasoningEffort: reasoningEffort,
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
 		return
 	}
 	resolver := s.claudeAliasResolver()
 	resolver.SetOverrides(overrides)
+	resolver.SetReasoningEffortOverrides(reasoningEffort)
 	if strings.TrimSpace(payload.DefaultCodexProvider) != "" {
 		cfg := resolver.Defaults()
 		cfg.DefaultCodexProvider = strings.TrimSpace(payload.DefaultCodexProvider)
 		resolver.SetConfig(cfg)
 	}
 	s.adminGetClaudeMapping(w, r)
+}
+
+func reasoningEffortMap(layer bridge.ReasoningEffortOverrides) map[string]string {
+	out := map[string]string{}
+	for _, role := range bridge.Roles {
+		if value := bridge.NormalizeReasoningEffort(layer[role]); value != "" {
+			out[string(role)] = value
+		}
+	}
+	return out
 }
 
 func envOverridesMap(layer bridge.Overrides) map[string]string {

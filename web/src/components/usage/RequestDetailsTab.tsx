@@ -82,7 +82,7 @@ export function RequestDetailsTab({ secret, providers, providerNames, onError }:
                 <th>Model</th>
                 <th>Provider</th>
                 <th className="right">Input</th>
-                <th className="right">Saved</th>
+                <th className="right">Cached</th>
                 <th className="right">Output</th>
                 <th>Latency</th>
                 <th>Status</th>
@@ -107,7 +107,7 @@ export function RequestDetailsTab({ secret, providers, providerNames, onError }:
                     <td><code>{event.public_model_id || event.upstream_model}</code></td>
                     <td>{providerNames[event.provider_id] || event.provider_id}</td>
                     <td className="right">{fmt(event.input_tokens)}</td>
-                    <td className="right">{event.tokens_saved ? fmt(event.tokens_saved) : "—"}</td>
+                    <td className="right">{event.cached_tokens ? fmt(event.cached_tokens) : "—"}</td>
                     <td className="right">{fmt(event.output_tokens)}</td>
                     <td>{event.latency_ms} ms</td>
                     <td>
@@ -149,7 +149,8 @@ export function RequestDetailsTab({ secret, providers, providerNames, onError }:
             <div><span>Input tokens</span>{fmt(selected.input_tokens)}</div>
             <div><span>Output tokens</span>{fmt(selected.output_tokens)}</div>
             <div><span>Reasoning tokens</span>{fmt(selected.reasoning_tokens)}</div>
-            <div><span>Tokens saved</span>{fmt(selected.tokens_saved)}</div>
+            <div><span>Cached tokens</span>{fmt(selected.cached_tokens)}</div>
+            <div><span>Tokens saved (compression)</span>{fmt(selected.tokens_saved)}</div>
             <div><span>Estimated cost</span>{fmtCost(selected.estimated_cost_usd)}</div>
             <div><span>Error code</span><code>{selected.error_code || "ok"}</code></div>
           </div>

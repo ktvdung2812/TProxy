@@ -641,3 +641,29 @@ func TestDiscoverGLMFallsBackOn404(t *testing.T) {
 		t.Fatalf("models = %+v", models)
 	}
 }
+
+func TestParseResponsesUsageIncludesCachedTokens(t *testing.T) {
+	usage := parseResponsesUsage(map[string]any{
+		"input_tokens":  120,
+		"output_tokens": 40,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 80,
+		},
+	})
+	if usage.InputTokens != 120 || usage.OutputTokens != 40 || usage.CachedTokens != 80 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestParseOpenAIUsageIncludesCachedTokens(t *testing.T) {
+	usage := parseOpenAIUsage(map[string]any{
+		"prompt_tokens":     90,
+		"completion_tokens": 12,
+		"prompt_tokens_details": map[string]any{
+			"cached_tokens": 55,
+		},
+	})
+	if usage.InputTokens != 90 || usage.OutputTokens != 12 || usage.CachedTokens != 55 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
