@@ -511,6 +511,52 @@ func TestTerminalSessionClearsAuthorizationMaterial(t *testing.T) {
 	}
 }
 
+func TestPurgeExpiredSessionsExpiresAbandonedSessionBeforeRemoval(t *testing.T) {
+	manager := NewManager(nil, nil)
+	defer manager.Close()
+
+	now := time.Date(2026, time.July, 18, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	item := &session{
+		id:             "abandoned-browser-session",
+		state:          "oauth-state-secret",
+		verifier:       "pkce-verifier-secret",
+		deviceCode:     "device-code-secret",
+		deviceUserCode: "device-user-code",
+		status:         "pending",
+		expiresAt:      now.Add(time.Minute),
+		cancel:         make(chan struct{}),
+	}
+	manager.sessions[item.id] = item
+
+	now = item.expiresAt.Add(time.Nanosecond)
+	manager.PurgeExpiredSessions(time.Hour)
+
+	status := manager.statusFor(item)
+	if status.Status != "expired" || status.ErrorCode != "invalid_state" {
+		t.Fatalf("purged session status = %+v", status)
+	}
+	item.mu.Lock()
+	if item.state != "" || item.verifier != "" || item.deviceCode != "" || item.deviceUserCode != "" {
+		item.mu.Unlock()
+		t.Fatalf("expired session retained authorization material: %+v", item)
+	}
+	if !item.cancelClosed {
+		item.mu.Unlock()
+		t.Fatal("expired session was not stopped")
+	}
+	item.mu.Unlock()
+	if _, exists := manager.sessions[item.id]; !exists {
+		t.Fatal("expired session was removed before retention elapsed")
+	}
+
+	now = item.expiresAt.Add(time.Hour + time.Nanosecond)
+	manager.PurgeExpiredSessions(time.Hour)
+	if _, exists := manager.sessions[item.id]; exists {
+		t.Fatal("expired session was retained after retention elapsed")
+	}
+}
+
 func TestFailSessionPreservesCancellation(t *testing.T) {
 	manager := NewManager(nil, nil)
 	defer manager.Close()
