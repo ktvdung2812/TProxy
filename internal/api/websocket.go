@@ -91,6 +91,8 @@ func (s *Server) responsesWebSocket(w http.ResponseWriter, r *http.Request) {
 		if request.SessionID == "" {
 			request.SessionID = strings.TrimSpace(stringValue(event["session_id"]))
 		}
+		request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+		attachIngressMetadata(r, &request)
 		if err = s.runResponsesWebSocketRequest(r.Context(), connection, r, request); err != nil {
 			return
 		}

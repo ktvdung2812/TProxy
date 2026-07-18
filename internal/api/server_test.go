@@ -326,6 +326,58 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 	}
 }
 
+func TestProviderPrefixedResponsesWebSocketDisablesFallback(t *testing.T) {
+	var fallbackCalls atomic.Int32
+	pinned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"pinned quota exhausted"}}`))
+	}))
+	defer pinned.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"fallback\",\"model\":\"fallback-upstream\",\"choices\":[{\"delta\":{\"content\":\"unexpected fallback\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer fallback.Close()
+	t.Setenv("TPROXY_WS_PIN_API_KEY", "ws-pin-key")
+	cfg := &config.Config{
+		Server:        config.ServerConfig{AllowUpstreamModels: true},
+		ClientAPIKeys: []config.ClientAPIKey{{ID: "ws-pin-client", Name: "WebSocket pin", KeyEnv: "TPROXY_WS_PIN_API_KEY"}},
+		Providers: []config.ProviderConfig{
+			{ID: "pinned-provider", Type: "openai-compatible", BaseURL: pinned.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "pinned-credential", AuthType: "none"}}},
+			{ID: "fallback-provider", Type: "openai-compatible", BaseURL: fallback.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "fallback-credential", AuthType: "none"}}},
+		},
+		Models: []config.PublicModelConfig{{ID: "td-ws-pin", Aliases: []string{"ws-pin"}, Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "pinned-route", Provider: "pinned-provider", UpstreamModel: "pinned-upstream", Priority: 100},
+			{ID: "fallback-route", Provider: "fallback-provider", UpstreamModel: "fallback-upstream", Priority: 50},
+		}}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	app := httptest.NewServer(NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler())
+	defer app.Close()
+	wsURL := "ws" + strings.TrimPrefix(app.URL, "http") + "/pinned-provider/v1/responses/ws"
+	connection, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer ws-pin-key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err = connection.WriteJSON(map[string]any{"type": "response.create", "request_id": "ws-pin-request", "response": map[string]any{"model": "ws-pin", "input": "hello"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var frame map[string]any
+	if err = connection.ReadJSON(&frame); err != nil {
+		t.Fatal(err)
+	}
+	if frame["type"] != "error" {
+		t.Fatalf("provider-prefixed websocket frame=%+v", frame)
+	}
+	if fallbackCalls.Load() != 0 {
+		t.Fatalf("provider-prefixed websocket fell back %d times", fallbackCalls.Load())
+	}
+}
+
 func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -515,6 +567,315 @@ func TestAdminOAuthBrowserFlowIsSingleUseAndRedacted(t *testing.T) {
 	handler.ServeHTTP(snapshotRecorder, snapshotRequest)
 	if strings.Contains(snapshotRecorder.Body.String(), "api-access-secret") || strings.Contains(snapshotRecorder.Body.String(), "api-refresh-secret") {
 		t.Fatalf("snapshot leaked token: %s", snapshotRecorder.Body.String())
+	}
+}
+
+func TestRemoteOAuthCallbackIsPublicButSingleUse(t *testing.T) {
+	t.Setenv("TPROXY_REMOTE_OAUTH_CLIENT", "api-client")
+	t.Setenv("TPROXY_REMOTE_MANAGEMENT", "management-secret")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"remote-access","refresh_token":"remote-refresh","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	cfg := &config.Config{
+		Server:   config.ServerConfig{AllowRemoteManagement: true},
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_REMOTE_MANAGEMENT"},
+		Providers: []config.ProviderConfig{{
+			ID: "remote-oauth", Type: "openai-compatible", BaseURL: providerServer.URL, Enabled: true,
+			OAuth: &config.OAuthConfig{
+				AuthorizationURL: providerServer.URL + "/authorize",
+				TokenURL:         providerServer.URL,
+				ClientIDEnv:      "TPROXY_REMOTE_OAUTH_CLIENT",
+				RedirectURL:      "https://gateway.example.test/api/admin/oauth/callback",
+			},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	handler := server.Handler()
+
+	start := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/start", bytes.NewBufferString(`{"provider_id":"remote-oauth","credential_id":"remote-account","mode":"browser"}`))
+	start.RemoteAddr = "203.0.113.10:1234"
+	start.Header.Set("Authorization", "Bearer management-secret")
+	start.Header.Set("Content-Type", "application/json")
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, start)
+	if startRecorder.Code != http.StatusCreated {
+		t.Fatalf("remote start status=%d body=%s", startRecorder.Code, startRecorder.Body.String())
+	}
+	var started struct {
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.Unmarshal(startRecorder.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	authorization, err := url.Parse(started.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := authorization.Query().Get("state")
+	if state == "" {
+		t.Fatal("authorization state is missing")
+	}
+	callbackPath := "/api/admin/oauth/callback?state=" + url.QueryEscape(state) + "&code=remote-code"
+	auditBefore, err := dataStore.RecentAuditEvents(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionsBefore, err := dataStore.RecentConfigVersions(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callbackForm := url.Values{"state": {state}, "code": {"remote-code"}}
+	callback := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/callback", strings.NewReader(callbackForm.Encode()))
+	callback.RemoteAddr = "203.0.113.10:1234"
+	callback.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	callbackRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(callbackRecorder, callback)
+	if callbackRecorder.Code != http.StatusOK {
+		t.Fatalf("remote callback status=%d body=%s", callbackRecorder.Code, callbackRecorder.Body.String())
+	}
+	auditAfter, err := dataStore.RecentAuditEvents(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionsAfter, err := dataStore.RecentConfigVersions(context.Background(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(auditAfter) != len(auditBefore) || len(versionsAfter) != len(versionsBefore) {
+		t.Fatalf("public callback recorded management mutation: audit %d->%d config versions %d->%d", len(auditBefore), len(auditAfter), len(versionsBefore), len(versionsAfter))
+	}
+
+	for _, path := range []string{
+		"/api/admin/oauth/callback",
+		"/api/admin/oauth/callback?state=not-a-state&code=remote-code",
+		callbackPath,
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = "203.0.113.10:1234"
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_state") {
+			t.Fatalf("callback %s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+
+	admin := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	admin.RemoteAddr = "203.0.113.10:1234"
+	adminRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(adminRecorder, admin)
+	if adminRecorder.Code != http.StatusUnauthorized || !strings.Contains(adminRecorder.Body.String(), "invalid_management_secret") {
+		t.Fatalf("remote admin status=%d body=%s", adminRecorder.Code, adminRecorder.Body.String())
+	}
+}
+
+func TestOAuthCallbackDenialValidatesAndConsumesState(t *testing.T) {
+	t.Setenv("TPROXY_DENIAL_OAUTH_CLIENT", "api-client")
+	t.Setenv("TPROXY_DENIAL_MANAGEMENT", "management-secret")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"unused","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	cfg := &config.Config{
+		Server:   config.ServerConfig{AllowRemoteManagement: true},
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_DENIAL_MANAGEMENT"},
+		Providers: []config.ProviderConfig{{
+			ID: "denial-provider", Type: "openai-compatible", BaseURL: providerServer.URL, Enabled: true,
+			OAuth: &config.OAuthConfig{AuthorizationURL: providerServer.URL + "/authorize", TokenURL: providerServer.URL, ClientIDEnv: "TPROXY_DENIAL_OAUTH_CLIENT", RedirectURL: "https://gateway.example.test/api/admin/oauth/callback"},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	handler := server.Handler()
+	start := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/start", bytes.NewBufferString(`{"provider_id":"denial-provider","credential_id":"denied-account","mode":"browser"}`))
+	start.RemoteAddr = "203.0.113.11:1234"
+	start.Header.Set("Authorization", "Bearer management-secret")
+	start.Header.Set("Content-Type", "application/json")
+	startRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(startRecorder, start)
+	if startRecorder.Code != http.StatusCreated {
+		t.Fatalf("start status=%d body=%s", startRecorder.Code, startRecorder.Body.String())
+	}
+	var started struct {
+		SessionID        string `json:"session_id"`
+		AuthorizationURL string `json:"authorization_url"`
+	}
+	if err := json.Unmarshal(startRecorder.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	authorization, err := url.Parse(started.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := authorization.Query().Get("state")
+	if state == "" || started.SessionID == "" {
+		t.Fatalf("start response missing state/session: %+v", started)
+	}
+	for _, path := range []string{
+		"/api/admin/oauth/callback?error=access_denied",
+		"/api/admin/oauth/callback?state=wrong-state&error=access_denied",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = "203.0.113.11:1234"
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_state") {
+			t.Fatalf("invalid denial %s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	valid := httptest.NewRequest(http.MethodGet, "/api/admin/oauth/callback?state="+url.QueryEscape(state)+"&error=access_denied", nil)
+	valid.RemoteAddr = "203.0.113.11:1234"
+	validRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(validRecorder, valid)
+	if validRecorder.Code != http.StatusBadRequest || !strings.Contains(validRecorder.Body.String(), "oauth_authorization_rejected") {
+		t.Fatalf("valid denial status=%d body=%s", validRecorder.Code, validRecorder.Body.String())
+	}
+	replay := httptest.NewRequest(http.MethodGet, "/api/admin/oauth/callback?state="+url.QueryEscape(state)+"&error=access_denied", nil)
+	replay.RemoteAddr = "203.0.113.11:1234"
+	replayRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(replayRecorder, replay)
+	if replayRecorder.Code != http.StatusBadRequest || !strings.Contains(replayRecorder.Body.String(), "invalid_state") {
+		t.Fatalf("replayed denial status=%d body=%s", replayRecorder.Code, replayRecorder.Body.String())
+	}
+	status := httptest.NewRequest(http.MethodGet, "/api/admin/oauth/status?session_id="+url.QueryEscape(started.SessionID), nil)
+	status.RemoteAddr = "203.0.113.11:1234"
+	status.Header.Set("Authorization", "Bearer management-secret")
+	statusRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(statusRecorder, status)
+	if statusRecorder.Code != http.StatusOK || !strings.Contains(statusRecorder.Body.String(), `"status":"failed"`) || !strings.Contains(statusRecorder.Body.String(), "oauth_authorization_rejected") {
+		t.Fatalf("denied session status=%d body=%s", statusRecorder.Code, statusRecorder.Body.String())
+	}
+}
+
+func TestOAuthStartRejectsDerivedRemoteCallbackHost(t *testing.T) {
+	t.Setenv("TPROXY_REMOTE_OAUTH_CLIENT", "api-client")
+	t.Setenv("TPROXY_REMOTE_MANAGEMENT", "management-secret")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"remote-access","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	cfg := &config.Config{
+		Server:   config.ServerConfig{AllowRemoteManagement: true},
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_REMOTE_MANAGEMENT"},
+		Providers: []config.ProviderConfig{{
+			ID: "remote-oauth", Type: "openai-compatible", BaseURL: providerServer.URL, Enabled: true,
+			OAuth: &config.OAuthConfig{AuthorizationURL: providerServer.URL + "/authorize", TokenURL: providerServer.URL, ClientIDEnv: "TPROXY_REMOTE_OAUTH_CLIENT"},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/start", bytes.NewBufferString(`{"provider_id":"remote-oauth","mode":"browser"}`))
+	request.RemoteAddr = "203.0.113.10:1234"
+	request.Host = "attacker.example"
+	request.Header.Set("Authorization", "Bearer management-secret")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "oauth_configuration_invalid") {
+		t.Fatalf("unsafe derived callback status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestOAuthStartRejectsEmptyLoopbackCallbackPort(t *testing.T) {
+	t.Setenv("TPROXY_EMPTY_PORT_OAUTH_CLIENT", "api-client")
+	t.Setenv("TPROXY_EMPTY_PORT_MANAGEMENT", "management-secret")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"unused","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+	for _, host := range []string{"localhost:", "127.0.0.1:", "[::1]:"} {
+		t.Run(host, func(t *testing.T) {
+			cfg := &config.Config{
+				Security:  config.SecurityConfig{ManagementSecretEnv: "TPROXY_EMPTY_PORT_MANAGEMENT"},
+				Providers: []config.ProviderConfig{{ID: "empty-port-provider", Type: "openai-compatible", BaseURL: providerServer.URL, Enabled: true, OAuth: &config.OAuthConfig{AuthorizationURL: providerServer.URL + "/authorize", TokenURL: providerServer.URL, ClientIDEnv: "TPROXY_EMPTY_PORT_OAUTH_CLIENT"}}},
+			}
+			dataStore := apiTestStore(t, cfg)
+			server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+			defer server.Close()
+			request := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/start", bytes.NewBufferString(`{"provider_id":"empty-port-provider","mode":"browser"}`))
+			request.Host = host
+			request.RemoteAddr = "127.0.0.1:1234"
+			request.Header.Set("Authorization", "Bearer management-secret")
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "oauth_configuration_invalid") {
+				t.Fatalf("empty callback port host=%q status=%d body=%s", host, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestProviderPrefixedRawRouteDisablesCredentialFallback(t *testing.T) {
+	t.Setenv("TPROXY_RAW_FAIL_KEY", "fail-key")
+	t.Setenv("TPROXY_RAW_SUCCESS_KEY", "success-key")
+	t.Setenv("TPROXY_RAW_CLIENT_KEY", "raw-client-key")
+	var successCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer fail-key" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"quota"}}`))
+			return
+		}
+		successCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1,"model":"image-upstream","data":[]}`))
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		ClientAPIKeys: []config.ClientAPIKey{{ID: "raw-client", Name: "Raw client", KeyEnv: "TPROXY_RAW_CLIENT_KEY"}},
+		Providers: []config.ProviderConfig{{
+			ID: "openai", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true,
+			Credentials: []config.CredentialConfig{
+				{ID: "a-failing", AuthType: "api_key", SecretEnv: "TPROXY_RAW_FAIL_KEY", Priority: 100},
+				{ID: "b-success", AuthType: "api_key", SecretEnv: "TPROXY_RAW_SUCCESS_KEY", Priority: 100},
+			},
+		}},
+		Models: []config.PublicModelConfig{{ID: "image-model", Enabled: true, Capabilities: []string{"image-output"}, Routes: []config.RouteTargetConfig{{ID: "image-route", Provider: "openai", UpstreamModel: "image-upstream", Priority: 10}}}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/images/generations", bytes.NewBufferString(`{"model":"image-model","prompt":"draw"}`))
+	request.RemoteAddr = "203.0.113.10:1234"
+	request.Header.Set("Authorization", "Bearer raw-client-key")
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("provider-pinned raw status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if successCalls.Load() != 0 {
+		t.Fatalf("provider-prefixed raw route fell back to second credential %d times", successCalls.Load())
+	}
+}
+
+func TestAdminAuthImportRejectsOversizedPayload(t *testing.T) {
+	t.Setenv("TPROXY_AUTH_IMPORT_MANAGEMENT", "management-secret")
+	cfg := &config.Config{Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_AUTH_IMPORT_MANAGEMENT"}}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+	validPrefix := []byte(`{"version":1,"credentials":[]}`)
+	body := append(append([]byte(nil), validPrefix...), bytes.Repeat([]byte{' '}, store.MaxAuthBundleBytes-len(validPrefix)+1)...)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/auth/import", bytes.NewReader(body))
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("Authorization", "Bearer management-secret")
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusRequestEntityTooLarge || !strings.Contains(recorder.Body.String(), "request_too_large") {
+		t.Fatalf("oversized auth import status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
