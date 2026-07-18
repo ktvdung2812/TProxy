@@ -22,7 +22,10 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
-const vertexTokenBuffer = 12 * time.Hour
+// Google service-account access tokens normally live for one hour. Refresh
+// five minutes before expiry while reusing the cached token for the rest of
+// its lifetime; a multi-hour buffer would force a mint on every request.
+const vertexTokenBuffer = 5 * time.Minute
 
 type vertexServiceAccount struct {
 	Type        string `json:"type"`
@@ -73,7 +76,10 @@ func (m *Manager) ensureVertexServiceAccount(ctx context.Context, credential sto
 			metadata = map[string]any{}
 		}
 		metadata["vertex_access_expires_at"] = expiresAt.UTC().Format(time.RFC3339Nano)
-		_ = m.store.UpdateCredentialMetadata(ctx, credential.ID, metadata)
+		credential.Metadata = metadata
+		if err = m.store.UpdateCredentialMetadata(ctx, credential.ID, credentialMetadataForPersistence(credential)); err != nil {
+			return credential, err
+		}
 	}
 	return credential, nil
 }
