@@ -317,6 +317,37 @@ func TestHTTPPluginAdapterUsesCanonicalOutOfProcessProtocol(t *testing.T) {
 	}
 }
 
+func TestHTTPPluginStreamSynthesizesMessageEndFromDone(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/stream" {
+			t.Fatalf("plugin path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"text_delta\",\"text\":\"plugin stream\"}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+	adapter, err := NewRegistry().Adapter("plugin-http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := adapter.ExecuteStream(context.Background(), store.Provider{ID: "plugin", Type: "plugin-http", BaseURL: upstream.URL}, store.Credential{AuthType: "none"}, canonical.Request{RequestID: "plugin-stream", UpstreamModel: "plugin-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	messageEnds := 0
+	for event := range events {
+		text.WriteString(event.Text)
+		if event.Type == canonical.EventMessageEnd {
+			messageEnds++
+		}
+	}
+	if text.String() != "plugin stream" || messageEnds != 1 {
+		t.Fatalf("plugin stream text=%q message_ends=%d", text.String(), messageEnds)
+	}
+}
+
 func TestNativeOpenAIRequestPreservesOpaqueFields(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
