@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -251,6 +252,7 @@ func Load(path string) (*Config, error) {
 }
 
 func applyDefaults(cfg *Config) {
+	cfg.Server.Host = strings.TrimSpace(cfg.Server.Host)
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "127.0.0.1"
 	}
@@ -534,6 +536,9 @@ func setOAuthDefault(oauth *OAuthConfig, authorizationURL, tokenURL, clientID, r
 
 func (cfg *Config) Validate() error {
 	applyDefaults(cfg)
+	if err := validateServerBinding(cfg.Server); err != nil {
+		return err
+	}
 	if err := validateLimitPolicy("global", cfg.Limits); err != nil {
 		return err
 	}
@@ -710,6 +715,23 @@ func (cfg *Config) Validate() error {
 				return fmt.Errorf("combo %q references unknown public model %q", combo.ID, item.PublicModelID)
 			}
 		}
+	}
+	return nil
+}
+
+func validateServerBinding(server ServerConfig) error {
+	host := strings.TrimSpace(server.Host)
+	if host == "" {
+		return errors.New("server host is required")
+	}
+	if strings.Contains(host, "://") || strings.ContainsAny(host, "/?# \t\r\n") {
+		return fmt.Errorf("server host %q must not include a scheme, path or port", host)
+	}
+	if strings.Contains(host, ":") && net.ParseIP(host) == nil {
+		return fmt.Errorf("server host %q must not include a port", host)
+	}
+	if server.Port < 1 || server.Port > 65535 {
+		return fmt.Errorf("server port %d must be between 1 and 65535", server.Port)
 	}
 	return nil
 }
