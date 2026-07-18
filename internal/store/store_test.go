@@ -1,8 +1,11 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -574,6 +577,451 @@ func TestOAuthAuthBundleImportRejectsWrongMasterKey(t *testing.T) {
 	credentials, err := target.Credentials(context.Background(), "provider")
 	if err != nil || len(credentials) != 0 {
 		t.Fatalf("wrong-key import changed target credentials: credentials=%+v err=%v", credentials, err)
+	}
+}
+
+func TestOAuthAuthBundleValidatesTypeMetadataAndEnvelopeAtomically(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenSQLite(filepath.Join(t.TempDir(), "auth-target.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	providerCfg := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Enabled: true}}}
+	if err = target.Seed(context.Background(), providerCfg); err != nil {
+		t.Fatal(err)
+	}
+	validEnvelope, err := json.Marshal(OAuthToken{AccessToken: "access-secret", RefreshToken: "refresh-secret", TokenType: "Bearer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validCiphertext, err := encryptor.Encrypt(string(validEnvelope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformedCiphertext, err := encryptor.Encrypt("plaintext-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := authBundle{Version: 1, Credentials: []authBundleCredential{
+		{ID: "valid", ProviderID: "provider", AuthType: "oauth", SecretCiphertext: validCiphertext, MetadataJSON: `{"provider_project":"safe"}`, Enabled: true},
+		{ID: "bad-type", ProviderID: "provider", AuthType: "api_key", SecretCiphertext: validCiphertext, MetadataJSON: `{}`, Enabled: true},
+		{ID: "bad-metadata", ProviderID: "provider", AuthType: "oauth", SecretCiphertext: validCiphertext, MetadataJSON: `{"access_token":"plaintext-leak"}`, Enabled: true},
+		{ID: "bad-envelope", ProviderID: "provider", AuthType: "oauth", SecretCiphertext: malformedCiphertext, MetadataJSON: `{}`, Enabled: true},
+	}}
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = target.ImportAuthBundle(context.Background(), data); err == nil {
+		t.Fatal("expected invalid auth bundle to be rejected")
+	}
+	credentials, err := target.Credentials(context.Background(), "provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 0 {
+		t.Fatalf("invalid auth bundle partially committed: %+v", credentials)
+	}
+}
+
+func TestExportConfigRedactsCredentialMetadata(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "metadata-export.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Enabled: true}}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveCredential(context.Background(), "provider", config.CredentialConfig{ID: "credential", AuthType: "oauth", Secret: "access-secret", Metadata: map[string]any{"access_token": "metadata-secret", "region": "local"}}); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := dataStore.ExportConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := exported.Providers[0].Credentials[0].Metadata
+	if _, exists := metadata["access_token_env"]; !exists {
+		t.Fatalf("credential metadata secret was not converted to placeholder: %+v", metadata)
+	}
+	if metadata["region"] != "local" || strings.Contains(fmt.Sprint(metadata), "metadata-secret") {
+		t.Fatalf("credential metadata export leaked secret: %+v", metadata)
+	}
+}
+
+func TestRequestAndAuditLogsRedactSecretMetadata(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "logs.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	metadata := map[string]any{"Authorization": "Bearer access-secret", "nested": map[string]any{"refresh_token": "refresh-secret"}, "message": "api_key=key-secret"}
+	if err = dataStore.AddRequestLog(context.Background(), RequestLog{RequestID: "request", Metadata: metadata}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.AddAuditEvent(context.Background(), AuditEvent{Action: "test", Metadata: metadata}); err != nil {
+		t.Fatal(err)
+	}
+	var requestRaw, auditRaw string
+	if err = dataStore.db.QueryRow(`SELECT metadata_json FROM request_logs WHERE request_id='request'`).Scan(&requestRaw); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.db.QueryRow(`SELECT metadata_json FROM audit_events WHERE action='test'`).Scan(&auditRaw); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{requestRaw, auditRaw} {
+		if strings.Contains(raw, "access-secret") || strings.Contains(raw, "refresh-secret") || strings.Contains(raw, "key-secret") {
+			t.Fatalf("log metadata leaked secret: %s", raw)
+		}
+	}
+}
+
+func TestClearCredentialCooldownPreservesModelCooldowns(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "cooldowns.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err = dataStore.Seed(context.Background(), &config.Config{Providers: []config.ProviderConfig{{
+		ID: "provider", Type: "openai-compatible", Enabled: true,
+		Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	if err = dataStore.SetCooldown(context.Background(), "credential", "account_limit", "account unavailable", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"upstream-a", "upstream-b"} {
+		if err = dataStore.SetModelCooldown(context.Background(), "credential", model, "model_limit", "model unavailable", now.Add(time.Hour), 429, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err = dataStore.ClearCredentialCooldown(context.Background(), "credential"); err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() || credential.LastErrorCode != "" || credential.LastError != "" || credential.LastValidated.IsZero() {
+		t.Fatalf("credential cooldown was not cleared: %+v", credential)
+	}
+	for _, model := range []string{"upstream-a", "upstream-b"} {
+		until, cooldownErr := dataStore.ModelCooldownUntil(context.Background(), "credential", model, now)
+		if cooldownErr != nil || until.IsZero() || dataStore.ModelCooldownCount(context.Background(), "credential", model) != 1 {
+			t.Fatalf("model %q cooldown changed: until=%v err=%v", model, until, cooldownErr)
+		}
+	}
+
+	if err = dataStore.ClearCooldown(context.Background(), "credential"); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"upstream-a", "upstream-b"} {
+		until, cooldownErr := dataStore.ModelCooldownUntil(context.Background(), "credential", model, now)
+		if cooldownErr != nil || !until.IsZero() || dataStore.ModelCooldownCount(context.Background(), "credential", model) != 0 {
+			t.Fatalf("admin clear retained model %q cooldown: until=%v err=%v", model, until, cooldownErr)
+		}
+	}
+}
+
+func TestClearCredentialCooldownRejectsMissingCredential(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "missing-cooldown.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err = dataStore.ClearCredentialCooldown(context.Background(), "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing credential error=%v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestSetModelCooldownRedactsDurableError(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "model-error.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err = dataStore.Seed(context.Background(), &config.Config{Providers: []config.ProviderConfig{{
+		ID: "provider", Type: "openai-compatible", Enabled: true,
+		Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SetModelCooldown(context.Background(), "credential", "model", "token=access-secret", "proxy http://proxy-user:proxy-password@example.test failed", time.Now().Add(time.Hour), 429, 1); err != nil {
+		t.Fatal(err)
+	}
+	var code, message string
+	if err = dataStore.db.QueryRow(`SELECT code,message FROM credential_model_cooldowns WHERE credential_id='credential' AND model='model'`).Scan(&code, &message); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{code, message} {
+		if strings.Contains(raw, "access-secret") || strings.Contains(raw, "proxy-password") || strings.Contains(raw, "proxy-user") {
+			t.Fatalf("model cooldown leaked durable secret: %q", raw)
+		}
+	}
+}
+
+func TestLegacyRawOAuthAuthBundleRoundTripIntoFreshStore(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerConfig := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Name: "Provider", Enabled: true}}}
+	source, err := OpenSQLite(filepath.Join(t.TempDir(), "legacy-source.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err = source.Seed(context.Background(), providerConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = source.SaveCredential(context.Background(), "provider", config.CredentialConfig{ID: "legacy-oauth", AuthType: "oauth", Secret: "legacy-access"}); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := source.ExportAuthBundle(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(bundle, []byte("legacy-access")) {
+		t.Fatal("legacy OAuth token leaked into exported bundle")
+	}
+	target, err := OpenSQLite(filepath.Join(t.TempDir(), "legacy-target.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	if err = target.ImportAuthBundle(context.Background(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := target.Provider(context.Background(), "provider")
+	if err != nil || provider.ID != "provider" {
+		t.Fatalf("fresh import provider=%+v err=%v", provider, err)
+	}
+	credentials, err := target.Credentials(context.Background(), "provider")
+	if err != nil || len(credentials) != 1 || credentials[0].Secret != "legacy-access" || credentials[0].OAuthToken == nil {
+		t.Fatalf("fresh legacy import credentials=%+v err=%v", credentials, err)
+	}
+}
+
+func TestAuthBundleMetadataValidationBranches(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := json.Marshal(OAuthToken{AccessToken: "access-secret", RefreshToken: "refresh-secret", TokenType: "Bearer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validCiphertext, err := encryptor.Encrypt(string(envelope))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyEnvelope, err := encryptor.Encrypt("{}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		authType   string
+		metadata   string
+		ciphertext string
+		wantErr    bool
+	}{
+		{name: "unsupported type", authType: "api_key", metadata: `{}`, ciphertext: validCiphertext, wantErr: true},
+		{name: "plaintext token metadata", authType: "oauth", metadata: `{"api_token":"plaintext"}`, ciphertext: validCiphertext, wantErr: true},
+		{name: "malformed envelope", authType: "oauth", metadata: `{}`, ciphertext: emptyEnvelope, wantErr: true},
+		{name: "duplicate metadata key", authType: "oauth", metadata: `{"region":"one","region":"two"}`, ciphertext: validCiphertext, wantErr: true},
+		{name: "redacted metadata", authType: "oauth", metadata: `{"access_token":"[REDACTED]","copilot_token_expires_at":"2030-01-01T00:00:00Z"}`, ciphertext: validCiphertext, wantErr: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			target, openErr := OpenSQLite(filepath.Join(t.TempDir(), "metadata.db"), encryptor)
+			if openErr != nil {
+				t.Fatal(openErr)
+			}
+			defer target.Close()
+			if seedErr := target.Seed(context.Background(), &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Enabled: true}}}); seedErr != nil {
+				t.Fatal(seedErr)
+			}
+			bundle, marshalErr := json.Marshal(authBundle{Version: 1, Credentials: []authBundleCredential{{ID: "credential", ProviderID: "provider", AuthType: test.authType, SecretCiphertext: test.ciphertext, MetadataJSON: test.metadata, Enabled: true}}})
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			importErr := target.ImportAuthBundle(context.Background(), bundle)
+			if (importErr != nil) != test.wantErr {
+				t.Fatalf("import error=%v wantErr=%v", importErr, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestAuthBundleImportClearsTransientCredentialState(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerConfig := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Enabled: true}}}
+	source, err := OpenSQLite(filepath.Join(t.TempDir(), "transient-source.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err = source.Seed(context.Background(), providerConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = source.SaveOAuthCredential(context.Background(), "provider", "credential", "", "", OAuthToken{AccessToken: "source-access"}); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := source.ExportAuthBundle(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenSQLite(filepath.Join(t.TempDir(), "transient-target.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	if err = target.Seed(context.Background(), providerConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.SaveOAuthCredential(context.Background(), "provider", "credential", "", "", OAuthToken{AccessToken: "old-access"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.SetCooldown(context.Background(), "credential", "old_code", "old error", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.SetModelCooldown(context.Background(), "credential", "model", "old_code", "old error", time.Now().Add(time.Hour), 429, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.ImportAuthBundle(context.Background(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	credential, err := target.CredentialByID(context.Background(), "credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() || credential.LastErrorCode != "" || credential.LastError != "" || !credential.LastValidated.IsZero() || credential.Secret != "source-access" {
+		t.Fatalf("transient state survived import: %+v", credential)
+	}
+	if until, untilErr := target.ModelCooldownUntil(context.Background(), "credential", "model", time.Now()); untilErr != nil || !until.IsZero() {
+		t.Fatalf("model cooldown survived import: until=%v err=%v", until, untilErr)
+	}
+}
+
+func TestAuthBundleSizeLimits(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "size.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err = dataStore.ImportAuthBundle(context.Background(), bytes.Repeat([]byte{'x'}, MaxAuthBundleBytes+1)); err == nil {
+		t.Fatal("oversized direct auth bundle was accepted")
+	}
+	if err = dataStore.Seed(context.Background(), &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", Enabled: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveOAuthCredential(context.Background(), "provider", "credential", "", "", OAuthToken{AccessToken: "access"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.UpdateCredentialMetadata(context.Background(), "credential", map[string]any{"notes": strings.Repeat("x", MaxAuthBundleBytes)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = dataStore.ExportAuthBundle(context.Background()); err == nil {
+		t.Fatal("oversized auth bundle export was accepted")
+	}
+}
+
+func TestCredentialUpdatesRejectMissingRows(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "missing.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	if err = dataStore.UpdateCredentialMetadata(context.Background(), "missing", map[string]any{}); err == nil {
+		t.Fatal("expected missing metadata update to fail")
+	}
+	if err = dataStore.UpdateOAuthToken(context.Background(), "missing", OAuthToken{AccessToken: "access"}); err == nil {
+		t.Fatal("expected missing OAuth update to fail")
 	}
 }
 

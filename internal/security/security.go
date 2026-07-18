@@ -118,6 +118,15 @@ func BearerToken(r *http.Request) string {
 }
 
 func IsLoopback(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	// Without an explicit trusted-proxy configuration, forwarded headers are
+	// untrusted input. Treating a loopback reverse proxy as the client would
+	// otherwise bypass local-only management and client-key gates.
+	if r.Header != nil && (r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "") {
+		return false
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
@@ -128,15 +137,16 @@ func IsLoopback(r *http.Request) bool {
 
 func NewID(prefix string) string {
 	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return prefix + "unknown"
+	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
+		panic("security: cryptographic entropy unavailable")
 	}
 	return prefix + base64.RawURLEncoding.EncodeToString(buf)
 }
 
 func RedactHeader(name, value string) string {
 	lower := strings.ToLower(name)
-	if lower == "authorization" || lower == "cookie" || strings.Contains(lower, "api-key") || strings.Contains(lower, "token") {
+	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(lower)
+	if normalized == "authorization" || normalized == "cookie" || strings.Contains(normalized, "apikey") || strings.Contains(normalized, "token") {
 		return "[redacted]"
 	}
 	return value
@@ -144,8 +154,9 @@ func RedactHeader(name, value string) string {
 
 var secretTextPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;"']+`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password)\s*[":=]+\s*")[^"]+`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password)\s*[=:]\s*)[^\s,;]+`),
+	regexp.MustCompile(`(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|token)\b\s*[":=]+\s*")[^"]+`),
+	regexp.MustCompile(`(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|token)\b\s*[=:]\s*)[^\s,;]+`),
+	regexp.MustCompile(`(?i)(\b(?:https?|socks5h?)://)[^\s/@:]+:[^\s/@]+@`),
 }
 
 func RedactText(value string) string {
