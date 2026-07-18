@@ -859,6 +859,57 @@ func TestLegacyRawOAuthAuthBundleRoundTripIntoFreshStore(t *testing.T) {
 	}
 }
 
+func TestOAuthAuthBundleRoundTripIntoFreshStoreSeedsAllProviders(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerConfig := &config.Config{Providers: []config.ProviderConfig{
+		{ID: "provider-a", Type: "openai-compatible", Name: "Provider A", Enabled: true},
+		{ID: "provider-b", Type: "openai-compatible", Name: "Provider B", Enabled: true},
+	}}
+	source, err := OpenSQLite(filepath.Join(t.TempDir(), "multi-source.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	if err = source.Seed(context.Background(), providerConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = source.SaveOAuthCredential(context.Background(), "provider-a", "credential-a", "", "", OAuthToken{AccessToken: "access-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = source.SaveOAuthCredential(context.Background(), "provider-b", "credential-b", "", "", OAuthToken{AccessToken: "access-b"}); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := source.ExportAuthBundle(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := OpenSQLite(filepath.Join(t.TempDir(), "multi-target.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	if err = target.ImportAuthBundle(context.Background(), bundle); err != nil {
+		t.Fatal(err)
+	}
+	for _, providerID := range []string{"provider-a", "provider-b"} {
+		provider, providerErr := target.Provider(context.Background(), providerID)
+		if providerErr != nil || provider.ID != providerID {
+			t.Fatalf("provider %q missing after fresh import: %+v err=%v", providerID, provider, providerErr)
+		}
+		credentials, credentialsErr := target.Credentials(context.Background(), providerID)
+		if credentialsErr != nil || len(credentials) != 1 {
+			t.Fatalf("provider %q credentials missing after fresh import: %+v err=%v", providerID, credentials, credentialsErr)
+		}
+	}
+}
+
 func TestAuthBundleMetadataValidationBranches(t *testing.T) {
 	key, err := security.GenerateMasterKey()
 	if err != nil {
