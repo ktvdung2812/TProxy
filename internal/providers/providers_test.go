@@ -55,6 +55,124 @@ func TestCodexAdapterTranslatesResponsesAndParsesSSE(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamRetainsUsageOnlyChunkAfterFinish(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"stream-usage\",\"model\":\"upstream\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+	adapter, err := NewRegistry().Adapter("openai-compatible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := adapter.ExecuteStream(context.Background(), store.Provider{ID: "openai", Type: "openai-compatible", BaseURL: upstream.URL}, store.Credential{AuthType: "none"}, canonical.Request{RequestID: "openai-stream-usage", UpstreamModel: "upstream"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage canonical.Usage
+	usageIndex, endIndex := -1, -1
+	index := 0
+	for event := range events {
+		if event.Type == canonical.EventUsage && event.Usage != nil {
+			usage = *event.Usage
+			usageIndex = index
+		}
+		if event.Type == canonical.EventMessageEnd {
+			endIndex = index
+		}
+		index++
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 4 || usage.ReasoningTokens != 2 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if usageIndex < 0 || endIndex < 0 || usageIndex >= endIndex {
+		t.Fatalf("usage must precede terminal event: usage_index=%d end_index=%d", usageIndex, endIndex)
+	}
+}
+
+func TestGeminiStreamEmitsUsageBeforeFinalMessageEnd(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-stream:streamGenerateContent" || r.URL.Query().Get("alt") != "sse" {
+			t.Fatalf("request URL = %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":13,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":1}}\n\n"))
+	}))
+	defer upstream.Close()
+	adapter, err := NewRegistry().Adapter("gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := adapter.ExecuteStream(context.Background(), store.Provider{ID: "gemini", Type: "gemini", BaseURL: upstream.URL}, store.Credential{AuthType: "none"}, canonical.Request{RequestID: "gemini-stream-usage", UpstreamModel: "gemini-stream"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage canonical.Usage
+	usageIndex, endIndex := -1, -1
+	index := 0
+	for event := range events {
+		if event.Type == canonical.EventUsage && event.Usage != nil {
+			usage = *event.Usage
+			usageIndex = index
+		}
+		if event.Type == canonical.EventMessageEnd {
+			endIndex = index
+		}
+		index++
+	}
+	if usage.InputTokens != 13 || usage.OutputTokens != 5 || usage.ReasoningTokens != 1 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if usageIndex < 0 || endIndex < 0 || usageIndex >= endIndex {
+		t.Fatalf("usage must precede terminal event: usage_index=%d end_index=%d", usageIndex, endIndex)
+	}
+}
+
+func TestAnthropicStreamMergesMessageStartAndDeltaUsage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-usage\",\"model\":\"claude-stream\",\"usage\":{\"input_tokens\":17,\"cache_read_input_tokens\":6}}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n"))
+	}))
+	defer upstream.Close()
+	adapter, err := NewRegistry().Adapter("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := adapter.ExecuteStream(context.Background(), store.Provider{ID: "claude", Type: "claude", BaseURL: upstream.URL}, store.Credential{AuthType: "none"}, canonical.Request{RequestID: "claude-stream-usage", UpstreamModel: "claude-stream", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage canonical.Usage
+	usageEvents, endIndex := 0, -1
+	index := 0
+	for event := range events {
+		if event.Type == canonical.EventUsage && event.Usage != nil {
+			usage = *event.Usage
+			usageEvents++
+		}
+		if event.Type == canonical.EventMessageEnd {
+			endIndex = index
+		}
+		index++
+	}
+	if usage.InputTokens != 17 || usage.OutputTokens != 8 || usage.CachedTokens != 6 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if usageEvents < 2 || endIndex < 0 {
+		t.Fatalf("expected start and delta usage before terminal: usage_events=%d end_index=%d", usageEvents, endIndex)
+	}
+}
+
 func TestClaudeOAuthAdapterUsesBearerAndClaudeHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" || r.URL.Query().Get("beta") != "true" {
