@@ -72,6 +72,9 @@ func (a *pluginHTTPAdapter) ExecuteStream(ctx context.Context, provider store.Pr
 			}
 			line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if line == "[DONE]" {
+				// Canonical consumers finalize usage and release stream capacity only
+				// after an explicit terminal event.
+				out <- canonical.Event{Type: canonical.EventMessageEnd}
 				return
 			}
 			var payload struct {
