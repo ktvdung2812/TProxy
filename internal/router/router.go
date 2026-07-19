@@ -1000,6 +1000,17 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 			if model.RewriteResponseModel {
 				event.Model = model.ID
 			}
+			if event.Type == canonical.EventResponsesSSE {
+				switch event.SSEEvent {
+				case "response.completed", "response.incomplete":
+					terminal = true
+					usage = mergeCanonicalUsage(usage, providers.UsageFromResponsesSSEData(event.SSEData))
+				case "response.failed":
+					terminal = true
+					status = http.StatusBadGateway
+					errorCode = "upstream_response_failed"
+				}
+			}
 			if event.Usage != nil {
 				usage = mergeCanonicalUsage(usage, *event.Usage)
 			}

@@ -1,6 +1,9 @@
 package providers
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 const QuotaDepletedAutoDisableThreshold = 0.0
 
@@ -22,12 +25,29 @@ func QuotaEntryRemainingPercent(entry QuotaEntry) float64 {
 	return math.Max(0, math.Round(((entry.Total-used)/entry.Total)*100))
 }
 
-// QuotaAtZero reports whether any finite quota window is fully depleted (0% left).
+// quotaKeyAffectsRouting reports whether a quota window should gate credential routing.
+// Auxiliary windows such as weekly or review limits are tracked for display only.
+func quotaKeyAffectsRouting(providerType, key string) bool {
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	normalizedType := strings.ToLower(strings.TrimSpace(providerType))
+	if strings.Contains(normalizedKey, "weekly") || strings.Contains(normalizedKey, "review") {
+		return false
+	}
+	if normalizedType == "codex" {
+		return normalizedKey == "session"
+	}
+	return true
+}
+
+// QuotaAtZero reports whether routing quota is fully depleted (0% left).
 func QuotaAtZero(quota CredentialQuota) bool {
 	if len(quota.Quotas) == 0 {
 		return false
 	}
-	for _, entry := range quota.Quotas {
+	for key, entry := range quota.Quotas {
+		if !quotaKeyAffectsRouting(quota.ProviderType, key) {
+			continue
+		}
 		if entry.Unlimited || entry.Total <= 0 {
 			continue
 		}

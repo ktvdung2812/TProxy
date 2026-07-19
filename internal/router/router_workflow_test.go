@@ -93,6 +93,29 @@ func TestWrapEventsMergesUsageChunks(t *testing.T) {
 	}
 }
 
+func TestWrapEventsRecordsPassthroughUsageBeforeCompleted(t *testing.T) {
+	dataStore := workflowTestStore(t)
+	requestRouter := New(dataStore, providers.NewRegistry())
+	input := make(chan canonical.Event, 4)
+	input <- canonical.Event{Type: canonical.EventUsage, Usage: &canonical.Usage{InputTokens: 120, OutputTokens: 40, CachedTokens: 80}}
+	input <- canonical.Event{
+		Type:     canonical.EventResponsesSSE,
+		SSEEvent: "response.completed",
+		SSEData:  []byte(`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":120,"output_tokens":40,"input_tokens_details":{"cached_tokens":80}}}}`),
+	}
+	close(input)
+	output := requestRouter.wrapEvents(context.Background(), workflowTestModel(), workflowTestSelection(), canonical.Request{RequestID: "passthrough-usage"}, time.Now(), input, nil)
+	for range output {
+	}
+	usage, err := dataStore.RecentUsage(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage) != 1 || usage[0].InputTokens != 120 || usage[0].OutputTokens != 40 || usage[0].CachedTokens != 80 {
+		t.Fatalf("passthrough usage=%+v", usage)
+	}
+}
+
 func TestWrapEventsFinalizesOnMessageEndWithoutWaitingForChannelClose(t *testing.T) {
 	dataStore := workflowTestStore(t)
 	requestRouter := New(dataStore, providers.NewRegistry())

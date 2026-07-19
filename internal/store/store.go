@@ -630,6 +630,19 @@ func (s *Store) SaveCredential(ctx context.Context, providerID string, credentia
 	default:
 		return fmt.Errorf("unsupported auth type %q", credentialCfg.AuthType)
 	}
+	metadata := credentialMetadata(credentialCfg)
+	if existing, err := s.CredentialByID(ctx, credentialCfg.ID); err == nil {
+		if len(credentialCfg.Metadata) == 0 {
+			for key, value := range existing.Metadata {
+				if _, has := metadata[key]; !has {
+					metadata[key] = value
+				}
+			}
+		}
+		if credentialCfg.Enabled != nil && *credentialCfg.Enabled {
+			metadata = quotaAutoDisabledMetadata(metadata, false)
+		}
+	}
 	ciphertext := ""
 	secret := credentialCfg.Secret
 	if secret == "" {
@@ -642,13 +655,13 @@ func (s *Store) SaveCredential(ctx context.Context, providerID string, credentia
 			return err
 		}
 	}
-	metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
+	metadataBytes, _ := json.Marshal(redactPersistedMetadata(metadata))
 	if credentialCfg.Weight <= 0 {
 		credentialCfg.Weight = 1
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled)
 VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext<>'' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled,status=CASE WHEN credentials.status='auth_required' AND excluded.auth_type='oauth' THEN credentials.status ELSE excluded.status END`,
-		credentialCfg.ID, providerID, credentialCfg.AuthType, credentialStatus(credentialCfg.AuthType), credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()))
+		credentialCfg.ID, providerID, credentialCfg.AuthType, credentialStatus(credentialCfg.AuthType), credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadataBytes), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()))
 	return err
 }
 

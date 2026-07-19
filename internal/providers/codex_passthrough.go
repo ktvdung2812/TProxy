@@ -64,14 +64,15 @@ func parseCodexResponsesPassthroughSSE(ctx context.Context, body io.Reader, out 
 			case "response.completed":
 				hasCompleted = true
 				emittedTerminal = true
-			case "response.failed":
-				hasFailed = true
-				emittedTerminal = true
 			case "response.incomplete":
 				hasIncomplete = true
 				emittedTerminal = true
+			case "response.failed":
+				hasFailed = true
+				emittedTerminal = true
 			}
 		}
+		emitPassthroughUsage(out, raw, eventName)
 		emit(eventName, []byte(data))
 		currentEvent = ""
 	}
@@ -82,4 +83,30 @@ func parseCodexResponsesPassthroughSSE(ctx context.Context, body io.Reader, out 
 	if !emittedTerminal && !hasCompleted && !hasFailed && !hasIncomplete {
 		out <- canonical.Event{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "codex_stream_missing_response_completed", Message: "Codex stream ended before response.completed"}}
 	}
+}
+
+func emitPassthroughUsage(out chan<- canonical.Event, raw map[string]any, eventName string) {
+	if raw == nil {
+		return
+	}
+	switch eventName {
+	case "response.completed", "response.incomplete":
+	default:
+		return
+	}
+	usage := parseResponsesUsage(firstAny(raw["usage"], nestedMapValue(raw, "response", "usage")))
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.ReasoningTokens == 0 && usage.CachedTokens == 0 {
+		return
+	}
+	copyUsage := usage
+	out <- canonical.Event{Type: canonical.EventUsage, Usage: &copyUsage}
+}
+
+// UsageFromResponsesSSEData extracts token usage from a Responses API SSE payload.
+func UsageFromResponsesSSEData(data []byte) canonical.Usage {
+	var raw map[string]any
+	if json.Unmarshal(data, &raw) != nil {
+		return canonical.Usage{}
+	}
+	return parseResponsesUsage(firstAny(raw["usage"], nestedMapValue(raw, "response", "usage")))
 }

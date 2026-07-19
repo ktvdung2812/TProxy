@@ -19,6 +19,15 @@ func TestQuotaAtZero(t *testing.T) {
 	}
 
 	quota.Quotas = map[string]QuotaEntry{
+		"session": {Name: "Session", Used: 98, Total: 100, Remaining: 2},
+		"weekly":  {Name: "Weekly", Used: 100, Total: 100, Remaining: 0},
+	}
+	quota.ProviderType = "codex"
+	if QuotaAtZero(quota) {
+		t.Fatal("codex session with remaining quota should stay routable when weekly is empty")
+	}
+
+	quota.Quotas = map[string]QuotaEntry{
 		"unlimited": {Name: "Unlimited", Unlimited: true},
 	}
 	if QuotaAtZero(quota) {

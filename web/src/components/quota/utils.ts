@@ -42,6 +42,24 @@ export function getRemainingPercentage(entry: QuotaEntry) {
   return calculatePercentage(entry.used, entry.total);
 }
 
+const AUXILIARY_QUOTA_KEY = /weekly|review/i;
+
+export function quotaKeyAffectsRouting(providerType: string, key: string) {
+  const normalizedKey = key.trim().toLowerCase();
+  const normalizedType = providerType.trim().toLowerCase();
+  if (AUXILIARY_QUOTA_KEY.test(normalizedKey)) return false;
+  if (normalizedType === "codex") return normalizedKey === "session";
+  return true;
+}
+
+export function isConnectionAtZero(quota?: CredentialQuota, providerType = quota?.provider_type || "") {
+  return quotaEntries(quota).some((entry) => {
+    if (!quotaKeyAffectsRouting(providerType, entry.key)) return false;
+    if (entry.unlimited || entry.total <= 0) return false;
+    return entry.remaining <= 0;
+  });
+}
+
 export function formatResetTime(date?: string) {
   if (!date) return "-";
   const resetDate = new Date(date);
