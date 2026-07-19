@@ -952,3 +952,45 @@ func newStore(t *testing.T, cfg *config.Config) *store.Store {
 	}
 	return dataStore
 }
+
+func TestResolveAutoModelPrefersFastCodingModel(t *testing.T) {
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"fast","model":"mini","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer fast.Close()
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"slow","model":"gpt-4","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer slow.Close()
+
+	dataStore := newStore(t, &config.Config{
+		Providers: []config.ProviderConfig{
+			{ID: "slow-provider", Type: "openai-compatible", Enabled: true, BaseURL: slow.URL, Credentials: []config.CredentialConfig{{ID: "slow-cred", AuthType: "none"}}},
+			{ID: "fast-provider", Type: "openai-compatible", Enabled: true, BaseURL: fast.URL, Credentials: []config.CredentialConfig{{ID: "fast-cred", AuthType: "none"}}},
+		},
+		Models: []config.PublicModelConfig{
+			{ID: "slow-coder", DisplayName: "Slow Coder", Enabled: true, Capabilities: []string{"text", "tools"}, Routes: []config.RouteTargetConfig{{ID: "slow-route", Provider: "slow-provider", UpstreamModel: "gpt-4", Priority: 100}}},
+			{ID: "flash-mini", DisplayName: "Flash Mini", Enabled: true, Capabilities: []string{"text", "tools"}, Routes: []config.RouteTargetConfig{{ID: "fast-route", Provider: "fast-provider", UpstreamModel: "mini", Priority: 100}}},
+		},
+	})
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "auto/coding:fast", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.ID != "auto/coding:fast" {
+		t.Fatalf("virtual id=%s", model.ID)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "auto-test", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Route.UpstreamModel != "mini" {
+		t.Fatalf("expected fast route, got %+v", result.Selection.Route)
+	}
+	if result.Response.Model != "auto/coding:fast" {
+		t.Fatalf("response model=%s", result.Response.Model)
+	}
+}

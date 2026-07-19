@@ -7,9 +7,8 @@ import (
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/canonical"
-	"github.com/tproxy/tproxy/internal/rtk"
+	"github.com/tproxy/tproxy/internal/compression"
 	"github.com/tproxy/tproxy/internal/store"
-	"github.com/tproxy/tproxy/internal/tokenizer"
 )
 
 func (s *Server) adminTokenSaverSettings(w http.ResponseWriter, r *http.Request) {
@@ -22,14 +21,16 @@ func (s *Server) adminTokenSaverSettings(w http.ResponseWriter, r *http.Request)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"rtk_enabled":          settings.RTKEnabled,
+			"compression_mode":     settings.CompressionMode,
 			"per_request_opt_out":  settings.PerRequestOptOut,
 			"cli_hook_recommended": settings.CLIHookRecommended,
 			"upstream_project":     "https://github.com/rtk-ai/rtk",
 		})
 	case http.MethodPut, http.MethodPatch:
 		var payload struct {
-			RTKEnabled         *bool `json:"rtk_enabled"`
-			CLIHookRecommended *bool `json:"cli_hook_recommended"`
+			RTKEnabled         *bool   `json:"rtk_enabled"`
+			CLIHookRecommended *bool   `json:"cli_hook_recommended"`
+			CompressionMode    *string `json:"compression_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), useClientRequestID(r))
@@ -46,11 +47,14 @@ func (s *Server) adminTokenSaverSettings(w http.ResponseWriter, r *http.Request)
 		if payload.CLIHookRecommended != nil {
 			settings.CLIHookRecommended = *payload.CLIHookRecommended
 		}
+		if payload.CompressionMode != nil {
+			settings.CompressionMode = strings.TrimSpace(*payload.CompressionMode)
+		}
 		if err := s.store.SaveTokenSaverSettings(r.Context(), settings); err != nil {
 			writeError(w, http.StatusInternalServerError, "token_saver_settings_failed", err.Error(), useClientRequestID(r))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rtk_enabled": settings.RTKEnabled})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rtk_enabled": settings.RTKEnabled, "compression_mode": settings.CompressionMode})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET/PUT/PATCH required", useClientRequestID(r))
 	}
@@ -64,23 +68,35 @@ func (s *Server) applyTokenSaver(request *canonical.Request, w http.ResponseWrit
 	if err != nil {
 		settings = store.DefaultTokenSaverSettings()
 	}
+	mode := compression.ParseMode(settings.CompressionMode)
+	if headerMode := strings.TrimSpace(r.Header.Get("X-TProxy-Compression")); headerMode != "" {
+		mode = compression.ParseMode(headerMode)
+	}
 	if settings.PerRequestOptOut && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-TProxy-Token-Saver")), "off") {
-		return
+		mode = compression.ModeOff
 	}
-	var tokensSaved int
-	if settings.RTKEnabled {
-		tokensSaved = rtk.CompressRequest(request).TokensSaved
-	} else {
-		tokensSaved = tokenizer.Compress(request).TokensSaved
+	if !settings.RTKEnabled && mode != compression.ModeOff {
+		mode = compression.ModeOff
 	}
-	if tokensSaved <= 0 {
+	stats := compression.CompressRequest(request, mode)
+	if stats.TokensSaved <= 0 {
 		return
 	}
 	if request.Metadata == nil {
 		request.Metadata = map[string]any{}
 	}
-	request.Metadata["tokens_saved"] = tokensSaved
+	request.Metadata["tokens_saved"] = stats.TokensSaved
+	request.Metadata["compression_mode"] = string(stats.Mode)
 	if w != nil {
-		w.Header().Set("X-TProxy-Tokens-Saved", fmt.Sprint(tokensSaved))
+		headerMode := strings.TrimSpace(r.Header.Get("X-TProxy-Compression"))
+		w.Header().Set("X-TProxy-Tokens-Saved", fmt.Sprint(stats.TokensSaved))
+		w.Header().Set("X-TProxy-Compression", fmt.Sprintf("%s; source=%s", stats.Mode, compressionSource(headerMode)))
 	}
+}
+
+func compressionSource(headerMode string) string {
+	if headerMode != "" {
+		return "header"
+	}
+	return "settings"
 }
