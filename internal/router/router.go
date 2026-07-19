@@ -22,6 +22,7 @@ import (
 	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/pricing"
 	"github.com/tproxy/tproxy/internal/providers"
+	"github.com/tproxy/tproxy/internal/resilience"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -47,6 +48,7 @@ type Router struct {
 	providerStreams       map[string]int
 	pricing               *pricing.Catalog
 	modelsRegistry        *pricing.ModelsRegistry
+	circuitBreakers       *resilience.Registry
 }
 
 type CredentialRefresher interface {
@@ -69,6 +71,7 @@ type Selection struct {
 type Result struct {
 	Selection Selection
 	Response  *canonical.Response
+	CostUSD   float64
 }
 
 type StreamResult struct {
@@ -97,7 +100,15 @@ func New(dataStore *store.Store, registry *providers.Registry) *Router {
 		cooldowns: CooldownSettingsFromConfig(config.CooldownConfig{}), strategy: StrategyRoundRobin,
 		stickyRoundRobinLimit: defaultStickyRoundRobinLimit, providerStrategies: map[string]store.ProviderRotationStrategy{},
 		sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int),
+		circuitBreakers: resilience.NewRegistry(),
 	}
+}
+
+func (r *Router) CircuitBreakers() *resilience.Registry {
+	if r.circuitBreakers == nil {
+		r.circuitBreakers = resilience.NewRegistry()
+	}
+	return r.circuitBreakers
 }
 
 func (r *Router) SetCredentialRefresher(refresher CredentialRefresher) {
@@ -290,6 +301,13 @@ func (r *Router) Resolve(ctx context.Context, requested string, apiKey *store.AP
 	if apiKey != nil {
 		apiKeyID = apiKey.ID
 		teamID = apiKey.Policy.Team
+	}
+	if variant, isAuto := ParseAutoModel(requested); isAuto {
+		model, err := r.resolveAutoModel(ctx, variant, apiKey)
+		if err != nil {
+			return nil, err
+		}
+		return model, nil
 	}
 	if providerPrefix, alias, ok := splitProviderModelSelector(requested); ok {
 		model, err := r.store.ResolveProviderModelScoped(ctx, providerPrefix, alias, apiKeyID, teamID)
@@ -570,11 +588,14 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if errExecute == nil {
 			r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
 			r.clearSuccessfulCooldown(ctx, selection)
+			if r.circuitBreakers != nil {
+				r.circuitBreakers.RecordSuccess(selection.Provider.ID)
+			}
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			if model.RewriteResponseModel {
 				response.Model = model.ID
 			}
-			return &Result{Selection: selection, Response: response}, nil
+			return &Result{Selection: selection, Response: response, CostUSD: r.estimateCost(response.Usage, selection)}, nil
 		}
 		lastErr = errExecute
 		status := providers.Status(errExecute)
@@ -583,6 +604,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		fallback := shouldFallbackStatus(status)
 		if fallback {
 			r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
+		}
+		if r.circuitBreakers != nil {
+			r.circuitBreakers.RecordFailure(selection.Provider.ID, status)
 		}
 		if disableFallback(request) {
 			return nil, errExecute
@@ -1183,6 +1207,9 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" || provider.Status == "auth_required" || provider.Status == "cooldown" {
 			continue
 		}
+		if r.circuitBreakers != nil && !r.circuitBreakers.CanExecute(provider.ID) {
+			continue
+		}
 		if pin := pinnedProvider(request); pin != "" && !providerMatchesPin(*provider, pin) {
 			continue
 		}
@@ -1282,8 +1309,14 @@ func (r *Router) providerSupports(provider store.Provider, request canonical.Req
 }
 
 func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([]store.RouteTarget, error) {
+	routeModelID := model.ID
+	if model.Limits != nil {
+		if source, ok := model.Limits["_auto_source_model"].(string); ok && strings.TrimSpace(source) != "" {
+			routeModelID = source
+		}
+	}
 	if len(model.ComboItems) == 0 {
-		routes, err := r.store.Routes(ctx, model.ID)
+		routes, err := r.store.Routes(ctx, routeModelID)
 		if err != nil {
 			return nil, err
 		}

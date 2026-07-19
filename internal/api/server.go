@@ -1014,6 +1014,14 @@ const (
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonical.Request, mode renderMode) {
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	attachClientPolicyMetadata(&request, key)
+	if err := applyRequestControls(r, &request); err != nil {
+		if strings.Contains(err.Error(), "prompt_injection") {
+			writeError(w, http.StatusBadRequest, "prompt_injection_detected", err.Error(), request.RequestID)
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid_request_controls", err.Error(), request.RequestID)
+		return
+	}
 	if err := s.enforceClientBudget(r.Context(), key); err != nil {
 		writeError(w, http.StatusPaymentRequired, "budget_exceeded", err.Error(), request.RequestID)
 		return
@@ -1118,6 +1126,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 	default:
 		payload = renderOpenAI(result.Response, request.RequestID)
 	}
+	writeCostHeaders(w, result)
 	writeJSON(w, 200, payload)
 }
 

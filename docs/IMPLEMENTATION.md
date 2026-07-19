@@ -58,3 +58,12 @@
 - Advanced dashboard drag/drop route editing, provider-specific media controls and richer health charts.
 - Optional plugin store/distribution and gRPC transport (HTTP plugin protocol is implemented and disabled by default).
 - Shared provider media-job limits and richer global/team media accounting beyond the implemented request, stream and budget policies.
+
+## OmniRoute parity (Phase A+B)
+
+- Provider-level circuit breaker with OPEN/DEGRADED/CLOSED states (`internal/resilience/circuitbreaker.go`).
+- Zero-config auto-combo model resolution (`auto`, `auto/coding:fast`, `auto/reasoning:pro`, …) in `internal/router/autocombo.go`.
+- Compression pipeline with RTK, Caveman and stacked modes (`internal/compression/pipeline.go`).
+- Heuristic prompt-injection guard on LLM routes (`internal/guardrails/injection.go`).
+- Per-request routing/compression/budget headers and `X-TProxy-Cost` response telemetry.
+- Roadmap for remaining OmniRoute capabilities in `../specs/08-omniroute-parity.md`.
