@@ -36,6 +36,33 @@ func TestParseCodexResponsesPassthroughSSEForwardsEvents(t *testing.T) {
 	}
 }
 
+func TestParseCodexResponsesPassthroughSSEEmitsUsage(t *testing.T) {
+	body := strings.NewReader("" +
+		"event: response.completed\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":120,\"output_tokens\":40,\"input_tokens_details\":{\"cached_tokens\":80}}}}\n\n" +
+		"data: [DONE]\n\n")
+	out := make(chan canonical.Event, 8)
+	parseCodexResponsesPassthroughSSE(context.Background(), body, out)
+	close(out)
+
+	var events []canonical.Event
+	for event := range out {
+		events = append(events, event)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2: %#v", len(events), events)
+	}
+	if events[0].Type != canonical.EventUsage || events[0].Usage == nil {
+		t.Fatalf("first event = %#v", events[0])
+	}
+	if events[0].Usage.InputTokens != 120 || events[0].Usage.OutputTokens != 40 || events[0].Usage.CachedTokens != 80 {
+		t.Fatalf("usage = %#v", events[0].Usage)
+	}
+	if events[1].Type != canonical.EventResponsesSSE {
+		t.Fatalf("second event = %#v", events[1])
+	}
+}
+
 func TestCodexNormalizeReasoningSetsInclude(t *testing.T) {
 	body := map[string]any{
 		"reasoning": map[string]any{"effort": "medium"},

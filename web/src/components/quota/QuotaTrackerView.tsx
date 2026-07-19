@@ -21,6 +21,7 @@ import {
   getConnectionLabel,
   getHiddenQuotaRows,
   getQuotaVisibilityKey,
+  isConnectionAtZero,
   isConnectionDepleted,
   quotaEntries,
   runWithConcurrency,
@@ -330,7 +331,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
 
   const handleEnableAvailable = () => {
     const targets = sortedCredentials.filter(
-      (credential) => !credential.enabled && !isConnectionDepleted(quotaById[credential.id]),
+      (credential) => !credential.enabled && !isConnectionAtZero(quotaById[credential.id], quotaProviderKey(credential)),
     );
     void bulkSetEnabled(targets, true);
   };
