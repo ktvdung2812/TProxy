@@ -135,6 +135,21 @@ func IsLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func IsPrivateNetwork(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.Header != nil && (r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "") {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && (ip.IsPrivate() || ip.IsLinkLocalUnicast())
+}
+
 func NewID(prefix string) string {
 	buf := make([]byte, 12)
 	if _, err := io.ReadFull(rand.Reader, buf); err != nil {

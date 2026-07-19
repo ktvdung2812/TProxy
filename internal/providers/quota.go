@@ -54,6 +54,7 @@ var quotaSupportedTypes = map[string]bool{
 	"codebuddy-cn":       true,
 	"github":             true,
 	"gemini-cli":         true,
+	"kimi":               true,
 	"kimi-coding":        true,
 	"ollama":             true,
 }

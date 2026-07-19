@@ -1,5 +1,5 @@
 import { cn } from "../ui";
-import { formatProxyUsageLabel, formatQuotaName, formatResetTime, getColorEmoji, getColorTone } from "./utils";
+import { formatProxyUsageLabel, formatQuotaName, formatResetAbsolute, formatResetTime, getColorEmoji, getColorTone } from "./utils";
 
 type QuotaRow = {
   key: string;
@@ -46,20 +46,18 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
           {rows.map((row) => {
             const tone = getColorTone(row.remaining);
             const countdown = formatResetTime(row.reset_at);
+            const absoluteReset = formatResetAbsolute(row.reset_at);
             const countdownLabel = countdown !== "-" ? `in ${countdown}` : "N/A";
+
+            const isLive = credentialActive && isSessionQuotaRow(row);
 
             return (
               <tr key={row.key} className="quota-tracker-table-row">
-                <td className="quota-tracker-cell quota-tracker-cell-name">
+                <td className={cn("quota-tracker-cell quota-tracker-cell-name", isLive && "quota-tracker-cell-name-live")}>
                   <span className="quota-tracker-dot" aria-hidden>
                     {getColorEmoji(row.remaining)}
                   </span>
-                  <span
-                    className={cn(
-                      "quota-tracker-name",
-                      credentialActive && isSessionQuotaRow(row) && "quota-tracker-name-live",
-                    )}
-                  >
+                  <span className="quota-tracker-name">
                     {formatQuotaName(row.name)}
                   </span>
                 </td>
@@ -76,7 +74,8 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                 </td>
                 <td className="quota-tracker-cell quota-tracker-cell-reset">
                   <span className="quota-tracker-reset" title={row.reset_at || undefined}>
-                    {countdownLabel}
+                    <span className="quota-tracker-reset-relative">{countdownLabel}</span>
+                    {absoluteReset ? <span className="quota-tracker-reset-absolute">{absoluteReset}</span> : null}
                   </span>
                 </td>
                 {onHide ? (

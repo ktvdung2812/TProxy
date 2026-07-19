@@ -59,6 +59,7 @@ type Server struct {
 	auth             *auth.Manager
 	managementSecret string
 	allowRemoteMgmt  bool
+	allowLanMgmt     bool
 	configPath       string
 	limiter          *requestLimiter
 	liveUsage        *LiveUsageTracker
@@ -77,7 +78,9 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 		authManager = auth.NewManager(dataStore, nil)
 	}
 	requestRouter.SetCredentialRefresher(authManager)
-	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, managementSecret: config.Env(cfg.Security.ManagementSecretEnv), allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	server.loadManagementSecret(context.Background())
+	server.loadGatewaySettings(context.Background())
 	_ = requestRouter.SyncAccountRotationSettings(context.Background())
 	server.loadClaudeAliasResolver()
 	return server
@@ -270,11 +273,11 @@ func (s *Server) geminiNative(w http.ResponseWriter, r *http.Request, action str
 
 func (s *Server) managementAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.allowRemoteMgmt && !security.IsLoopback(r) {
+		if !s.managementClientAllowed(r) {
 			writeError(w, http.StatusForbidden, "management_remote_disabled", "remote management is disabled", useClientRequestID(r))
 			return
 		}
-		if s.allowRemoteMgmt && !security.IsLoopback(r) && s.managementSecret == "" {
+		if !security.IsLoopback(r) && s.managementSecret == "" {
 			writeError(w, http.StatusServiceUnavailable, "management_secret_required", "remote management requires a management secret", useClientRequestID(r))
 			return
 		}
@@ -1465,10 +1468,17 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			tokenSaver = store.DefaultTokenSaverSettings()
 		}
+		gateway, err := s.store.GatewaySettings(r.Context())
+		if err != nil {
+			gateway = store.DefaultGatewaySettings()
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"retention":               s.cfg.Retention,
 			"payload_capture":         false,
 			"allow_remote_management": s.allowRemoteMgmt,
+			"allow_lan_management":    gateway.AllowLANManagement,
+			"server_host":             s.cfg.Server.Host,
+			"server_port":             s.cfg.Server.Port,
 			"token_saver": map[string]any{
 				"enabled":              true,
 				"rtk_enabled":          tokenSaver.RTKEnabled,
@@ -1479,6 +1489,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		})
 	case "/api/admin/settings/token-saver":
 		s.adminTokenSaverSettings(w, r)
+	case "/api/admin/settings/dashboard-password":
+		s.adminDashboardPassword(w, r)
+	case "/api/admin/settings/gateway":
+		s.adminGatewaySettings(w, r)
 	case "/api/admin/import/9router":
 		s.adminImport9router(w, r)
 	case "/api/admin/ninerouter/presets":
@@ -1512,7 +1526,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 		s.router.ConfigureRouting(next.Routing)
 		_ = s.router.SyncAccountRotationSettings(r.Context())
-		s.managementSecret = config.Env(next.Security.ManagementSecretEnv)
+		s.loadManagementSecret(r.Context())
+		s.loadGatewaySettings(r.Context())
 		s.allowRemoteMgmt = next.Server.AllowRemoteManagement
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config_path": s.configPath})
 	case "/api/admin/oauth/start":
@@ -2718,8 +2733,9 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 	s.cfg = &next
 	s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 	s.router.ConfigureRouting(next.Routing)
-	s.managementSecret = config.Env(next.Security.ManagementSecretEnv)
+	s.loadManagementSecret(r.Context())
 	s.allowRemoteMgmt = next.Server.AllowRemoteManagement
+	s.loadGatewaySettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "imported_at": time.Now().UTC(), "database": "sqlite"})
 }
 

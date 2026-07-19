@@ -160,6 +160,14 @@ export const NAV_SECTIONS: NavSection[] = [
         title: "Logs & audit",
         description: "Recent requests and admin changes.",
       },
+      {
+        id: "settings",
+        path: "/settings",
+        label: "Settings",
+        icon: "settings",
+        title: "Settings",
+        description: "Gateway behavior, rotation, retention, and configuration backup.",
+      },
     ],
   },
 ];

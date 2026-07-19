@@ -155,6 +155,20 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     [eligible],
   );
 
+  const scopeCredentials = useMemo(() => {
+    if (providerFilter === "all") return eligible;
+    return eligible.filter((item) => quotaProviderKey(item) === providerFilter);
+  }, [eligible, providerFilter]);
+
+  const accountStats = useMemo(() => {
+    const enabled = scopeCredentials.filter((item) => item.enabled).length;
+    return {
+      total: scopeCredentials.length,
+      enabled,
+      disabled: scopeCredentials.length - enabled,
+    };
+  }, [scopeCredentials]);
+
   const sortedCredentials = useMemo(() => {
     return [...filteredCredentials].sort((a, b) => {
       if (a.enabled !== b.enabled) {
@@ -389,6 +403,49 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   return (
     <section className="quota-tracker-page">
       <div className="quota-tracker-controls">
+        <div className="quota-tracker-stats" aria-label="Account statistics">
+          <span className="quota-tracker-stat quota-tracker-stat-on">
+            <span className="quota-tracker-stat-dot" aria-hidden="true" />
+            <strong>{accountStats.enabled}</strong> on
+          </span>
+          <span className="quota-tracker-stat quota-tracker-stat-off">
+            <span className="quota-tracker-stat-dot" aria-hidden="true" />
+            <strong>{accountStats.disabled}</strong> off
+          </span>
+          {providerFilter === "all" ? (
+            <>
+              <span className="quota-tracker-stats-divider" aria-hidden="true" />
+              <div className="quota-tracker-provider-stats">
+                {providerOptions.map((providerType) => {
+                  const info = getProviderTypeInfo(providerType);
+                  const count = providerCounts[providerType] || 0;
+                  const enabledCount = eligible.filter(
+                    (item) => quotaProviderKey(item) === providerType && item.enabled,
+                  ).length;
+                  return (
+                    <span
+                      key={providerType}
+                      className="quota-tracker-provider-stat"
+                      title={`${info.name}: ${count} accounts (${enabledCount} on, ${count - enabledCount} off)`}
+                    >
+                      <ProviderLogo
+                        className="quota-tracker-provider-icon"
+                        providerType={providerType}
+                        style={{ color: info.color }}
+                      />
+                      <span className="quota-tracker-provider-stat-name">{info.name}</span>
+                      <span className="quota-tracker-provider-stat-count">{count}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <span className="quota-tracker-stat-meta">
+              {accountStats.total} in {selectedProviderLabel}
+            </span>
+          )}
+        </div>
         <div className="quota-tracker-filter-group">
           <div className="quota-tracker-dropdown">
             <button
@@ -414,7 +471,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                     }}
                   >
                     <span className="material-symbols-outlined">apps</span>
-                    <span>All providers</span>
+                    <span className="quota-tracker-menu-item-text">All providers</span>
+                    <span className="quota-tracker-menu-count">{eligible.length}</span>
                   </button>
                   {providerOptions.map((providerType) => {
                     const info = getProviderTypeInfo(providerType);
@@ -433,7 +491,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           providerType={providerType}
                           style={{ color: info.color }}
                         />
-                        <span>{info.name}</span>
+                        <span className="quota-tracker-menu-item-text">{info.name}</span>
+                        <span className="quota-tracker-menu-count">{providerCounts[providerType] || 0}</span>
                       </button>
                     );
                   })}
@@ -451,6 +510,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             {ACCOUNT_FILTER_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
+                {option.value === "all"
+                  ? ` (${accountStats.total})`
+                  : option.value === "active"
+                    ? ` (${accountStats.enabled})`
+                    : ` (${accountStats.disabled})`}
               </option>
             ))}
           </select>

@@ -121,6 +121,7 @@ func TestAdminCanCreateVirtualModelWithoutExposingSecrets(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/models", bytes.NewBufferString(body))
 	request.RemoteAddr = "127.0.0.1:1234"
 	request.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(request)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -144,8 +145,36 @@ func TestRemoteManagementRequiresSecret(t *testing.T) {
 	request.RemoteAddr = "203.0.113.10:1234"
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), "management_secret_required") {
+	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "invalid_management_secret") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestLANManagementAllowsPrivateNetworkWithPassword(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Server: config.ServerConfig{AllowRemoteManagement: false}}
+	dataStore := apiTestStore(t, cfg)
+	if err := dataStore.SaveGatewaySettings(ctx, store.GatewaySettings{AllowLANManagement: true}); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+
+	denied := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	denied.RemoteAddr = "203.0.113.10:1234"
+	deniedRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deniedRecorder, denied)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("public status=%d body=%s", deniedRecorder.Code, deniedRecorder.Body.String())
+	}
+
+	allowed := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	allowed.RemoteAddr = "192.168.1.50:1234"
+	allowed.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
+	allowedRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(allowedRecorder, allowed)
+	if allowedRecorder.Code != http.StatusOK {
+		t.Fatalf("lan status=%d body=%s", allowedRecorder.Code, allowedRecorder.Body.String())
 	}
 }
 
@@ -309,6 +338,7 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		logsRequest.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
 		logsResponse, err := http.DefaultClient.Do(logsRequest)
 		if err != nil {
 			t.Fatal(err)
@@ -446,6 +476,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
 	postPool := httptest.NewRequest(http.MethodPost, "/api/admin/proxy-pools", bytes.NewBufferString(`{"id":"pool-1","name":"Primary","url":"direct","enabled":true}`))
 	postPool.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(postPool)
 	postRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(postRecorder, postPool)
 	if postRecorder.Code != http.StatusCreated {
@@ -454,6 +485,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	provider := httptest.NewRequest(http.MethodPost, "/api/admin/providers", bytes.NewBufferString(`{"id":"proxy-provider","type":"openai-compatible","base_url":"http://127.0.0.1:1","enabled":true,"proxy_pools":["pool-1"],"credentials":[{"id":"proxy-credential","auth_type":"none"}]}`))
 	provider.RemoteAddr = "127.0.0.1:1234"
 	provider.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(provider)
 	providerRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(providerRecorder, provider)
 	if providerRecorder.Code != http.StatusOK {
@@ -462,6 +494,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	testPool := httptest.NewRequest(http.MethodPost, "/api/admin/proxy-pools/pool-1/test", bytes.NewBufferString(`{"target_url":"`+target.URL+`"}`))
 	testPool.RemoteAddr = "127.0.0.1:1234"
 	testPool.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(testPool)
 	testRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(testRecorder, testPool)
 	if testRecorder.Code != http.StatusOK || !strings.Contains(testRecorder.Body.String(), `"ok":true`) {
@@ -469,6 +502,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	}
 	snapshot := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	snapshot.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(snapshot)
 	snapshotRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRecorder, snapshot)
 	if !strings.Contains(snapshotRecorder.Body.String(), "pool-1") || strings.Contains(snapshotRecorder.Body.String(), "password") {
@@ -476,6 +510,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	}
 	deleteBound := httptest.NewRequest(http.MethodDelete, "/api/admin/proxy-pools/pool-1", nil)
 	deleteBound.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(deleteBound)
 	deleteBoundRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(deleteBoundRecorder, deleteBound)
 	if deleteBoundRecorder.Code != http.StatusConflict {
@@ -484,6 +519,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	updateProvider := httptest.NewRequest(http.MethodPut, "/api/admin/providers", bytes.NewBufferString(`{"id":"proxy-provider","type":"openai-compatible","base_url":"http://127.0.0.1:1","enabled":true,"proxy_pools":[],"credentials":[]}`))
 	updateProvider.RemoteAddr = "127.0.0.1:1234"
 	updateProvider.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(updateProvider)
 	updateProviderRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(updateProviderRecorder, updateProvider)
 	if updateProviderRecorder.Code != http.StatusOK {
@@ -491,6 +527,7 @@ func TestProxyPoolCRUDBindingHealthTestAndRedaction(t *testing.T) {
 	}
 	deletePool := httptest.NewRequest(http.MethodDelete, "/api/admin/proxy-pools/pool-1", nil)
 	deletePool.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(deletePool)
 	deletePoolRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(deletePoolRecorder, deletePool)
 	if deletePoolRecorder.Code != http.StatusOK {
@@ -576,6 +613,7 @@ func TestAdminOAuthBrowserFlowIsSingleUseAndRedacted(t *testing.T) {
 	startRequest := httptest.NewRequest(http.MethodPost, "/api/admin/oauth/start", bytes.NewBufferString(`{"provider_id":"oauth","credential_id":"api-oauth","mode":"browser"}`))
 	startRequest.RemoteAddr = "127.0.0.1:1234"
 	startRequest.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(startRequest)
 	startRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(startRecorder, startRequest)
 	if startRecorder.Code != http.StatusCreated {
@@ -612,6 +650,7 @@ func TestAdminOAuthBrowserFlowIsSingleUseAndRedacted(t *testing.T) {
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/api/admin/oauth/status?credential_id=api-oauth", nil)
 	statusRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(statusRequest)
 	statusRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(statusRecorder, statusRequest)
 	if statusRecorder.Code != http.StatusOK || strings.Contains(statusRecorder.Body.String(), "api-access-secret") || strings.Contains(statusRecorder.Body.String(), "api-refresh-secret") {
@@ -620,6 +659,7 @@ func TestAdminOAuthBrowserFlowIsSingleUseAndRedacted(t *testing.T) {
 
 	snapshotRequest := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	snapshotRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(snapshotRequest)
 	snapshotRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRecorder, snapshotRequest)
 	if strings.Contains(snapshotRecorder.Body.String(), "api-access-secret") || strings.Contains(snapshotRecorder.Body.String(), "api-refresh-secret") {
@@ -949,6 +989,7 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 
 	credentialRequest := httptest.NewRequest(http.MethodPost, "/api/admin/credentials", bytes.NewBufferString(`{"provider_id":"crud-provider","credential":{"id":"crud-credential","label":"Primary","auth_type":"api_key","secret":"provider-secret","priority":20,"weight":1}}`))
 	credentialRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(credentialRequest)
 	credentialRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(credentialRecorder, credentialRequest)
 	if credentialRecorder.Code != http.StatusOK {
@@ -957,6 +998,7 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 
 	keyRequest := httptest.NewRequest(http.MethodPost, "/api/admin/api-keys", bytes.NewBufferString(`{"id":"crud-client","name":"CRUD client","models":["crud-model"]}`))
 	keyRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(keyRequest)
 	keyRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(keyRecorder, keyRequest)
 	if keyRecorder.Code != http.StatusCreated {
@@ -981,6 +1023,7 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 
 	snapshotRequest := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	snapshotRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(snapshotRequest)
 	snapshotRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRecorder, snapshotRequest)
 	if strings.Contains(snapshotRecorder.Body.String(), "provider-secret") || strings.Contains(snapshotRecorder.Body.String(), createdKey.Key) || !strings.Contains(snapshotRecorder.Body.String(), "crud-client") {
@@ -989,6 +1032,7 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 
 	disableRequest := httptest.NewRequest(http.MethodPut, "/api/admin/api-keys/crud-client", bytes.NewBufferString(`{"name":"CRUD client","models":["crud-model"],"enabled":false}`))
 	disableRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(disableRequest)
 	disableRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(disableRecorder, disableRequest)
 	if disableRecorder.Code != http.StatusOK {
@@ -1006,6 +1050,7 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 	for _, path := range []string{"/api/admin/credentials/crud-credential", "/api/admin/models/crud-model", "/api/admin/providers/crud-provider", "/api/admin/api-keys/crud-client"} {
 		request := httptest.NewRequest(http.MethodDelete, path, nil)
 		request.RemoteAddr = "127.0.0.1:1234"
+		withDefaultManagementAuth(request)
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusOK {
@@ -1043,6 +1088,7 @@ func TestClientPolicyLimitsAreTypedAndLogged(t *testing.T) {
 
 	logs := httptest.NewRequest(http.MethodGet, "/api/admin/logs?limit=10", nil)
 	logs.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(logs)
 	logsRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(logsRecorder, logs)
 	if logsRecorder.Code != http.StatusOK || !strings.Contains(logsRecorder.Body.String(), `"client_api_key_id":"limited"`) || !strings.Contains(logsRecorder.Body.String(), "rate_limit_exceeded") {
@@ -1051,10 +1097,12 @@ func TestClientPolicyLimitsAreTypedAndLogged(t *testing.T) {
 
 	writeAdmin := httptest.NewRequest(http.MethodPost, "/api/admin/reload", nil)
 	writeAdmin.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(writeAdmin)
 	writeRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(writeRecorder, writeAdmin)
 	audit := httptest.NewRequest(http.MethodGet, "/api/admin/audit?limit=10", nil)
 	audit.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(audit)
 	auditRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(auditRecorder, audit)
 	if auditRecorder.Code != http.StatusOK || !strings.Contains(auditRecorder.Body.String(), "POST /api/admin/reload") {
@@ -1077,6 +1125,7 @@ func TestProviderHealthAndDiscoveryManagementRoutes(t *testing.T) {
 
 	health := httptest.NewRequest(http.MethodPost, "/api/admin/providers/discover-provider/health", nil)
 	health.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(health)
 	healthRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(healthRecorder, health)
 	if healthRecorder.Code != http.StatusOK || !strings.Contains(healthRecorder.Body.String(), `"status":"healthy"`) {
@@ -1084,6 +1133,7 @@ func TestProviderHealthAndDiscoveryManagementRoutes(t *testing.T) {
 	}
 	discovery := httptest.NewRequest(http.MethodGet, "/api/admin/providers/discover-provider/models", nil)
 	discovery.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(discovery)
 	discoveryRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(discoveryRecorder, discovery)
 	if discoveryRecorder.Code != http.StatusOK || !strings.Contains(discoveryRecorder.Body.String(), `"id":"upstream-a"`) {
@@ -1119,6 +1169,7 @@ func TestProviderModelDiscoveryMergesAllCredentials(t *testing.T) {
 
 	discovery := httptest.NewRequest(http.MethodGet, "/api/admin/providers/discover-provider/models", nil)
 	discovery.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(discovery)
 	discoveryRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(discoveryRecorder, discovery)
 	body := discoveryRecorder.Body.String()
@@ -1158,6 +1209,7 @@ func TestCredentialModelDiscoveryRoute(t *testing.T) {
 
 	discovery := httptest.NewRequest(http.MethodGet, "/api/admin/credentials/account-a/models", nil)
 	discovery.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(discovery)
 	discoveryRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(discoveryRecorder, discovery)
 	body := discoveryRecorder.Body.String()
@@ -1190,6 +1242,7 @@ func TestAdminModelTestProbesUpstreamModel(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/models/test", bytes.NewBufferString(`{"provider_id":"probe-provider","model_id":"probe-model","kind":"llm"}`))
 	request.RemoteAddr = "127.0.0.1:1234"
 	request.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(request)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	body := recorder.Body.String()
@@ -1208,6 +1261,7 @@ func TestConfigurationExportRedactsSecretsAndInvalidImportKeepsState(t *testing.
 	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
 	exportRequest := httptest.NewRequest(http.MethodGet, "/api/admin/config/export", nil)
 	exportRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(exportRequest)
 	exportRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(exportRecorder, exportRequest)
 	if exportRecorder.Code != http.StatusOK || strings.Contains(exportRecorder.Body.String(), "do-not-export-this-secret") || !strings.Contains(exportRecorder.Body.String(), "TPROXY_CREDENTIAL_EXPORT_CREDENTIAL") {
@@ -1216,6 +1270,7 @@ func TestConfigurationExportRedactsSecretsAndInvalidImportKeepsState(t *testing.
 	invalidImport := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", strings.NewReader(`{"database":{"driver":"postgres"}}`))
 	invalidImport.RemoteAddr = "127.0.0.1:1234"
 	invalidImport.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(invalidImport)
 	invalidRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(invalidRecorder, invalidImport)
 	if invalidRecorder.Code != http.StatusBadRequest {
@@ -1223,6 +1278,7 @@ func TestConfigurationExportRedactsSecretsAndInvalidImportKeepsState(t *testing.
 	}
 	snapshot := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	snapshot.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(snapshot)
 	snapshotRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(snapshotRecorder, snapshot)
 	if snapshotRecorder.Code != http.StatusOK || !strings.Contains(snapshotRecorder.Body.String(), "export-model") {
@@ -1262,6 +1318,10 @@ func TestCORSPreflightAllowsClientAPIKeyHeader(t *testing.T) {
 	if !strings.Contains(strings.ToLower(allowed), "x-api-key") {
 		t.Fatalf("allowed headers = %q", allowed)
 	}
+}
+
+func withDefaultManagementAuth(r *http.Request) {
+	r.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
 }
 
 func apiTestStore(t *testing.T, cfg *config.Config) *store.Store {

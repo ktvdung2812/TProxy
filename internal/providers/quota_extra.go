@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ func (r *Registry) credentialQuotaByPreset(ctx context.Context, provider store.P
 			quota.Message = err.Error()
 		}
 		return quota, true
+	case "kimi", "kimi-coding":
+		return r.kimiQuota(ctx, provider, credential), true
 	default:
 		return CredentialQuota{}, false
 	}
@@ -47,17 +50,14 @@ func (r *Registry) glmQuota(ctx context.Context, provider store.Provider, creden
 		ProviderType: provider.Type,
 		Quotas:       map[string]QuotaEntry{},
 	}
-	quotaURL := "https://api.z.ai/api/monitor/usage/quota/limit"
-	if provider.ID == "glm-cn" {
-		quotaURL = "https://open.bigmodel.cn/api/monitor/usage/quota/limit"
-	}
-	headers := http.Header{
-		"Authorization": {"Bearer " + credential.Secret},
-		"Accept":          {"application/json"},
-	}
-	body, status, err := r.quotaGET(ctx, quotaURL, headers)
+	quotaURL := glmQuotaURL(provider)
+	body, status, err := r.glmQuotaGET(ctx, quotaURL, credential.Secret)
 	if err != nil {
 		result.Message = err.Error()
+		return result
+	}
+	if status == http.StatusUnauthorized {
+		result.Message = "GLM API key invalid or expired."
 		return result
 	}
 	if status < 200 || status >= 300 {
@@ -70,34 +70,152 @@ func (r *Registry) glmQuota(ctx context.Context, provider store.Provider, creden
 		return result
 	}
 	data, _ := payload["data"].(map[string]any)
-	limits, _ := data["limits"].([]any)
-	for _, raw := range limits {
-		item, _ := raw.(map[string]any)
-		if item == nil || stringValue(item["type"]) != "TOKENS_LIMIT" {
-			continue
-		}
-		usedPercent := float64(numberValue(item["percentage"]))
-		resetAt := ""
-		if resetMS := int64(numberValue(item["nextResetTime"])); resetMS > 0 {
-			resetAt = millisToRFC3339(resetMS)
-		}
-		remaining := float64(max(0, 100-int(usedPercent)))
-		result.Quotas["session"] = QuotaEntry{
-			Name:      "Session",
-			Used:      usedPercent,
-			Total:     100,
-			Remaining: remaining,
-			ResetAt:   resetAt,
-		}
-		break
+	if data == nil {
+		result.Message = "GLM connected. No quota windows returned."
+		return result
 	}
-	if level := stringValue(data["level"]); level != "" {
-		result.Plan = level
-	}
+	plan, quotas := parseGLMQuotaData(data)
+	result.Plan = plan
+	result.Quotas = quotas
 	if len(result.Quotas) == 0 {
 		result.Message = "GLM connected. No quota windows returned."
 	}
 	return result
+}
+
+func glmQuotaURL(provider store.Provider) string {
+	if provider.ID == "glm-cn" {
+		return "https://open.bigmodel.cn/api/monitor/usage/quota/limit"
+	}
+	return "https://api.z.ai/api/monitor/usage/quota/limit"
+}
+
+func (r *Registry) glmQuotaGET(ctx context.Context, quotaURL, secret string) ([]byte, int, error) {
+	authVariants := []string{strings.TrimSpace(secret), "Bearer " + strings.TrimSpace(secret)}
+	seen := map[string]bool{}
+	for _, auth := range authVariants {
+		if auth == "" || seen[auth] {
+			continue
+		}
+		seen[auth] = true
+		headers := http.Header{
+			"Authorization":   {auth},
+			"Accept":          {"application/json"},
+			"Accept-Language": {"en-US,en"},
+		}
+		body, status, err := r.quotaGET(ctx, quotaURL, headers)
+		if err != nil {
+			return nil, 0, err
+		}
+		if status == http.StatusUnauthorized && len(seen) < len(authVariants) {
+			continue
+		}
+		return body, status, nil
+	}
+	return nil, http.StatusUnauthorized, nil
+}
+
+func parseGLMQuotaData(data map[string]any) (string, map[string]QuotaEntry) {
+	quotas := map[string]QuotaEntry{}
+	level := stringValue(data["level"])
+	plan := level
+	if level != "" {
+		plan = strings.ToUpper(level[:1]) + strings.ToLower(level[1:])
+	}
+	limits, _ := data["limits"].([]any)
+	tokenLimits := 0
+	for _, raw := range limits {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		switch stringValue(item["type"]) {
+		case "TOKENS_LIMIT":
+			tokenLimits++
+			key, name := glmTokenLimitKey(numberValue(item["unit"]), numberValue(item["number"]))
+			if tokenLimits == 1 && key == "token_0_0" {
+				key, name = "session", "5h Token"
+			}
+			quotas[key] = glmPercentQuotaEntry(name, item)
+		case "TIME_LIMIT":
+			quotas["mcp"] = glmMCPQuotaEntry(item)
+		}
+	}
+	return plan, quotas
+}
+
+func glmTokenLimitKey(unit, number int) (string, string) {
+	if unit == 3 && number == 5 {
+		return "session", "5h Token"
+	}
+	if unit == 6 && number == 1 {
+		return "weekly", "Weekly"
+	}
+	if unit == 0 && number == 0 {
+		return "token_0_0", "Token usage"
+	}
+	return fmt.Sprintf("token_%d_%d", unit, number), "Token usage"
+}
+
+func glmPercentQuotaEntry(name string, item map[string]any) QuotaEntry {
+	usedPercent := glmQuotaFloat(firstValue(item, "percentage", "used_percent"))
+	if usedPercent < 0 {
+		usedPercent = 0
+	}
+	if usedPercent > 100 {
+		usedPercent = 100
+	}
+	resetAt := ""
+	if resetMS := int64(glmQuotaFloat(item["nextResetTime"])); resetMS > 0 {
+		resetAt = millisToRFC3339(resetMS)
+	}
+	return QuotaEntry{
+		Name:      name,
+		Used:      usedPercent,
+		Total:     100,
+		Remaining: float64(max(0, 100-int(usedPercent))),
+		ResetAt:   resetAt,
+	}
+}
+
+func glmMCPQuotaEntry(item map[string]any) QuotaEntry {
+	used := glmQuotaFloat(firstValue(item, "currentValue", "current_value"))
+	total := glmQuotaFloat(firstValue(item, "usage", "total"))
+	if total <= 0 {
+		usedPercent := glmQuotaFloat(item["percentage"])
+		return QuotaEntry{
+			Name:      "MCP (1 Month)",
+			Used:      usedPercent,
+			Total:     100,
+			Remaining: float64(max(0, 100-int(usedPercent))),
+		}
+	}
+	return QuotaEntry{
+		Name:      "MCP (1 Month)",
+		Used:      used,
+		Total:     total,
+		Remaining: quotaPercentRemaining(used, total),
+	}
+}
+
+func glmQuotaFloat(value any) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0
+		}
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return float64(numberValue(value))
+	}
 }
 
 func (r *Registry) minimaxQuota(ctx context.Context, provider store.Provider, credential store.Credential) CredentialQuota {
@@ -445,4 +563,168 @@ func quotaPercentRemaining(used, total float64) float64 {
 		return 0
 	}
 	return remaining
+}
+
+func (r *Registry) kimiQuota(ctx context.Context, provider store.Provider, credential store.Credential) CredentialQuota {
+	result := CredentialQuota{
+		CredentialID: credential.ID,
+		ProviderID:   provider.ID,
+		ProviderType: provider.Type,
+		Quotas:       map[string]QuotaEntry{},
+	}
+	baseURL := kimiQuotaBaseURL(provider)
+	headers := authHeaders(provider, credential)
+	headers.Set("User-Agent", "KimiCLI/1.6")
+
+	body, status, err := r.quotaGET(ctx, baseURL+"/usages", headers)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	if status == http.StatusNotFound {
+		body, status, err = r.quotaGET(ctx, baseURL+"/usage", headers)
+		if err != nil {
+			result.Message = err.Error()
+			return result
+		}
+	}
+	if status == http.StatusUnauthorized {
+		result.Message = "Kimi authentication failed. Use a Kimi Code key (sk-kimi-...) or refresh the OAuth token."
+		return result
+	}
+	if status < 200 || status >= 300 {
+		result.Message = fmt.Sprintf("Kimi quota API unavailable (HTTP %d)", status)
+		return result
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		result.Message = "Invalid Kimi quota response"
+		return result
+	}
+	plan, quotas := parseKimiQuotaPayload(payload)
+	result.Plan = plan
+	result.Quotas = quotas
+	if len(result.Quotas) == 0 {
+		result.Message = "Kimi connected. No quota windows returned."
+	}
+	return result
+}
+
+func kimiQuotaBaseURL(provider store.Provider) string {
+	base := strings.TrimSpace(provider.BaseURL)
+	if base == "" {
+		return "https://api.kimi.com/coding/v1"
+	}
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/v1") {
+		return base
+	}
+	return base + "/v1"
+}
+
+func parseKimiQuotaPayload(payload map[string]any) (string, map[string]QuotaEntry) {
+	quotas := map[string]QuotaEntry{}
+	plan := ""
+	if user, ok := payload["user"].(map[string]any); ok {
+		if membership, ok := user["membership"].(map[string]any); ok {
+			plan = strings.TrimPrefix(stringValue(membership["level"]), "LEVEL_")
+		}
+	}
+	if dataList, ok := payload["data"].([]any); ok {
+		for _, raw := range dataList {
+			item, _ := raw.(map[string]any)
+			if item == nil {
+				continue
+			}
+			modelName := stringValue(item["model_name"])
+			label := "Limit"
+			key := "limit"
+			if modelName == "all" {
+				label = "Weekly"
+				key = "weekly"
+			} else if modelName != "" {
+				label = modelName
+				key = "limit_" + modelName
+			}
+			quotas[key] = kimiQuotaEntryFromDetail(item, label)
+		}
+		return plan, quotas
+	}
+	if usage, ok := payload["usage"].(map[string]any); ok {
+		quotas["weekly"] = kimiQuotaEntryFromDetail(usage, "Weekly")
+	}
+	for idx, raw := range toAnySlice(payload["limits"]) {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		detail, _ := item["detail"].(map[string]any)
+		if detail == nil {
+			detail = item
+		}
+		window, _ := item["window"].(map[string]any)
+		key, label := kimiQuotaWindowKey(window, idx)
+		quotas[key] = kimiQuotaEntryFromDetail(detail, label)
+	}
+	return plan, quotas
+}
+
+func kimiQuotaEntryFromDetail(detail map[string]any, label string) QuotaEntry {
+	limit := kimiQuotaNumber(firstValue(detail, "limit", "limit_amount"))
+	used := kimiQuotaNumber(firstValue(detail, "used", "used_amount"))
+	if used == 0 {
+		remaining := kimiQuotaNumber(detail["remaining"])
+		if remaining > 0 && limit > 0 {
+			used = limit - remaining
+		}
+	}
+	name := label
+	if name == "" {
+		name = stringValue(firstValue(detail, "name", "title", "model_name"))
+	}
+	return QuotaEntry{
+		Name:      name,
+		Used:      used,
+		Total:     limit,
+		Remaining: quotaPercentRemaining(used, limit),
+		ResetAt:   parseResetAt(firstValue(detail, "resetTime", "reset_at", "reset_time")),
+	}
+}
+
+func kimiQuotaNumber(value any) float64 {
+	switch v := value.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0
+		}
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return float64(numberValue(value))
+	}
+}
+
+func kimiQuotaWindowKey(window map[string]any, idx int) (string, string) {
+	duration := numberValue(window["duration"])
+	unit := strings.ToUpper(stringValue(firstValue(window, "timeUnit", "time_unit")))
+	if strings.Contains(unit, "MINUTE") {
+		if duration >= 60 && duration%60 == 0 {
+			hours := duration / 60
+			return "session", fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("limit_%dm", duration), fmt.Sprintf("%dm", duration)
+	}
+	if strings.Contains(unit, "HOUR") {
+		return "session", fmt.Sprintf("%dh", duration)
+	}
+	if strings.Contains(unit, "DAY") {
+		return fmt.Sprintf("limit_%dd", duration), fmt.Sprintf("%dd", duration)
+	}
+	if strings.Contains(unit, "MONTH") {
+		return fmt.Sprintf("limit_%dmo", duration), fmt.Sprintf("%dmo", duration)
+	}
+	return fmt.Sprintf("limit_%d", idx+1), fmt.Sprintf("Limit #%d", idx+1)
 }
