@@ -11,7 +11,15 @@ import {
   Input,
   cn,
 } from "./components/ui";
-import { defaultApiKey, defaultManagementSecret, DEV_MANAGEMENT_SECRET, isLocalDashboardHost } from "./devDefaults";
+import { defaultApiKey } from "./devDefaults";
+import { AuthLoadingView } from "./components/auth/AuthLoadingView";
+import { LoginView } from "./components/auth/LoginView";
+import {
+  clearStoredManagementSecret,
+  getStoredManagementSecret,
+  setStoredManagementSecret,
+  validateManagementSecret,
+} from "./lib/auth";
 import { ChatView } from "./components/chat/ChatView";
 import { useChatModels } from "./components/chat/useChatModels";
 import { ProvidersView } from "./components/providers/ProvidersView";
@@ -29,6 +37,7 @@ import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
 import { LogsView } from "./components/logs/LogsView";
+import { SettingsView } from "./components/settings/SettingsView";
 import { fetchAuditEvents, type AuditEvent } from "./components/logs/api";
 import { matchRoute } from "./navigation";
 import { useRequestLogStream, type RequestLog } from "./hooks/useRequestLogStream";
@@ -145,7 +154,8 @@ function App() {
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [discovered, setDiscovered] = useState<Record<string, { id: string; name?: string }[]>>({});
-  const [secret, setSecret] = useState(() => localStorage.getItem("tproxy-management-secret") || defaultManagementSecret());
+  const [secret, setSecret] = useState("");
+  const [authState, setAuthState] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -165,9 +175,53 @@ function App() {
     setLogs(items);
   }, []);
 
-  useRequestLogStream(secret, logsStreamEnabled, applyLogUpdate);
+  useRequestLogStream(secret, logsStreamEnabled && authState === "authenticated", applyLogUpdate);
+
+  const logout = useCallback(() => {
+    clearStoredManagementSecret();
+    setSecret("");
+    setAuthState("unauthenticated");
+    setSnapshot(emptySnapshot);
+    setError("");
+    setNotice("");
+  }, []);
+
+  const login = useCallback(async (nextSecret: string) => {
+    const result = await validateManagementSecret(nextSecret);
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    setStoredManagementSecret(nextSecret);
+    setSecret(nextSecret);
+    setAuthState("authenticated");
+    setError("");
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = getStoredManagementSecret();
+      if (!stored) {
+        if (!cancelled) setAuthState("unauthenticated");
+        return;
+      }
+      const result = await validateManagementSecret(stored);
+      if (cancelled) return;
+      if (result.ok) {
+        setSecret(stored);
+        setAuthState("authenticated");
+      } else {
+        clearStoredManagementSecret();
+        setAuthState("unauthenticated");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
+    if (authState !== "authenticated" || !secret) return;
     setLoading(true);
     setError("");
     try {
@@ -179,32 +233,26 @@ function App() {
       if (!response.ok) {
         const code = data?.error?.code;
         if (code === "invalid_management_secret") {
-          localStorage.removeItem("tproxy-management-secret");
-          if (isLocalDashboardHost() && secret !== DEV_MANAGEMENT_SECRET) {
-            setSecret(DEV_MANAGEMENT_SECRET);
-            return;
-          }
-          throw new Error(
-            secret
-              ? "Invalid management secret. Check TPROXY_MANAGEMENT_SECRET in server config, then click Refresh."
-              : "Management secret required. Configure TPROXY_MANAGEMENT_SECRET on the server, then click Refresh.",
-          );
+          logout();
+          throw new Error("Phiên đăng nhập hết hạn hoặc secret không hợp lệ.");
         }
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
       setSnapshot(data);
-      if (secret) localStorage.setItem("tproxy-management-secret", secret);
+      setStoredManagementSecret(secret);
       void refreshAudit();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load tproxy state");
     } finally {
       setLoading(false);
     }
-  }, [authHeaders, secret]);
+  }, [authHeaders, authState, logout, secret]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (authState === "authenticated") {
+      void load();
+    }
+  }, [authState, load]);
 
   const refreshAudit = useCallback(async () => {
     try {
@@ -302,6 +350,24 @@ function App() {
 
   const sidebarCollapseLabel = isNarrowSidebar ? "Mở rộng menu" : "Thu nhỏ menu";
 
+  if (authState === "checking") {
+    return (
+      <div className="app-shell app-shell-auth">
+        <MatrixRain />
+        <AuthLoadingView />
+      </div>
+    );
+  }
+
+  if (authState === "unauthenticated") {
+    return (
+      <div className="app-shell app-shell-auth">
+        <MatrixRain />
+        <LoginView onLogin={login} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <MatrixRain />
@@ -322,6 +388,7 @@ function App() {
           icon={activeRoute.icon}
           onRefresh={load}
           loading={loading}
+          onLogout={logout}
           extra={
             activeRoute.id === "providers" ? (
               <Input
@@ -368,6 +435,7 @@ function App() {
               <Route path="/cli-tools" element={<CLIToolsPage />} />
               <Route path="/cli-tools/:toolId" element={<CLIToolDetailPage />} />
               <Route path="/logs" element={<LogsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
@@ -682,6 +750,21 @@ function App() {
         audit={audit}
         streaming={logsStreamEnabled}
         onRefreshAudit={refreshAudit}
+      />
+    );
+  }
+
+  function SettingsPage() {
+    return (
+      <SettingsView
+        secret={secret}
+        onError={setError}
+        onNotice={setNotice}
+        onMutated={() => void load()}
+        onPasswordChanged={(newPassword) => {
+          setStoredManagementSecret(newPassword);
+          setSecret(newPassword);
+        }}
       />
     );
   }

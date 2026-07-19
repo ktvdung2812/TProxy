@@ -54,6 +54,10 @@ export function ProviderDetail({
     () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
     [catalog, presets, provider.ID],
   );
+  const sortedCredentials = useMemo(
+    () => [...credentials].sort((a, b) => Number(b.enabled) - Number(a.enabled)),
+    [credentials],
+  );
   const [showAddCredential, setShowAddCredential] = useState(false);
   const [credentialMethod, setCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [showOAuth, setShowOAuth] = useState(false);
@@ -232,7 +236,7 @@ export function ProviderDetail({
             hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, cookie, or import."}
           />
         ) : (
-          credentials.map((cred) => (
+          sortedCredentials.map((cred) => (
             <ConnectionRow
               key={cred.id}
               providerId={provider.ID}
@@ -459,7 +463,7 @@ function ConnectionRow({
   };
 
   return (
-    <div className="connection-row">
+    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}`}>
       <span className="connection-auth-icon">
         <span className="material-symbols-outlined">{authIcon}</span>
       </span>

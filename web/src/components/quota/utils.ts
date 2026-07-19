@@ -79,6 +79,19 @@ export function formatResetTime(date?: string) {
   return `${days}d ${hours}h ${remainingMinutes}m`;
 }
 
+export function formatResetAbsolute(date?: string) {
+  if (!date) return null;
+  const resetDate = new Date(date);
+  if (Number.isNaN(resetDate.getTime())) return null;
+
+  const hours = String(resetDate.getHours()).padStart(2, "0");
+  const minutes = String(resetDate.getMinutes()).padStart(2, "0");
+  const day = String(resetDate.getDate()).padStart(2, "0");
+  const month = String(resetDate.getMonth() + 1).padStart(2, "0");
+  const year = resetDate.getFullYear();
+  return `${hours}:${minutes} ${day}/${month}/${year}`;
+}
+
 export function quotaEntries(quota?: CredentialQuota) {
   return Object.entries(quota?.quotas || {}).map(([key, entry]) => ({
     key,

@@ -87,3 +87,16 @@ func TestIsLoopbackRejectsForwardedRequests(t *testing.T) {
 		t.Fatal("forwarded request was treated as trusted loopback")
 	}
 }
+
+func TestIsPrivateNetworkRecognizesLANAddresses(t *testing.T) {
+	request := httptest.NewRequest("GET", "http://192.168.1.10/", nil)
+	request.RemoteAddr = "192.168.1.10:1234"
+	if !IsPrivateNetwork(request) {
+		t.Fatal("private LAN address was not recognized")
+	}
+	request = httptest.NewRequest("GET", "http://203.0.113.4/", nil)
+	request.RemoteAddr = "203.0.113.4:1234"
+	if IsPrivateNetwork(request) {
+		t.Fatal("public address was treated as private network")
+	}
+}
