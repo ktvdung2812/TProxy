@@ -128,7 +128,7 @@ func (r *Router) discoverProviderModelsFromUpstream(ctx context.Context, provide
 	if len(candidates) == 0 && len(credentials) > 0 {
 		candidates = append(candidates, credentials[0])
 	}
-	ordered, errOrder := r.orderCredentials(ctx, providerID, "discovery:"+providerID, 0, candidates)
+	ordered, errOrder := r.orderCredentials(ctx, providerID, "discovery:"+providerID, 0, candidates, "")
 	if errOrder != nil {
 		return nil, errOrder
 	}

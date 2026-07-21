@@ -65,6 +65,7 @@ type Credential struct {
 	LastValidated         time.Time
 	LastUsedAt            time.Time
 	ConsecutiveUseCount   int
+	CreatedAt             time.Time
 }
 
 type ProxyPool struct {
@@ -94,6 +95,7 @@ type PublicModel struct {
 	Capabilities         []string
 	Limits               map[string]any
 	ComboItems           []ComboItem
+	Policy               map[string]any
 }
 
 type ComboItem struct {
@@ -305,9 +307,9 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 			if credentialCfg.Weight <= 0 {
 				credentialCfg.Weight = 1
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status)
-VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`,
-				credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), credentialStatus(credentialCfg.AuthType)); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status,created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`,
+				credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), credentialStatus(credentialCfg.AuthType), now); err != nil {
 				return rollback(fmt.Errorf("seed credential %s: %w", credentialCfg.ID, err))
 			}
 		}
@@ -397,7 +399,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		return rollback(errors.New("provider id and type are required"))
 	}
 	switch providerCfg.Type {
-	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http":
+	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
 	default:
 		return rollback(fmt.Errorf("unsupported provider type %q", providerCfg.Type))
 	}
@@ -419,7 +421,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		if credentialCfg.Weight <= 0 {
 			credentialCfg.Weight = 1
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`, credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), credentialStatus(credentialCfg.AuthType)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`, credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), credentialStatus(credentialCfg.AuthType), now); err != nil {
 			return rollback(err)
 		}
 	}
@@ -602,17 +604,18 @@ func (s *Store) ComboItems(ctx context.Context, comboID string) ([]ComboItem, er
 }
 
 func (s *Store) ResolveCombo(ctx context.Context, comboID string) (*PublicModel, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,display_name,enabled,rewrite_response_model,capabilities_json,limits_json FROM combos WHERE id=? AND enabled=1`, comboID)
+	row := s.db.QueryRowContext(ctx, `SELECT id,display_name,enabled,rewrite_response_model,capabilities_json,limits_json,policy_json FROM combos WHERE id=? AND enabled=1`, comboID)
 	var model PublicModel
 	var enabled, rewrite int
-	var capabilities, limits string
-	if err := row.Scan(&model.ID, &model.DisplayName, &enabled, &rewrite, &capabilities, &limits); err != nil {
+	var capabilities, limits, policy string
+	if err := row.Scan(&model.ID, &model.DisplayName, &enabled, &rewrite, &capabilities, &limits, &policy); err != nil {
 		return nil, err
 	}
 	model.Enabled = enabled != 0
 	model.RewriteResponseModel = rewrite != 0
 	_ = json.Unmarshal([]byte(capabilities), &model.Capabilities)
 	_ = json.Unmarshal([]byte(limits), &model.Limits)
+	_ = json.Unmarshal([]byte(policy), &model.Policy)
 	var err error
 	model.ComboItems, err = s.ComboItems(ctx, comboID)
 	return &model, err
@@ -659,9 +662,9 @@ func (s *Store) SaveCredential(ctx context.Context, providerID string, credentia
 	if credentialCfg.Weight <= 0 {
 		credentialCfg.Weight = 1
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled)
-VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext<>'' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled,status=CASE WHEN credentials.status='auth_required' AND excluded.auth_type='oauth' THEN credentials.status ELSE excluded.status END`,
-		credentialCfg.ID, providerID, credentialCfg.AuthType, credentialStatus(credentialCfg.AuthType), credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadataBytes), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()))
+	_, err = s.db.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext<>'' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled,status=CASE WHEN credentials.status='auth_required' AND excluded.auth_type='oauth' THEN credentials.status ELSE excluded.status END`,
+		credentialCfg.ID, providerID, credentialCfg.AuthType, credentialStatus(credentialCfg.AuthType), credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadataBytes), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -989,6 +992,40 @@ func (s *Store) APIKeys(ctx context.Context) ([]APIKeySummary, error) {
 	return items, rows.Err()
 }
 
+// MatchAPIKeySecrets maps enabled API key IDs to plaintext values when a candidate matches the stored hash.
+func (s *Store) MatchAPIKeySecrets(ctx context.Context, candidates []string) (map[string]string, error) {
+	result := map[string]string{}
+	if len(candidates) == 0 {
+		return result, nil
+	}
+	byHash := make(map[string]string, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		byHash[security.HashAPIKey(candidate)] = candidate
+	}
+	if len(byHash) == 0 {
+		return result, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, key_hash FROM api_keys WHERE enabled=1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, hash string
+		if err := rows.Scan(&id, &hash); err != nil {
+			return nil, err
+		}
+		if plaintext, ok := byHash[hash]; ok {
+			result[id] = plaintext
+		}
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) PublicModels(ctx context.Context) ([]PublicModel, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,display_name,aliases_json,enabled,expose_upstream_name,rewrite_response_model,capabilities_json,limits_json FROM public_models ORDER BY id`)
 	if err != nil {
@@ -1040,7 +1077,7 @@ func (s *Store) CatalogModels(ctx context.Context) ([]PublicModel, error) {
 		return nil, err
 	}
 	for _, combo := range combos {
-		models = append(models, PublicModel{ID: combo.ID, DisplayName: combo.DisplayName, Enabled: combo.Enabled, RewriteResponseModel: combo.RewriteResponseModel, Capabilities: combo.Capabilities, Limits: combo.Limits, ComboItems: combo.Items})
+		models = append(models, PublicModel{ID: combo.ID, DisplayName: combo.DisplayName, Enabled: combo.Enabled, RewriteResponseModel: combo.RewriteResponseModel, Capabilities: combo.Capabilities, Limits: combo.Limits, Policy: combo.Policy, ComboItems: combo.Items})
 	}
 	sort.SliceStable(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
@@ -1263,7 +1300,7 @@ func (s *Store) ProviderByPrefix(ctx context.Context, prefix string) (*Provider,
 	return &item, nil
 }
 
-const credentialSelectColumns = `id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,cooldown_until,last_error_code,last_error,last_validated_at,last_used_at,consecutive_use_count`
+const credentialSelectColumns = `id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,cooldown_until,last_error_code,last_error,last_validated_at,last_used_at,consecutive_use_count,created_at`
 
 func (s *Store) Credentials(ctx context.Context, providerID string) ([]Credential, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+credentialSelectColumns+` FROM credentials WHERE provider_id=? ORDER BY priority DESC,id`, providerID)
@@ -1289,9 +1326,9 @@ func (s *Store) CredentialByID(ctx context.Context, credentialID string) (Creden
 
 func (s *Store) scanCredentialRow(scan func(dest ...any) error) (Credential, error) {
 	var item Credential
-	var secret, metadata, cooldown, validated, lastUsed string
+	var secret, metadata, cooldown, validated, lastUsed, created string
 	var enabled, consecutiveUseCount int
-	if err := scan(&item.ID, &item.ProviderID, &item.AuthType, &item.Status, &item.Label, &item.Email, &secret, &metadata, &item.Priority, &item.Weight, &enabled, &cooldown, &item.LastErrorCode, &item.LastError, &validated, &lastUsed, &consecutiveUseCount); err != nil {
+	if err := scan(&item.ID, &item.ProviderID, &item.AuthType, &item.Status, &item.Label, &item.Email, &secret, &metadata, &item.Priority, &item.Weight, &enabled, &cooldown, &item.LastErrorCode, &item.LastError, &validated, &lastUsed, &consecutiveUseCount, &created); err != nil {
 		return Credential{}, err
 	}
 	item.Enabled = enabled != 0
@@ -1325,6 +1362,9 @@ func (s *Store) scanCredentialRow(scan func(dest ...any) error) (Credential, err
 	}
 	if lastUsed != "" {
 		item.LastUsedAt, _ = time.Parse(time.RFC3339Nano, lastUsed)
+	}
+	if created != "" {
+		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 	}
 	return item, nil
 }
@@ -1545,10 +1585,10 @@ func (s *Store) SaveOAuthCredential(ctx context.Context, providerID, credentialI
 		return rollback(err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,last_validated_at)
-VALUES(?,?,?,'healthy',?,?,?,'{}',0,1,1,?)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,last_validated_at,created_at)
+VALUES(?,?,?,'healthy',?,?,?,'{}',0,1,1,?,?)
 ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type='oauth',status='healthy',label=CASE WHEN excluded.label<>'' THEN excluded.label ELSE credentials.label END,email=CASE WHEN excluded.email<>'' THEN excluded.email ELSE credentials.email END,secret_ciphertext=excluded.secret_ciphertext,enabled=1,cooldown_until='',last_error_code='',last_error='',last_validated_at=excluded.last_validated_at`,
-		credentialID, providerID, "oauth", label, email, ciphertext, now); err != nil {
+		credentialID, providerID, "oauth", label, email, ciphertext, now, now); err != nil {
 		return rollback(err)
 	}
 	return tx.Commit()
@@ -2095,6 +2135,7 @@ type CredentialSummary struct {
 	ProxyPoolIDs        []string   `json:"proxy_pool_ids,omitempty"`
 	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
 	ConsecutiveUseCount int        `json:"consecutive_use_count,omitempty"`
+	CreatedAt           *time.Time `json:"created_at,omitempty"`
 }
 type UsageSummary struct {
 	Requests         int     `json:"requests"`
@@ -2182,11 +2223,16 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 				value := c.LastUsedAt
 				lastUsed = &value
 			}
+			var createdAt *time.Time
+			if !c.CreatedAt.IsZero() {
+				value := c.CreatedAt
+				createdAt = &value
+			}
 			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{
 				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status,
 				Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown,
 				LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
-				ConsecutiveUseCount: c.ConsecutiveUseCount,
+				ConsecutiveUseCount: c.ConsecutiveUseCount, CreatedAt: createdAt,
 			})
 		}
 	}

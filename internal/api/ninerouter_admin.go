@@ -28,8 +28,8 @@ func (s *Server) adminNinerouterPresets(w http.ResponseWriter, r *http.Request) 
 		SupportsQuota  bool     `json:"supports_quota"`
 		NoAuth         bool     `json:"no_auth"`
 	}
-	items := make([]presetView, 0, len(ninerouter.Presets))
-	for _, preset := range ninerouter.Presets {
+	items := make([]presetView, 0, len(ninerouter.AllPresets()))
+	for _, preset := range ninerouter.AllPresets() {
 		items = append(items, presetView{
 			ID:             preset.ID,
 			Type:           preset.Type,

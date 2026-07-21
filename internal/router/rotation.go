@@ -9,12 +9,7 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
-const (
-	StrategyFillFirst           = "fill-first"
-	StrategyRoundRobin          = "round-robin"
-	StrategyWeightedRoundRobin  = "weighted-round-robin"
-	defaultStickyRoundRobinLimit = 3
-)
+const defaultStickyRoundRobinLimit = 3
 
 type rotationPolicy struct {
 	strategy              string
@@ -42,35 +37,27 @@ func (r *Router) rotationPolicyForProvider(providerID string) rotationPolicy {
 	return policy
 }
 
-func (r *Router) orderCredentials(ctx context.Context, providerID, routeKey string, priority int, credentials []store.Credential) ([]store.Credential, error) {
+func (r *Router) orderCredentials(ctx context.Context, providerID, routeKey string, priority int, credentials []store.Credential, taskHint string) ([]store.Credential, error) {
 	if len(credentials) == 0 {
 		return credentials, nil
 	}
 	policy := r.rotationPolicyForProvider(providerID)
-	switch policy.strategy {
-	case StrategyFillFirst:
-		return credentials, nil
-	case StrategyWeightedRoundRobin:
-		if len(credentials) < 2 {
-			return credentials, nil
-		}
-		return r.rotateWeighted(routeKey, priority, credentials), nil
-	case StrategyRoundRobin:
+	ordered, touch := orderCredentialsByStrategy(policy.strategy, credentials, credentialOrderContext{
+		routeKey:              routeKey,
+		priority:              priority,
+		stickyRoundRobinLimit: policy.stickyRoundRobinLimit,
+		taskHint:              taskHint,
+		arena:                 r.arena,
+		rotateWeighted:        r.rotateWeighted,
+	})
+	if touch != nil {
 		r.selectionMu.Lock()
 		defer r.selectionMu.Unlock()
-		ordered, touch := stickyRoundRobinOrder(credentials, policy.stickyRoundRobinLimit, time.Now().UTC())
-		if touch != nil {
-			if err := r.store.TouchCredentialRotation(ctx, touch.ID, touch.ConsecutiveUseCount, touch.LastUsedAt.Format(time.RFC3339Nano)); err != nil {
-				return nil, err
-			}
+		if err := r.store.TouchCredentialRotation(ctx, touch.ID, touch.ConsecutiveUseCount, touch.LastUsedAt.Format(time.RFC3339Nano)); err != nil {
+			return nil, err
 		}
-		return ordered, nil
-	default:
-		if len(credentials) < 2 {
-			return credentials, nil
-		}
-		return r.rotateWeighted(routeKey, priority, credentials), nil
 	}
+	return ordered, nil
 }
 
 type rotationTouch struct {

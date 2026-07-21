@@ -27,6 +27,7 @@ export function ModelsSection({
   const [searchQuery, setSearchQuery] = useState("");
   const [modelTestResults, setModelTestResults] = useState<Record<string, "ok" | "error">>({});
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [testingAll, setTestingAll] = useState(false);
   const [testError, setTestError] = useState("");
 
   const enabledCredentials = useMemo(
@@ -90,34 +91,52 @@ export function ModelsSection({
     }
   };
 
-  const inferModelKind = (capabilities?: string[]) => {
-    if (capabilities?.includes("embedding")) return "embedding";
-    if (capabilities?.includes("image-output")) return "image";
-    if (capabilities?.includes("stt")) return "stt";
-    return "llm";
+  const runModelTest = async (model: DiscoveredModel) => {
+    const result = await testModel(secret, {
+      provider_id: providerId,
+      model_id: model.id,
+      kind: "llm",
+      credential_ids: model.credential_ids,
+    });
+    setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
+    if (!result.ok) {
+      const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
+      setTestError(`${model.id}: ${result.error || "Model not reachable"}${latency}`);
+    }
+    return result.ok;
   };
 
   const handleTestUpstreamModel = async (model: DiscoveredModel) => {
-    if (testingModelId) return;
+    if (testingModelId || testingAll) return;
     setTestingModelId(model.id);
     setTestError("");
     try {
-      const result = await testModel(secret, {
-        provider_id: providerId,
-        model_id: model.id,
-        kind: inferModelKind(model.capabilities),
-        credential_ids: model.credential_ids,
-      });
-      setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
-      if (!result.ok) {
-        const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
-        setTestError((result.error || "Model not reachable") + latency);
-      }
+      await runModelTest(model);
     } catch (cause) {
       setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
       setTestError(cause instanceof Error ? cause.message : "Test failed");
     } finally {
       setTestingModelId(null);
+    }
+  };
+
+  const handleTestAllModels = async () => {
+    if (testingModelId || testingAll || availableModels.length === 0) return;
+    setTestingAll(true);
+    setTestError("");
+    try {
+      for (const model of availableModels) {
+        setTestingModelId(model.id);
+        try {
+          await runModelTest(model);
+        } catch (cause) {
+          setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
+          setTestError(cause instanceof Error ? cause.message : `Test failed for ${model.id}`);
+        }
+      }
+    } finally {
+      setTestingModelId(null);
+      setTestingAll(false);
     }
   };
 
@@ -142,14 +161,27 @@ export function ModelsSection({
       subtitle={cardSubtitle}
       icon="apps"
       action={
-        <Input
-          icon="search"
-          placeholder="Search models..."
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          style={{ width: 220 }}
-          aria-label="Search models"
-        />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={testingAll ? "progress_activity" : "science"}
+            onClick={() => void handleTestAllModels()}
+            disabled={testingAll || !!testingModelId || availableModels.length === 0 || discovering}
+            aria-label="Test all models"
+            title="Test all models"
+          >
+            {testingAll ? "Testing..." : "Test all"}
+          </Button>
+          <Input
+            icon="search"
+            placeholder="Search models..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            style={{ width: 220 }}
+            aria-label="Search models"
+          />
+        </div>
       }
     >
       {enabledCredentials.length === 0 ? (
@@ -234,8 +266,8 @@ export function ModelsSection({
                             variant="ghost"
                             size="sm"
                             icon={isTesting ? "progress_activity" : testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "science"}
-                            onClick={() => handleTestUpstreamModel(model)}
-                            disabled={isTesting || enabledCredentials.length === 0}
+                            onClick={() => void handleTestUpstreamModel(model)}
+                            disabled={isTesting || testingAll || enabledCredentials.length === 0}
                             aria-label="Test model"
                             title={isTesting ? "Testing..." : "Test model"}
                           />

@@ -55,6 +55,9 @@ var placeholderToRole = map[string]Role{
 	"claude-sonnet": RoleSonnet,
 	"claude-haiku":  RoleHaiku,
 	"claude-fable":  RoleFable,
+	"gpt-sol":       RoleFable,
+	"gpt-terra":     RoleOpus,
+	"gpt-luna":      RoleHaiku,
 }
 
 func NewResolver(cfg Config) *Resolver {
@@ -260,6 +263,9 @@ func PlaceholderNames() []string {
 		"claude-sonnet",
 		"haiku",
 		"claude-haiku",
+		"gpt-sol",
+		"gpt-terra",
+		"gpt-luna",
 	}
 }
 

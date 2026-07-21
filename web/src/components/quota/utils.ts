@@ -108,6 +108,21 @@ export function earliestResetAt(quota?: CredentialQuota) {
   return times.length > 0 ? Math.min(...times) : Number.POSITIVE_INFINITY;
 }
 
+export function findEarliestQuotaReset(
+  entries: Array<{ key: string; name: string; reset_at?: string }>,
+) {
+  let best: { resetAt: string; name: string; time: number } | null = null;
+  for (const entry of entries) {
+    if (!entry.reset_at) continue;
+    const time = new Date(entry.reset_at).getTime();
+    if (Number.isNaN(time) || time <= Date.now()) continue;
+    if (!best || time < best.time) {
+      best = { resetAt: entry.reset_at, name: entry.name || entry.key, time };
+    }
+  }
+  return best;
+}
+
 export function isConnectionDepleted(quota?: CredentialQuota) {
   return quotaEntries(quota).some((entry) => {
     if (entry.unlimited || entry.total <= 0) return false;

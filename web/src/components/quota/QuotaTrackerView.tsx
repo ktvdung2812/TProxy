@@ -6,6 +6,7 @@ import { ProviderLogo } from "../providers/ProviderLogo";
 import { useUsageStream } from "../usage/useUsageStream";
 import { ConfirmDialog, Toggle, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
+import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
 import { consumeCodexResetCredit, fetchCredentialProxyUsage, fetchCredentialQuota, type CredentialProxyUsage, type CredentialQuota } from "./api";
 import { QuotaTable } from "./QuotaTable";
 import {
@@ -67,6 +68,7 @@ type CredentialRow = {
   email?: string;
   enabled: boolean;
   auth_type: string;
+  created_at?: string;
 };
 
 type Props = {
@@ -108,6 +110,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   const [quotaVisibility, setQuotaVisibility] = useState<QuotaVisibility>(() => loadVisibility());
   const [resetConfirmCredential, setResetConfirmCredential] = useState<CredentialRow | null>(null);
   const [resetCreditsCredential, setResetCreditsCredential] = useState<CredentialRow | null>(null);
+  const [detailCredential, setDetailCredential] = useState<CredentialRow | null>(null);
   const [resettingLimitId, setResettingLimitId] = useState<string | null>(null);
   const [activeCredentialIds, setActiveCredentialIds] = useState<Set<string>>(() => new Set());
   const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
@@ -385,6 +388,11 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     }
   };
 
+  const selectedCredential = useMemo(
+    () => (detailCredential ? credentials.find((item) => item.id === detailCredential.id) ?? detailCredential : null),
+    [credentials, detailCredential],
+  );
+
   const selectedProviderLabel =
     providerFilter === "all" ? "All providers" : getProviderTypeInfo(providerFilter).name;
 
@@ -607,9 +615,28 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             return (
               <article
                 key={credential.id}
-                className={cn("quota-tracker-card", !credential.enabled && "quota-tracker-card-inactive")}
+                className={cn(
+                  "quota-tracker-card",
+                  "quota-tracker-card-selectable",
+                  !credential.enabled && "quota-tracker-card-inactive",
+                  detailCredential?.id === credential.id && "quota-tracker-card-selected",
+                )}
+                role="button"
+                tabIndex={0}
+                aria-label={`View details for ${getConnectionLabel(credential) || credential.id}`}
+                onClick={() => setDetailCredential(credential)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setDetailCredential(credential);
+                  }
+                }}
               >
-                <div className="quota-tracker-card-head">
+                <div
+                  className="quota-tracker-card-head"
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
                   <div className="quota-tracker-card-head-row">
                     <div className="quota-tracker-card-ident">
                       <ProviderLogo
@@ -780,6 +807,26 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         secret={secret}
         credential={resetCreditsCredential}
         onClose={() => setResetCreditsCredential(null)}
+      />
+
+      <QuotaAccountDetailModal
+        open={Boolean(selectedCredential)}
+        secret={secret}
+        credential={selectedCredential}
+        quotaKey={selectedCredential ? quotaProviderKey(selectedCredential) : ""}
+        quota={selectedCredential ? quotaById[selectedCredential.id] : undefined}
+        proxyUsage={selectedCredential ? proxyUsageById[selectedCredential.id] : undefined}
+        credentialActive={selectedCredential ? activeCredentialIds.has(selectedCredential.id) : false}
+        toggling={selectedCredential ? togglingId === selectedCredential.id : false}
+        onClose={() => setDetailCredential(null)}
+        onToggleEnabled={(enabled) => {
+          if (selectedCredential) void setCredentialEnabled(selectedCredential, enabled);
+        }}
+        onQuotaUpdated={(quota) => {
+          if (!selectedCredential) return;
+          setQuotaById((current) => ({ ...current, [selectedCredential.id]: quota }));
+        }}
+        refreshCountdown={countdown}
       />
     </section>
   );

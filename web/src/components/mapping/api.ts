@@ -8,7 +8,6 @@ export type ClaudeMappingResponse = {
   effective_reasoning_effort: Partial<Record<MappingTier, ReasoningEffort>>;
   effective: Record<MappingTier, string>;
   effective_resolved: Record<string, { raw: string; resolved: string; route: "codex-bridge" | "claude-native" | "virtual-model" }>;
-  default_codex_provider: string;
   placeholders: Array<{ name: string; role: string; resolves: string }>;
   content_mapping: Record<string, Record<string, string>>;
 };
@@ -38,7 +37,6 @@ export function saveClaudeMapping(
   payload: {
     overrides: Record<string, string>;
     reasoning_effort_overrides?: Partial<Record<MappingTier, ReasoningEffort>>;
-    default_codex_provider?: string;
   },
 ) {
   return adminFetch<ClaudeMappingResponse>(secret, "/api/admin/mapping/claude", "PUT", payload);

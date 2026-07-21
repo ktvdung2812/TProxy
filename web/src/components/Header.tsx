@@ -8,6 +8,7 @@ type HeaderProps = {
   icon?: string;
   onRefresh?: () => void;
   onLogout?: () => void;
+  onOpenNav?: () => void;
   loading?: boolean;
   extra?: ReactNode;
 };
@@ -19,6 +20,7 @@ export function Header({
   icon = "space_dashboard",
   onRefresh,
   onLogout,
+  onOpenNav,
   loading = false,
   extra,
 }: HeaderProps) {
@@ -46,11 +48,16 @@ export function Header({
   return (
     <header className="app-header">
       <div className="header-title">
-        <h1>
-          <span className="material-symbols-outlined">{icon}</span>
-          {title}
-        </h1>
-        {description ? <p>{description}</p> : null}
+        {onOpenNav ? (
+          <IconButton icon="menu" label="Mở menu" className="header-menu-btn" onClick={onOpenNav} />
+        ) : null}
+        <div className="header-title-copy">
+          <h1>
+            <span className="material-symbols-outlined">{icon}</span>
+            {title}
+          </h1>
+          {description ? <p>{description}</p> : null}
+        </div>
       </div>
 
       <div className="header-actions">

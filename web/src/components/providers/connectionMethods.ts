@@ -13,7 +13,8 @@ export type ConnectionMethodKind =
   | "service_account"
   | "none"
   | "import_cliproxy"
-  | "import_9router";
+  | "import_9router"
+  | "import_cursor";
 
 export type ConnectionMethod = {
   kind: ConnectionMethodKind;
@@ -52,8 +53,11 @@ const OAUTH_READY_TYPES = new Set(OAUTH_PROVIDER_TYPES);
 
 const HOST_URL_PRESETS = new Set(["ollama-local"]);
 
+/** Presets routed as OAuth in 9router but implemented as BYO URL + API key in tproxy. */
+const BYO_KEY_PROVIDER_TYPES = new Set(["openai-compatible", "anthropic-compatible"]);
+
 function oauthAvailable(providerType: string): boolean {
-  return OAUTH_READY_TYPES.has(providerType);
+  return OAUTH_READY_TYPES.has(providerType.trim().toLowerCase());
 }
 
 function oauthLabel(catalog: ProviderTypeInfo, presetId?: string): string {
@@ -61,13 +65,21 @@ function oauthLabel(catalog: ProviderTypeInfo, presetId?: string): string {
   if (presetId === "github") return "GitHub OAuth";
   if (presetId === "gemini-cli") return "Google Sign-In";
   if (catalog.type === "copilot") return "GitHub Device Login";
-  return `Connect ${catalog.name}`;
+  return `Sign in with ${catalog.name}`;
 }
 
 function apiKeyLabel(catalog: ProviderTypeInfo, preset?: NinerouterPreset | null): string {
   if (preset?.id === "ollama-local") return "Add Ollama Host";
   if (preset?.credential_auth === "cookie" || preset?.category === "webCookie") return "Add Cookie";
   return "Add API Key";
+}
+
+function byoKeyDescription(catalog: ProviderTypeInfo, preset?: NinerouterPreset | null): string {
+  const baseUrl = preset?.base_url || catalog.defaultBaseUrl;
+  if (baseUrl) {
+    return `Paste your API key and use the provider base URL (for example ${baseUrl}).`;
+  }
+  return "Paste your API key and provider base URL.";
 }
 
 /** Resolve per-provider connection methods from catalog + optional 9router preset metadata. */
@@ -84,12 +96,15 @@ export function resolveConnectionProfile(
     preset?.auth_type === "oauth" ||
     preset?.category === "oauth" ||
     preset?.category === "free";
+  const bringYourOwnKey =
+    BYO_KEY_PROVIDER_TYPES.has(providerType) && !oauthAvailable(providerType);
   const hasApiKeyMode =
     authModes.includes("apikey") ||
     preset?.credential_auth === "apikey" ||
     preset?.category === "apikey" ||
     preset?.category === "freeTier" ||
-    catalog.defaultAuthType === "api_key";
+    catalog.defaultAuthType === "api_key" ||
+    bringYourOwnKey;
   const isCookie =
     preset?.credential_auth === "cookie" ||
     preset?.category === "webCookie" ||
@@ -124,21 +139,29 @@ export function resolveConnectionProfile(
     });
   }
 
-  if (hasOAuthMode) {
-    const available = oauthAvailable(providerType);
+  if (presetId === "cursor" || preset?.id === "cursor") {
     methods.push({
-      kind: "oauth",
-      label: oauthLabel(catalog, presetId),
-      description: available
-        ? defaultOAuthMode(providerType, presetId) === "device"
-          ? "Device authorization — complete sign-in in the browser tab that opens."
-          : "Browser OAuth — sign in with your provider account."
-        : undefined,
-      available,
-      unavailableReason: available ? undefined : "OAuth for this provider is not implemented in tproxy yet. Import a token export instead.",
-      oauthMode: defaultOAuthMode(providerType, presetId),
+      kind: "import_cursor",
+      label: "Import from Cursor IDE",
+      description: "Auto-detect access token and machine ID from Cursor's local SQLite database.",
+      available: true,
     });
-    if (!available && CLIPROXY_IMPORT_TYPES.has(providerType)) {
+  }
+
+  if (hasOAuthMode && !bringYourOwnKey) {
+    const available = oauthAvailable(providerType);
+    if (available) {
+      methods.push({
+        kind: "oauth",
+        label: oauthLabel(catalog, presetId),
+        description:
+          defaultOAuthMode(providerType, presetId) === "device"
+            ? "Device authorization — complete sign-in in the browser tab that opens."
+            : "Browser OAuth — sign in with your provider account.",
+        available: true,
+        oauthMode: defaultOAuthMode(providerType, presetId),
+      });
+    } else if (CLIPROXY_IMPORT_TYPES.has(providerType)) {
       methods.push({
         kind: "import_cliproxy",
         label: "Import CLIProxyAPI auth JSON",
@@ -153,9 +176,11 @@ export function resolveConnectionProfile(
       kind: "api_key",
       label: apiKeyLabel(catalog, preset),
       description:
-        presetId && HOST_URL_PRESETS.has(presetId)
-          ? "Set the Ollama host URL. API key is optional for local instances."
-          : "Paste an API key from the provider console.",
+        bringYourOwnKey
+          ? byoKeyDescription(catalog, preset)
+          : presetId && HOST_URL_PRESETS.has(presetId)
+            ? "Set the Ollama host URL. API key is optional for local instances."
+            : "Paste an API key from the provider console.",
       available: true,
       apiKeyUrl: preset?.api_key_url || catalog.apiKeyUrl,
       authHint: preset?.auth_hint,
@@ -191,10 +216,21 @@ export function resolveConnectionProfile(
     (method, index) => methods.findIndex((item) => item.kind === method.kind && item.label === method.label) === index,
   );
 
+  const oauthUnavailable =
+    hasOAuthMode &&
+    !bringYourOwnKey &&
+    !oauthAvailable(providerType) &&
+    !CLIPROXY_IMPORT_TYPES.has(providerType);
+
   return {
     noAuth: false,
     showAdvancedCredential: true,
-    notice: preset?.auth_hint && isCookie ? preset.auth_hint : undefined,
+    notice:
+      oauthUnavailable
+        ? "Interactive OAuth is not available for this provider yet. Use Import 9router backup if you already have credentials."
+        : preset?.auth_hint && isCookie
+          ? preset.auth_hint
+          : undefined,
     methods: unique,
   };
 }

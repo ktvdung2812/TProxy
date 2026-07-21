@@ -56,6 +56,15 @@ export const CLAUDE_CLIENT_TIER_PLACEHOLDERS: Record<MappingTier, string> = {
   haiku: "haiku",
 };
 
+/** GPT codename placeholders for Codex CLI / OpenAI-compatible clients. */
+export const GPT_CLIENT_TIER_PLACEHOLDERS: Partial<Record<MappingTier, string>> = {
+  fable: "gpt-sol",
+  opus: "gpt-terra",
+  haiku: "gpt-luna",
+};
+
+export type GptCodenameTier = keyof typeof GPT_CLIENT_TIER_PLACEHOLDERS;
+
 export const DEFAULT_CLAUDE_PRIMARY_MODEL: MappingTier = "fable";
 export const CLAUDE_CODE_CONTEXT_TOKENS = "1048576";
 
@@ -126,10 +135,46 @@ export function buildClaudeSettings(
   );
 }
 
+export function buildCodexConfig(
+  baseUrl: string,
+  apiKey: string,
+  primaryTier: GptCodenameTier = "fable",
+): string {
+  const model = GPT_CLIENT_TIER_PLACEHOLDERS[primaryTier] || "gpt-sol";
+  const lines = [
+    `model = "${model}"`,
+    `model_provider = "tproxy"`,
+    ``,
+    `[model_providers.tproxy]`,
+    `name = "tproxy"`,
+    `base_url = "${baseUrl.replace(/\/v1\/?$/, "")}/v1"`,
+    `wire_api = "responses"`,
+    `env_key = "TPROXY_API_KEY"`,
+    ``,
+    `# Set TPROXY_API_KEY=${apiKey || "your-api-key"} in the shell before running codex`,
+  ];
+  return lines.join("\n");
+}
+
 export function buildBashExports(baseUrl: string, apiKey: string, primaryModel: MappingTier = DEFAULT_CLAUDE_PRIMARY_MODEL): string {
   return Object.entries(buildClaudeCodeClientEnv({ baseUrl, apiKey, primaryModel }))
     .map(([key, value]) => `export ${key}="${value}"`)
     .join("\n");
+}
+
+/** Bash exports for CLI Tools guide — uses tier placeholders or a virtual model ID from the dashboard. */
+export function buildClaudeGuideExports(baseUrl: string, apiKey: string, model: string): string {
+  const modelId = model.trim() || DEFAULT_CLAUDE_PRIMARY_MODEL;
+  const tier = modelId.toLowerCase() as MappingTier;
+  if (MAPPING_TIERS.includes(tier)) {
+    return `${buildBashExports(baseUrl, apiKey, tier)}\nclaude`;
+  }
+  const env = buildClaudeCodeClientEnv({ baseUrl, apiKey, primaryModel: DEFAULT_CLAUDE_PRIMARY_MODEL });
+  env.ANTHROPIC_MODEL = modelId;
+  env.CLAUDE_CODE_SUBAGENT_MODEL = modelId;
+  return `${Object.entries(env)
+    .map(([entryKey, value]) => `export ${entryKey}="${value}"`)
+    .join("\n")}\nclaude`;
 }
 
 export function buildPowerShellExports(

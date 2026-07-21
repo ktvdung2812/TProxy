@@ -1,3 +1,5 @@
+import type { RequestLog } from "../../hooks/useRequestLogStream";
+
 export type QuotaEntry = {
   name?: string;
   used: number;
@@ -101,6 +103,13 @@ export function fetchCredentialProxyUsage(secret: string, period: "all" | "today
 
 export function fetchCredentialQuota(secret: string, credentialId: string) {
   return adminFetch<CredentialQuota>(secret, `/api/admin/credentials/${encodeURIComponent(credentialId)}/quota`, "POST");
+}
+
+export function fetchCredentialRequestLogs(secret: string, credentialId: string, limit = 100) {
+  return adminFetch<{ credential_id: string; data: RequestLog[] }>(
+    secret,
+    `/api/admin/credentials/${encodeURIComponent(credentialId)}/logs?limit=${limit}`,
+  );
 }
 
 export function fetchCodexResetCredits(secret: string, credentialId: string) {

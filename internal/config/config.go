@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tproxy/tproxy/internal/routing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -158,12 +159,14 @@ type OAuthConfig struct {
 	DiscoveryURL              string            `yaml:"discovery-url" json:"discovery_url"`
 	AuthorizationURL          string            `yaml:"authorization-url" json:"authorization_url"`
 	TokenURL                  string            `yaml:"token-url" json:"token_url"`
+	RefreshURL                string            `yaml:"refresh-url" json:"refresh_url"`
 	UserInfoURL               string            `yaml:"user-info-url" json:"user_info_url"`
 	DeviceCodeURL             string            `yaml:"device-code-url" json:"device_code_url"`
 	DeviceTokenURL            string            `yaml:"device-token-url" json:"device_token_url"`
 	DeviceVerificationURL     string            `yaml:"device-verification-url" json:"device_verification_url"`
 	DeviceExchangeRedirectURL string            `yaml:"device-exchange-redirect-url" json:"device_exchange_redirect_url"`
 	DeviceFlow                string            `yaml:"device-flow" json:"device_flow"`
+	DevicePKCE                  bool              `yaml:"device-pkce" json:"device_pkce"`
 	DeviceRequestFormat       string            `yaml:"device-request-format" json:"device_request_format"`
 	ClientID                  string            `yaml:"client-id,omitempty" json:"client_id,omitempty"`
 	ClientIDEnv               string            `yaml:"client-id-env" json:"client_id_env"`
@@ -316,6 +319,39 @@ func applyDefaults(cfg *Config) {
 	}
 	for index := range cfg.Providers {
 		ApplyProviderDefaults(&cfg.Providers[index])
+	}
+}
+
+func applyClineProviderDefaults(provider *ProviderConfig, name string) {
+	if provider.Name == "" {
+		provider.Name = name
+	}
+	if provider.BaseURL == "" {
+		provider.BaseURL = "https://api.cline.bot/api/v1"
+	}
+	if len(provider.Headers) == 0 {
+		provider.Headers = map[string]string{
+			"HTTP-Referer": "https://cline.bot",
+			"X-Title":      "Cline",
+		}
+	}
+	if provider.OAuth == nil {
+		provider.OAuth = &OAuthConfig{}
+	}
+	if provider.OAuth.AuthorizationURL == "" {
+		provider.OAuth.AuthorizationURL = "https://api.cline.bot/api/v1/auth/authorize"
+	}
+	if provider.OAuth.TokenURL == "" {
+		provider.OAuth.TokenURL = "https://api.cline.bot/api/v1/auth/token"
+	}
+	if provider.OAuth.RefreshURL == "" {
+		provider.OAuth.RefreshURL = "https://api.cline.bot/api/v1/auth/refresh"
+	}
+	if provider.OAuth.RefreshSafetyWindow == "" {
+		provider.OAuth.RefreshSafetyWindow = "20m"
+	}
+	if provider.OAuth.ClientID == "" {
+		provider.OAuth.ClientID = "extension"
 	}
 }
 
@@ -485,6 +521,7 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 			provider.OAuth.DeviceCodeURL = "https://chat.qwen.ai/api/v1/oauth2/device/code"
 		}
 		provider.OAuth.DeviceFlow = "rfc8628"
+		provider.OAuth.DevicePKCE = true
 		provider.OAuth.DeviceRequestFormat = "form"
 		if len(provider.OAuth.Scopes) == 0 {
 			provider.OAuth.Scopes = []string{"openid", "profile", "email", "model.completion"}
@@ -492,6 +529,10 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		if provider.OAuth.RefreshSafetyWindow == "" {
 			provider.OAuth.RefreshSafetyWindow = "20m"
 		}
+	case "cline":
+		applyClineProviderDefaults(provider, "Cline")
+	case "clinepass":
+		applyClineProviderDefaults(provider, "ClinePass")
 	case "kiro":
 		if provider.Name == "" {
 			provider.Name = "Kiro AI"
@@ -499,6 +540,124 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		if provider.BaseURL == "" {
 			provider.BaseURL = "https://runtime.us-east-1.kiro.dev"
 		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		provider.OAuth.DeviceFlow = "kiro"
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+	case "iflow":
+		if provider.Name == "" {
+			provider.Name = "iFlow AI"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://apis.iflow.cn/v1"
+		}
+		if len(provider.Headers) == 0 {
+			provider.Headers = map[string]string{"User-Agent": "iFlow-Cli"}
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		setOAuthDefault(provider.OAuth, "https://iflow.cn/oauth", "https://iflow.cn/oauth/token", "10009311001", "")
+		if provider.OAuth.UserInfoURL == "" {
+			provider.OAuth.UserInfoURL = "https://iflow.cn/api/oauth/getUserInfo"
+		}
+		provider.OAuth.ListenForCallback = true
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "24h"
+		}
+	case "codebuddy-cn":
+		if provider.Name == "" {
+			provider.Name = "CodeBuddy CN"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://copilot.tencent.com/v2"
+		}
+		if len(provider.Headers) == 0 {
+			provider.Headers = map[string]string{
+				"User-Agent":          "CLI/2.108.1 CodeBuddy/2.108.1",
+				"X-Product":           "SaaS",
+				"X-IDE-Type":          "CLI",
+				"X-IDE-Name":          "CLI",
+				"x-requested-with":    "XMLHttpRequest",
+				"x-codebuddy-request": "1",
+			}
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://copilot.tencent.com/v2/plugin/auth/state"
+		}
+		if provider.OAuth.TokenURL == "" {
+			provider.OAuth.TokenURL = "https://copilot.tencent.com/v2/plugin/auth/token"
+		}
+		if provider.OAuth.RefreshURL == "" {
+			provider.OAuth.RefreshURL = "https://copilot.tencent.com/v2/plugin/auth/token/refresh"
+		}
+		provider.OAuth.DeviceFlow = "codebuddy-cn"
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "12h"
+		}
+	case "kilocode":
+		if provider.Name == "" {
+			provider.Name = "Kilo Code"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.kilo.ai/api/openrouter"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://api.kilo.ai/api/device-auth/codes"
+		}
+		provider.OAuth.DeviceFlow = "kilocode"
+	case "gitlab":
+		if provider.Name == "" {
+			provider.Name = "GitLab Duo"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://gitlab.com/api/v4"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		if provider.OAuth.AuthorizationURL == "" {
+			provider.OAuth.AuthorizationURL = "https://gitlab.com/oauth/authorize"
+		}
+		if provider.OAuth.TokenURL == "" {
+			provider.OAuth.TokenURL = "https://gitlab.com/oauth/token"
+		}
+		if len(provider.OAuth.Scopes) == 0 {
+			provider.OAuth.Scopes = []string{"api", "read_user"}
+		}
+		provider.OAuth.ListenForCallback = true
+		if provider.OAuth.RefreshSafetyWindow == "" {
+			provider.OAuth.RefreshSafetyWindow = "5m"
+		}
+	case "kimchi":
+		if provider.Name == "" {
+			provider.Name = "Kimchi"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://llm.kimchi.dev/openai/v1"
+		}
+		if len(provider.Headers) == 0 {
+			provider.Headers = map[string]string{"User-Agent": "kimchi/0.1.50"}
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		if provider.OAuth.AuthorizationURL == "" {
+			provider.OAuth.AuthorizationURL = "https://app.kimchi.dev/cli-auth"
+		}
+		if provider.OAuth.UserInfoURL == "" {
+			provider.OAuth.UserInfoURL = "https://app.kimchi.dev/api/v1/me"
+		}
+		provider.OAuth.ListenForCallback = true
 	case "qoder":
 		if provider.Name == "" {
 			provider.Name = "Qoder"
@@ -648,11 +807,11 @@ func (cfg *Config) Validate() error {
 	if strategy == "" {
 		strategy = "round-robin"
 	}
-	if strategy != "round-robin" && strategy != "fill-first" && strategy != "weighted-round-robin" {
+	if !routing.IsValidStrategy(strategy) {
 		return fmt.Errorf("unsupported routing strategy %q", strategy)
 	}
 	for providerID, providerStrategy := range cfg.Routing.ProviderStrategies {
-		if providerStrategy.Strategy != "" && providerStrategy.Strategy != "round-robin" && providerStrategy.Strategy != "fill-first" && providerStrategy.Strategy != "weighted-round-robin" {
+		if providerStrategy.Strategy != "" && !routing.IsValidStrategy(providerStrategy.Strategy) {
 			return fmt.Errorf("unsupported routing strategy %q for provider %q", providerStrategy.Strategy, providerID)
 		}
 	}
@@ -701,12 +860,12 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder":
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}
 		if provider.OAuth != nil {
-			if err := validateOAuth(provider.ID, provider.OAuth); err != nil {
+			if err := validateOAuth(provider.ID, provider.Type, provider.OAuth); err != nil {
 				return err
 			}
 		}
@@ -843,18 +1002,21 @@ func validateProxyURL(value string) error {
 	}
 }
 
-func validateOAuth(providerID string, oauth *OAuthConfig) error {
-	if strings.TrimSpace(oauth.TokenURL) == "" && strings.TrimSpace(oauth.DiscoveryURL) == "" {
+func validateOAuth(providerID, providerType string, oauth *OAuthConfig) error {
+	hasTokenEndpoint := strings.TrimSpace(oauth.TokenURL) != "" || strings.TrimSpace(oauth.DiscoveryURL) != ""
+	if !hasTokenEndpoint && providerType != "kimchi" && !isCustomDeviceFlow(oauth.DeviceFlow) {
 		return fmt.Errorf("provider %q oauth token-url or discovery-url is required", providerID)
 	}
-	if strings.TrimSpace(oauth.ClientIDEnv) == "" && strings.TrimSpace(oauth.ClientID) == "" {
+	if oauthRequiresClientID(providerType, oauth) && strings.TrimSpace(oauth.ClientIDEnv) == "" && strings.TrimSpace(oauth.ClientID) == "" {
 		return fmt.Errorf("provider %q oauth client-id or client-id-env is required", providerID)
 	}
 	if oauth.RequireClientSecret && strings.TrimSpace(oauth.ClientSecretEnv) == "" {
 		return fmt.Errorf("provider %q oauth client-secret-env is required", providerID)
 	}
 	if strings.TrimSpace(oauth.AuthorizationURL) == "" && strings.TrimSpace(oauth.DeviceCodeURL) == "" && strings.TrimSpace(oauth.DiscoveryURL) == "" {
-		return fmt.Errorf("provider %q oauth requires authorization-url, device-code-url or discovery-url", providerID)
+		if !isCustomOAuthProviderType(providerType) {
+			return fmt.Errorf("provider %q oauth requires authorization-url, device-code-url or discovery-url", providerID)
+		}
 	}
 	for name, value := range map[string]string{
 		"discovery-url":                oauth.DiscoveryURL,
@@ -890,10 +1052,47 @@ func validateOAuth(providerID string, oauth *OAuthConfig) error {
 		return fmt.Errorf("provider %q oauth device-request-format must be form or json", providerID)
 	}
 	deviceFlow := strings.ToLower(strings.TrimSpace(oauth.DeviceFlow))
-	if deviceFlow != "" && deviceFlow != "rfc8628" && deviceFlow != "codex" {
+	if deviceFlow != "" && !isSupportedDeviceFlow(deviceFlow) {
 		return fmt.Errorf("provider %q oauth device-flow is unsupported", providerID)
 	}
 	return nil
+}
+
+func isCustomDeviceFlow(flow string) bool {
+	switch strings.ToLower(strings.TrimSpace(flow)) {
+	case "qoder", "kilocode", "codebuddy-cn", "kiro":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedDeviceFlow(flow string) bool {
+	switch flow {
+	case "rfc8628", "codex", "qoder", "kilocode", "codebuddy-cn", "kiro":
+		return true
+	default:
+		return false
+	}
+}
+
+func oauthRequiresClientID(providerType string, oauth *OAuthConfig) bool {
+	switch providerType {
+	case "cline", "clinepass", "kimchi", "kilocode", "codebuddy-cn", "kiro":
+		return false
+	case "gitlab":
+		return false
+	}
+	return !isCustomDeviceFlow(oauth.DeviceFlow)
+}
+
+func isCustomOAuthProviderType(providerType string) bool {
+	switch providerType {
+	case "qoder", "kilocode", "codebuddy-cn", "kiro", "kimchi", "iflow", "gitlab":
+		return true
+	default:
+		return false
+	}
 }
 
 func Env(name string) string {
@@ -901,6 +1100,31 @@ func Env(name string) string {
 		return ""
 	}
 	return strings.TrimSpace(os.Getenv(name))
+}
+
+// APIKeySecretCandidates returns plaintext client API keys resolvable from config key-env and common env vars.
+func APIKeySecretCandidates(cfg *Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	for _, key := range cfg.ClientAPIKeys {
+		add(Env(key.KeyEnv))
+	}
+	add(Env("TPROXY_API_KEY"))
+	return out
 }
 
 func Save(path string, cfg *Config) error {

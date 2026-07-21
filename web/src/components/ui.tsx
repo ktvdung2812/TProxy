@@ -84,7 +84,7 @@ export function IconButton({ icon, label, className, ...props }: IconButtonProps
 /* ============================================================
    Badge
    ============================================================ */
-type BadgeVariant = "default" | "primary" | "success" | "warning" | "error" | "info";
+type BadgeVariant = "default" | "neutral" | "primary" | "success" | "warning" | "error" | "info";
 type BadgeSize = "sm" | "md" | "lg";
 
 type BadgeProps = HTMLAttributes<HTMLSpanElement> & {
@@ -103,8 +103,9 @@ export function Badge({
   children,
   ...props
 }: BadgeProps) {
+  const resolvedVariant = variant === "neutral" ? "default" : variant;
   return (
-    <span className={cn("badge", variant, size, className)} {...props}>
+    <span className={cn("badge", resolvedVariant, size, className)} {...props}>
       {dot ? <span className="badge-dot" /> : null}
       {icon ? <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{icon}</span> : null}
       {children}
@@ -117,7 +118,7 @@ export function Badge({
    ============================================================ */
 type CardPad = "none" | "xs" | "sm" | "md" | "lg";
 
-type CardProps = HTMLAttributes<HTMLDivElement> & {
+type CardProps = Omit<HTMLAttributes<HTMLDivElement>, "title"> & {
   title?: ReactNode;
   subtitle?: ReactNode;
   icon?: string;

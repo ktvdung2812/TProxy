@@ -68,3 +68,7 @@ export function toggleApiKey(secret: string, key: ApiKeyRecord, enabled: boolean
     budget_usd_per_day: key.policy?.limits?.budget_usd_per_day || 0,
   });
 }
+
+export function fetchResolvableApiKeySecrets(secret: string) {
+  return adminFetch<{ secrets: Record<string, string> }>(secret, "/api/admin/api-key-secrets");
+}

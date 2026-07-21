@@ -21,8 +21,15 @@ func TestLookupAliases(t *testing.T) {
 }
 
 func TestPresetCount(t *testing.T) {
-	if len(Presets) < 90 {
-		t.Fatalf("expected at least 90 presets, got %d", len(Presets))
+	if len(AllPresets()) < 110 {
+		t.Fatalf("expected at least 110 presets, got %d", len(AllPresets()))
+	}
+}
+
+func TestWave2PresetLookup(t *testing.T) {
+	preset, ok := Lookup("groq")
+	if !ok || preset.ID != "groq" {
+		t.Fatalf("wave-2 groq preset missing: %+v", preset)
 	}
 }
 

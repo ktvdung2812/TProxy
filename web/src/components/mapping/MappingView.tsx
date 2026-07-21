@@ -1,30 +1,62 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiKeyOption } from "../cli-tools/ApiKeySelect";
-import { Badge, Button, Card, Field, Input, Select, cn } from "../ui";
+import { Badge, Button, Card, Select, cn } from "../ui";
 import { fetchClaudeMapping, saveClaudeMapping, type ClaudeMappingResponse } from "./api";
-import { REASONING_EFFORT_OPTIONS, reasoningEffortOptionsForTarget, type ReasoningEffort } from "./codegen";
-import { MappingCodeTab } from "./MappingCodeTab";
+import { reasoningEffortOptionsForTarget, type ReasoningEffort } from "./codegen";
+import { MappingCodePanel } from "./MappingCodePanel";
+import { ModelTargetCombobox } from "./ModelTargetCombobox";
 
 type Props = {
   secret: string;
   apiKeys: ApiKeyOption[];
   models: Array<{ ID: string; DisplayName?: string }>;
-  providers: Array<{ ID: string; Type: string; Name: string }>;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
 };
 
-type MappingTab = "mapping" | "code";
+type ClientTab = "claude" | "codex";
 
 const TIERS = [
-  { id: "fable", label: "Claude Fable", hint: "claude-fable, fable" },
-  { id: "opus", label: "Claude Opus", hint: "claude-opus, opus, opusplan" },
-  { id: "sonnet", label: "Claude Sonnet", hint: "claude-sonnet, sonnet, default" },
-  { id: "haiku", label: "Claude Haiku", hint: "claude-haiku, haiku" },
+  {
+    id: "fable",
+    claudeLabel: "Claude Fable",
+    codexLabel: "GPT Sol",
+    claudeHint: "claude-fable, fable",
+    codexHint: "gpt-sol",
+  },
+  {
+    id: "opus",
+    claudeLabel: "Claude Opus",
+    codexLabel: "GPT Terra",
+    claudeHint: "claude-opus, opus, opusplan",
+    codexHint: "gpt-terra",
+  },
+  {
+    id: "sonnet",
+    claudeLabel: "Claude Sonnet",
+    codexLabel: "Claude Sonnet",
+    claudeHint: "claude-sonnet, sonnet, default",
+    codexHint: "sonnet only (no GPT codename)",
+  },
+  {
+    id: "haiku",
+    claudeLabel: "Claude Haiku",
+    codexLabel: "GPT Luna",
+    claudeHint: "claude-haiku, haiku",
+    codexHint: "gpt-luna",
+  },
 ] as const;
 
-export function MappingView({ secret, apiKeys, models, providers, onError, onNotice }: Props) {
-  const [activeTab, setActiveTab] = useState<MappingTab>("mapping");
+function isClaudePlaceholder(name: string) {
+  return !name.toLowerCase().startsWith("gpt-");
+}
+
+function isCodexPlaceholder(name: string) {
+  return name.toLowerCase().startsWith("gpt-");
+}
+
+export function MappingView({ secret, apiKeys, models, onError, onNotice }: Props) {
+  const [activeTab, setActiveTab] = useState<ClientTab>("claude");
   const [data, setData] = useState<ClaudeMappingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,7 +72,6 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
     sonnet: "",
     haiku: "",
   });
-  const [defaultCodexProvider, setDefaultCodexProvider] = useState("codex");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,7 +90,6 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
         sonnet: response.reasoning_effort_overrides?.sonnet || "",
         haiku: response.reasoning_effort_overrides?.haiku || "",
       });
-      setDefaultCodexProvider(response.default_codex_provider || "codex");
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to load mapping");
     } finally {
@@ -76,10 +106,11 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
     [models],
   );
 
-  const codexProviders = useMemo(
-    () => providers.filter((provider) => provider.Type === "codex").map((provider) => provider.ID),
-    [providers],
-  );
+  const filteredPlaceholders = useMemo(() => {
+    const items = data?.placeholders || [];
+    const filter = activeTab === "claude" ? isClaudePlaceholder : isCodexPlaceholder;
+    return items.filter((item) => filter(item.name));
+  }, [activeTab, data?.placeholders]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -87,10 +118,9 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
       const response = await saveClaudeMapping(secret, {
         overrides,
         reasoning_effort_overrides: reasoningEffortOverrides,
-        default_codex_provider: defaultCodexProvider,
       });
       setData(response);
-      onNotice("Claude routing map saved");
+      onNotice("Routing map saved");
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Failed to save mapping");
     } finally {
@@ -109,34 +139,44 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
     );
   }
 
+  const isClaude = activeTab === "claude";
+
   return (
     <section className="section mapping-page">
       <div className="section-head">
         <div>
           <p className="eyebrow">Protocol mapping</p>
-          <h2>Claude transparent routing</h2>
+          <h2>Transparent model routing</h2>
           <p>
-            Route Claude Code / Cowork token flows to any upstream model without changing model names in the
-            client. Placeholders like <code>sonnet</code> or <code>fable</code> are rewritten on{" "}
-            <code>/v1/messages</code>; GPT targets bridge through Codex, real Claude models route natively (same as
-            the reference <code>proxy</code> project).
+            {isClaude ? (
+              <>
+                Route Claude Code without changing model names in the client. Placeholders like{" "}
+                <code>sonnet</code> or <code>fable</code> rewrite on <code>/v1/messages</code>.
+              </>
+            ) : (
+              <>
+                Route Codex CLI without changing model names in the client. GPT codenames like{" "}
+                <code>gpt-sol</code> or <code>gpt-terra</code> rewrite on <code>/v1/chat/completions</code> and{" "}
+                <code>/v1/responses</code>.
+              </>
+            )}
           </p>
         </div>
         <div className="mapping-page-actions">
           <div className="usage-segmented">
             <button
               type="button"
-              className={activeTab === "mapping" ? "active" : ""}
-              onClick={() => setActiveTab("mapping")}
+              className={activeTab === "claude" ? "active" : ""}
+              onClick={() => setActiveTab("claude")}
             >
-              Mapping
+              Claude
             </button>
             <button
               type="button"
-              className={activeTab === "code" ? "active" : ""}
-              onClick={() => setActiveTab("code")}
+              className={activeTab === "codex" ? "active" : ""}
+              onClick={() => setActiveTab("codex")}
             >
-              Generate code
+              Codex
             </button>
           </div>
           <Button variant="outline" size="sm" icon="refresh" disabled={loading} onClick={() => void load()}>
@@ -145,9 +185,6 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
         </div>
       </div>
 
-      {activeTab === "code" ? (
-        <MappingCodeTab apiKeys={apiKeys} overrides={overrides} data={data} />
-      ) : (
       <div className="mapping-grid">
         <Card pad="md" className="mapping-card">
           <div className="mapping-card-head">
@@ -155,35 +192,20 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
             <div>
               <strong>Tier routing</strong>
               <p>
-                Map each tier to a virtual model ID (for example <code>mapping-fable</code>), a{" "}
-                <code>provider:upstream-model</code> selector, or leave blank for built-in defaults. Use the reasoning
-                dropdown for Codex targets (GPT 5.6 models also support <strong>Max</strong> reasoning).
-                Env vars such as <code>ANTHROPIC_DEFAULT_FABLE_MODEL</code> override config when set on the tproxy
-                process.
+                Map each tier to a virtual model ID (for example <code>codex-gpt-5.6-sol</code>) or a{" "}
+                <code>provider:upstream-model</code> selector. Shared across Claude and Codex — only the client
+                placeholder names differ. Env vars such as <code>ANTHROPIC_DEFAULT_FABLE_MODEL</code> override config
+                when set on the tproxy process.
               </p>
             </div>
           </div>
-
-          <Field label="Default Codex provider prefix" hint="Used when a target looks like gpt-* without provider prefix.">
-            <Input
-              list="mapping-codex-providers"
-              value={defaultCodexProvider}
-              onChange={(event) => setDefaultCodexProvider(event.target.value)}
-              placeholder="codex"
-            />
-            <datalist id="mapping-codex-providers">
-              {codexProviders.map((providerId) => (
-                <option key={providerId} value={providerId} />
-              ))}
-            </datalist>
-          </Field>
 
           <div className="mapping-tier-grid">
             {TIERS.map((tier) => (
               <div className="mapping-tier-row" key={tier.id}>
                 <div className="mapping-tier-label">
-                  <strong>{tier.label}</strong>
-                  <span>{tier.hint}</span>
+                  <strong>{isClaude ? tier.claudeLabel : tier.codexLabel}</strong>
+                  <span>{isClaude ? tier.claudeHint : tier.codexHint}</span>
                   {data?.effective_resolved?.[tier.id] ? (
                     <Badge variant="default" size="sm">
                       → {data.effective_resolved[tier.id].resolved}
@@ -194,29 +216,40 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
                     </Badge>
                   ) : null}
                   {data?.effective_resolved?.[tier.id]?.route === "claude-native" ? (
-                    <Badge variant="info" size="sm">Claude native</Badge>
+                    <Badge variant="info" size="sm">
+                      Claude native
+                    </Badge>
                   ) : data?.effective_resolved?.[tier.id]?.route === "virtual-model" ? (
-                    <Badge variant="success" size="sm">Virtual model</Badge>
+                    <Badge variant="success" size="sm">
+                      Virtual model
+                    </Badge>
                   ) : data?.effective_resolved?.[tier.id] ? (
-                    <Badge variant="primary" size="sm">Codex bridge</Badge>
+                    <Badge variant="primary" size="sm">
+                      Codex bridge
+                    </Badge>
                   ) : null}
                   {data?.effective_reasoning_effort?.[tier.id] ? (
-                    <Badge variant="info" size="sm">effort: {data.effective_reasoning_effort[tier.id]}</Badge>
+                    <Badge variant="info" size="sm">
+                      effort: {data.effective_reasoning_effort[tier.id]}
+                    </Badge>
                   ) : null}
                   {data?.env_defaults?.[tier.id] ? (
-                    <Badge variant="default" size="sm">env: {data.env_defaults[tier.id]}</Badge>
+                    <Badge variant="default" size="sm">
+                      env: {data.env_defaults[tier.id]}
+                    </Badge>
                   ) : null}
                 </div>
                 <div className="mapping-tier-controls">
-                  <Input
-                    list={`mapping-models-${tier.id}`}
+                  <ModelTargetCombobox
+                    aria-label={`${isClaude ? tier.claudeLabel : tier.codexLabel} target model`}
                     value={overrides[tier.id] || ""}
                     placeholder={data?.defaults?.[tier.id] || "provider:model"}
-                    onChange={(event) => setOverrides((current) => ({ ...current, [tier.id]: event.target.value }))}
+                    options={modelOptions}
+                    onChange={(next) => setOverrides((current) => ({ ...current, [tier.id]: next }))}
                   />
                   <Select
                     className="mapping-tier-effort"
-                    aria-label={`${tier.label} reasoning effort`}
+                    aria-label={`${isClaude ? tier.claudeLabel : tier.codexLabel} reasoning effort`}
                     value={reasoningEffortOverrides[tier.id] || ""}
                     onChange={(event) =>
                       setReasoningEffortOverrides((current) => ({
@@ -235,13 +268,6 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
                     ))}
                   </Select>
                 </div>
-                <datalist id={`mapping-models-${tier.id}`}>
-                  {modelOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </datalist>
               </div>
             ))}
           </div>
@@ -258,62 +284,29 @@ export function MappingView({ secret, apiKeys, models, providers, onError, onNot
             <span className="material-symbols-outlined">list_alt</span>
             <div>
               <strong>Placeholder rewrite</strong>
-              <p>Incoming request model IDs rewritten before routing; responses keep the client-facing name.</p>
+              <p>
+                {isClaude
+                  ? "Claude client model IDs rewritten before routing."
+                  : "Codex / OpenAI client model IDs rewritten before routing."}
+              </p>
             </div>
           </div>
           <div className="mapping-placeholder-list">
-            {(data?.placeholders || []).map((item) => (
-              <div className="mapping-placeholder-row" key={item.name}>
-                <code>{item.name}</code>
-                <span className="mapping-placeholder-arrow">→</span>
-                <code className="mapping-placeholder-target">{item.resolves}</code>
-              </div>
-            ))}
+            {filteredPlaceholders.length === 0 ? (
+              <p className="mapping-placeholder-empty">No placeholders configured yet.</p>
+            ) : (
+              filteredPlaceholders.map((item) => (
+                <div className="mapping-placeholder-row" key={item.name}>
+                  <code>{item.name}</code>
+                  <span className="mapping-placeholder-arrow">→</span>
+                  <code className="mapping-placeholder-target">{item.resolves}</code>
+                </div>
+              ))
+            )}
           </div>
         </Card>
 
-        <Card pad="md" className="mapping-card mapping-card-wide">
-          <div className="mapping-card-head">
-            <span className="material-symbols-outlined">terminal</span>
-            <div>
-              <strong>Server env example</strong>
-              <p>Real upstream targets on the tproxy process. Dashboard overrides take priority over env.</p>
-            </div>
-          </div>
-          <pre className="mapping-env-example">{`ANTHROPIC_DEFAULT_FABLE_MODEL=mapping-fable
-ANTHROPIC_DEFAULT_OPUS_MODEL=mapping-opus
-ANTHROPIC_DEFAULT_SONNET_MODEL=mapping-sonnet
-ANTHROPIC_DEFAULT_HAIKU_MODEL=mapping-haiku`}</pre>
-          <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-            Claude Code keeps placeholder names (<code>fable</code>, <code>sonnet</code>, …) in{" "}
-            <code>~/.claude/settings.json</code>. Use the <strong>Generate code</strong> tab for the client config;
-            only the server needs virtual model IDs like <code>mapping-fable</code>.
-          </p>
-        </Card>
-
-        <Card pad="md" className="mapping-card mapping-card-wide">
-          <div className="mapping-card-head">
-            <span className="material-symbols-outlined">settings</span>
-            <div>
-              <strong>Claude Code client example</strong>
-              <p>Placeholder tier names — tproxy rewrites on <code>/v1/messages</code>.</p>
-            </div>
-          </div>
-          <pre className="mapping-env-example">{`{
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:28121/v1",
-    "ANTHROPIC_API_KEY": "your-api-key",
-    "ANTHROPIC_MODEL": "fable",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "fable",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "opus",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "sonnet",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "fable",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1048576",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1048576"
-  }
-}`}</pre>
-        </Card>
+        <MappingCodePanel client={activeTab} apiKeys={apiKeys} overrides={overrides} data={data} />
 
         <Card pad="md" className="mapping-card mapping-card-wide">
           <div className="mapping-card-head">
@@ -340,7 +333,6 @@ ANTHROPIC_DEFAULT_HAIKU_MODEL=mapping-haiku`}</pre>
           </div>
         </Card>
       </div>
-      )}
     </section>
   );
 }

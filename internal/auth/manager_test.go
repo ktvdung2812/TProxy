@@ -331,7 +331,7 @@ func TestDeviceFlowTreatsSlowDownAsPending(t *testing.T) {
 	defer providerServer.Close()
 	manager := NewManager(nil, providerServer.Client())
 	defer manager.Close()
-	token, pending, err := manager.exchangeDeviceCode(context.Background(), config.OAuthConfig{ClientID: "device-client", TokenURL: providerServer.URL + "/token"}, "device-code")
+	token, pending, err := manager.exchangeDeviceCode(context.Background(), config.OAuthConfig{ClientID: "device-client", TokenURL: providerServer.URL + "/token"}, "device-code", "")
 	if !pending || Code(err) != "slow_down" || token.AccessToken != "" {
 		t.Fatalf("slow_down result token=%+v pending=%v err=%v", token, pending, err)
 	}
@@ -926,6 +926,66 @@ func TestRFCDeviceFlowAcceptsPendingSuccessResponse(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("RFC device flow did not complete; polls=%d", polls.Load())
+}
+
+func TestQwenDeviceFlowUsesPKCE(t *testing.T) {
+	var polls atomic.Int32
+	var capturedChallenge string
+	var capturedVerifier string
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/device":
+			_ = r.ParseForm()
+			if r.Form.Get("client_id") != "qwen-client" {
+				t.Errorf("client_id = %q", r.Form.Get("client_id"))
+			}
+			capturedChallenge = r.Form.Get("code_challenge")
+			if capturedChallenge == "" || r.Form.Get("code_challenge_method") != "S256" {
+				t.Fatalf("device PKCE form = %v", r.Form)
+			}
+			_, _ = w.Write([]byte(`{"device_code":"qwen-device","user_code":"QWEN-CODE","verification_uri":"https://chat.qwen.ai/authorize","verification_uri_complete":"https://chat.qwen.ai/authorize?user_code=QWEN-CODE","expires_in":60,"interval":1}`))
+		case "/token":
+			_ = r.ParseForm()
+			capturedVerifier = r.Form.Get("code_verifier")
+			if polls.Add(1) == 1 {
+				_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"access_token":"qwen-access","refresh_token":"qwen-refresh","expires_in":3600}`))
+		}
+	}))
+	defer providerServer.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "qwen", Type: "qwen", Enabled: true, OAuth: &config.OAuthConfig{ClientID: "qwen-client", DeviceCodeURL: providerServer.URL + "/device", TokenURL: providerServer.URL + "/token", DeviceFlow: "rfc8628", DeviceRequestFormat: "form"}}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "qwen", CredentialID: "qwen-account", Mode: "device"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.VerificationURI == "" || started.UserCode != "QWEN-CODE" {
+		t.Fatalf("start response = %+v", started)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := manager.SessionStatus(started.SessionID)
+		if statusErr != nil {
+			t.Fatal(statusErr)
+		}
+		if status.Status == "complete" {
+			if capturedVerifier == "" || pkceChallenge(capturedVerifier) != capturedChallenge {
+				t.Fatalf("PKCE verifier/challenge mismatch: verifier=%q challenge=%q", capturedVerifier, capturedChallenge)
+			}
+			credentials, _ := dataStore.Credentials(context.Background(), "qwen")
+			if len(credentials) != 1 || credentials[0].Secret != "qwen-access" {
+				t.Fatalf("credential = %+v", credentials)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("Qwen device flow did not complete; polls=%d", polls.Load())
 }
 
 func TestXAIDiscoveryDeviceFlowAndRefresh(t *testing.T) {

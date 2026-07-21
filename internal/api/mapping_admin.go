@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/bridge"
+	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/store"
 )
@@ -81,10 +82,9 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 		},
 		"reasoning_effort_overrides": reasoningEffortMap(reasoningEffort),
 		"effective_reasoning_effort": resolver.EffectiveReasoningEffortMapping(),
-		"effective":              effective,
-		"effective_resolved":       resolver.EffectiveResolvedMapping(),
-		"default_codex_provider":   defaults.DefaultCodexProvider,
-		"placeholders":             placeholders,
+		"effective":            effective,
+		"effective_resolved":   resolver.EffectiveResolvedMapping(),
+		"placeholders":         placeholders,
 		"content_mapping":          contentMappingSummary(),
 	})
 }
@@ -93,7 +93,6 @@ func (s *Server) adminPutClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Overrides                map[string]string `json:"overrides"`
 		ReasoningEffortOverrides map[string]string `json:"reasoning_effort_overrides"`
-		DefaultCodexProvider     string            `json:"default_codex_provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
@@ -123,11 +122,6 @@ func (s *Server) adminPutClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	resolver := s.claudeAliasResolver()
 	resolver.SetOverrides(overrides)
 	resolver.SetReasoningEffortOverrides(reasoningEffort)
-	if strings.TrimSpace(payload.DefaultCodexProvider) != "" {
-		cfg := resolver.Defaults()
-		cfg.DefaultCodexProvider = strings.TrimSpace(payload.DefaultCodexProvider)
-		resolver.SetConfig(cfg)
-	}
 	s.adminGetClaudeMapping(w, r)
 }
 
@@ -161,6 +155,12 @@ func (s *Server) claudeAliasResolver() *bridge.Resolver {
 func (s *Server) resolveClaudeIngressModel(r *http.Request, model string) string {
 	resolved := resolveIngressModel(r, model)
 	return s.claudeAliasResolver().ResolveModel(resolved)
+}
+
+func (s *Server) applyMappingIngress(r *http.Request, request *canonical.Request) {
+	preserveClaudeClientModel(request)
+	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
+	s.applyClaudeTierReasoningEffort(request)
 }
 
 func contentMappingSummary() map[string]any {

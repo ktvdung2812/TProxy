@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card } from "../ui";
-import { fetchTokenSaverSettings, updateTokenSaverSettings } from "./api";
+import { Badge, Button, Card, Select } from "../ui";
+import { fetchTokenSaverSettings, updateTokenSaverSettings, type CompressionMode } from "./api";
 
 type Props = {
   secret: string;
@@ -8,8 +8,19 @@ type Props = {
   onNotice?: (message: string) => void;
 };
 
+const COMPRESSION_MODES: Array<{ id: CompressionMode; label: string; hint: string }> = [
+  { id: "ultra", label: "Ultra (RTK → CCR → Headroom → LLMLingua → Caveman)", hint: "Maximum savings; heuristic LLMLingua-2 pruning" },
+  { id: "full", label: "Full (RTK → CCR → Headroom → Caveman)", hint: "All structural engines without LLMLingua" },
+  { id: "stacked", label: "Stacked (RTK → Caveman)", hint: "Best savings for agentic sessions (~30–70%)" },
+  { id: "rtk", label: "RTK only", hint: "Tool-output filtering for shell/git/build logs" },
+  { id: "caveman", label: "Caveman", hint: "Terse prose compression on long assistant text" },
+  { id: "lite", label: "Lite (Headroom)", hint: "Compact homogeneous JSON tool arrays" },
+  { id: "off", label: "Off", hint: "Disable gateway compression" },
+];
+
 export function TokenSaverView({ secret, onError, onNotice }: Props) {
   const [rtkEnabled, setRtkEnabled] = useState(true);
+  const [compressionMode, setCompressionMode] = useState<CompressionMode>("stacked");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -18,6 +29,8 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
     try {
       const data = await fetchTokenSaverSettings(secret);
       setRtkEnabled(data.rtk_enabled !== false);
+      const mode = (data.compression_mode || "stacked") as CompressionMode;
+      setCompressionMode(COMPRESSION_MODES.some((item) => item.id === mode) ? mode : "stacked");
     } catch (error) {
       onError(error instanceof Error ? error.message : "Failed to load token saver settings");
     } finally {
@@ -29,14 +42,16 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
     void load();
   }, [load]);
 
-  const toggleRTK = async (next: boolean) => {
+  const saveMode = async (nextMode: CompressionMode) => {
     setSaving(true);
     try {
-      await updateTokenSaverSettings(secret, { rtk_enabled: next });
-      setRtkEnabled(next);
-      onNotice?.(next ? "RTK token saver enabled" : "RTK token saver disabled");
+      const nextEnabled = nextMode !== "off";
+      await updateTokenSaverSettings(secret, { compression_mode: nextMode, rtk_enabled: nextEnabled });
+      setCompressionMode(nextMode);
+      setRtkEnabled(nextEnabled);
+      onNotice?.(`Compression mode set to ${nextMode}`);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update RTK setting");
+      onError(error instanceof Error ? error.message : "Failed to update compression mode");
     } finally {
       setSaving(false);
     }
@@ -51,44 +66,34 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
     }
   };
 
+  const activeMode = COMPRESSION_MODES.find((item) => item.id === compressionMode) ?? COMPRESSION_MODES[0];
+
   return (
     <section className="section token-saver-page">
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">Optimization</p>
-          <h1>Token Saver</h1>
-          <p className="page-desc">
-            Compress tool outputs before they reach the model. RTK integration is ported from the 9router pipeline and inspired by{" "}
-            <a href="https://github.com/rtk-ai/rtk" target="_blank" rel="noreferrer">rtk-ai/rtk</a>.
-          </p>
-        </div>
-      </div>
-
       <Card pad="md" className="token-saver-card">
         <div className="token-saver-card-head">
           <div>
             <div className="token-saver-title-row">
               <span className="material-symbols-outlined">compress</span>
-              <h2>RTK Token Saver</h2>
-              <Badge variant={rtkEnabled ? "success" : "neutral"} size="sm">{rtkEnabled ? "ON" : "OFF"}</Badge>
+              <h2>Compression pipeline</h2>
+              <Badge variant={rtkEnabled ? "success" : "neutral"} size="sm">{rtkEnabled ? activeMode.label : "OFF"}</Badge>
             </div>
             <p className="token-saver-desc">
-              Smart filters for <code>git diff</code>, <code>grep</code>, <code>ls</code>, build logs, and other common tool outputs.
-              Typical savings: 20–40% input tokens per agentic request.
+              Shrink prompts before they reach upstream providers. Stacked mode runs RTK on tool output, then Caveman on long prose.
             </p>
           </div>
-          <label className="token-saver-toggle">
-            <span>{rtkEnabled ? "Enabled" : "Disabled"}</span>
-            <input
-              type="checkbox"
-              checked={rtkEnabled}
-              disabled={loading || saving}
-              onChange={(event) => void toggleRTK(event.target.checked)}
-            />
-          </label>
         </div>
+        <label className="settings-field">
+          <span>Mode</span>
+          <Select value={compressionMode} disabled={loading || saving} onChange={(event) => void saveMode(event.target.value as CompressionMode)}>
+            {COMPRESSION_MODES.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </Select>
+        </label>
+        <p className="token-saver-hint">{activeMode.hint}</p>
         <p className="token-saver-hint">
-          Per-request opt-out header: <code>X-TProxy-Token-Saver: off</code>
+          Per-request override: <code>X-TProxy-Compression: stacked</code> · opt-out: <code>X-TProxy-Token-Saver: off</code>
         </p>
       </Card>
 
@@ -99,7 +104,7 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
         </div>
         <p className="token-saver-desc">
           For maximum savings, install the upstream RTK binary and enable the auto-rewrite hook in Claude Code / Cursor.
-          tproxy RTK runs on the proxy layer; the CLI hook compresses shell commands before tool results are created.
+          tproxy compression runs on the gateway layer; the CLI hook compresses shell commands before tool results are created.
         </p>
         <div className="token-saver-command-block">
           <code>cargo install --git https://github.com/rtk-ai/rtk</code>

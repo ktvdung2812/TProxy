@@ -116,6 +116,7 @@ export function useChatModels(secret: string, snapshot: SnapshotSlice) {
         try {
           const response = await discoverProviderModels(secret, provider.ID);
           if (cancelled) return;
+          if (response.error?.message) return;
 
           const discovered: ChatModelOption[] = [];
           for (const model of response.data || []) {

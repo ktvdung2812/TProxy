@@ -148,6 +148,7 @@ type session struct {
 	redirectURL    string
 	deviceCode     string
 	deviceUserCode string
+	deviceMeta     map[string]string
 	interval       time.Duration
 	expiresAt      time.Time
 	status         string
@@ -187,9 +188,7 @@ type Manager struct {
 }
 
 func NewManager(dataStore *store.Store, client *http.Client) *Manager {
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
+	client = oauthHTTPClient(client)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{store: dataStore, client: client, rootCtx: ctx, cancel: cancel, sessions: make(map[string]*session), refresh: make(map[string]*refreshCall), discovery: make(map[string]discoveryEntry), now: time.Now, prewarm: NewPrewarmManager()}
 }
@@ -385,7 +384,7 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 	if err != nil {
 		return StartResponse{}, err
 	}
-	if m.clientID(*oauthConfig) == "" {
+	if !oauthAllowsMissingClientID(provider.Type, *oauthConfig) && m.clientID(*oauthConfig) == "" {
 		return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("OAuth client ID is unavailable")}
 	}
 	if oauthConfig.RequireClientSecret && m.clientSecret(*oauthConfig) == "" {
@@ -393,9 +392,10 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 	}
 	mode := strings.ToLower(strings.TrimSpace(request.Mode))
 	if mode == "" {
-		if provider.Type == "xai" || provider.Type == "kimi" || provider.Type == "qwen" || provider.Type == "qoder" {
+		if provider.Type == "xai" || provider.Type == "kimi" || provider.Type == "qwen" || provider.Type == "qoder" ||
+			provider.Type == "kilocode" || provider.Type == "codebuddy-cn" || provider.Type == "kiro" {
 			mode = "device"
-		} else if oauthConfig.AuthorizationURL != "" {
+		} else if isClineProvider(provider.Type) || provider.Type == "kimchi" || provider.Type == "iflow" || provider.Type == "gitlab" || oauthConfig.AuthorizationURL != "" {
 			mode = "browser"
 		} else {
 			mode = "device"
@@ -413,7 +413,7 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 	item := &session{id: sessionID, providerID: provider.ID, credentialID: credentialID, label: request.Label, email: request.Email, mode: mode, expiresAt: expiresAt, status: "pending", interval: 5 * time.Second, cancel: make(chan struct{})}
 	response := StartResponse{SessionID: sessionID, ProviderID: provider.ID, CredentialID: credentialID, Mode: mode, ExpiresAt: expiresAt}
 	if mode == "browser" {
-		if oauthConfig.AuthorizationURL == "" {
+		if oauthConfig.AuthorizationURL == "" && !usesCustomBrowserOAuth(provider.Type) {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("browser OAuth requires authorization-url")}
 		}
 		redirectURL := strings.TrimSpace(oauthConfig.RedirectURL)
@@ -426,15 +426,34 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		if err := validateRedirectURL(redirectURL); err != nil {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: err}
 		}
+		item.state = security.NewID("oauth_state_")
+		item.redirectURL = redirectURL
+		item.status = "pending"
 		verifier, err := pkceVerifier()
 		if err != nil {
 			return StartResponse{}, err
 		}
 		item.verifier = verifier
-		item.state = security.NewID("oauth_state_")
-		item.redirectURL = redirectURL
-		item.status = "pending"
-		response.AuthorizationURL = authorizationURL(*oauthConfig, item.state, verifier, redirectURL, m.clientID(*oauthConfig))
+		switch provider.Type {
+		case "cline", "clinepass":
+			response.AuthorizationURL = clineAuthorizationURL(redirectURL)
+		case "iflow":
+			clientID := m.clientID(*oauthConfig)
+			if clientID == "" {
+				clientID = iflowClientID
+			}
+			response.AuthorizationURL = iflowAuthorizationURL(redirectURL, item.state, clientID)
+		case "kimchi":
+			response.AuthorizationURL = kimchiAuthorizationURL(redirectURL, item.state)
+		case "gitlab":
+			gitlabCfg := gitlabOAuthFromProvider(*provider, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
+			if gitlabCfg.ClientID == "" {
+				return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("GitLab OAuth requires gitlab_client_id in provider config")}
+			}
+			response.AuthorizationURL = gitlabAuthorizationURL(gitlabCfg, redirectURL, item.state, pkceChallenge(verifier))
+		default:
+			response.AuthorizationURL = authorizationURL(*oauthConfig, item.state, verifier, redirectURL, m.clientID(*oauthConfig))
+		}
 	} else if strings.EqualFold(oauthConfig.DeviceFlow, "qoder") {
 		flow, flowErr := initiateQoderDeviceFlow()
 		if flowErr != nil {
@@ -447,11 +466,68 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		item.status = "polling"
 		response.VerificationURI = flow.VerificationURI
 		response.IntervalSeconds = 2
+	} else if strings.EqualFold(oauthConfig.DeviceFlow, "kilocode") {
+		flow, flowErr := initiateKilocodeDeviceFlow()
+		if flowErr != nil {
+			return StartResponse{}, flowErr
+		}
+		item.deviceCode = flow.Code
+		item.interval = time.Duration(flow.Interval) * time.Second
+		item.status = "polling"
+		response.UserCode = flow.Code
+		response.VerificationURI = flow.VerificationURI
+		response.IntervalSeconds = flow.Interval
+	} else if strings.EqualFold(oauthConfig.DeviceFlow, "codebuddy-cn") {
+		flow, flowErr := initiateCodebuddyDeviceFlow()
+		if flowErr != nil {
+			return StartResponse{}, flowErr
+		}
+		item.deviceCode = flow.State
+		item.interval = flow.Interval
+		item.status = "polling"
+		response.VerificationURI = flow.VerificationURI
+		response.IntervalSeconds = int(flow.Interval / time.Second)
+	} else if strings.EqualFold(oauthConfig.DeviceFlow, "kiro") {
+		region := kiroDefaultRegion
+		startURL := kiroDefaultStartURL
+		authMethod := "builder-id"
+		if provider.Config != nil {
+			if value := strings.TrimSpace(stringValue(provider.Config["kiro_region"])); value != "" {
+				region = value
+			}
+			if value := strings.TrimSpace(stringValue(provider.Config["kiro_start_url"])); value != "" {
+				startURL = value
+			}
+			if value := strings.TrimSpace(stringValue(provider.Config["kiro_auth_method"])); value != "" {
+				authMethod = value
+			}
+		}
+		flow, flowErr := initiateKiroDeviceFlow(region, startURL, authMethod)
+		if flowErr != nil {
+			return StartResponse{}, flowErr
+		}
+		item.deviceCode = flow.DeviceCode
+		item.deviceUserCode = flow.UserCode
+		item.deviceMeta = kiroDeviceMeta(flow)
+		item.interval = flow.Interval
+		item.status = "polling"
+		response.UserCode = flow.UserCode
+		response.VerificationURI = flow.VerificationURI
+		response.IntervalSeconds = int(flow.Interval / time.Second)
 	} else {
 		if oauthConfig.DeviceCodeURL == "" {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("device OAuth requires device-code-url")}
 		}
-		device, err := m.requestDeviceCode(ctx, *oauthConfig)
+		verifier := ""
+		if deviceOAuthUsesPKCE(provider.Type, *oauthConfig) {
+			generated, pkceErr := pkceVerifier()
+			if pkceErr != nil {
+				return StartResponse{}, pkceErr
+			}
+			verifier = generated
+			item.verifier = verifier
+		}
+		device, err := m.requestDeviceCode(ctx, *oauthConfig, verifier)
 		if err != nil {
 			return StartResponse{}, err
 		}
@@ -549,23 +625,24 @@ func localCallbackValues(r *http.Request) (state, code, providerError string, er
 	switch r.Method {
 	case http.MethodGet:
 		values := r.URL.Query()
-		return values.Get("state"), values.Get("code"), values.Get("error"), nil
+		return values.Get("state"), firstNonEmpty(values.Get("code"), values.Get("token")), values.Get("error"), nil
 	case http.MethodPost:
 		if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
 			var payload struct {
 				State string `json:"state"`
 				Code  string `json:"code"`
+				Token string `json:"token"`
 				Error string `json:"error"`
 			}
 			if decodeErr := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); decodeErr != nil {
 				return "", "", "", decodeErr
 			}
-			return strings.TrimSpace(payload.State), strings.TrimSpace(payload.Code), strings.TrimSpace(payload.Error), nil
+			return strings.TrimSpace(payload.State), firstNonEmpty(strings.TrimSpace(payload.Code), strings.TrimSpace(payload.Token)), strings.TrimSpace(payload.Error), nil
 		}
 		if parseErr := r.ParseForm(); parseErr != nil {
 			return "", "", "", parseErr
 		}
-		return r.PostForm.Get("state"), r.PostForm.Get("code"), r.PostForm.Get("error"), nil
+		return r.PostForm.Get("state"), firstNonEmpty(r.PostForm.Get("code"), r.PostForm.Get("token")), r.PostForm.Get("error"), nil
 	default:
 		return "", "", "", errors.New("OAuth callback method is unsupported")
 	}
@@ -574,10 +651,15 @@ func localCallbackValues(r *http.Request) (state, code, providerError string, er
 func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (SessionStatus, error) {
 	state = strings.TrimSpace(state)
 	code = strings.TrimSpace(code)
-	if state == "" || code == "" {
+	if code == "" {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
-	item := m.sessionForState(state)
+	var item *session
+	if state != "" {
+		item = m.sessionForState(state)
+	} else {
+		item = m.sessionForSinglePendingStatelessBrowser()
+	}
 	if item == nil {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
@@ -620,7 +702,20 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (Ses
 		}
 		code = parts[0]
 	}
-	token, err := m.exchangeCode(ctx, *oauthConfig, code, expectedState, verifier, redirectURL)
+	var token store.OAuthToken
+	switch provider.Type {
+	case "cline", "clinepass":
+		token, err = m.exchangeClineCode(ctx, code, redirectURL, oauthConfig.TokenURL)
+	case "iflow":
+		token, err = m.exchangeIflowCode(ctx, code, redirectURL, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
+	case "kimchi":
+		token, err = m.exchangeKimchiToken(ctx, code)
+	case "gitlab":
+		gitlabCfg := gitlabOAuthFromProvider(*provider, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
+		token, err = m.exchangeGitlabCode(ctx, gitlabCfg, code, redirectURL, verifier)
+	default:
+		token, err = m.exchangeCode(ctx, *oauthConfig, code, expectedState, verifier, redirectURL)
+	}
 	if err != nil {
 		m.failSession(item, Code(err))
 		return m.statusFor(item), err
@@ -667,6 +762,32 @@ func (m *Manager) sessionForState(state string) *session {
 		if candidateState != "" && security.ConstantTimeEqual(candidateState, state) {
 			return candidate
 		}
+	}
+	return nil
+}
+
+func (m *Manager) sessionForSinglePendingStatelessBrowser() *session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var found *session
+	matches := 0
+	for _, candidate := range m.sessions {
+		candidate.mu.Lock()
+		pending := candidate.status == "pending" && candidate.mode == "browser" && !m.now().After(candidate.expiresAt)
+		providerID := candidate.providerID
+		candidate.mu.Unlock()
+		if !pending {
+			continue
+		}
+		provider, err := m.store.Provider(m.rootCtx, providerID)
+		if err != nil || !providerAllowsStatelessCallback(provider.Type) {
+			continue
+		}
+		matches++
+		found = candidate
+	}
+	if matches == 1 {
+		return found
 	}
 	return nil
 }
@@ -853,7 +974,27 @@ func (m *Manager) performRefresh(ctx context.Context, provider store.Provider, c
 	if err != nil {
 		return credential, err
 	}
-	token, err := m.exchangeRefresh(ctx, *oauthConfig, old.RefreshToken)
+	var token store.OAuthToken
+	switch provider.Type {
+	case "cline", "clinepass":
+		token, err = m.refreshClineToken(ctx, old.RefreshToken, oauthConfig.RefreshURL)
+	case "codebuddy-cn":
+		token, err = m.refreshCodebuddyToken(ctx, old.RefreshToken, *oauthConfig)
+	case "iflow":
+		token, err = m.refreshIflowToken(ctx, old.RefreshToken, *oauthConfig)
+	case "gitlab":
+		gitlabCfg := gitlabOAuthFromProvider(provider, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
+		if old.Extra != nil {
+			if baseURL := strings.TrimSpace(stringValue(old.Extra["base_url"])); baseURL != "" {
+				gitlabCfg.BaseURL = baseURL
+			}
+		}
+		token, err = m.refreshGitlabToken(ctx, old.RefreshToken, gitlabCfg)
+	case "kiro":
+		token, err = m.refreshKiroToken(ctx, old)
+	default:
+		token, err = m.exchangeRefresh(ctx, *oauthConfig, old.RefreshToken)
+	}
 	if err != nil {
 		if IsPermanent(err) {
 			_ = m.store.MarkCredentialAuthRequired(ctx, credential.ID, Code(err))
@@ -907,7 +1048,7 @@ type deviceCodeResponse struct {
 	ExpiresIn       time.Duration
 }
 
-func (m *Manager) requestDeviceCode(ctx context.Context, cfg config.OAuthConfig) (deviceCodeResponse, error) {
+func (m *Manager) requestDeviceCode(ctx context.Context, cfg config.OAuthConfig, verifier string) (deviceCodeResponse, error) {
 	form := url.Values{}
 	for key, value := range cfg.ExtraAuthParams {
 		form.Set(key, value)
@@ -919,15 +1060,25 @@ func (m *Manager) requestDeviceCode(ctx context.Context, cfg config.OAuthConfig)
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
+	if verifier != "" {
+		form.Set("code_challenge", pkceChallenge(verifier))
+		form.Set("code_challenge_method", "S256")
+	}
 	data, status, err := m.postTokenRequest(ctx, cfg.DeviceCodeURL, form, cfg.DeviceRequestFormat)
 	if err != nil {
 		return deviceCodeResponse{}, err
 	}
 	if status < 200 || status >= 300 {
+		if looksLikeHTMLResponse(data) {
+			return deviceCodeResponse{}, &Error{code: "oauth_provider_unavailable", err: errors.New("OAuth provider returned an HTML challenge page instead of JSON; retry or check network access")}
+		}
 		return deviceCodeResponse{}, oauthHTTPError(data, status, false)
 	}
 	var raw map[string]any
 	if err = json.Unmarshal(data, &raw); err != nil {
+		if looksLikeHTMLResponse(data) {
+			return deviceCodeResponse{}, &Error{code: "oauth_provider_unavailable", err: errors.New("OAuth provider returned an HTML challenge page instead of JSON; retry or check network access")}
+		}
 		return deviceCodeResponse{}, &Error{code: "oauth_provider_unavailable", err: errors.New("invalid device authorization response")}
 	}
 	code := stringValue(raw["device_code"])
@@ -968,6 +1119,7 @@ func (m *Manager) pollDevice(item *session) {
 		}
 		providerID, deviceCode, deviceUserCode, interval := item.providerID, item.deviceCode, item.deviceUserCode, item.interval
 		verifier := item.verifier
+		deviceMeta := item.deviceMeta
 		label, email := item.label, item.email
 		item.mu.Unlock()
 		provider, err := m.store.Provider(m.rootCtx, providerID)
@@ -986,8 +1138,14 @@ func (m *Manager) pollDevice(item *session) {
 			token, pending, err = m.exchangeCodexDevice(m.rootCtx, *oauthConfig, deviceCode, deviceUserCode)
 		} else if strings.EqualFold(oauthConfig.DeviceFlow, "qoder") {
 			token, pending, err = m.pollQoderDevice(m.rootCtx, deviceCode, verifier, deviceUserCode)
+		} else if strings.EqualFold(oauthConfig.DeviceFlow, "kilocode") {
+			token, pending, err = m.pollKilocodeDevice(m.rootCtx, deviceCode)
+		} else if strings.EqualFold(oauthConfig.DeviceFlow, "codebuddy-cn") {
+			token, pending, err = m.pollCodebuddyDevice(m.rootCtx, deviceCode)
+		} else if strings.EqualFold(oauthConfig.DeviceFlow, "kiro") {
+			token, pending, err = m.pollKiroDevice(m.rootCtx, deviceCode, deviceMeta)
 		} else {
-			token, pending, err = m.exchangeDeviceCode(m.rootCtx, *oauthConfig, deviceCode)
+			token, pending, err = m.exchangeDeviceCode(m.rootCtx, *oauthConfig, deviceCode, verifier)
 		}
 		if err == nil {
 			token, email, prepareErr := m.prepareProviderToken(m.rootCtx, *provider, token, email)
@@ -1022,7 +1180,7 @@ func (m *Manager) pollDevice(item *session) {
 	}
 }
 
-func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig, deviceCode string) (store.OAuthToken, bool, error) {
+func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig, deviceCode, verifier string) (store.OAuthToken, bool, error) {
 	if m.clientID(cfg) == "" {
 		return store.OAuthToken{}, false, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
@@ -1033,6 +1191,9 @@ func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 	form.Set("device_code", deviceCode)
 	form.Set("client_id", m.clientID(cfg))
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
@@ -1320,6 +1481,13 @@ func pkceVerifier() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func deviceOAuthUsesPKCE(providerType string, cfg config.OAuthConfig) bool {
+	if cfg.DevicePKCE {
+		return true
+	}
+	return providerType == "qwen"
 }
 
 func pkceChallenge(verifier string) string {

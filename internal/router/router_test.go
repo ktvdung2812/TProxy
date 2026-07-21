@@ -3,6 +3,7 @@ package router_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -522,6 +523,48 @@ func TestModelCooldownFiltersOnlyMatchingUpstreamRoute(t *testing.T) {
 	}
 	if result.Selection.Route.UpstreamModel != "upstream-b" {
 		t.Fatalf("selected upstream=%q want upstream-b", result.Selection.Route.UpstreamModel)
+	}
+}
+
+func TestAllModelCooldownsReturnRateLimitedError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be called when all credentials are on model cooldown")
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "credential-a", AuthType: "none"},
+			{ID: "credential-b", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	now := time.Now()
+	for _, credentialID := range []string{"credential-a", "credential-b"} {
+		if err := dataStore.SetModelCooldown(context.Background(), credentialID, "upstream-a", "upstream_rate_limited", "usage limit reached", now.Add(time.Hour), http.StatusTooManyRequests, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "cooldown-exhausted", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected error when all credentials are on model cooldown")
+	}
+	var providerErr *providers.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %T %v want *providers.ProviderError", err, err)
+	}
+	if providerErr.Code != "upstream_rate_limited" {
+		t.Fatalf("code = %q want upstream_rate_limited", providerErr.Code)
+	}
+	if providerErr.Status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d want %d", providerErr.Status, http.StatusTooManyRequests)
 	}
 }
 

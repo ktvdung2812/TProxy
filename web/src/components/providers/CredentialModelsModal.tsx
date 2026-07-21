@@ -11,13 +11,6 @@ type Props = {
   onClose: () => void;
 };
 
-function inferModelKind(capabilities?: string[]) {
-  if (capabilities?.includes("embedding")) return "embedding";
-  if (capabilities?.includes("image-output")) return "image";
-  if (capabilities?.includes("stt")) return "stt";
-  return "llm";
-}
-
 export function CredentialModelsModal({ open, credential, providerId, secret, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
@@ -26,6 +19,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
   const [searchQuery, setSearchQuery] = useState("");
   const [modelTestResults, setModelTestResults] = useState<Record<string, "ok" | "error">>({});
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [testingAll, setTestingAll] = useState(false);
   const [testError, setTestError] = useState("");
 
   useEffect(() => {
@@ -36,6 +30,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
       setSearchQuery("");
       setModelTestResults({});
       setTestingModelId(null);
+      setTestingAll(false);
       setTestError("");
       return;
     }
@@ -95,27 +90,53 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
     }
   };
 
+  const runModelTest = async (model: DiscoveredModel) => {
+    if (!credential) return false;
+    const result = await testModel(secret, {
+      provider_id: providerId,
+      model_id: model.id,
+      kind: "llm",
+      credential_id: credential.id,
+    });
+    setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
+    if (!result.ok) {
+      const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
+      setTestError(`${model.id}: ${result.error || "Model not reachable"}${latency}`);
+    }
+    return result.ok;
+  };
+
   const handleTestModel = async (model: DiscoveredModel) => {
-    if (!credential || testingModelId) return;
+    if (!credential || testingModelId || testingAll) return;
     setTestingModelId(model.id);
     setTestError("");
     try {
-      const result = await testModel(secret, {
-        provider_id: providerId,
-        model_id: model.id,
-        kind: inferModelKind(model.capabilities),
-        credential_id: credential.id,
-      });
-      setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
-      if (!result.ok) {
-        const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
-        setTestError((result.error || "Model not reachable") + latency);
-      }
+      await runModelTest(model);
     } catch (cause) {
       setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
       setTestError(cause instanceof Error ? cause.message : "Test failed");
     } finally {
       setTestingModelId(null);
+    }
+  };
+
+  const handleTestAllModels = async () => {
+    if (!credential || testingModelId || testingAll || models.length === 0) return;
+    setTestingAll(true);
+    setTestError("");
+    try {
+      for (const model of models) {
+        setTestingModelId(model.id);
+        try {
+          await runModelTest(model);
+        } catch (cause) {
+          setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
+          setTestError(cause instanceof Error ? cause.message : `Test failed for ${model.id}`);
+        }
+      }
+    } finally {
+      setTestingModelId(null);
+      setTestingAll(false);
     }
   };
 
@@ -133,14 +154,27 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
       size="lg"
       headerAction={
         !loading && models.length > 0 ? (
-          <Input
-            icon="search"
-            placeholder="Search models..."
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            style={{ width: "100%", maxWidth: 240 }}
-            aria-label="Search models"
-          />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <Button
+              variant="outline"
+              size="sm"
+              icon={testingAll ? "progress_activity" : "science"}
+              onClick={() => void handleTestAllModels()}
+              disabled={testingAll || !!testingModelId}
+              aria-label="Test all models"
+              title="Test all models"
+            >
+              {testingAll ? "Testing..." : "Test all"}
+            </Button>
+            <Input
+              icon="search"
+              placeholder="Search models..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              style={{ width: "100%", maxWidth: 240 }}
+              aria-label="Search models"
+            />
+          </div>
         ) : null
       }
       footer={
@@ -222,7 +256,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
                           size="sm"
                           icon={isTesting ? "progress_activity" : testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "science"}
                           onClick={() => void handleTestModel(model)}
-                          disabled={isTesting}
+                          disabled={isTesting || testingAll}
                           aria-label="Test model"
                           title={isTesting ? "Testing..." : "Test model"}
                         />

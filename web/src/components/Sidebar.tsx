@@ -8,10 +8,11 @@ type SidebarProps = {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   collapseLabel?: string;
+  onLogout?: () => void;
 };
 
 /** Vibrancy sidebar with macOS traffic lights, gradient brand logo, grouped nav, status. */
-export function Sidebar({ onClose, online = true, collapsed = false, onToggleCollapse, collapseLabel }: SidebarProps) {
+export function Sidebar({ onClose, online = true, collapsed = false, onToggleCollapse, collapseLabel, onLogout }: SidebarProps) {
   return (
     <aside className={cn("sidebar bg-vibrancy", collapsed && "is-collapsed")}>
       <div className="sidebar-header">
@@ -67,6 +68,12 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
         <span className={cn("status-dot", !online && "offline")} />
         {!collapsed && <span>{online ? "Gateway online" : "Gateway offline"}</span>}
       </div>
+      {onLogout && !collapsed ? (
+        <button type="button" className="sidebar-logout-btn" onClick={onLogout}>
+          <span className="material-symbols-outlined">logout</span>
+          <span>Đăng xuất</span>
+        </button>
+      ) : null}
     </aside>
   );
 }

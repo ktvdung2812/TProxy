@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 19
+const sqliteCurrentSchemaVersion = 20
 
 type sqliteMigration struct {
 	version int
@@ -59,6 +59,7 @@ var sqliteMigrations = []sqliteMigration{
 	{version: 19, apply: func(ctx context.Context, tx *sql.Tx) error {
 		return addColumnIfMissing(ctx, tx, "usage_events", "cached_tokens", `ALTER TABLE usage_events ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
 	}},
+	{version: 20, apply: migrateCredentialCreatedAt},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -328,6 +329,21 @@ func migrateCredentialRotationState(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	return addColumnIfMissing(ctx, tx, "credentials", "consecutive_use_count", `ALTER TABLE credentials ADD COLUMN consecutive_use_count INTEGER NOT NULL DEFAULT 0`)
+}
+
+func migrateCredentialCreatedAt(ctx context.Context, tx *sql.Tx) error {
+	if err := addColumnIfMissing(ctx, tx, "credentials", "created_at", `ALTER TABLE credentials ADD COLUMN created_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE credentials SET created_at = last_validated_at WHERE created_at = '' AND last_validated_at != ''`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE credentials SET created_at = (
+		SELECT MIN(ue.created_at) FROM usage_events ue WHERE ue.credential_id = credentials.id
+	) WHERE created_at = '' AND EXISTS (
+		SELECT 1 FROM usage_events ue WHERE ue.credential_id = credentials.id
+	)`)
+	return err
 }
 
 func sqliteSchemaVersion(ctx context.Context, queryer interface {

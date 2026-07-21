@@ -291,8 +291,11 @@ export function cancelOAuth(secret: string, sessionId: string) {
   );
 }
 
-export function completeOAuthCallback(secret: string, state: string, code: string) {
-  const params = new URLSearchParams({ state, code });
+export function completeOAuthCallback(secret: string, code: string, state?: string) {
+  const params = new URLSearchParams({ code });
+  if (state) {
+    params.set("state", state);
+  }
   return adminFetch<OAuthSessionStatus>(secret, `/api/admin/oauth/callback?${params.toString()}`, "GET");
 }
 
@@ -373,6 +376,36 @@ export function resetAccountRotationState(secret: string, providerId?: string) {
   return adminFetch<{ ok: boolean; provider_id?: string }>(secret, "/api/admin/rotation/reset", "POST", {
     provider_id: providerId || "",
   });
+}
+
+export type CursorAutoImportResult = {
+  found: boolean;
+  access_token?: string;
+  machine_id?: string;
+  db_path?: string;
+  error?: string;
+};
+
+export function autoImportCursorTokens(secret: string) {
+  return adminFetch<CursorAutoImportResult>(secret, "/api/admin/oauth/cursor/auto-import", "GET");
+}
+
+export function importCursorTokens(
+  secret: string,
+  payload: {
+    provider_id: string;
+    credential_id?: string;
+    label?: string;
+    access_token: string;
+    machine_id: string;
+  },
+) {
+  return adminFetch<{ ok: boolean; provider_id: string; credential_id: string }>(
+    secret,
+    "/api/admin/oauth/cursor/import",
+    "POST",
+    payload,
+  );
 }
 
 export const GLOBAL_ROTATION_STRATEGIES = [

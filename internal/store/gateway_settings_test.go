@@ -32,7 +32,7 @@ func TestGatewaySettingsDefaultsAndPersist(t *testing.T) {
 		t.Fatalf("defaults = %+v", defaults)
 	}
 
-	if err := dataStore.SaveGatewaySettings(ctx, GatewaySettings{AllowLANManagement: true}); err != nil {
+	if err := dataStore.SaveGatewaySettings(ctx, GatewaySettings{AllowLANManagement: true, PublicBaseURL: "https://proxy.example.com"}); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := dataStore.GatewaySettings(ctx)
@@ -41,5 +41,8 @@ func TestGatewaySettingsDefaultsAndPersist(t *testing.T) {
 	}
 	if !updated.AllowLANManagement {
 		t.Fatalf("updated = %+v", updated)
+	}
+	if updated.PublicBaseURL != "https://proxy.example.com" {
+		t.Fatalf("public base url = %q", updated.PublicBaseURL)
 	}
 }

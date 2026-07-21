@@ -18,13 +18,6 @@ type AliasTarget struct {
 	Model string
 }
 
-var chatGPTProviderAliases = map[string]struct{}{
-	"chatgpt": {},
-	"openai":  {},
-	"codex":   {},
-	"cx":      {},
-}
-
 var anthropicProviderAliases = map[string]struct{}{
 	"anthropic": {},
 	"claude":    {},
@@ -97,11 +90,8 @@ func ClassifyAliasTarget(value string) (AliasTarget, bool) {
 
 	if provider, upstream, ok := parseSlashProviderAlias(normalized); ok {
 		upstream = NormalizeModel(upstream)
-		if _, isChatGPT := chatGPTProviderAliases[provider]; isChatGPT {
-			if IsOpenAIChatModel(upstream) {
-				return AliasTarget{Kind: TargetKindChatGPT, Model: strings.ToLower(upstream)}, true
-			}
-			return AliasTarget{}, false
+		if IsOpenAIChatModel(upstream) {
+			return AliasTarget{Kind: TargetKindChatGPT, Model: strings.ToLower(upstream)}, true
 		}
 		if _, isAnthropic := anthropicProviderAliases[provider]; isAnthropic {
 			if IsRealClaudeModel(upstream) {
@@ -116,11 +106,11 @@ func ClassifyAliasTarget(value string) (AliasTarget, bool) {
 		selector := normalizeProviderSelector(trimmed)
 		parts := strings.SplitN(selector, ":", 2)
 		if len(parts) == 2 {
-			provider := strings.ToLower(strings.TrimSpace(parts[0]))
 			upstream := NormalizeModel(parts[1])
-			if _, isChatGPT := chatGPTProviderAliases[provider]; isChatGPT && IsOpenAIChatModel(upstream) {
+			if IsOpenAIChatModel(upstream) {
 				return AliasTarget{Kind: TargetKindChatGPT, Model: strings.ToLower(upstream)}, true
 			}
+			provider := strings.ToLower(strings.TrimSpace(parts[0]))
 			if _, isAnthropic := anthropicProviderAliases[provider]; isAnthropic && IsRealClaudeModel(upstream) {
 				return AliasTarget{Kind: TargetKindClaude, Model: strings.ToLower(upstream)}, true
 			}
@@ -143,7 +133,8 @@ func ClassifyAliasTarget(value string) (AliasTarget, bool) {
 	return AliasTarget{}, false
 }
 
-// IsClaudePlaceholder reports whether the client sent a virtual Claude tier name.
+// IsClaudePlaceholder reports whether the client sent a virtual tier placeholder
+// (Claude names like sonnet/fable or GPT codenames like gpt-sol/gpt-terra).
 func IsClaudePlaceholder(model string) bool {
 	if _, ok := PlaceholderRole(model); ok {
 		return true
@@ -186,13 +177,17 @@ func EnvOverridesMap() map[string]string {
 }
 
 func (r *Resolver) formatRoleTarget(target, defaultCodexProvider string) string {
-	if classified, ok := ClassifyAliasTarget(target); ok {
+	trimmed := strings.TrimSpace(target)
+	if classified, ok := ClassifyAliasTarget(trimmed); ok {
 		switch classified.Kind {
 		case TargetKindClaude, TargetKindVirtual:
 			return classified.Model
 		case TargetKindChatGPT:
+			if strings.Contains(trimmed, ":") || strings.Contains(trimmed, "::") || strings.Contains(trimmed, "/") {
+				return normalizeProviderSelector(trimmed)
+			}
 			return FormatTarget(classified.Model, defaultCodexProvider)
 		}
 	}
-	return FormatTarget(target, defaultCodexProvider)
+	return FormatTarget(trimmed, defaultCodexProvider)
 }

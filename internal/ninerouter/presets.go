@@ -27,15 +27,16 @@ var Presets = map[string]Preset{
 	"cerebras": {ID:"cerebras",Type:"openai-compatible",Name:"Cerebras",BaseURL:"https://api.cerebras.ai/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://cloud.cerebras.ai/platform",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"chutes": {ID:"chutes",Type:"openai-compatible",Name:"Chutes AI",BaseURL:"https://llm.chutes.ai/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://chutes.ai/app/api",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"claude": {ID:"claude",Type:"claude",Name:"Claude Code",BaseURL:"https://api.anthropic.com",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
-	"cline": {ID:"cline",Type:"openai-compatible",Name:"Cline",BaseURL:"https://api.cline.bot/api/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
+	"cline": {ID:"cline",Type:"cline",Name:"Cline",BaseURL:"https://api.cline.bot/api/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://app.cline.bot",AuthModes:[]string{"oauth","apikey"},SupportsQuota:false,NoAuth:false,HasOAuth:true},
+	"clinepass": {ID:"clinepass",Type:"clinepass",Name:"ClinePass",BaseURL:"https://api.cline.bot/api/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://app.cline.bot",AuthModes:[]string{"oauth","apikey"},SupportsQuota:false,NoAuth:false,HasOAuth:true},
 	"cloudflare-ai": {ID:"cloudflare-ai",Type:"openai-compatible",Name:"Cloudflare",BaseURL:"https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1",AuthType:"api_key",Category:"freeTier",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://dash.cloudflare.com/profile/api-tokens",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
-	"codebuddy-cn": {ID:"codebuddy-cn",Type:"openai-compatible",Name:"CodeBuddy CN",BaseURL:"https://copilot.tencent.com/v2",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://copilot.tencent.com",AuthModes:[]string{"oauth","apikey"},SupportsQuota:true,NoAuth:false,HasOAuth:true},
+	"codebuddy-cn": {ID:"codebuddy-cn",Type:"codebuddy-cn",Name:"CodeBuddy CN",BaseURL:"https://copilot.tencent.com/v2",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://copilot.tencent.com",AuthModes:[]string{"oauth","apikey"},SupportsQuota:true,NoAuth:false,HasOAuth:true},
 	"codex": {ID:"codex",Type:"codex",Name:"OpenAI Codex",BaseURL:"https://chatgpt.com/backend-api/codex",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
 	"cohere": {ID:"cohere",Type:"openai-compatible",Name:"Cohere",BaseURL:"https://api.cohere.ai/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://dashboard.cohere.com/api-keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"comfyui": {ID:"comfyui",Type:"image",Name:"ComfyUI",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"commandcode": {ID:"commandcode",Type:"openai-compatible",Name:"Command Code",BaseURL:"https://api.commandcode.ai/alpha/generate",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://commandcode.ai/studio",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"coqui": {ID:"coqui",Type:"elevenlabs",Name:"Coqui TTS",BaseURL:"",AuthType:"none",Category:"freeTier",CredentialAuth:"none",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:true,HasOAuth:false},
-	"cursor": {ID:"cursor",Type:"openai-compatible",Name:"Cursor IDE",BaseURL:"https://api2.cursor.sh",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
+	"cursor": {ID:"cursor",Type:"openai-compatible",Name:"Cursor IDE",BaseURL:"https://api2.cursor.sh",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"Import access token from Cursor IDE (Settings → Account). Upstream routing uses Cursor Connect API.",ApiKeyURL:"https://cursor.com",AuthModes:[]string{"oauth"},SupportsQuota:false,NoAuth:false,HasOAuth:true},
 	"deepgram": {ID:"deepgram",Type:"elevenlabs",Name:"Deepgram",BaseURL:"https://api.deepgram.com/v1/listen",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://console.deepgram.com/api-keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"deepseek": {ID:"deepseek",Type:"openai-compatible",Name:"DeepSeek",BaseURL:"https://api.deepseek.com",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://platform.deepseek.com/api_keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"edge-tts": {ID:"edge-tts",Type:"elevenlabs",Name:"Edge TTS",BaseURL:"",AuthType:"none",Category:"freeTier",CredentialAuth:"none",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:true,HasOAuth:false},
@@ -48,7 +49,7 @@ var Presets = map[string]Preset{
 	"gemini": {ID:"gemini",Type:"gemini",Name:"Gemini",BaseURL:"https://generativelanguage.googleapis.com",AuthType:"api_key",Category:"freeTier",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://aistudio.google.com/app/apikey",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"gemini-cli": {ID:"gemini-cli",Type:"antigravity",Name:"Gemini CLI",BaseURL:"https://cloudcode-pa.googleapis.com/v1internal",AuthType:"oauth",Category:"free",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
 	"github": {ID:"github",Type:"copilot",Name:"GitHub Copilot",BaseURL:"https://api.githubcopilot.com",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
-	"gitlab": {ID:"gitlab",Type:"openai-compatible",Name:"GitLab Duo",BaseURL:"https://gitlab.com/api/v4",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
+	"gitlab": {ID:"gitlab",Type:"gitlab",Name:"GitLab Duo",BaseURL:"https://gitlab.com/api/v4",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"Set gitlab_client_id in provider config",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:true},
 	"glm": {ID:"glm",Type:"openai-compatible",Name:"GLM",BaseURL:"https://api.z.ai/api/paas/v4",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"General API (pay-as-you-go): keep this URL. GLM Coding Plan keys must use https://api.z.ai/api/coding/paas/v4 instead.",ApiKeyURL:"https://open.bigmodel.cn/usercenter/apikeys",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
 	"glm-cn": {ID:"glm-cn",Type:"openai-compatible",Name:"GLM (China)",BaseURL:"https://open.bigmodel.cn/api/coding/paas/v4",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://open.bigmodel.cn/usercenter/apikeys",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
 	"google-pse": {ID:"google-pse",Type:"tavily",Name:"Google PSE",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://programmablesearchengine.google.com/controlpanel/create",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
@@ -58,14 +59,15 @@ var Presets = map[string]Preset{
 	"groq": {ID:"groq",Type:"openai-compatible",Name:"Groq",BaseURL:"https://api.groq.com/openai/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://console.groq.com/keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"huggingface": {ID:"huggingface",Type:"openai-compatible",Name:"HuggingFace",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://huggingface.co/settings/tokens",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"hyperbolic": {ID:"hyperbolic",Type:"openai-compatible",Name:"Hyperbolic",BaseURL:"https://api.hyperbolic.xyz/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://app.hyperbolic.xyz/settings",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
-	"iflow": {ID:"iflow",Type:"openai-compatible",Name:"iFlow AI",BaseURL:"https://apis.iflow.cn/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
+	"iflow": {ID:"iflow",Type:"iflow",Name:"iFlow AI",BaseURL:"https://apis.iflow.cn/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:true},
 	"inworld": {ID:"inworld",Type:"elevenlabs",Name:"Inworld TTS",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://platform.inworld.ai/api-keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"jina-ai": {ID:"jina-ai",Type:"openai-compatible",Name:"Jina AI",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://jina.ai/?sui=apikey",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"jina-reader": {ID:"jina-reader",Type:"tavily",Name:"Jina Reader",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://jina.ai/?sui=apikey",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
-	"kilocode": {ID:"kilocode",Type:"openai-compatible",Name:"Kilo Code",BaseURL:"https://api.kilo.ai/api/openrouter",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
+	"kilocode": {ID:"kilocode",Type:"kilocode",Name:"Kilo Code",BaseURL:"https://api.kilo.ai/api/openrouter",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:true},
+	"kimchi": {ID:"kimchi",Type:"kimchi",Name:"Kimchi",BaseURL:"https://llm.kimchi.dev/openai/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:[]string{"oauth"},SupportsQuota:false,NoAuth:false,HasOAuth:true},
 	"kimi": {ID:"kimi",Type:"kimi",Name:"Kimi",BaseURL:"https://api.kimi.com/coding/v1",AuthType:"api_key",Category:"apikey",CredentialAuth:"",AuthHint:"",ApiKeyURL:"https://platform.moonshot.ai/console/api-keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"kimi-coding": {ID:"kimi-coding",Type:"kimi",Name:"Kimi Coding",BaseURL:"https://api.kimi.com/coding/v1",AuthType:"oauth",Category:"oauth",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
-	"kiro": {ID:"kiro",Type:"kiro",Name:"Kiro AI",BaseURL:"https://runtime.us-east-1.kiro.dev/generateAssistantResponse",AuthType:"oauth",Category:"free",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:false},
+	"kiro": {ID:"kiro",Type:"kiro",Name:"Kiro AI",BaseURL:"https://runtime.us-east-1.kiro.dev/generateAssistantResponse",AuthType:"oauth",Category:"free",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:true,NoAuth:false,HasOAuth:true},
 	"linkup": {ID:"linkup",Type:"tavily",Name:"Linkup",BaseURL:"",AuthType:"api_key",Category:"apikey",CredentialAuth:"apikey",AuthHint:"",ApiKeyURL:"https://app.linkup.so/api-keys",AuthModes:nil,SupportsQuota:false,NoAuth:false,HasOAuth:false},
 	"local-device": {ID:"local-device",Type:"elevenlabs",Name:"Local Device",BaseURL:"",AuthType:"none",Category:"freeTier",CredentialAuth:"none",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:true,HasOAuth:false},
 	"mimo-free": {ID:"mimo-free",Type:"openai-compatible",Name:"MiMo Code Free",BaseURL:"https://api.xiaomimimo.com/api/free-ai/openai/chat",AuthType:"none",Category:"free",CredentialAuth:"",AuthHint:"",ApiKeyURL:"",AuthModes:nil,SupportsQuota:false,NoAuth:true,HasOAuth:false},
@@ -245,5 +247,18 @@ var Aliases = map[string]string{
 	"youcom":"youcom",
 }
 
-func Lookup(providerID string) (Preset, bool) { id:=strings.TrimSpace(providerID); if id=="" {return Preset{},false}; if m,ok:=Aliases[id]; ok {id=m}; p,ok:=Presets[id]; return p,ok }
+func Lookup(providerID string) (Preset, bool) {
+	id := strings.TrimSpace(providerID)
+	if id == "" {
+		return Preset{}, false
+	}
+	if mapped, ok := Aliases[id]; ok {
+		id = mapped
+	}
+	if preset, ok := Presets[id]; ok {
+		return preset, true
+	}
+	preset, ok := Wave2Presets[id]
+	return preset, ok
+}
 func ResolveProviderID(providerID string) string { if m,ok:=Aliases[strings.TrimSpace(providerID)]; ok {return m}; return strings.TrimSpace(providerID) }

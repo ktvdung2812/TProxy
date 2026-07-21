@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge, Button, Select, Toggle } from "../ui";
-import { discoverProviderModels, type DiscoveredModel } from "../providers/api";
 import type { ModelRecord, ProviderOption, RouteFormData } from "./types";
+import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 import {
   accountHealthLabel,
   accountHealthVariant,
+  providersForUpstreamModel,
   reorderRoutePriorities,
+  resolveCanonicalUpstreamModel,
+  routeFormsEqual,
   sortRouteForms,
+  syncRoutesForUpstreamModel,
   validatePriorityRoutes,
 } from "./utils";
 
@@ -18,10 +22,9 @@ type Props = {
   routes: RouteFormData[];
   providers: ProviderOption[];
   credentialCounts: Record<string, number>;
-  saving?: boolean;
-  showActions?: boolean;
   onSave?: (routes: RouteFormData[]) => void;
   onNavigateAway?: () => void;
+  onRegisterSave?: (actions: { canSave: boolean; save: () => void } | null) => void;
 };
 
 function moveItem<T>(items: T[], from: number, to: number) {
@@ -39,71 +42,64 @@ export function ProviderPriorityEditor({
   routes,
   providers,
   credentialCounts,
-  saving = false,
-  showActions = true,
   onSave,
   onNavigateAway,
+  onRegisterSave,
 }: Props) {
   const navigate = useNavigate();
   const [items, setItems] = useState<RouteFormData[]>([]);
-  const [modelsByProvider, setModelsByProvider] = useState<Record<string, DiscoveredModel[]>>({});
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  const { modelsByProvider, loading: loadingModels, error: modelsError } = useProviderModelDiscovery(
+    secret,
+    providers,
+    active,
+  );
 
   useEffect(() => {
     if (!active) return;
     setItems(sortRouteForms(routes));
   }, [active, routes, model?.ID]);
 
-  const providerIds = useMemo(
-    () => providers.map((provider) => provider.id).filter(Boolean),
-    [providers],
+  const canonicalUpstream = useMemo(
+    () => (model ? resolveCanonicalUpstreamModel(model, sortRouteForms(routes)) : ""),
+    [model, routes],
   );
 
   useEffect(() => {
-    if (!active || !secret || providerIds.length === 0) return;
+    if (!active || !model || loadingModels || !canonicalUpstream) return;
 
-    let cancelled = false;
-    setLoadingModels(true);
-    setModelsError(null);
+    setItems((current) => {
+      const base = current.length > 0 ? current : sortRouteForms(routes);
+      const synced = syncRoutesForUpstreamModel(base, providers, modelsByProvider, canonicalUpstream);
+      return routeFormsEqual(base, synced) ? base : synced;
+    });
+  }, [active, canonicalUpstream, loadingModels, model, modelsByProvider, providers, routes]);
 
-    void (async () => {
-      try {
-        const entries = await Promise.all(
-          providerIds.map(async (providerId) => {
-            try {
-              const result = await discoverProviderModels(secret, providerId);
-              return [providerId, result.data || []] as const;
-            } catch {
-              return [providerId, []] as const;
-            }
-          }),
-        );
-        if (cancelled) return;
-        setModelsByProvider(Object.fromEntries(entries));
-      } catch (error) {
-        if (!cancelled) {
-          setModelsByProvider({});
-          setModelsError(error instanceof Error ? error.message : "Failed to load supported models");
-        }
-      } finally {
-        if (!cancelled) setLoadingModels(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [active, secret, providerIds]);
+  const compatibleProviders = useMemo(
+    () => providersForUpstreamModel(providers, modelsByProvider, canonicalUpstream),
+    [canonicalUpstream, modelsByProvider, providers],
+  );
 
   const providerOptions = useMemo(
-    () => providers.map((provider) => ({ value: provider.id, label: provider.label })),
-    [providers],
+    () => compatibleProviders.map((provider) => ({ value: provider.id, label: provider.label })),
+    [compatibleProviders],
   );
 
   const validationError = validatePriorityRoutes(items);
   const enabledItems = items.filter((item) => item.enabled);
   const primaryProvider = enabledItems[0]?.provider || "";
+
+  useEffect(() => {
+    if (!onRegisterSave) return;
+    if (!model || !onSave) {
+      onRegisterSave(null);
+      return;
+    }
+    onRegisterSave({
+      canSave: !validationError,
+      save: () => onSave(reorderRoutePriorities(items)),
+    });
+    return () => onRegisterSave(null);
+  }, [onRegisterSave, model, onSave, validationError, items]);
 
   const goToProviders = () => {
     onNavigateAway?.();
@@ -116,21 +112,24 @@ export function ProviderPriorityEditor({
         if (routeIndex !== index) return route;
         const next = { ...route, ...patch };
         if (patch.provider && patch.provider !== route.provider) {
-          const providerModels = modelsByProvider[patch.provider] || [];
-          const hasCurrent = providerModels.some((item) => item.id === route.upstream_model);
-          next.upstream_model = hasCurrent ? route.upstream_model : providerModels[0]?.id || "";
+          if (canonicalUpstream) {
+            next.upstream_model = canonicalUpstream;
+          } else {
+            const providerModels = modelsByProvider[patch.provider] || [];
+            next.upstream_model = providerModels[0]?.id || route.upstream_model;
+          }
         }
         return next;
       }),
     );
   };
 
-  const upstreamOptions = (providerId: string, currentValue: string) => {
-    const providerModels = modelsByProvider[providerId] || [];
-    if (currentValue && !providerModels.some((item) => item.id === currentValue)) {
-      return [{ id: currentValue, name: currentValue }, ...providerModels];
-    }
-    return providerModels;
+  const providerOptionsForRoute = (currentProviderId: string) => {
+    if (!currentProviderId) return providerOptions;
+    if (providerOptions.some((option) => option.value === currentProviderId)) return providerOptions;
+    const fallback = providers.find((provider) => provider.id === currentProviderId);
+    if (!fallback) return providerOptions;
+    return [...providerOptions, { value: fallback.id, label: fallback.label }];
   };
 
   const removeRoute = (index: number) => {
@@ -147,38 +146,23 @@ export function ProviderPriorityEditor({
 
   return (
     <div className="priority-manager">
-      <div className="priority-manager-detail-head">
-        <div>
-          <h3>{model.DisplayName || model.ID}</h3>
-          <p>
-            <code>{model.ID}</code>
-            {model.Aliases?.length ? (
+      <div className="priority-manager-help">
+        <p>
+          This is where tproxy decides which provider serves <code>{model.ID}</code>. Requests hit{" "}
+          <strong>P1</strong> first, then fall back down the chain. Disable providers you do not want, or keep only one
+          enabled route to pin a single provider.
+        </p>
+        {canonicalUpstream ? (
+          <p className="priority-manager-primary">
+            Upstream model: <code>{canonicalUpstream}</code>
+            {!loadingModels ? (
               <>
                 {" "}
-                · Aliases: {(model.Aliases || []).join(", ")}
+                · {compatibleProviders.length} compatible provider{compatibleProviders.length === 1 ? "" : "s"}
               </>
             ) : null}
           </p>
-        </div>
-        {showActions && onSave ? (
-          <Button
-            variant="primary"
-            size="sm"
-            icon="save"
-            loading={saving}
-            disabled={!!validationError}
-            onClick={() => onSave(reorderRoutePriorities(items))}
-          >
-            Save priority
-          </Button>
         ) : null}
-      </div>
-
-      <div className="priority-manager-help">
-        <p>
-          Requests use the first enabled provider as <strong>P1</strong>, then fall back down the chain. Disable
-          providers you do not want, or keep only one enabled route to pin a single provider.
-        </p>
         {primaryProvider ? (
           <p className="priority-manager-primary">
             Primary provider: <code>{primaryProvider}</code>
@@ -188,26 +172,33 @@ export function ProviderPriorityEditor({
         )}
       </div>
 
-      {providerOptions.length === 0 ? (
+      {providers.length === 0 ? (
         <div className="priority-manager-empty">
           <p>No providers configured yet. Set up providers first, then return here to arrange priority.</p>
           <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
             Open Providers
           </Button>
         </div>
-      ) : items.length === 0 ? (
+      ) : !loadingModels && compatibleProviders.length === 0 && items.length === 0 ? (
         <div className="priority-manager-empty">
-          <p>No provider routes for this model yet. Configure providers, then map them here.</p>
+          <p>
+            {canonicalUpstream
+              ? `No providers currently expose upstream model "${canonicalUpstream}".`
+              : "No provider routes for this model yet. Configure providers, then map them here."}
+          </p>
           <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
             Open Providers
           </Button>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="priority-manager-empty">
+          <p>Discovering providers that support upstream model "{canonicalUpstream}"…</p>
         </div>
       ) : (
         <div className="priority-manager-table" role="table" aria-label="Provider priority routes">
           <div className="priority-manager-head" role="row">
             <span>Order</span>
             <span>Provider</span>
-            <span>Upstream</span>
             <span>Accounts</span>
             <span>Enabled</span>
             <span aria-hidden />
@@ -233,26 +224,9 @@ export function ProviderPriorityEditor({
                     value={route.provider}
                     onChange={(event) => updateRoute(index, { provider: event.target.value })}
                   >
-                    {providerOptions.map((option) => (
+                    {providerOptionsForRoute(route.provider).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div className="priority-manager-upstream" role="cell">
-                  <Select
-                    value={route.upstream_model}
-                    disabled={loadingModels || upstreamOptions(route.provider, route.upstream_model).length === 0}
-                    onChange={(event) => updateRoute(index, { upstream_model: event.target.value })}
-                  >
-                    {loadingModels ? <option value="">Loading models…</option> : null}
-                    {!loadingModels && upstreamOptions(route.provider, route.upstream_model).length === 0 ? (
-                      <option value="">No supported models</option>
-                    ) : null}
-                    {upstreamOptions(route.provider, route.upstream_model).map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name && item.name !== item.id ? `${item.name} (${item.id})` : item.id}
                       </option>
                     ))}
                   </Select>

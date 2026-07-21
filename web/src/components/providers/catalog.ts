@@ -61,6 +61,13 @@ export const ALL_PROVIDER_TYPES = [
   "qwen",
   "kiro",
   "qoder",
+  "cline",
+  "clinepass",
+  "iflow",
+  "codebuddy-cn",
+  "kilocode",
+  "gitlab",
+  "kimchi",
 ] as const;
 
 const CATALOG: Record<string, ProviderTypeInfo> = {
@@ -319,8 +326,79 @@ const CATALOG: Record<string, ProviderTypeInfo> = {
     description: "AWS Kiro / CodeWhisperer with AWS event-stream chat.",
     website: "https://kiro.dev",
     defaultAuthType: "oauth",
-    supportsOAuth: false,
+    supportsOAuth: true,
     defaultBaseUrl: "https://runtime.us-east-1.kiro.dev",
+  },
+  iflow: {
+    type: "iflow",
+    name: "iFlow AI",
+    icon: "water_drop",
+    textIcon: "IF",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#6366F1",
+    description: "iFlow AI via browser OAuth (API key extracted after login).",
+    website: "https://iflow.cn",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://apis.iflow.cn/v1",
+  },
+  "codebuddy-cn": {
+    type: "codebuddy-cn",
+    name: "CodeBuddy CN",
+    icon: "smart_toy",
+    textIcon: "CB",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#006EFF",
+    description: "Tencent CodeBuddy CN via browser polling OAuth.",
+    website: "https://copilot.tencent.com",
+    apiKeyUrl: "https://copilot.tencent.com",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://copilot.tencent.com/v2",
+  },
+  kilocode: {
+    type: "kilocode",
+    name: "Kilo Code",
+    icon: "code",
+    textIcon: "KC",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#FF6B35",
+    description: "Kilo Code OpenRouter proxy via device OAuth.",
+    website: "https://kilocode.ai",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://api.kilo.ai/api/openrouter",
+  },
+  gitlab: {
+    type: "gitlab",
+    name: "GitLab Duo",
+    icon: "code",
+    textIcon: "GL",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#FC6D26",
+    description: "GitLab Duo chat via PKCE OAuth (set gitlab_client_id in provider config).",
+    website: "https://gitlab.com",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://gitlab.com/api/v4",
+  },
+  kimchi: {
+    type: "kimchi",
+    name: "Kimchi",
+    icon: "restaurant",
+    textIcon: "KM",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#FF521D",
+    description: "Kimchi LLM via browser token callback OAuth.",
+    website: "https://kimchi.dev",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://llm.kimchi.dev/openai/v1",
   },
   qoder: {
     type: "qoder",
@@ -336,12 +414,43 @@ const CATALOG: Record<string, ProviderTypeInfo> = {
     supportsOAuth: true,
     defaultBaseUrl: "https://api3.qoder.sh",
   },
+  cline: {
+    type: "cline",
+    name: "Cline",
+    icon: "extension",
+    textIcon: "CL",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#00D1B2",
+    description: "Cline API via browser OAuth or API key from app.cline.bot.",
+    website: "https://cline.bot",
+    apiKeyUrl: "https://app.cline.bot",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://api.cline.bot/api/v1",
+  },
+  clinepass: {
+    type: "clinepass",
+    name: "ClinePass",
+    icon: "vpn_key",
+    textIcon: "CP",
+    category: "oauth",
+    listSection: "oauth",
+    color: "#00D1B2",
+    description: "ClinePass subscription models via Cline OAuth.",
+    website: "https://cline.bot",
+    apiKeyUrl: "https://app.cline.bot",
+    defaultAuthType: "oauth",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://api.cline.bot/api/v1",
+  },
 };
 
 /** Lookup provider type metadata. Returns a generic fallback for unknown types. */
 export function getProviderTypeInfo(type: string): ProviderTypeInfo {
+  const normalized = type.trim().toLowerCase();
   return (
-    CATALOG[type] ?? {
+    CATALOG[normalized] ?? CATALOG[type] ?? {
       type,
       name: type,
       icon: "dns",
@@ -358,7 +467,8 @@ export function getProviderTypeInfo(type: string): ProviderTypeInfo {
 
 /** True when the URL slug is a known catalog provider type (e.g. codex, claude). */
 export function isCatalogSlug(slug: string): boolean {
-  return slug in CATALOG;
+  const normalized = slug.trim().toLowerCase();
+  return normalized in CATALOG || slug in CATALOG;
 }
 
 export type ResolvedProviderSlug =
@@ -386,7 +496,6 @@ export function resolveProviderSlug(
   if (isCatalogSlug(slug)) {
     return { kind: "catalog", catalog: getProviderTypeInfo(slug) };
   }
-
   return null;
 }
 
@@ -394,10 +503,39 @@ export function providerDetailPath(slug: string): string {
   return `/providers/${encodeURIComponent(slug)}`;
 }
 
+/** Providers whose OAuth callback may omit the state query parameter. */
+export function allowsStatelessOAuthCallback(type: string): boolean {
+  return type === "cline" || type === "clinepass" || type === "kimchi";
+}
+
+/** Extract OAuth code from a pasted Cline AuthKit callback URL. */
+export function parseClineCallbackUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    const direct = parsed.searchParams.get("code") || parsed.searchParams.get("token");
+    if (direct) return direct;
+    if (!parsed.hostname.includes("authkit.cline.bot")) return null;
+    const nested = parsed.searchParams.get("redirect_uri");
+    if (!nested) return null;
+    const nestedUrl = new URL(nested);
+    return nestedUrl.searchParams.get("code") || nestedUrl.searchParams.get("token");
+  } catch {
+    return null;
+  }
+}
+
 /** Default OAuth mode when the client does not specify one explicitly. */
 export function defaultOAuthMode(type: string, presetId?: string): "browser" | "device" {
   if (presetId === "grok-cli" || presetId === "github") return "device";
-  if (type === "kimi" || type === "xai" || type === "qwen" || type === "qoder" || type === "copilot") return "device";
+  if (type === "kimi" || type === "xai" || type === "qwen" || type === "qoder" || type === "copilot" ||
+    type === "kilocode" || type === "codebuddy-cn" || type === "kiro") {
+    return "device";
+  }
+  if (type === "cline" || type === "clinepass" || type === "iflow" || type === "kimchi" || type === "gitlab") {
+    return "browser";
+  }
   return "browser";
 }
 

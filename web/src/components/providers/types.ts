@@ -55,6 +55,7 @@ export type Credential = {
   proxy_pool_ids?: string[];
   last_used_at?: string;
   consecutive_use_count?: number;
+  created_at?: string;
 };
 
 /** Aggregate connection counts for a provider. */

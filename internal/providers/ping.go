@@ -27,7 +27,7 @@ func (r *Registry) PingModel(ctx context.Context, provider store.Provider, crede
 	if strings.TrimSpace(kind) == "" {
 		kind = "llm"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	start := time.Now()

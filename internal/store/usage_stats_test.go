@@ -9,6 +9,26 @@ import (
 	"github.com/tproxy/tproxy/internal/security"
 )
 
+func TestUsageDisplayModel(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		publicModelID string
+		upstreamModel string
+		providerID    string
+		want          string
+	}{
+		{publicModelID: "openai-compatible-9rlv:gpt-5.6-sol", upstreamModel: "gpt-5.6-sol", providerID: "openai-compatible-9rlv", want: "gpt-5.6-sol"},
+		{publicModelID: "openai-compatible-9rlv:gpt-5.5", upstreamModel: "", providerID: "openai-compatible-9rlv", want: "gpt-5.5"},
+		{publicModelID: "codex-gpt-5.6-sol", upstreamModel: "gpt-5.6-sol", providerID: "openai-compatible-9rlv", want: "gpt-5.6-sol"},
+		{publicModelID: "codex-gpt-5.6-sol", upstreamModel: "", providerID: "codex", want: "codex-gpt-5.6-sol"},
+	}
+	for _, test := range tests {
+		if got := usageDisplayModel(test.publicModelID, test.upstreamModel, test.providerID); got != test.want {
+			t.Fatalf("usageDisplayModel(%q, %q, %q)=%q want %q", test.publicModelID, test.upstreamModel, test.providerID, got, test.want)
+		}
+	}
+}
+
 func TestUsageStatsAggregatesByModelAndAccount(t *testing.T) {
 	key, err := security.GenerateMasterKey()
 	if err != nil {
@@ -69,6 +89,47 @@ func TestUsageStatsAggregatesByModelAndAccount(t *testing.T) {
 	}
 	if len(stats.RecentRequests) != 2 {
 		t.Fatalf("RecentRequests = %+v", stats.RecentRequests)
+	}
+}
+
+func TestUsageStatsStripsProviderModelPrefix(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "usage-stats-prefix.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 21, 14, 0, 0, 0, time.UTC)
+	if err := dataStore.AddUsage(ctx, UsageEvent{
+		RequestID: "prefix-1", PublicModelID: "openai-compatible-9rlv:gpt-5.6-sol",
+		ProviderID: "openai-compatible-9rlv", UpstreamModel: "gpt-5.6-sol", Status: 200,
+		InputTokens: 10, OutputTokens: 5, EstimatedCostUSD: 0.01, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("AddUsage() error = %v", err)
+	}
+
+	stats, err := dataStore.UsageStats(ctx, now.Add(-time.Hour), UsageLookupMaps{
+		ProviderNames: map[string]string{"openai-compatible-9rlv": "Virouter"},
+	})
+	if err != nil {
+		t.Fatalf("UsageStats() error = %v", err)
+	}
+	for _, entry := range stats.ByModel {
+		if entry.RawModel != "gpt-5.6-sol" {
+			t.Fatalf("ByModel rawModel = %q, want gpt-5.6-sol (%+v)", entry.RawModel, stats.ByModel)
+		}
+	}
+	if stats.RecentRequests[0].Model != "gpt-5.6-sol" {
+		t.Fatalf("RecentRequests model = %q, want gpt-5.6-sol", stats.RecentRequests[0].Model)
 	}
 }
 

@@ -96,6 +96,16 @@ func TestModelsDiscoveryURL(t *testing.T) {
 			p:    store.Provider{ID: "ollama-local", Type: "ollama", BaseURL: "http://localhost:11434/api/chat"},
 			want: "http://localhost:11434/api/tags",
 		},
+		{
+			name: "cline",
+			p:    store.Provider{ID: "cline", Type: "cline", BaseURL: "https://api.cline.bot/api/v1"},
+			want: "https://api.cline.bot/api/v1/ai/cline/models",
+		},
+		{
+			name: "clinepass",
+			p:    store.Provider{ID: "clinepass", Type: "clinepass", BaseURL: "https://api.cline.bot/api/v1"},
+			want: "https://api.cline.bot/api/v1/ai/cline/models",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -61,7 +61,9 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
   const [allowLanManagement, setAllowLanManagement] = useState(false);
+  const [publicBaseUrl, setPublicBaseUrl] = useState("");
   const [savingLanAccess, setSavingLanAccess] = useState(false);
+  const [savingPublicUrl, setSavingPublicUrl] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,6 +77,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       setStrategy(rotationSettings.strategy || "round-robin");
       setStickyLimit(String(rotationSettings.sticky_round_robin_limit || 3));
       setAllowLanManagement(Boolean(adminSettings.allow_lan_management));
+      setPublicBaseUrl(adminSettings.public_base_url || "");
     } catch (error) {
       onError(error instanceof Error ? error.message : "Failed to load settings");
     } finally {
@@ -191,7 +194,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
   const toggleLanAccess = async (enabled: boolean) => {
     setSavingLanAccess(true);
     try {
-      const result = await saveGatewaySettings(secret, enabled);
+      const result = await saveGatewaySettings(secret, { allow_lan_management: enabled });
       setAllowLanManagement(result.allow_lan_management);
       setSettings((current) => (current ? { ...current, allow_lan_management: result.allow_lan_management } : current));
       if (result.restart_required) {
@@ -206,23 +209,24 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
     }
   };
 
+  const savePublicBaseUrl = async () => {
+    setSavingPublicUrl(true);
+    try {
+      const result = await saveGatewaySettings(secret, { public_base_url: publicBaseUrl.trim() });
+      setPublicBaseUrl(result.public_base_url || "");
+      setSettings((current) => (current ? { ...current, public_base_url: result.public_base_url || "" } : current));
+      onNotice?.("Public base URL saved");
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Không lưu được public base URL");
+    } finally {
+      setSavingPublicUrl(false);
+    }
+  };
+
   const overrideCount = Object.keys(rotation?.provider_strategies || {}).length;
 
   return (
     <section className="section settings-page">
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">System</p>
-          <h1>Settings</h1>
-          <p className="page-desc">
-            Gateway behavior, account rotation, retention policy, and configuration backup.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" icon="refresh" disabled={loading} onClick={() => void load()}>
-          Refresh
-        </Button>
-      </div>
-
       <Card pad="md" className="settings-card">
         <div className="settings-title-row">
           <span className="material-symbols-outlined">lock</span>
@@ -366,6 +370,23 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
               ) : null}
             </p>
           ) : null}
+          <div className="settings-kv-row settings-kv-row-stack">
+            <span>Public base URL</span>
+            <div className="settings-inline settings-inline-stack">
+              <Input
+                value={publicBaseUrl}
+                disabled={loading || savingPublicUrl}
+                placeholder="https://your-tunnel.example.com"
+                onChange={(event) => setPublicBaseUrl(event.target.value)}
+              />
+              <Button variant="outline" size="sm" loading={savingPublicUrl} onClick={() => void savePublicBaseUrl()}>
+                Save
+              </Button>
+            </div>
+          </div>
+          <p className="settings-hint">
+            Dùng cho CLI Tools như Cursor — endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel, reverse proxy). Ví dụ: <code>https://abc.trycloudflare.com</code>
+          </p>
           <div className="settings-kv-row">
             <span>Remote management</span>
             <Badge variant={settings?.allow_remote_management ? "success" : "neutral"} size="sm">

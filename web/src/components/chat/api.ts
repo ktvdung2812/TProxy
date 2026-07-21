@@ -28,13 +28,7 @@ export async function streamChatCompletion(
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const record = errorData as { error?: { message?: string } | string; message?: string };
-    const errorMessage =
-      typeof record.error === "string"
-        ? record.error
-        : record.error?.message || record.message || `Request failed (${response.status})`;
-    throw new Error(errorMessage);
+    throw new Error(await readErrorMessage(response));
   }
 
   const reader = response.body?.getReader();
@@ -63,19 +57,61 @@ export async function streamChatCompletion(
       const payload = trimmed.slice(5).trim();
       if (!payload || payload === "[DONE]") continue;
 
+      let chunk: { error?: { message?: string } | string };
       try {
-        const chunk = JSON.parse(payload);
-        const text = readAssistantText(chunk);
-        if (!text) continue;
-        assistantText += text;
-        callbacks.onDelta(assistantText);
+        chunk = JSON.parse(payload) as { error?: { message?: string } | string };
       } catch {
-        // Ignore malformed chunks.
+        continue;
       }
+      if (chunk.error) {
+        const message =
+          typeof chunk.error === "string"
+            ? chunk.error
+            : chunk.error.message || `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      const text = readAssistantText(chunk);
+      if (!text) continue;
+      assistantText += text;
+      callbacks.onDelta(assistantText);
     }
   }
 
   return assistantText;
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const raw = await response.text().catch(() => "");
+  const trimmed = raw.trim();
+  if (!trimmed) return `Request failed (${response.status})`;
+
+  // Auth and other pre-stream failures may be JSON or OpenAI SSE (`data: {...}`).
+  const candidates = [trimmed];
+  for (const line of trimmed.split(/\r?\n/)) {
+    const value = line.trim();
+    if (value.startsWith("data:")) {
+      const payload = value.slice(5).trim();
+      if (payload && payload !== "[DONE]") candidates.push(payload);
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const record = JSON.parse(candidate) as {
+        error?: { message?: string } | string;
+        message?: string;
+      };
+      if (typeof record.error === "string" && record.error.trim()) return record.error;
+      if (record.error && typeof record.error === "object" && record.error.message?.trim()) {
+        return record.error.message;
+      }
+      if (record.message?.trim()) return record.message;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return `Request failed (${response.status})`;
 }
 
 function textValue(value: unknown): string {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
 )
@@ -95,7 +96,7 @@ func parseMessages(value any) []canonical.Message {
 	return result
 }
 
-func renderOpenAI(response *canonical.Response, requestID string) map[string]any {
+func renderOpenAI(response *canonical.Response, requestID, clientModel string) map[string]any {
 	content := response.Content
 	if content == nil {
 		content = ""
@@ -107,13 +108,21 @@ func renderOpenAI(response *canonical.Response, requestID string) map[string]any
 	if len(response.ToolCalls) > 0 {
 		message["tool_calls"] = response.ToolCalls
 	}
-	return map[string]any{"id": nonEmpty(response.ID, requestID), "object": "chat.completion", "created": time.Now().Unix(), "model": response.Model, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": nonEmpty(response.FinishReason, "stop")}}, "usage": map[string]any{"prompt_tokens": response.Usage.InputTokens, "completion_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
+	model := response.Model
+	if clientModel != "" {
+		model = clientModel
+	}
+	return map[string]any{"id": nonEmpty(response.ID, requestID), "object": "chat.completion", "created": time.Now().Unix(), "model": model, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": nonEmpty(response.FinishReason, "stop")}}, "usage": map[string]any{"prompt_tokens": response.Usage.InputTokens, "completion_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
 }
 
-func renderResponses(response *canonical.Response, requestID string) map[string]any {
+func renderResponses(response *canonical.Response, requestID, clientModel string) map[string]any {
 	content := []any{map[string]any{"type": "output_text", "text": stringValue(response.Content)}}
 	output := []any{map[string]any{"id": "msg_" + requestID, "type": "message", "role": "assistant", "content": content}}
-	return map[string]any{"id": nonEmpty(response.ID, "resp_"+requestID), "object": "response", "created_at": time.Now().Unix(), "model": response.Model, "status": "completed", "output": output, "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
+	model := response.Model
+	if clientModel != "" {
+		model = clientModel
+	}
+	return map[string]any{"id": nonEmpty(response.ID, "resp_"+requestID), "object": "response", "created_at": time.Now().Unix(), "model": model, "status": "completed", "output": output, "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
 }
 
 func renderClaude(response *canonical.Response, requestID, clientModel string) map[string]any {
@@ -142,6 +151,19 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func writeError(w http.ResponseWriter, status int, code, message, requestID string) {
 	w.Header().Set("X-TProxy-Error-Code", code)
 	writeJSON(w, status, map[string]any{"error": map[string]any{"type": "provider_error", "code": code, "message": security.RedactText(message), "request_id": requestID}})
+}
+
+func providerErrorHTTPStatus(err error) int {
+	status := providers.Status(err)
+	if status == 0 {
+		return http.StatusBadGateway
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return http.StatusBadGateway
+	default:
+		return status
+	}
 }
 
 func peekRequestBody(r *http.Request, limit int64) []byte {
@@ -223,7 +245,7 @@ func writeOpenAIStream(w http.ResponseWriter, r *http.Request, events <-chan can
 		if event.ID != "" {
 			streamID = event.ID
 		}
-		if event.Model != "" {
+		if event.Model != "" && model == "" {
 			model = event.Model
 		}
 		switch event.Type {
@@ -321,6 +343,15 @@ func stringValue(value any) string {
 		return text
 	}
 	return fmt.Sprint(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 func boolValue(value any) bool { valueBool, ok := value.(bool); return ok && valueBool }
 func intValue(value any) int {

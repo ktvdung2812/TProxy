@@ -36,6 +36,25 @@ func TestResolveRealModelPassthrough(t *testing.T) {
 	}
 }
 
+func TestResolveGptCodenamePlaceholders(t *testing.T) {
+	resolver := NewResolver(Config{})
+	resolver.SetOverrides(Overrides{
+		RoleFable: "codex-gpt-5.6-sol",
+		RoleOpus:  "codex-gpt-5.6-terra",
+		RoleHaiku: "codex-gpt-5.6-luna",
+	})
+	cases := map[string]string{
+		"gpt-sol":   "codex-gpt-5.6-sol",
+		"gpt-terra": "codex-gpt-5.6-terra",
+		"gpt-luna":  "codex-gpt-5.6-luna",
+	}
+	for placeholder, want := range cases {
+		if got := resolver.ResolveModel(placeholder); got != want {
+			t.Fatalf("%s resolved = %q, want %q", placeholder, got, want)
+		}
+	}
+}
+
 func TestFormatTargetProviderSelector(t *testing.T) {
 	if got := FormatTarget("codex::gpt-5.6-luna", ""); got != "codex:gpt-5.6-luna" {
 		t.Fatalf("formatted = %q", got)
