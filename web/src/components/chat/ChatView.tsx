@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Badge, Button, Input, cn } from "../ui";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { streamChatCompletion } from "./api";
 import type { ChatAttachment, ChatModelOption, ChatSession } from "./types";
 import {
@@ -43,6 +45,7 @@ export function ChatView({
   onApiKeyChange,
   onError,
 }: Props) {
+  const { copied, copy } = useCopyToClipboard();
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = safeParse<ChatSession[]>(localStorage.getItem(STORAGE_KEYS.sessions), []);
     return Array.isArray(saved)
@@ -544,7 +547,7 @@ export function ChatView({
                           <>
                             No models available. Connect providers in{" "}
                             <Link to="/providers">Providers</Link> or configure models in{" "}
-                            <Link to="/models">Provider Priority Manager</Link>.
+                            <Link to="/models">PPM</Link>.
                           </>
                         ) : (
                           "No models match your search."
@@ -619,8 +622,8 @@ export function ChatView({
                     placeholder="tproxy API key"
                   />
                   <p className="chat-settings-hint">
-                    Uses <code>/v1/chat/completions</code>. Create a key in{" "}
-                    <Link to="/apis">APIs</Link>.
+                    Uses <code>/v1/chat/completions</code> with a client API key from{" "}
+                    <Link to="/apis">APIs</Link> — not the dashboard management password.
                   </p>
                 </div>
               ) : null}
@@ -682,11 +685,28 @@ export function ChatView({
                     ) : null}
 
                     <div className="chat-message-content">
-                      {content}
-                      {isAssistant && isStreaming && !streamingText ? (
-                        <span className="chat-cursor">▋</span>
-                      ) : null}
+                      {isAssistant ? (
+                        <ChatMarkdown content={content} streaming={isStreaming} />
+                      ) : (
+                        content
+                      )}
                     </div>
+
+                    {content && !isStreaming ? (
+                      <div className="chat-message-actions">
+                        <button
+                          type="button"
+                          className="chat-message-copy"
+                          onClick={() => copy(content, message.id)}
+                          aria-label={copied === message.id ? "Copied" : "Copy message"}
+                          title={copied === message.id ? "Copied" : "Copy message"}
+                        >
+                          <span className="material-symbols-outlined">
+                            {copied === message.id ? "check" : "content_copy"}
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

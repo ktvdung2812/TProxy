@@ -110,6 +110,9 @@ func modelsDiscoveryURL(provider store.Provider) string {
 		return endpoint(provider.BaseURL, "/models?client_version=1.0.0")
 	case "ollama":
 		return ollamaDiscoveryURL(provider.BaseURL)
+	case "cline", "clinepass":
+		// Cline's catalog is not OpenAI /models; the extension uses /ai/cline/models.
+		return openAIResourceURL(provider.BaseURL, "/ai/cline/models")
 	}
 	if provider.ID == "opencode" {
 		return endpoint(provider.BaseURL, "/zen/v1/models")

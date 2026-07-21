@@ -39,18 +39,35 @@ func (b *LiveRequestLogBuffer) Push(item store.RequestLog) {
 }
 
 func (b *LiveRequestLogBuffer) Recent(limit int) []store.RequestLog {
+	return b.RecentByCredential("", limit)
+}
+
+func (b *LiveRequestLogBuffer) RecentByCredential(credentialID string, limit int) []store.RequestLog {
 	if limit <= 0 {
 		limit = 50
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.items) <= limit {
-		out := make([]store.RequestLog, len(b.items))
-		copy(out, b.items)
+	if credentialID == "" {
+		if len(b.items) <= limit {
+			out := make([]store.RequestLog, len(b.items))
+			copy(out, b.items)
+			return out
+		}
+		out := make([]store.RequestLog, limit)
+		copy(out, b.items[:limit])
 		return out
 	}
-	out := make([]store.RequestLog, limit)
-	copy(out, b.items[:limit])
+	out := make([]store.RequestLog, 0, limit)
+	for _, item := range b.items {
+		if item.CredentialID != credentialID {
+			continue
+		}
+		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
+	}
 	return out
 }
 

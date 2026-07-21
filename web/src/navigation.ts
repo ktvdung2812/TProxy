@@ -35,10 +35,10 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         id: "models",
         path: "/models",
-        label: "Provider Priority Manager",
+        label: "PPM",
         icon: "route",
         title: "Provider Priority Manager",
-        description: "Map providers to stable model IDs and control fallback order.",
+        description: "Define public model IDs and the provider priority chain that decides which upstream handles each request.",
       },
       {
         id: "combos",
@@ -54,7 +54,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Mapping",
         icon: "swap_horiz",
         title: "Protocol mapping",
-        description: "Transparent Claude tier routing — rewrite placeholders server-side without changing client model names.",
+        description: "Transparent Claude and GPT placeholder routing — rewrite tier names server-side without changing client model names.",
       },
     ],
   },
@@ -73,10 +73,10 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         id: "upstreams",
         path: "/upstreams",
-        label: "Upstreams",
+        label: "Health overview",
         icon: "cloud",
-        title: "Upstreams",
-        description: "Configured upstream gateways and accounts.",
+        title: "Provider health overview",
+        description: "Quick health checks and model discovery across all providers.",
       },
       {
         id: "proxy-pools",
@@ -106,7 +106,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Token Saver",
         icon: "compress",
         title: "Token Saver",
-        description: "RTK tool-output compression and CLI hook setup.",
+        description: "RTK + Caveman compression pipeline and CLI hook setup.",
       },
       {
         id: "quota",
@@ -156,7 +156,7 @@ export const NAV_SECTIONS: NavSection[] = [
         id: "observability",
         path: "/logs",
         label: "Logs & audit",
-        icon: "monitoring",
+        icon: "receipt_long",
         title: "Logs & audit",
         description: "Recent requests and admin changes.",
       },

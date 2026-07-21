@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -23,6 +24,12 @@ import (
 )
 
 func main() {
+	if ran, err := maybeRunConnect(os.Args[1:]); ran {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}

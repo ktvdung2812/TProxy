@@ -141,6 +141,7 @@ func (s *Server) runRetentionCleanup(ctx context.Context) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
+	mux.Handle("/mcp", s.clientAuth(mcpBridgeHandler(s)))
 	mux.Handle("/dashboard/", s.dashboard())
 	mux.Handle("/assets/", s.dashboard())
 	// OAuth providers cannot attach the management bearer when redirecting the
@@ -366,7 +367,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := useClientRequestID(r)
 	request := parseOpenAIChat(body, requestID)
-	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+	s.applyMappingIngress(r, &request)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeOpenAI)
 }
@@ -383,7 +384,7 @@ func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := useClientRequestID(r)
 	request := parseResponses(body, requestID)
-	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+	s.applyMappingIngress(r, &request)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeResponses)
 }
@@ -401,7 +402,7 @@ func (s *Server) responsesCompact(w http.ResponseWriter, r *http.Request) {
 	body["_compact"] = true
 	requestID := useClientRequestID(r)
 	request := parseResponses(body, requestID)
-	request.PublicModelID = resolveIngressModel(r, request.PublicModelID)
+	s.applyMappingIngress(r, &request)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeResponses)
 }
@@ -418,9 +419,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := useClientRequestID(r)
 	request := parseClaude(body, requestID)
-	preserveClaudeClientModel(&request)
-	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
-	s.applyClaudeTierReasoningEffort(&request)
+	s.applyMappingIngress(r, &request)
 	attachIngressMetadata(r, &request)
 	s.execute(w, r, request, renderModeClaude)
 }
@@ -436,8 +435,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := parseClaude(body, useClientRequestID(r))
-	preserveClaudeClientModel(&request)
-	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
+	s.applyMappingIngress(r, &request)
 	writeJSON(w, 200, map[string]any{"input_tokens": tokenEstimate(request)})
 }
 
@@ -1075,7 +1073,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			if selectionProvider := liveProviderFromContext(r); selectionProvider != "" {
 				s.liveUsage.RecordError(selectionProvider)
 			}
-			writeError(w, 502, providers.Code(errStream), errStream.Error(), request.RequestID)
+			writeError(w, providerErrorHTTPStatus(errStream), providers.Code(errStream), errStream.Error(), request.RequestID)
 			return
 		}
 		s.liveUsage.Begin(request.RequestID, stream.Selection.Provider.ID, model.ID, stream.Selection.Credential.ID, stream.Selection.Credential.Label)
@@ -1089,11 +1087,11 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		case renderModeClaude:
 			writeClaudeStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
 		case renderModeResponses:
-			writeResponsesStream(w, r, stream.Events, request.RequestID, model.ID)
+			writeResponsesStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
 		case renderModeOpenAI:
-			writeOpenAIStream(w, r, stream.Events, request.RequestID, model.ID)
+			writeOpenAIStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
 		default:
-			writeOpenAIStream(w, r, stream.Events, request.RequestID, model.ID)
+			writeOpenAIStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
 		}
 		return
 	}
@@ -1102,11 +1100,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		if selectionProvider := liveProviderFromContext(r); selectionProvider != "" {
 			s.liveUsage.RecordError(selectionProvider)
 		}
-		status := 502
-		if providers.Status(errExecute) == 401 || providers.Status(errExecute) == 403 {
-			status = 502
-		}
-		writeError(w, status, providers.Code(errExecute), errExecute.Error(), request.RequestID)
+		writeError(w, providerErrorHTTPStatus(errExecute), providers.Code(errExecute), errExecute.Error(), request.RequestID)
 		return
 	}
 	s.liveUsage.Begin(request.RequestID, result.Selection.Provider.ID, model.ID, result.Selection.Credential.ID, result.Selection.Credential.Label)
@@ -1122,9 +1116,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 	case renderModeClaude:
 		payload = renderClaude(result.Response, request.RequestID, clientModel)
 	case renderModeResponses:
-		payload = renderResponses(result.Response, request.RequestID)
+		payload = renderResponses(result.Response, request.RequestID, clientModel)
 	default:
-		payload = renderOpenAI(result.Response, request.RequestID)
+		payload = renderOpenAI(result.Response, request.RequestID, clientModel)
 	}
 	writeCostHeaders(w, result)
 	writeJSON(w, 200, payload)
@@ -1257,7 +1251,7 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	if request.Stream {
 		stream, err := s.router.ExecuteStream(r.Context(), *model, request)
 		if err != nil {
-			writeError(w, 502, providers.Code(err), err.Error(), requestID)
+			writeError(w, providerErrorHTTPStatus(err), providers.Code(err), err.Error(), requestID)
 			return
 		}
 		if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
@@ -1270,7 +1264,7 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	}
 	result, err := s.router.Execute(r.Context(), *model, request)
 	if err != nil {
-		writeError(w, 502, providers.Code(err), err.Error(), requestID)
+		writeError(w, providerErrorHTTPStatus(err), providers.Code(err), err.Error(), requestID)
 		return
 	}
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
@@ -1349,6 +1343,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.HasSuffix(suffix, "/models") {
 			s.adminCredentialModels(w, r, strings.TrimSuffix(suffix, "/models"))
+			return
+		}
+		if strings.HasSuffix(suffix, "/logs") {
+			s.adminCredentialLogs(w, r, strings.TrimSuffix(suffix, "/logs"))
 			return
 		}
 		s.adminDeleteCredential(w, r, suffix)
@@ -1450,6 +1448,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminSaveCredential(w, r)
 	case "/api/admin/api-keys":
 		s.adminCreateAPIKey(w, r)
+	case "/api/admin/api-key-secrets":
+		s.adminAPIKeySecrets(w, r)
 	case "/api/admin/usage":
 		s.adminUsage(w, r)
 	case "/api/admin/quota/summary":
@@ -1486,6 +1486,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			"payload_capture":         false,
 			"allow_remote_management": s.allowRemoteMgmt,
 			"allow_lan_management":    gateway.AllowLANManagement,
+			"public_base_url":         gateway.PublicBaseURL,
 			"server_host":             s.cfg.Server.Host,
 			"server_port":             s.cfg.Server.Port,
 			"token_saver": map[string]any{
@@ -1506,6 +1507,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminImport9router(w, r)
 	case "/api/admin/ninerouter/presets":
 		s.adminNinerouterPresets(w, r)
+	case "/api/admin/free-tiers":
+		s.adminFreeTiers(w, r)
+	case "/api/admin/routing/strategies":
+		s.adminRoutingStrategies(w, r)
 	case "/api/admin/import/cliproxyapi":
 		s.adminImportCliproxyAPI(w, r)
 	case "/api/admin/config/export":
@@ -1547,6 +1552,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.oauthStatus(w, r)
 	case "/api/admin/oauth/session":
 		s.oauthCancel(w, r)
+	case "/api/admin/oauth/cursor/auto-import":
+		s.adminCursorOAuthAutoImport(w, r)
+	case "/api/admin/oauth/cursor/import":
+		s.adminCursorOAuthImport(w, r)
 	case "/api/admin/auth/export":
 		s.adminAuthExport(w, r)
 	case "/api/admin/auth/import":
@@ -1860,7 +1869,7 @@ func (s *Server) adminProviderModels(w http.ResponseWriter, r *http.Request, pro
 			writeError(w, http.StatusNotFound, "provider_not_found", "provider not found", useClientRequestID(r))
 			return
 		}
-		writeJSON(w, http.StatusBadGateway, map[string]any{"provider_id": providerID, "data": []providers.DiscoveredModel{}, "error": map[string]any{"code": providers.Code(err), "message": err.Error(), "request_id": useClientRequestID(r)}})
+		writeJSON(w, http.StatusOK, map[string]any{"provider_id": providerID, "data": []providers.DiscoveredModel{}, "error": map[string]any{"code": providers.Code(err), "message": err.Error(), "request_id": useClientRequestID(r)}})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"provider_id": providerID, "data": items})
@@ -1894,7 +1903,7 @@ func (s *Server) adminCredentialModels(w http.ResponseWriter, r *http.Request, c
 	}
 	items, err := s.router.DiscoverCredentialModels(r.Context(), *provider, credential)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"credential_id": credentialID,
 			"provider_id":   credential.ProviderID,
 			"data":          []providers.DiscoveredModel{},
@@ -2284,6 +2293,22 @@ func (s *Server) adminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "key": key, "warning": "This key is shown only once"})
+}
+
+func (s *Server) adminAPIKeySecrets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	secrets, err := s.store.MatchAPIKeySecrets(r.Context(), config.APIKeySecretCandidates(s.cfg))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
+		return
+	}
+	if secrets == nil {
+		secrets = map[string]string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"secrets": secrets})
 }
 
 func (s *Server) adminAPIKeyItem(w http.ResponseWriter, r *http.Request, id string) {
@@ -2911,17 +2936,18 @@ func loopbackCallbackHost(raw string) (string, error) {
 
 func oauthCallbackValues(r *http.Request) (state, code, providerError string) {
 	if r.Method == http.MethodGet {
-		return r.URL.Query().Get("state"), r.URL.Query().Get("code"), r.URL.Query().Get("error")
+		values := r.URL.Query()
+		return values.Get("state"), firstNonEmpty(values.Get("code"), values.Get("token")), values.Get("error")
 	}
 	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
 		var body map[string]any
 		if json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body) == nil {
-			return stringValue(body["state"]), stringValue(body["code"]), stringValue(body["error"])
+			return stringValue(body["state"]), firstNonEmpty(stringValue(body["code"]), stringValue(body["token"])), stringValue(body["error"])
 		}
 		return "", "", "invalid_request"
 	}
 	_ = r.ParseForm()
-	return r.Form.Get("state"), r.Form.Get("code"), r.Form.Get("error")
+	return r.Form.Get("state"), firstNonEmpty(r.Form.Get("code"), r.Form.Get("token")), r.Form.Get("error")
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

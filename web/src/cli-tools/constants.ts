@@ -10,6 +10,8 @@ export type CLIToolGuideStep = {
   value?: string;
   copyable?: boolean;
   type?: "apiKeySelector" | "modelSelector";
+  /** Which column renders this step in the setup guide. */
+  column?: "config" | "commands";
 };
 
 export type CLIToolModelSlot = {
@@ -58,9 +60,9 @@ export function isAutoApplyTool(toolId: string): toolId is AutoApplyToolId {
 }
 
 const CUSTOM_GUIDE_STEPS: CLIToolGuideStep[] = [
-  { step: 1, title: "API Key", type: "apiKeySelector" },
-  { step: 2, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-  { step: 3, title: "Model", type: "modelSelector" },
+  { step: 1, title: "API Key", type: "apiKeySelector", column: "config" },
+  { step: 2, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+  { step: 3, title: "Model", type: "modelSelector", column: "config" },
 ];
 
 /** CLI tools — parity with 9router /dashboard/cli-tools */
@@ -78,10 +80,10 @@ export const CLI_TOOLS: Record<string, CLITool> = {
       { type: "info", text: "Use a combo ID (for example claude-code-fallback) as your default model to get ordered fallback across virtual models." },
     ],
     guideSteps: [
-      { step: 1, title: "Install Claude Code", desc: "npm install -g @anthropic-ai/claude-code" },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Default model", type: "modelSelector" },
+      { step: 1, title: "Install Claude Code", desc: "npm install -g @anthropic-ai/claude-code", column: "commands" },
+      { step: 2, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+      { step: 4, title: "Default model", type: "modelSelector", column: "config" },
     ],
     defaultModels: [
       { id: "fable", name: "Claude Fable", alias: "fable" },
@@ -114,9 +116,9 @@ claude`,
       { type: "info", text: "Open Claw stores provider config under models.providers. Add a tproxy provider entry with your base URL and API key." },
     ],
     guideSteps: [
-      { step: 1, title: "Install Open Claw", desc: "Follow the Open Claw installation guide for your platform." },
+      { step: 1, title: "Install Open Claw", desc: "Follow the Open Claw installation guide for your platform.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
-      { step: 5, title: "Provider name", desc: 'Use provider id "tproxy" in your Open Claw config.' },
+      { step: 5, title: "Provider name", desc: 'Use provider id "tproxy" in your Open Claw config.', column: "commands" },
     ],
     codeBlock: {
       language: "json",
@@ -149,7 +151,7 @@ claude`,
       { type: "info", text: "Codex reads ~/.codex/config.toml. Point base_url at tproxy's OpenAI-compatible /v1 endpoint." },
     ],
     guideSteps: [
-      { step: 1, title: "Install Codex", desc: "Follow OpenAI's Codex CLI installation guide." },
+      { step: 1, title: "Install Codex", desc: "Follow OpenAI's Codex CLI installation guide.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
     codeBlock: {
@@ -192,9 +194,9 @@ api_key = "{{apiKey}}"`,
       { type: "info", text: "Add a combo ID such as cowork-fallback to allowed models for ordered fallback across virtual models." },
     ],
     guideSteps: [
-      { step: 1, title: "Open Cowork settings", desc: "Configure third-party inference in Claude Desktop Cowork." },
+      { step: 1, title: "Open Cowork settings", desc: "Configure third-party inference in Claude Desktop Cowork.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
-      { step: 5, title: "Allowed models", desc: "Add one or more tproxy virtual model IDs to the allowed models list." },
+      { step: 5, title: "Allowed models", desc: "Add one or more tproxy virtual model IDs to the allowed models list.", column: "commands" },
     ],
   },
   hermes: {
@@ -258,12 +260,13 @@ api_key = "{{apiKey}}"`,
       },
     ],
     guideSteps: [
-      { step: 1, title: "Open Settings", desc: "Go to Settings → Models" },
-      { step: 2, title: "Enable OpenAI API", desc: 'Enable the "OpenAI API key" option' },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "API Key", type: "apiKeySelector" },
-      { step: 5, title: "Add Custom Model", desc: 'Click "View All Models" → "Add Custom Model"' },
-      { step: 6, title: "Select Model", type: "modelSelector" },
+      { step: 1, title: "Open Settings", desc: "Go to Settings → Models", column: "commands" },
+      { step: 2, title: "Enable OpenAI API", desc: 'Enable the "OpenAI API key" option', column: "commands" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+      { step: 4, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 5, title: "Add Custom Model", desc: 'Click "View All Models" → "Add Custom Model"', column: "commands" },
+      { step: 6, title: "Select Model", type: "modelSelector", column: "config" },
+      { step: 7, title: "Use model ID", desc: "Enter the virtual model ID from tproxy as the custom model name in Cursor.", column: "commands" },
     ],
   },
   cline: {
@@ -274,7 +277,7 @@ api_key = "{{apiKey}}"`,
     description: "Cline AI Coding Assistant",
     configType: "custom",
     guideSteps: [
-      { step: 1, title: "Open Cline settings", desc: "Choose API Provider → OpenAI Compatible" },
+      { step: 1, title: "Open Cline settings", desc: "Choose API Provider → OpenAI Compatible", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
   },
@@ -289,7 +292,7 @@ api_key = "{{apiKey}}"`,
       { type: "info", text: "Kilo Code VS Code extension supports OpenAI-compatible endpoints." },
     ],
     guideSteps: [
-      { step: 1, title: "Open Kilo settings", desc: "Select API Provider → OpenAI Compatible" },
+      { step: 1, title: "Open Kilo settings", desc: "Select API Provider → OpenAI Compatible", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
   },
@@ -301,11 +304,11 @@ api_key = "{{apiKey}}"`,
     description: "Roo AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Settings", desc: "Go to Roo Settings panel" },
-      { step: 2, title: "Select Provider", desc: "Choose API Provider → Ollama" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "API Key", type: "apiKeySelector" },
-      { step: 5, title: "Select Model", type: "modelSelector" },
+      { step: 1, title: "Open Settings", desc: "Go to Roo Settings panel", column: "commands" },
+      { step: 2, title: "Select Provider", desc: "Choose API Provider → Ollama", column: "commands" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+      { step: 4, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 5, title: "Select Model", type: "modelSelector", column: "config" },
     ],
   },
   continue: {
@@ -316,10 +319,10 @@ api_key = "{{apiKey}}"`,
     description: "Continue AI Assistant",
     configType: "guide",
     guideSteps: [
-      { step: 1, title: "Open Config", desc: "Open Continue configuration file" },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Select Model", type: "modelSelector" },
-      { step: 4, title: "Add Model Config", desc: "Add the following configuration to your models array:" },
+      { step: 1, title: "Open Config", desc: "Open Continue configuration file", column: "commands" },
+      { step: 2, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 3, title: "Select Model", type: "modelSelector", column: "config" },
+      { step: 4, title: "Add Model Config", desc: "Add the following configuration to your models array:", column: "commands" },
     ],
     codeBlock: {
       language: "json",
@@ -348,11 +351,11 @@ api_key = "{{apiKey}}"`,
       },
     ],
     guideSteps: [
-      { step: 1, title: "Install Amp", desc: "Install the Amp CLI using the package manager supported by your environment." },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Add Shorthands", desc: "Map Amp shorthand names such as g25p or cs45 to tproxy model IDs in your local config." },
+      { step: 1, title: "Install Amp", desc: "Install the Amp CLI using the package manager supported by your environment.", column: "commands" },
+      { step: 2, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+      { step: 4, title: "Select Model", type: "modelSelector", column: "config" },
+      { step: 5, title: "Add Shorthands", desc: "Map Amp shorthand names such as g25p or cs45 to tproxy model IDs in your local config.", column: "commands" },
     ],
     codeBlock: {
       language: "bash",
@@ -396,11 +399,11 @@ amp --model "{{model}}"
       { id: "gemini-3-flash", name: "Gemini 3 Flash", alias: "gemini-3-flash" },
     ],
     guideSteps: [
-      { step: 1, title: "Install Qwen Code", desc: "npm install -g @qwen-code/qwen-code" },
-      { step: 2, title: "API Key", type: "apiKeySelector" },
-      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
-      { step: 4, title: "Select Model", type: "modelSelector" },
-      { step: 5, title: "Save Config", desc: "Copy the JSON below to your ~/.qwen/settings.json file." },
+      { step: 1, title: "Install Qwen Code", desc: "npm install -g @qwen-code/qwen-code", column: "commands" },
+      { step: 2, title: "API Key", type: "apiKeySelector", column: "config" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+      { step: 4, title: "Select Model", type: "modelSelector", column: "config" },
+      { step: 5, title: "Save Config", desc: "Copy the JSON below to your ~/.qwen/settings.json file.", column: "commands" },
     ],
     codeBlock: {
       language: "json",
@@ -441,7 +444,7 @@ amp --model "{{model}}"
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
     ],
     guideSteps: [
-      { step: 1, title: "Install DeepSeek TUI", desc: "Follow the DeepSeek TUI installation guide." },
+      { step: 1, title: "Install DeepSeek TUI", desc: "Follow the DeepSeek TUI installation guide.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
     codeBlock: {
@@ -481,7 +484,7 @@ model = "{{model}}"`,
       { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", alias: "gemini" },
     ],
     guideSteps: [
-      { step: 1, title: "Install jcode", desc: "Run the install script from the jcode repository." },
+      { step: 1, title: "Install jcode", desc: "Run the install script from the jcode repository.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
     codeBlock: {
@@ -519,7 +522,7 @@ model = "{{model}}"`,
       { type: "warning", text: "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml" },
     ],
     guideSteps: [
-      { step: 1, title: "Install Grok Build", desc: "Follow xAI's Grok CLI installation guide." },
+      { step: 1, title: "Install Grok Build", desc: "Follow xAI's Grok CLI installation guide.", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
     codeBlock: {

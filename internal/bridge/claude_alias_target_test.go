@@ -7,6 +7,10 @@ func TestClassifyAliasTargetGPT(t *testing.T) {
 	if !ok || target.Kind != TargetKindChatGPT || target.Model != "gpt-5.6-sol" {
 		t.Fatalf("target = %+v ok=%v", target, ok)
 	}
+	target, ok = ClassifyAliasTarget("openai-codex:gpt-5.4")
+	if !ok || target.Kind != TargetKindChatGPT || target.Model != "gpt-5.4" {
+		t.Fatalf("custom provider target = %+v ok=%v", target, ok)
+	}
 	target, ok = ClassifyAliasTarget("cx/gpt-5.6-terra")
 	if !ok || target.Kind != TargetKindChatGPT || target.Model != "gpt-5.6-terra" {
 		t.Fatalf("slash target = %+v ok=%v", target, ok)
@@ -51,12 +55,28 @@ func TestResolveModelClaudeNativeSubstitution(t *testing.T) {
 	}
 }
 
+func TestIsClaudePlaceholderGptCodenames(t *testing.T) {
+	for _, name := range []string{"gpt-sol", "gpt-terra", "gpt-luna"} {
+		if !IsClaudePlaceholder(name) {
+			t.Fatalf("expected %q to be a placeholder", name)
+		}
+	}
+}
+
 func TestIsClaudePlaceholderAnthropicPrefix(t *testing.T) {
 	if !IsClaudePlaceholder("anthropic/claude-sonnet") {
 		t.Fatal("expected anthropic/claude-sonnet placeholder")
 	}
 	if IsClaudePlaceholder("claude-sonnet-4.6") {
 		t.Fatal("real model should not be placeholder")
+	}
+}
+
+func TestResolveModelCustomCodexProvider(t *testing.T) {
+	resolver := NewResolver(Config{})
+	resolver.SetOverrides(Overrides{RoleSonnet: "openai-codex:gpt-5.4"})
+	if got := resolver.ResolveModel("sonnet"); got != "openai-codex:gpt-5.4" {
+		t.Fatalf("resolved = %q", got)
 	}
 }
 

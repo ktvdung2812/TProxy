@@ -7,6 +7,7 @@ import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
 import { ConnectionStatsInline } from "./ConnectionStatsInline";
 import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
+import { CursorImportModal } from "./CursorImportModal";
 import { AddCredentialModal } from "./AddCredentialModal";
 import { ProviderConnectionActions } from "./ProviderConnectionActions";
 import { ProviderRotationCard } from "./ProviderRotationCard";
@@ -61,6 +62,7 @@ export function ProviderDetail({
   const [showAddCredential, setShowAddCredential] = useState(false);
   const [credentialMethod, setCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [showOAuth, setShowOAuth] = useState(false);
+  const [oauthAutoStart, setOauthAutoStart] = useState(false);
   const [reAuthCredential, setReAuthCredential] = useState<Credential | null>(null);
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
   const [confirmDeleteProvider, setConfirmDeleteProvider] = useState(false);
@@ -68,6 +70,7 @@ export function ProviderDetail({
   const [healthBusy, setHealthBusy] = useState(false);
   const [discoverNonce, setDiscoverNonce] = useState(0);
   const [modelsCredential, setModelsCredential] = useState<Credential | null>(null);
+  const [showCursorImport, setShowCursorImport] = useState(false);
   const [proxyPools, setProxyPools] = useState<ProxyPoolOption[]>([]);
 
   // Fetch proxy pools once for the EditConnectionModal binding dropdown.
@@ -120,6 +123,7 @@ export function ProviderDetail({
     }
     switch (method.kind) {
       case "oauth":
+        setOauthAutoStart(true);
         setShowOAuth(true);
         break;
       case "api_key":
@@ -131,6 +135,9 @@ export function ProviderDetail({
         break;
       case "import_cliproxy":
         onOpenImport?.("cliproxy");
+        break;
+      case "import_cursor":
+        setShowCursorImport(true);
         break;
       case "import_9router":
         onOpenImport?.("9router");
@@ -301,9 +308,25 @@ export function ProviderDetail({
         providerType={provider.Type}
         presetId={catalog.presetId}
         secret={secret}
-        onClose={() => setShowOAuth(false)}
+        autoStart={oauthAutoStart}
+        onClose={() => {
+          setShowOAuth(false);
+          setOauthAutoStart(false);
+        }}
         onComplete={() => {
           onNotice("OAuth credential connected");
+          setOauthAutoStart(false);
+          onMutated();
+        }}
+        onError={onError}
+      />
+      <CursorImportModal
+        open={showCursorImport}
+        secret={secret}
+        providerId={provider.ID}
+        onClose={() => setShowCursorImport(false)}
+        onComplete={() => {
+          onNotice("Cursor token imported");
           onMutated();
         }}
         onError={onError}

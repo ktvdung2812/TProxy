@@ -1,0 +1,22 @@
+{
+  "name": "tproxy",
+  "version": "0.1.0",
+  "description": "npm wrapper for the tproxy AI gateway binary",
+  "license": "MIT",
+  "bin": {
+    "tproxy": "bin/tproxy.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "ai",
+    "gateway",
+    "proxy",
+    "llm",
+    "openai"
+  ]
+}

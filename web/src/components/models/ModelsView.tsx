@@ -4,7 +4,8 @@ import { deleteModel, saveModel } from "./api";
 import { ModelSelectModal } from "./ModelSelectModal";
 import { ProviderPriorityModal } from "./ProviderPriorityModal";
 import type { ModelFormData, ModelRecord, ProviderOption, RouteFormData, RouteRecord } from "./types";
-import { modelToForm, sortRoutes } from "./utils";
+import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
+import { buildModelCardRoutes, modelToForm, providerDisplayLabel, sortRoutes } from "./utils";
 
 type Props = {
   secret: string;
@@ -39,6 +40,8 @@ export function ModelsView({
   const [priorityModel, setPriorityModel] = useState<ModelRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+
+  const { modelsByProvider, loading: loadingDiscovery } = useProviderModelDiscovery(secret, providers, true);
 
   const existingIds = useMemo(() => models.map((model) => model.ID), [models]);
 
@@ -118,7 +121,11 @@ export function ModelsView({
         <div>
           <p className="eyebrow">Public surface</p>
           <h2>Provider Priority Manager</h2>
-          <p>Map providers to stable model IDs and control fallback order.</p>
+          <p>
+            The routing gateway for every public model ID. Clients send a stable model name; tproxy resolves it here
+            to decide which provider and upstream model handle the request, with automatic fallback down the priority
+            chain.
+          </p>
         </div>
         <div className="models-head-actions">
           <span className="meta">{models.length} models</span>
@@ -130,10 +137,32 @@ export function ModelsView({
 
       <div className="model-grid">
         {models.map((model) => {
-          const routes = sortRoutes(routesByModel[model.ID] || []);
-          const enabledRoutes = routes.filter((route) => route.Enabled);
-          const visibleRoutes = routes.slice(0, 3);
-          const hiddenRouteCount = routes.length - visibleRoutes.length;
+          const savedRoutes = sortRoutes(routesByModel[model.ID] || []);
+          const displayRoutes = loadingDiscovery
+            ? savedRoutes.map((route) => {
+                const enabledRoutes = savedRoutes.filter((item) => item.Enabled);
+                const enabledPosition = route.Enabled
+                  ? enabledRoutes.findIndex((item) => item.ID === route.ID) + 1
+                  : 0;
+                return {
+                  key: route.ID,
+                  provider: route.ProviderID,
+                  providerLabel: providerDisplayLabel(providers, route.ProviderID),
+                  upstreamModel: route.UpstreamModel,
+                  enabled: route.Enabled,
+                  priority: route.Priority,
+                  saved: true,
+                  enabledPosition,
+                  accountCount: credentialCounts[route.ProviderID] ?? 0,
+                };
+              })
+            : buildModelCardRoutes(model, savedRoutes, providers, modelsByProvider).map((route) => ({
+                ...route,
+                accountCount: credentialCounts[route.provider] ?? 0,
+              }));
+          const visibleRoutes = displayRoutes.slice(0, 4);
+          const hiddenRouteCount = displayRoutes.length - visibleRoutes.length;
+          const suggestedCount = displayRoutes.filter((route) => !route.saved).length;
           return (
             <Card key={model.ID} pad="md" className="model-card">
               <div className="model-title">
@@ -158,25 +187,31 @@ export function ModelsView({
                 </div>
               )}
               <div className="route-list">
-                {visibleRoutes.map((route) => {
-                  const enabledPosition = route.Enabled
-                    ? enabledRoutes.findIndex((item) => item.ID === route.ID) + 1
-                    : 0;
-                  return (
-                    <div
-                      className={`route-row${route.Enabled ? "" : " is-disabled"}${enabledPosition === 1 ? " is-primary" : ""}`}
-                      key={route.ID}
-                    >
-                      <b>{route.Enabled && enabledPosition > 0 ? `P${enabledPosition}` : "—"}</b>
-                      <span>{route.ProviderID}</span>
-                      <code>{route.UpstreamModel}</code>
-                      <small>{route.Enabled ? `priority ${route.Priority}` : "disabled"}</small>
-                    </div>
-                  );
-                })}
+                {visibleRoutes.length === 0 ? (
+                  <p className="model-route-empty">
+                    {loadingDiscovery ? "Discovering compatible providers…" : "No provider routes yet"}
+                  </p>
+                ) : null}
+                {visibleRoutes.map((route) => (
+                  <div
+                    className={`route-row${route.enabled ? "" : " is-disabled"}${route.enabledPosition === 1 ? " is-primary" : ""}${route.saved ? "" : " is-suggested"}`}
+                    key={route.key}
+                  >
+                    <b>{route.enabled && route.enabledPosition > 0 ? `P${route.enabledPosition}` : "—"}</b>
+                    <span title={route.provider}>{route.providerLabel}</span>
+                    <small>
+                      {route.saved ? `priority ${route.priority}` : "new"}
+                    </small>
+                  </div>
+                ))}
                 {hiddenRouteCount > 0 ? (
                   <p className="model-route-more">
                     +{hiddenRouteCount} more provider{hiddenRouteCount === 1 ? "" : "s"}
+                  </p>
+                ) : null}
+                {suggestedCount > 0 ? (
+                  <p className="model-route-hint">
+                    {suggestedCount} new provider{suggestedCount === 1 ? "" : "s"} at the bottom — open Manage priority to save.
                   </p>
                 ) : null}
               </div>

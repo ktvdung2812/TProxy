@@ -2,6 +2,7 @@ import type { CLITool } from "../../cli-tools/constants";
 import type { ManualConfigEntry } from "./ManualConfigModal";
 import {
   buildClaudeCodeClientEnv,
+  buildClaudeGuideExports,
   DEFAULT_CLAUDE_PRIMARY_MODEL,
   type MappingTier,
 } from "../mapping/codegen";
@@ -11,6 +12,27 @@ function replaceVars(text: string, baseUrl: string, apiKey: string, model: strin
     .replace(/\{\{baseUrl\}\}/g, baseUrl)
     .replace(/\{\{apiKey\}\}/g, apiKey)
     .replace(/\{\{model\}\}/g, model || "virtual-model-id");
+}
+
+/** Live command preview for the Commands column — mirrors left-column selections. */
+export function buildGuideCommandPreview(
+  tool: CLITool,
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+): string | null {
+  const key = apiKey.trim();
+  const modelId = model.trim() || "virtual-model-id";
+
+  if (tool.id === "claude") {
+    return buildClaudeGuideExports(baseUrl, key, modelId);
+  }
+
+  if (tool.codeBlock?.code) {
+    return replaceVars(tool.codeBlock.code, baseUrl, key, modelId);
+  }
+
+  return null;
 }
 
 export function buildManualConfigs(

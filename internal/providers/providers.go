@@ -111,6 +111,13 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"qwen":                 {"text", "tools"},
 		"kiro":                 {"text", "vision", "tools", "reasoning"},
 		"qoder":                {"text", "tools", "reasoning"},
+		"cline":                {"text", "vision", "tools", "reasoning"},
+		"clinepass":            {"text", "tools", "reasoning"},
+		"iflow":                {"text", "vision", "tools", "reasoning"},
+		"codebuddy-cn":         {"text", "vision", "tools", "reasoning"},
+		"kilocode":             {"text", "vision", "tools", "reasoning"},
+		"gitlab":               {"text", "tools", "reasoning"},
+		"kimchi":               {"text", "vision", "tools", "reasoning"},
 	}
 	items := append([]string(nil), capabilities[providerType]...)
 	return items
@@ -124,7 +131,8 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"openai-compatible": "openai", "image": "openai", "video": "openai", "ollama": "openai", "kimi": "openai", "xai": "openai",
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
-		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder",
+		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cline": "openai", "clinepass": "openai",
+		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai",
 	}
 	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: providerType != "antigravity" && providerType != "tavily" && providerType != "elevenlabs", BootstrapRetry: true}, nil
 }
@@ -260,6 +268,13 @@ func NewRegistry() *Registry {
 		"qwen":                 &openAIAdapter{client: client},
 		"kiro":                 &kiroAdapter{client: client},
 		"qoder":                &qoderAdapter{client: client},
+		"cline":                &openAIAdapter{client: client},
+		"clinepass":            &openAIAdapter{client: client},
+		"iflow":                &openAIAdapter{client: client},
+		"codebuddy-cn":         &openAIAdapter{client: client},
+		"kilocode":             &openAIAdapter{client: client},
+		"gitlab":               &openAIAdapter{client: client},
+		"kimchi":               &openAIAdapter{client: client},
 	}}
 }
 
@@ -317,6 +332,18 @@ func authHeaders(provider store.Provider, credential store.Credential) http.Head
 	}
 	if provider.Type == "xai" {
 		applyGrokCLIHeaders(headers, provider.BaseURL)
+	}
+	if provider.Type == "cline" || provider.Type == "clinepass" {
+		applyClineHeaders(headers)
+		if credential.Secret != "" {
+			headers.Set("Authorization", clineAuthorizationValue(credential.Secret))
+		}
+	}
+	if provider.Type == "iflow" {
+		applyIflowHeaders(headers, credential)
+	}
+	if provider.Type == "kilocode" {
+		applyKilocodeHeaders(headers, credential)
 	}
 	return headers
 }

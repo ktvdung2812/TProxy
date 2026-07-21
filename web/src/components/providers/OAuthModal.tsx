@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Input, Modal } from "../ui";
-import { getProviderTypeInfo, defaultOAuthMode, usesBrowserOAuth } from "./catalog";
+import { getProviderTypeInfo, defaultOAuthMode, usesBrowserOAuth, allowsStatelessOAuthCallback, parseClineCallbackUrl } from "./catalog";
 import {
   cancelOAuth,
   completeOAuthCallback,
@@ -234,16 +234,25 @@ export function OAuthModal({
     setErrorMsg("");
     try {
       const parsed = new URL(manualUrl.trim());
-      const code = parsed.searchParams.get("code");
-      const state = parsed.searchParams.get("state");
+      const code =
+        (providerType === "cline" || providerType === "clinepass"
+          ? parseClineCallbackUrl(manualUrl.trim())
+          : null) ||
+        parsed.searchParams.get("code") ||
+        parsed.searchParams.get("token");
+      const state = parsed.searchParams.get("state") || "";
       const oauthError = parsed.searchParams.get("error");
+      const statelessCallback = allowsStatelessOAuthCallback(providerType);
       if (oauthError) {
         throw new Error(parsed.searchParams.get("error_description") || oauthError);
       }
-      if (!code || !state) {
+      if (!code) {
+        throw new Error("Callback URL must include a code (or token) query parameter");
+      }
+      if (!state && !statelessCallback) {
         throw new Error("Callback URL must include code and state query parameters");
       }
-      const status = await completeOAuthCallback(secret, state, code);
+      const status = await completeOAuthCallback(secret, code, state || undefined);
       setSession(status);
       if (["complete", "failed", "cancelled", "expired"].includes(status.status)) {
         handleTerminal(status);
@@ -255,7 +264,7 @@ export function OAuthModal({
       setErrorMsg(msg);
       onError?.(msg);
     }
-  }, [sessionId, manualUrl, secret, handleTerminal, startPolling, onError]);
+  }, [sessionId, manualUrl, secret, providerType, handleTerminal, startPolling, onError]);
 
   const authUrl = startResp?.authorization_url || "";
   const isPending = phase === "pending";
@@ -278,7 +287,7 @@ export function OAuthModal({
               Cancel
             </Button>
             <Button variant="primary" icon="login" disabled={!info.supportsOAuth} onClick={handleStart}>
-              Connect
+              Sign in
             </Button>
           </>
         ) : phase === "complete" ? (
@@ -290,8 +299,11 @@ export function OAuthModal({
             <Button variant="secondary" onClick={handleCancel}>
               Cancel
             </Button>
+            <Button variant="outline" icon="open_in_new" onClick={() => authUrl && openAuthWindow(authUrl)} disabled={!authUrl}>
+              Open login page
+            </Button>
             <Button variant="primary" icon="link" onClick={() => void handleManualCallback()} disabled={!manualUrl.trim()}>
-              Connect
+              Submit callback URL
             </Button>
           </>
         ) : (
@@ -333,9 +345,19 @@ export function OAuthModal({
 
           <div className="oauth-step">
             <p className="oauth-step-label">Step 2: Paste the callback URL here</p>
-            <p className="oauth-step-hint">After authorization, copy the full URL from your browser address bar.</p>
+            <p className="oauth-step-hint">
+              {providerType === "cline" || providerType === "clinepass"
+                ? "After sign-in, paste the full URL from authkit.cline.bot (for example .../device?code=...)."
+                : "After authorization, copy the full URL from your browser address bar."}
+            </p>
             <Input
-              placeholder="http://localhost:1455/auth/callback?code=...&state=..."
+              placeholder={
+                providerType === "cline" || providerType === "clinepass"
+                  ? "https://authkit.cline.bot/device?user_code=...&code=..."
+                  : allowsStatelessOAuthCallback(providerType)
+                    ? "http://localhost:1455/auth/callback?code=..."
+                    : "http://localhost:1455/auth/callback?code=...&state=..."
+              }
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}
               className="oauth-url-input"

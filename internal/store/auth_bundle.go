@@ -269,8 +269,8 @@ VALUES(?,?,?,'',?,'unknown','','','{}','{}',?,?)`, provider.ID, provider.Type, p
 		if item.MetadataJSON == "" {
 			item.MetadataJSON = "{}"
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,last_error_code,last_error,last_validated_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,'','','') ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,status=excluded.status,label=excluded.label,email=excluded.email,secret_ciphertext=excluded.secret_ciphertext,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled,cooldown_until='',last_error_code='',last_error='',last_validated_at=''`, item.ID, item.ProviderID, item.AuthType, item.Status, item.Label, item.Email, item.SecretCiphertext, item.MetadataJSON, item.Priority, item.Weight, boolInt(item.Enabled)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,last_error_code,last_error,last_validated_at,created_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,'','','',?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,status=excluded.status,label=excluded.label,email=excluded.email,secret_ciphertext=excluded.secret_ciphertext,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled,cooldown_until='',last_error_code='',last_error='',last_validated_at=''`, item.ID, item.ProviderID, item.AuthType, item.Status, item.Label, item.Email, item.SecretCiphertext, item.MetadataJSON, item.Priority, item.Weight, boolInt(item.Enabled), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return rollback(err)
 		}
 		if _, err = tx.ExecContext(ctx, `DELETE FROM credential_model_cooldowns WHERE credential_id=?`, item.ID); err != nil {

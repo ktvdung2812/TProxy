@@ -59,11 +59,19 @@
 - Optional plugin store/distribution and gRPC transport (HTTP plugin protocol is implemented and disabled by default).
 - Shared provider media-job limits and richer global/team media accounting beyond the implemented request, stream and budget policies.
 
-## OmniRoute parity (Phase A+B)
+## OmniRoute parity (Phase A–F)
 
 - Provider-level circuit breaker with OPEN/DEGRADED/CLOSED states (`internal/resilience/circuitbreaker.go`).
 - Zero-config auto-combo model resolution (`auto`, `auto/coding:fast`, `auto/reasoning:pro`, …) in `internal/router/autocombo.go`.
-- Compression pipeline with RTK, Caveman and stacked modes (`internal/compression/pipeline.go`).
+- Compression pipeline with RTK, Caveman, CCR, Headroom, LLMLingua-2, stacked/full/ultra modes (`internal/compression/`).
+- Fusion combo routing with parallel model execution (`internal/router/fusion.go`).
+- Free-tier catalog API and dashboard (`/dashboard/free-tiers`, `GET /api/admin/free-tiers`).
+- 18 credential rotation strategies including LKGP, task-aware, and arena-elo (`internal/routing/strategies.go`).
+- Arena ELO live ranking (`internal/intelligence/arena.go`).
+- Wave-2 provider preset catalog (`internal/ninerouter/wave2_presets.go`).
+- MCP JSON-RPC bridge at `POST /mcp` (`internal/mcp/server.go`).
+- Remote CLI `tproxy connect` (`cmd/tproxy/connect.go`).
+- npm wrapper (`npm/`), Electron shell (`electron/`), PWA manifest + service worker (`web/public/`).
 - Heuristic prompt-injection guard on LLM routes (`internal/guardrails/injection.go`).
 - Per-request routing/compression/budget headers and `X-TProxy-Cost` response telemetry.
-- Roadmap for remaining OmniRoute capabilities in `../specs/08-omniroute-parity.md`.
+- Roadmap tracker in `../specs/08-omniroute-parity.md`.

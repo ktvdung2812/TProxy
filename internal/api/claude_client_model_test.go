@@ -32,6 +32,15 @@ func TestClientFacingModel(t *testing.T) {
 	}
 }
 
+func TestClientFacingModelGptCodename(t *testing.T) {
+	request := canonical.Request{
+		Metadata: map[string]any{claudeClientModelMetadataKey: "gpt-sol"},
+	}
+	if got := clientFacingModel(request, "codex-gpt-5.6-sol"); got != "gpt-sol" {
+		t.Fatalf("client model = %q", got)
+	}
+}
+
 func TestRenderClaudeUsesClientModel(t *testing.T) {
 	payload := renderClaude(&canonical.Response{Model: "codex:gpt-5.4", Content: "ok"}, "req-1", "sonnet")
 	if payload["model"] != "sonnet" {

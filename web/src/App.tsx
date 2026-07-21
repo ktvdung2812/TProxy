@@ -11,7 +11,7 @@ import {
   Input,
   cn,
 } from "./components/ui";
-import { defaultApiKey } from "./devDefaults";
+import { resolveChatApiKey } from "./devDefaults";
 import { AuthLoadingView } from "./components/auth/AuthLoadingView";
 import { LoginView } from "./components/auth/LoginView";
 import {
@@ -27,6 +27,7 @@ import { ProviderLogo } from "./components/providers/ProviderLogo";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
 import { UsageView } from "./components/usage/UsageView";
 import { TokenSaverView } from "./components/token-saver/TokenSaverView";
+import { FreeTiersView } from "./components/free-tiers/FreeTiersView";
 import { ApisView } from "./components/apis/ApisView";
 import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
@@ -99,6 +100,7 @@ type Credential = {
   proxy_pool_ids?: string[];
   last_used_at?: string;
   consecutive_use_count?: number;
+  created_at?: string;
 };
 
 type Snapshot = {
@@ -161,9 +163,10 @@ function App() {
   const [notice, setNotice] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const viewportWidth = useViewportWidth();
   const [providerSearch, setProviderSearch] = useState("");
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("tproxy-api-key") || defaultApiKey());
+  const [apiKey, setApiKey] = useState(() => resolveChatApiKey());
 
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [gatewayOnline, setGatewayOnline] = useState(true);
@@ -249,6 +252,16 @@ function App() {
   }, [authHeaders, authState, logout, secret]);
 
   useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (authState !== "authenticated") {
+      setMobileNavOpen(false);
+    }
+  }, [authState]);
+
+  useEffect(() => {
     if (authState === "authenticated") {
       void load();
     }
@@ -326,6 +339,7 @@ function App() {
         email: credential.email,
         enabled: credential.enabled,
         auth_type: credential.auth_type,
+        created_at: credential.created_at,
       })),
     );
   }, [snapshot.credentials, snapshot.providers]);
@@ -371,12 +385,22 @@ function App() {
   return (
     <div className="app-shell">
       <MatrixRain />
-      <div className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow")}>
+      {isMobileSidebar && mobileNavOpen ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Đóng menu"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
+      <div className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow", isMobileSidebar && "is-mobile", mobileNavOpen && "is-open")}>
         <Sidebar
           online={online}
           collapsed={isNarrowSidebar}
           onToggleCollapse={isMobileSidebar ? undefined : toggleSidebar}
           collapseLabel={sidebarCollapseLabel}
+          onClose={() => setMobileNavOpen(false)}
+          onLogout={logout}
         />
       </div>
 
@@ -389,6 +413,7 @@ function App() {
           onRefresh={load}
           loading={loading}
           onLogout={logout}
+          onOpenNav={isMobileSidebar ? () => setMobileNavOpen(true) : undefined}
           extra={
             activeRoute.id === "providers" ? (
               <Input
@@ -409,12 +434,18 @@ function App() {
               <div className="banner banner-error">
                 <span className="material-symbols-outlined">error</span>
                 <span>{error}</span>
+                <button type="button" className="banner-dismiss" aria-label="Đóng thông báo lỗi" onClick={() => setError("")}>
+                  <span className="material-symbols-outlined">close</span>
+                </button>
               </div>
             )}
             {notice && (
               <div className="banner banner-notice">
                 <span className="material-symbols-outlined">check_circle</span>
                 <span>{notice}</span>
+                <button type="button" className="banner-dismiss" aria-label="Đóng thông báo" onClick={() => setNotice("")}>
+                  <span className="material-symbols-outlined">close</span>
+                </button>
               </div>
             )}
 
@@ -428,6 +459,7 @@ function App() {
               <Route path="/providers/:providerId" element={<ProvidersPage />} />
               <Route path="/proxy-pools" element={<ProxyPoolsPage />} />
               <Route path="/quota" element={<QuotaPage />} />
+              <Route path="/free-tiers" element={<FreeTiersPage />} />
               <Route path="/usage" element={<UsagePage />} />
               <Route path="/token-saver" element={<TokenSaverPage />} />
               <Route path="/apis" element={<ApisPage />} />
@@ -446,6 +478,10 @@ function App() {
 
   function QuotaPage() {
     return <QuotaTrackerView secret={secret} credentials={quotaCredentials} onError={setError} onMutated={() => void load()} />;
+  }
+
+  function FreeTiersPage() {
+    return <FreeTiersView secret={secret} onError={setError} />;
   }
 
   function UsagePage() {
@@ -529,6 +565,7 @@ function App() {
         secret={secret}
         searchQuery={providerSearch}
         selectedId={providerId ?? null}
+        snapshotLoading={loading}
         onSelect={(id) => navigate(id ? `/providers/${encodeURIComponent(id)}` : "/providers")}
         onMutated={() => void load()}
         onNotice={setNotice}
@@ -607,11 +644,6 @@ function App() {
         secret={secret}
         apiKeys={snapshot.api_keys || []}
         models={snapshot.models || []}
-        providers={(snapshot.providers || []).map((provider) => ({
-          ID: provider.ID,
-          Type: provider.Type,
-          Name: provider.Name,
-        }))}
         onError={setError}
         onNotice={setNotice}
       />
@@ -671,9 +703,9 @@ function App() {
       <section className="section">
               <div className="section-head">
                 <div>
-                  <p className="eyebrow">Upstreams</p>
-                  <h2>Providers</h2>
-                  <p>Configured upstream gateways and accounts.</p>
+                  <p className="eyebrow">Infrastructure</p>
+                  <h2>Health overview</h2>
+                  <p>Run health checks and model discovery without opening each provider detail page. For credential setup and OAuth, use <button type="button" className="inline-link" onClick={() => navigate("/providers")}>Providers</button>.</p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <span className="meta">{snapshot.providers?.length || 0} configured</span>

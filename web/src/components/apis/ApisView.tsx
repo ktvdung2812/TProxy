@@ -306,7 +306,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               missingSecretMessage="Secret for this key is not saved in this browser. Create a new key below and save the secret when it is shown."
             />
           </Field>
-          <Field label="Example model" hint="Public model IDs from Provider Priority Manager">
+          <Field label="Example model" hint="Public model IDs from PPM — provider selection is configured there">
             <Select value={exampleModel} onChange={(event) => setExampleModel(event.target.value)}>
               {modelOptions.length === 0 ? (
                 <option value="">No models yet</option>

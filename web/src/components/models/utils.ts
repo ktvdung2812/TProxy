@@ -1,4 +1,5 @@
-import type { ModelFormData, ModelRecord, RouteFormData, RouteRecord } from "./types";
+import type { DiscoveredModel } from "../providers/api";
+import type { ModelFormData, ModelRecord, ProviderOption, RouteFormData, RouteRecord } from "./types";
 
 export const MODEL_ID_REGEX = /^[a-zA-Z0-9_.-]+$/;
 
@@ -172,4 +173,150 @@ export function isProviderModelMapped(
       (route) => route.ProviderID === providerId && route.UpstreamModel === upstreamModel,
     ),
   );
+}
+
+export function looksLikeUpstreamModelID(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return /^[a-z0-9][a-z0-9._/-]*$/i.test(trimmed) && !/\s/.test(trimmed);
+}
+
+export function resolveCanonicalUpstreamModel(model: ModelRecord, routes: RouteFormData[]): string {
+  const sorted = sortRouteForms(routes);
+  const enabledUpstream = sorted.find((route) => route.enabled && route.upstream_model.trim())?.upstream_model.trim();
+  if (enabledUpstream) return enabledUpstream;
+
+  const anyUpstream = sorted.find((route) => route.upstream_model.trim())?.upstream_model.trim();
+  if (anyUpstream) return anyUpstream;
+
+  const display = model.DisplayName?.trim() || "";
+  const id = model.ID.trim();
+
+  if (display && looksLikeUpstreamModelID(display)) return display;
+  if (id.startsWith("codex-")) return id.slice("codex-".length);
+
+  const alias = (model.Aliases || []).find((item) => looksLikeUpstreamModelID(item));
+  if (alias) return alias.trim();
+
+  if (display) return display;
+  return id;
+}
+
+export function providerSupportsUpstreamModel(
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+  providerId: string,
+  upstreamModel: string,
+): boolean {
+  const normalized = upstreamModel.trim().toLowerCase();
+  if (!normalized) return false;
+  return (modelsByProvider[providerId] || []).some((item) => item.id.trim().toLowerCase() === normalized);
+}
+
+export function providersForUpstreamModel(
+  providers: ProviderOption[],
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+  upstreamModel: string,
+): ProviderOption[] {
+  const normalized = upstreamModel.trim().toLowerCase();
+  if (!normalized) return providers;
+  return providers.filter((provider) => providerSupportsUpstreamModel(modelsByProvider, provider.id, normalized));
+}
+
+export function syncRoutesForUpstreamModel(
+  routes: RouteFormData[],
+  providers: ProviderOption[],
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+  upstreamModel: string,
+): RouteFormData[] {
+  const canonical = upstreamModel.trim();
+  if (!canonical) return routes;
+
+  const byProvider = new Map(routes.map((route) => [route.provider, route]));
+  const supporting = providersForUpstreamModel(providers, modelsByProvider, canonical);
+  const merged: RouteFormData[] = routes.map((route) => {
+    if (!providerSupportsUpstreamModel(modelsByProvider, route.provider, canonical)) {
+      return route;
+    }
+    return { ...route, upstream_model: canonical };
+  });
+
+  for (const provider of supporting) {
+    if (byProvider.has(provider.id)) continue;
+    merged.push(emptyRoute(provider.id, defaultRoutePriority(merged.length), canonical));
+  }
+
+  return reorderRoutePriorities(merged);
+}
+
+export function routeFormsEqual(left: RouteFormData[], right: RouteFormData[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((route, index) => {
+    const other = right[index];
+    return (
+      route.id === other.id &&
+      route.provider === other.provider &&
+      route.upstream_model === other.upstream_model &&
+      route.priority === other.priority &&
+      route.weight === other.weight &&
+      route.enabled === other.enabled
+    );
+  });
+}
+
+export type ModelCardRoute = {
+  key: string;
+  provider: string;
+  providerLabel: string;
+  upstreamModel: string;
+  enabled: boolean;
+  priority: number;
+  saved: boolean;
+  enabledPosition: number;
+};
+
+export function providerDisplayLabel(providers: ProviderOption[], providerId: string): string {
+  const provider = providers.find((item) => item.id === providerId);
+  if (!provider) return providerId;
+  const match = provider.label.match(/^(.+?)\s*\(/);
+  return match?.[1]?.trim() || provider.label;
+}
+
+export function buildModelCardRoutes(
+  model: ModelRecord,
+  savedRoutes: RouteRecord[],
+  providers: ProviderOption[],
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+): ModelCardRoute[] {
+  const savedForms = modelToForm(model, savedRoutes).routes;
+  const canonicalUpstream = resolveCanonicalUpstreamModel(model, savedForms);
+  const synced = syncRoutesForUpstreamModel(savedForms, providers, modelsByProvider, canonicalUpstream);
+  const savedProviders = new Set(savedForms.map((route) => route.provider));
+  const enabledSynced = synced.filter((route) => route.enabled);
+
+  return synced.map((route) => {
+    const enabledPosition = route.enabled
+      ? enabledSynced.findIndex((item) => item.provider === route.provider) + 1
+      : 0;
+    return {
+      key: route.id || `${route.provider}-${route.upstream_model}`,
+      provider: route.provider,
+      providerLabel: providerDisplayLabel(providers, route.provider),
+      upstreamModel: route.upstream_model,
+      enabled: route.enabled,
+      priority: route.priority,
+      saved: savedProviders.has(route.provider),
+      enabledPosition,
+    };
+  });
+}
+
+export function routesToFormData(routes: RouteRecord[]): RouteFormData[] {
+  return sortRoutes(routes).map((route) => ({
+    id: route.ID,
+    provider: route.ProviderID,
+    upstream_model: route.UpstreamModel,
+    priority: route.Priority,
+    weight: route.Weight && route.Weight > 0 ? route.Weight : 1,
+    enabled: route.Enabled,
+  }));
 }

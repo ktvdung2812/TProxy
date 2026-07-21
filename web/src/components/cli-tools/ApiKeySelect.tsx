@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
-import { Field, Select } from "../ui";
+import { getStoredApiKeySecret, storeApiKeySecret } from "../../lib/apiKeySecrets";
+import { Field, Input, Select } from "../ui";
 
 export type ApiKeyOption = {
   id: string;
@@ -16,6 +16,8 @@ type Props = {
   onSelectedIdChange?: (id: string) => void;
   /** Render without outer Field wrapper (parent supplies label). */
   embedded?: boolean;
+  /** Show a text field for the API key secret (CLI Tools guide). */
+  showSecretField?: boolean;
   emptyMessage?: string;
   missingSecretMessage?: string;
 };
@@ -36,6 +38,7 @@ export function ApiKeySelect({
   onChange,
   onSelectedIdChange,
   embedded = false,
+  showSecretField = false,
   emptyMessage,
   missingSecretMessage,
 }: Props) {
@@ -63,7 +66,15 @@ export function ApiKeySelect({
   const handleSelect = (id: string) => {
     setSelectedId(id);
     onSelectedIdChange?.(id);
-    onChange(getStoredApiKeySecret(id) ?? "");
+    const stored = getStoredApiKeySecret(id) ?? "";
+    onChange(stored);
+  };
+
+  const handleSecretChange = (next: string) => {
+    onChange(next);
+    if (selectedId && next.trim()) {
+      storeApiKeySecret(selectedId, next.trim());
+    }
   };
 
   const selectedKey = enabledKeys.find((key) => key.id === selectedId);
@@ -98,7 +109,24 @@ export function ApiKeySelect({
   return (
     <div className={stackClass}>
       {embedded ? select : <Field label="Select key">{select}</Field>}
-      {hasSecret ? (
+      {showSecretField ? (
+        <Field
+          label="API key value"
+          hint={
+            hasSecret
+              ? "Used in command previews below. Saved in this browser."
+              : "Paste the secret shown when the key was created, or it will be resolved from TPROXY_API_KEY when available."
+          }
+        >
+          <Input
+            value={value}
+            onChange={(event) => handleSecretChange(event.target.value)}
+            placeholder="tp_..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </Field>
+      ) : hasSecret ? (
         embedded ? null : (
           <p className="cli-tool-hint">
             Using key <strong>{selectedKey?.name || selectedKey?.id}</strong>. Manage keys in{" "}

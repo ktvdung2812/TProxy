@@ -20,6 +20,7 @@ type Props = {
   model: string;
   baseUrl: string;
   onApiKeyChange: (value: string) => void;
+  hideScript?: boolean;
 };
 
 function configBadge(status: CLIToolStatus | null): { label: string; tone: "success" | "warning" | "muted" } | null {
@@ -34,7 +35,7 @@ export function supportsAutoApply(toolId: string): boolean {
   return isAutoApplyTool(toolId);
 }
 
-export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiKeyChange }: Props) {
+export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiKeyChange, hideScript = false }: Props) {
   const isLocal = isLocalDashboardHost();
   const canAutoApply = isLocal && supportsAutoApply(tool.id);
   const [status, setStatus] = useState<CLIToolStatus | null>(null);
@@ -168,7 +169,9 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
         </Button>
       </div>
 
-      <CLIApplyScriptBlock configs={manualConfigs} disabled={!model || !apiKey.trim()} />
+      {!hideScript ? (
+        <CLIApplyScriptBlock configs={manualConfigs} disabled={!model || !apiKey.trim()} />
+      ) : null}
 
       {!canAutoApply ? (
         <div className="cli-tool-note cli-tool-note-info">

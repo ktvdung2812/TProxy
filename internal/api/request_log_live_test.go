@@ -7,6 +7,18 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
+func TestLiveRequestLogBufferRecentByCredential(t *testing.T) {
+	buffer := NewLiveRequestLogBuffer(10)
+	buffer.Push(store.RequestLog{RequestID: "a", CredentialID: "cred-a", Method: "POST", Path: "/v1/responses", Status: 200, CreatedAt: time.Now().UTC()})
+	buffer.Push(store.RequestLog{RequestID: "b", CredentialID: "cred-b", Method: "POST", Path: "/v1/responses", Status: 502, CreatedAt: time.Now().UTC()})
+	buffer.Push(store.RequestLog{RequestID: "c", CredentialID: "cred-a", Method: "GET", Path: "/v1/models", Status: 200, CreatedAt: time.Now().UTC()})
+
+	filtered := buffer.RecentByCredential("cred-a", 10)
+	if len(filtered) != 2 || filtered[0].RequestID != "c" || filtered[1].RequestID != "a" {
+		t.Fatalf("filtered=%+v", filtered)
+	}
+}
+
 func TestLiveRequestLogBufferRecentAndNotify(t *testing.T) {
 	buffer := NewLiveRequestLogBuffer(3)
 	notify, unsubscribe := buffer.Subscribe()

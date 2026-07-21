@@ -12,6 +12,7 @@ export type AdminSettings = {
   payload_capture: boolean;
   allow_remote_management: boolean;
   allow_lan_management: boolean;
+  public_base_url?: string;
   server_host: string;
   server_port: number;
   token_saver: {
@@ -90,15 +91,16 @@ export function changeDashboardPassword(secret: string, currentPassword: string,
   });
 }
 
-export function saveGatewaySettings(secret: string, allowLanManagement: boolean) {
+export function saveGatewaySettings(secret: string, payload: { allow_lan_management?: boolean; public_base_url?: string }) {
   return adminFetch<{
     ok: boolean;
     allow_lan_management: boolean;
+    public_base_url?: string;
     server_host: string;
     server_port: number;
     restart_required?: boolean;
   }>(secret, "/api/admin/settings/gateway", {
     method: "PATCH",
-    body: JSON.stringify({ allow_lan_management: allowLanManagement }),
+    body: JSON.stringify(payload),
   });
 }

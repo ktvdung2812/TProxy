@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button, Modal } from "../ui";
 import { ProviderPriorityEditor } from "./ProviderPriorityEditor";
 import type { ModelRecord, ProviderOption, RouteFormData } from "./types";
@@ -25,6 +26,8 @@ export function ProviderPriorityModal({
   onClose,
   onSubmit,
 }: Props) {
+  const [saveActions, setSaveActions] = useState<{ canSave: boolean; save: () => void } | null>(null);
+
   return (
     <Modal
       open={open}
@@ -35,9 +38,18 @@ export function ProviderPriorityModal({
       size="lg"
       className="priority-manager-modal"
       footer={
-        <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
-          Close
-        </Button>
+        saveActions ? (
+          <Button
+            variant="primary"
+            size="sm"
+            icon="save"
+            loading={saving}
+            disabled={!saveActions.canSave}
+            onClick={saveActions.save}
+          >
+            Save priority
+          </Button>
+        ) : null
       }
     >
       <ProviderPriorityEditor
@@ -47,9 +59,9 @@ export function ProviderPriorityModal({
         routes={routes}
         providers={providers}
         credentialCounts={credentialCounts}
-        saving={saving}
         onSave={onSubmit}
         onNavigateAway={onClose}
+        onRegisterSave={setSaveActions}
       />
     </Modal>
   );

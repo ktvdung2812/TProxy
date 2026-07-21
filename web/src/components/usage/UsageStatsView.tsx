@@ -146,8 +146,8 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
         ),
         renderDetailCells: (item: ReturnType<typeof enrichUsageRows>[number]) => (
           <>
-            <td>{item.rawModel}</td>
-            <td><ProviderBadge provider={item.provider} /></td>
+            <td>{item.provider?.toLowerCase() || "unknown"}</td>
+            <td className="muted">—</td>
             <td className="right">{fmt(item.requests)}</td>
             <td className="right muted">{fmtTime(item.lastUsed)}</td>
           </>

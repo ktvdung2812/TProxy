@@ -10,6 +10,7 @@ import { resolveProviderSlug, type ProviderTypeInfo } from "./catalog";
 import { resolveConnectionProfile, type ConnectionMethod } from "./connectionMethods";
 import { checkProviderHealth, deleteProvider, exportAuthBundle, fetchNinerouterPresets, importAuthBundle, saveProvider, type NinerouterPreset } from "./api";
 import { AddCredentialModal } from "./AddCredentialModal";
+import { CursorImportModal } from "./CursorImportModal";
 import { OAuthModal } from "./OAuthModal";
 import type { Credential, ModelAlias, Provider } from "./types";
 
@@ -20,6 +21,7 @@ type Props = {
   secret: string;
   searchQuery?: string;
   selectedId: string | null;
+  snapshotLoading?: boolean;
   onSelect: (id: string | null) => void;
   onMutated: () => void;
   onNotice: (message: string) => void;
@@ -34,6 +36,7 @@ export function ProvidersView({
   secret,
   searchQuery = "",
   selectedId,
+  snapshotLoading = false,
   onSelect,
   onMutated,
   onNotice,
@@ -55,6 +58,7 @@ export function ProvidersView({
   const [showCatalogCredential, setShowCatalogCredential] = useState(false);
   const [catalogCredentialMethod, setCatalogCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [catalogProviderId, setCatalogProviderId] = useState<string | null>(null);
+  const [showCursorImport, setShowCursorImport] = useState(false);
   const importInputId = "tproxy-auth-bundle-import";
 
   useEffect(() => {
@@ -71,23 +75,27 @@ export function ProvidersView({
   }, [secret]);
 
   useEffect(() => {
-    if (!selectedId || !presetsLoaded) return;
+    if (!selectedId || snapshotLoading || !presetsLoaded) return;
     if (!resolveProviderSlug(selectedId, providers, presets)) {
       onSelect(null);
     }
-  }, [selectedId, providers, presets, presetsLoaded, onSelect]);
+  }, [selectedId, providers, presets, presetsLoaded, snapshotLoading, onSelect]);
 
   const resolved = useMemo(
     () => (selectedId ? resolveProviderSlug(selectedId, providers, presets) : null),
     [selectedId, providers, presets],
   );
 
-  const awaitingPresetCatalog = useMemo(() => {
-    if (!selectedId || presetsLoaded) return false;
-    return resolveProviderSlug(selectedId, providers, []) === null;
-  }, [selectedId, presetsLoaded, providers]);
+  const awaitingProviderResolution = useMemo(() => {
+    if (!selectedId) return false;
+    if (snapshotLoading) return true;
+    if (!presetsLoaded) {
+      return resolveProviderSlug(selectedId, providers, []) === null;
+    }
+    return false;
+  }, [selectedId, snapshotLoading, presetsLoaded, providers]);
 
-  if (awaitingPresetCatalog) {
+  if (awaitingProviderResolution) {
     return (
       <section className="section">
         <div className="section-head">
@@ -146,6 +154,9 @@ export function ProvidersView({
         case "import_cliproxy":
         case "import_9router":
           setShowImport(true);
+          break;
+        case "import_cursor":
+          setShowCursorImport(true);
           break;
         default: {
           const _exhaustive: never = method.kind;
@@ -315,6 +326,18 @@ export function ProvidersView({
           onNotice={onNotice}
           onError={onError}
           onMutated={onMutated}
+        />
+        <CursorImportModal
+          open={showCursorImport}
+          secret={secret}
+          providerId={catalogProviderId || catalog.presetId || catalog.type}
+          onClose={() => setShowCursorImport(false)}
+          onComplete={() => {
+            onNotice("Cursor token imported");
+            onMutated();
+            onSelect(catalog.presetId || catalog.type);
+          }}
+          onError={onError}
         />
         <AddProviderModal
           open={showAdd}

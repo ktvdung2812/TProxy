@@ -10,6 +10,7 @@ import {
 } from "./ninerouterCatalog";
 import { CustomProviderCard, ProviderCatalogCard } from "./ProviderCatalogCard";
 import type { Credential, Provider } from "./types";
+import { getProviderStats } from "./types";
 
 type Props = {
   providers: Provider[];
@@ -36,6 +37,46 @@ function instancesForEntry(providers: Provider[], entry: ProviderTypeInfo) {
     if (byPreset.length > 0) return byPreset;
   }
   return providers.filter((p) => p.Type === entry.type && (!entry.presetId || p.ID === entry.presetId));
+}
+
+function connectionSortScore(
+  providers: Provider[],
+  credentials: Record<string, Credential[]>,
+  entry: PresetCatalogEntry | Provider,
+) {
+  const instances =
+    "ID" in entry
+      ? providers.filter((p) => p.ID === entry.ID)
+      : instancesForEntry(providers, entry);
+  const stats = getProviderStats(instances.flatMap((p) => credentials[p.ID] || []));
+  return { hasAccounts: stats.total > 0 ? 1 : 0, connected: stats.connected };
+}
+
+function sortByConnections<T extends PresetCatalogEntry | Provider>(
+  items: T[],
+  providers: Provider[],
+  credentials: Record<string, Credential[]>,
+): T[] {
+  const byName = (a: T, b: T) => {
+    const nameA = "Name" in a ? a.Name || a.ID : a.name;
+    const nameB = "Name" in b ? b.Name || b.ID : b.name;
+    return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+  };
+  return [...items].sort((a, b) => {
+    const scoreA = connectionSortScore(providers, credentials, a);
+    const scoreB = connectionSortScore(providers, credentials, b);
+    if (scoreA.hasAccounts !== scoreB.hasAccounts) return scoreB.hasAccounts - scoreA.hasAccounts;
+    if (scoreA.connected !== scoreB.connected) return scoreB.connected - scoreA.connected;
+    return byName(a, b);
+  });
+}
+
+function sortCatalogByConnections(
+  catalog: PresetCatalogEntry[],
+  providers: Provider[],
+  credentials: Record<string, Credential[]>,
+) {
+  return sortByConnections(catalog, providers, credentials);
 }
 
 /** Providers list — 9router-style sections and compact cards. */
@@ -81,10 +122,37 @@ export function ProviderList({
   const pluginCatalog = filterCatalog(presetSections.plugin);
   const visibleCustom = filterCustom(customProviders);
 
+  const sortedOauthCatalog = useMemo(
+    () => sortCatalogByConnections(oauthCatalog, providers, credentials),
+    [oauthCatalog, providers, credentials],
+  );
+  const sortedFreeTierCatalog = useMemo(
+    () => sortCatalogByConnections(freeTierCatalog, providers, credentials),
+    [freeTierCatalog, providers, credentials],
+  );
+  const sortedApikeyCatalog = useMemo(
+    () => sortCatalogByConnections(apikeyCatalog, providers, credentials),
+    [apikeyCatalog, providers, credentials],
+  );
+  const sortedMediaCatalog = useMemo(
+    () => sortCatalogByConnections(mediaCatalog, providers, credentials),
+    [mediaCatalog, providers, credentials],
+  );
+  const sortedPluginCatalog = useMemo(
+    () => sortCatalogByConnections(pluginCatalog, providers, credentials),
+    [pluginCatalog, providers, credentials],
+  );
+  const sortedVisibleCustom = useMemo(
+    () => sortByConnections(visibleCustom, providers, credentials),
+    [visibleCustom, providers, credentials],
+  );
+
   const isApikeySearching = !!searchQuery.trim();
   const visibleApikeyCatalog =
-    isApikeySearching || showAllApikey ? apikeyCatalog : apikeyCatalog.slice(0, APIKEY_INITIAL_VISIBLE);
-  const hiddenApikeyCount = Math.max(0, apikeyCatalog.length - visibleApikeyCatalog.length);
+    isApikeySearching || showAllApikey
+      ? sortedApikeyCatalog
+      : sortedApikeyCatalog.slice(0, APIKEY_INITIAL_VISIBLE);
+  const hiddenApikeyCount = Math.max(0, sortedApikeyCatalog.length - visibleApikeyCatalog.length);
 
   const hasResults =
     visibleCustom.length > 0 ||
@@ -98,8 +166,8 @@ export function ProviderList({
     catalog.flatMap((item) => instancesForEntry(providers, item).map((p) => p.ID));
 
   const oauthCredentials = useMemo(
-    () => sectionProviderIds(oauthCatalog).flatMap((id) => credentials[id] || []),
-    [oauthCatalog, credentials, providers],
+    () => sectionProviderIds(sortedOauthCatalog).flatMap((id) => credentials[id] || []),
+    [sortedOauthCatalog, credentials, providers],
   );
 
   return (
@@ -124,14 +192,14 @@ export function ProviderList({
           </>
         }
       >
-        {visibleCustom.length === 0 ? (
+        {sortedVisibleCustom.length === 0 ? (
           <div className="providers-dashed-empty">
             <span className="material-symbols-outlined">extension</span>
             <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
           </div>
         ) : (
           <div className="provider-catalog-grid">
-            {visibleCustom.map((provider) => (
+            {sortedVisibleCustom.map((provider) => (
               <CustomProviderCard
                 key={provider.ID}
                 provider={provider}
@@ -143,7 +211,7 @@ export function ProviderList({
         )}
       </ProviderSection>
 
-      {oauthCatalog.length > 0 && (
+      {sortedOauthCatalog.length > 0 && (
         <ProviderSection
           title="OAuth Providers"
           actions={
@@ -152,38 +220,38 @@ export function ProviderList({
               <TestAllButton
                 label="Test All"
                 busy={testingSection === "oauth"}
-                onClick={() => onTestSection?.("oauth", sectionProviderIds(oauthCatalog))}
+                onClick={() => onTestSection?.("oauth", sectionProviderIds(sortedOauthCatalog))}
               />
             </>
           }
         >
-          <CatalogGrid catalog={oauthCatalog} providers={providers} credentials={credentials} />
+          <CatalogGrid catalog={sortedOauthCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
-      {freeTierCatalog.length > 0 && (
+      {sortedFreeTierCatalog.length > 0 && (
         <ProviderSection
           title="Free Tier Providers"
           actions={
             <TestAllButton
               label="Test All"
               busy={testingSection === "freeTier"}
-              onClick={() => onTestSection?.("freeTier", sectionProviderIds(freeTierCatalog))}
+              onClick={() => onTestSection?.("freeTier", sectionProviderIds(sortedFreeTierCatalog))}
             />
           }
         >
-          <CatalogGrid catalog={freeTierCatalog} providers={providers} credentials={credentials} />
+          <CatalogGrid catalog={sortedFreeTierCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
-      {apikeyCatalog.length > 0 && (
+      {sortedApikeyCatalog.length > 0 && (
         <ProviderSection
           title="API Key Providers"
           actions={
             <TestAllButton
               label="Test All"
               busy={testingSection === "apikey"}
-              onClick={() => onTestSection?.("apikey", sectionProviderIds(apikeyCatalog))}
+              onClick={() => onTestSection?.("apikey", sectionProviderIds(sortedApikeyCatalog))}
             />
           }
         >
@@ -195,21 +263,21 @@ export function ProviderList({
               onClick={() => setShowAllApikey(true)}
             >
               <span className="material-symbols-outlined">expand_more</span>
-              Show all {apikeyCatalog.length} providers
+              Show all {sortedApikeyCatalog.length} providers
             </button>
           ) : null}
         </ProviderSection>
       )}
 
-      {mediaCatalog.length > 0 && (
+      {sortedMediaCatalog.length > 0 && (
         <ProviderSection title="Media Providers">
-          <CatalogGrid catalog={mediaCatalog} providers={providers} credentials={credentials} />
+          <CatalogGrid catalog={sortedMediaCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
 
-      {pluginCatalog.length > 0 && (
+      {sortedPluginCatalog.length > 0 && (
         <ProviderSection title="Plugin Providers">
-          <CatalogGrid catalog={pluginCatalog} providers={providers} credentials={credentials} />
+          <CatalogGrid catalog={sortedPluginCatalog} providers={providers} credentials={credentials} />
         </ProviderSection>
       )}
     </div>

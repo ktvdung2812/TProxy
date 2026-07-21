@@ -34,6 +34,13 @@ func (m *Manager) prepareProviderToken(ctx context.Context, provider store.Provi
 			return token, email, err
 		}
 	}
+	if isClineProvider(provider.Type) {
+		var err error
+		token, email, err = m.enrichClineToken(ctx, token, email)
+		if err != nil {
+			return token, email, err
+		}
+	}
 	if email != "" {
 		token.Extra["email"] = email
 	}

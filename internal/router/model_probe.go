@@ -26,8 +26,26 @@ func (r *Router) TestUpstreamModel(ctx context.Context, providerID, modelID, kin
 	if prepareErr != nil {
 		return providers.PingResult{}, credential.ID, asCredentialError(prepareErr)
 	}
-	result := r.registry.PingModel(ctx, *provider, prepared, modelID, kind)
+	result := r.registry.PingModel(ctx, *provider, prepared, modelID, resolveUpstreamProbeKind(modelID, kind))
 	return result, prepared.ID, nil
+}
+
+// resolveUpstreamProbeKind picks the endpoint for a direct upstream model probe.
+// Providers often tag chat models with embedding capability; probe those via chat
+// unless the model id clearly targets embeddings.
+func resolveUpstreamProbeKind(modelID, kind string) string {
+	normalized := strings.TrimSpace(strings.ToLower(kind))
+	if normalized == "" {
+		return "llm"
+	}
+	if normalized != "embedding" {
+		return normalized
+	}
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" || strings.Contains(id, "embed") {
+		return "embedding"
+	}
+	return "llm"
 }
 
 // TestPublicModel probes a configured virtual model through the normal router path.

@@ -10,8 +10,12 @@ type Props = {
 
 /** Provider-specific connection action buttons (9router-style). */
 export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm" }: Props) {
-  const primary = profile.methods.filter((method) => method.kind !== "import_9router" && method.kind !== "import_cliproxy");
-  const secondary = profile.methods.filter((method) => method.kind === "import_9router" || method.kind === "import_cliproxy");
+  const primary = profile.methods.filter(
+    (method) => method.kind !== "import_9router" && method.kind !== "import_cliproxy" && method.kind !== "import_cursor",
+  );
+  const secondary = profile.methods.filter(
+    (method) => method.kind === "import_9router" || method.kind === "import_cliproxy" || method.kind === "import_cursor",
+  );
 
   return (
     <div className="provider-connection-actions">
@@ -56,7 +60,7 @@ export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm"
 function iconForMethod(kind: ConnectionMethod["kind"]): string {
   switch (kind) {
     case "oauth":
-      return "lock_person";
+      return "login";
     case "api_key":
       return "key";
     case "cookie":
@@ -67,6 +71,8 @@ function iconForMethod(kind: ConnectionMethod["kind"]): string {
       return "lock_open";
     case "import_cliproxy":
       return "upload";
+    case "import_cursor":
+      return "edit";
     case "import_9router":
       return "cloud_download";
     default: {

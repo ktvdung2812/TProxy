@@ -1,0 +1,21 @@
+{
+  "name": "tproxy Control Center",
+  "short_name": "tproxy",
+  "description": "Self-hosted AI gateway dashboard",
+  "start_url": "/dashboard/",
+  "display": "standalone",
+  "background_color": "#020503",
+  "theme_color": "#020503",
+  "icons": [
+    {
+      "src": "/dashboard/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/dashboard/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

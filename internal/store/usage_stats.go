@@ -128,13 +128,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, created)
 		providerName := lookupName(lookups.ProviderNames, providerID, providerID)
-		rawModel := publicModelID
-		if rawModel == "" {
-			rawModel = upstreamModel
-		}
-		if rawModel == "" {
-			rawModel = "unknown"
-		}
+		rawModel := usageDisplayModel(publicModelID, upstreamModel, providerID)
 
 		stats.TotalRequests++
 		stats.TotalPromptTokens += inputTokens
@@ -343,6 +337,24 @@ func shortID(value string) string {
 	return value[:8]
 }
 
+// usageDisplayModel returns the upstream model name for usage tables.
+// Direct provider:model requests are shown without the provider prefix.
+func usageDisplayModel(publicModelID, upstreamModel, providerID string) string {
+	if trimmed := strings.TrimSpace(upstreamModel); trimmed != "" {
+		return trimmed
+	}
+	rawModel := strings.TrimSpace(publicModelID)
+	if rawModel == "" {
+		return "unknown"
+	}
+	if prefix, modelPart, ok := strings.Cut(rawModel, ":"); ok && prefix != "" && modelPart != "" {
+		if providerID == "" || prefix == providerID {
+			return modelPart
+		}
+	}
+	return rawModel
+}
+
 func usageStatusLabel(status int) string {
 	if status >= 200 && status < 400 {
 		return "ok"
@@ -397,8 +409,7 @@ func (s *Store) RecentUsageRequests(ctx context.Context, limit int, lookups Usag
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT request_id, created_at, COALESCE(NULLIF(public_model_id, ''), upstream_model, 'unknown') AS model,
-       provider_id, input_tokens, output_tokens, reasoning_tokens, cached_tokens, status
+SELECT request_id, created_at, public_model_id, upstream_model, provider_id, input_tokens, output_tokens, reasoning_tokens, cached_tokens, status
 FROM usage_events
 ORDER BY created_at DESC
 LIMIT ?`, limit)
@@ -409,9 +420,9 @@ LIMIT ?`, limit)
 
 	items := make([]UsageRecentRequest, 0, limit)
 	for rows.Next() {
-		var requestID, createdAt, model, providerID string
+		var requestID, createdAt, publicModelID, upstreamModel, providerID string
 		var inputTokens, outputTokens, reasoningTokens, cachedTokens, status int
-		if err := rows.Scan(&requestID, &createdAt, &model, &providerID, &inputTokens, &outputTokens, &reasoningTokens, &cachedTokens, &status); err != nil {
+		if err := rows.Scan(&requestID, &createdAt, &publicModelID, &upstreamModel, &providerID, &inputTokens, &outputTokens, &reasoningTokens, &cachedTokens, &status); err != nil {
 			return nil, err
 		}
 		if inputTokens == 0 && outputTokens == 0 {
@@ -420,7 +431,7 @@ LIMIT ?`, limit)
 		items = append(items, UsageRecentRequest{
 			RequestID:        requestID,
 			Timestamp:        createdAt,
-			Model:            model,
+			Model:            usageDisplayModel(publicModelID, upstreamModel, providerID),
 			Provider:         lookupName(lookups.ProviderNames, providerID, providerID),
 			PromptTokens:     inputTokens,
 			CompletionTokens: outputTokens,

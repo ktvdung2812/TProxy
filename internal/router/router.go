@@ -20,6 +20,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/intelligence"
 	"github.com/tproxy/tproxy/internal/pricing"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/resilience"
@@ -49,6 +50,7 @@ type Router struct {
 	pricing               *pricing.Catalog
 	modelsRegistry        *pricing.ModelsRegistry
 	circuitBreakers       *resilience.Registry
+	arena                 *intelligence.Arena
 }
 
 type CredentialRefresher interface {
@@ -101,6 +103,7 @@ func New(dataStore *store.Store, registry *providers.Registry) *Router {
 		stickyRoundRobinLimit: defaultStickyRoundRobinLimit, providerStrategies: map[string]store.ProviderRotationStrategy{},
 		sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int),
 		circuitBreakers: resilience.NewRegistry(),
+		arena:           intelligence.NewArena(),
 	}
 }
 
@@ -548,6 +551,9 @@ func (r *Router) ProviderDescriptor(ctx context.Context, providerID string) (pro
 }
 
 func (r *Router) Execute(ctx context.Context, model store.PublicModel, request canonical.Request) (*Result, error) {
+	if r.shouldExecuteFusion(model) && !fusionChildRequest(request) {
+		return r.executeFusion(ctx, model, request)
+	}
 	start := time.Now()
 	selections, err := r.selections(ctx, model, request)
 	if err != nil {
@@ -591,6 +597,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			if r.circuitBreakers != nil {
 				r.circuitBreakers.RecordSuccess(selection.Provider.ID)
 			}
+			if r.arena != nil {
+				r.arena.RecordOutcome(selection.Credential, true)
+			}
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			if model.RewriteResponseModel {
 				response.Model = model.ID
@@ -607,6 +616,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		}
 		if r.circuitBreakers != nil {
 			r.circuitBreakers.RecordFailure(selection.Provider.ID, status)
+		}
+		if r.arena != nil {
+			r.arena.RecordOutcome(selection.Credential, false)
 		}
 		if disableFallback(request) {
 			return nil, errExecute
@@ -1192,12 +1204,15 @@ func asCredentialError(err error) error {
 }
 
 func (r *Router) selections(ctx context.Context, model store.PublicModel, request canonical.Request) ([]Selection, error) {
+	// Provider selection for a public model ID is driven by route_targets configured in PPM
+	// (Provider Priority Manager). Order, enablement, and fallback all come from that table.
 	routes, err := r.routesForModel(ctx, model)
 	if err != nil {
 		return nil, err
 	}
 	var selections []Selection
 	policyLimited := false
+	modelCooldownLimited := false
 	now := time.Now()
 	for _, route := range routes {
 		if !routeMatches(route, request) {
@@ -1229,8 +1244,12 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			return nil, errCredentials
 		}
 		eligible := store.EligibleCredentials(credentials, now)
+		beforeModelCooldown := len(eligible)
 		eligible = r.filterModelCooldowns(ctx, eligible, route.UpstreamModel, now)
-		eligible, errOrder := r.orderCredentials(ctx, provider.ID, route.ID, route.Priority, eligible)
+		if beforeModelCooldown > 0 && len(eligible) == 0 {
+			modelCooldownLimited = true
+		}
+		eligible, errOrder := r.orderCredentials(ctx, provider.ID, route.ID, route.Priority, eligible, taskHintFromRequest(request.Metadata))
 		if errOrder != nil {
 			return nil, errOrder
 		}
@@ -1252,6 +1271,13 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 		if policyLimited {
 			return nil, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "provider_limit_exceeded", Message: "all eligible providers are outside configured resource or budget limits"}
+		}
+		if modelCooldownLimited {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusTooManyRequests,
+				Code:    "upstream_rate_limited",
+				Message: fmt.Sprintf("all credentials are temporarily rate-limited for %s; retry shortly or use another model", model.ID),
+			}
 		}
 		return nil, fmt.Errorf("no_available_credential: %s", model.ID)
 	}
@@ -1308,6 +1334,8 @@ func (r *Router) providerSupports(provider store.Provider, request canonical.Req
 	return false
 }
 
+// routesForModel loads the provider priority chain saved by PPM (route_targets) for a public model ID.
+// This is the runtime source of truth for which provider handles a model request.
 func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([]store.RouteTarget, error) {
 	routeModelID := model.ID
 	if model.Limits != nil {

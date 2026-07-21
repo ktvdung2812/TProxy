@@ -1,10 +1,35 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, Field, Input, Select } from "../ui";
-import type { CLITool } from "../../cli-tools/constants";
-import { getStoredApiKeySecret, getApiKeySecretsVersion, subscribeApiKeySecrets } from "../../lib/apiKeySecrets";
+import type { CLITool, CLIToolGuideStep } from "../../cli-tools/constants";
+import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
+import { fetchResolvableApiKeySecrets } from "../apis/api";
+import { fetchAdminSettings } from "../settings/api";
+import { getStoredApiKeySecret, getApiKeySecretsVersion, storeApiKeySecret, subscribeApiKeySecrets } from "../../lib/apiKeySecrets";
+import {
+  needsPublicBaseUrlForCliTools,
+  readStoredPublicBaseUrl,
+  resolveCliBaseUrl,
+  storePublicBaseUrl,
+} from "../../lib/publicBaseUrl";
 import { ApiKeySelect, type ApiKeyOption } from "./ApiKeySelect";
 import { CLIToolApplyPanel } from "./CLIToolApplyPanel";
+import { CLIApplyScriptBlock } from "./CLIApplyScriptBlock";
+import { buildGuideCommandPreview, buildManualConfigs } from "./manualConfigs";
+
+function stepColumn(step: CLIToolGuideStep): "config" | "commands" {
+  if (step.column) return step.column;
+  if (step.type === "apiKeySelector" || step.type === "modelSelector") return "config";
+  const title = step.title.toLowerCase().trim();
+  if (title === "base url" || title === "api key" || title === "model" || title === "default model" || title === "select model" || title === "virtual model") {
+    return "config";
+  }
+  return "commands";
+}
+
+function isConfigStep(step: CLIToolGuideStep): boolean {
+  return stepColumn(step) === "config";
+}
 
 type ModelOption = {
   value: string;
@@ -19,11 +44,6 @@ type Props = {
   secret: string;
 };
 
-function normalizeBaseUrl(origin: string): string {
-  const trimmed = origin.replace(/\/+$/, "");
-  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
-}
-
 export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
   const enabledKeys = useMemo(() => apiKeys.filter((key) => key.enabled !== false), [apiKeys]);
   const defaultKeyId = useMemo(() => {
@@ -35,19 +55,66 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
   const [selectedKeyId, setSelectedKeyId] = useState(defaultKeyId);
   const [model, setModel] = useState(() => models[0]?.value ?? "");
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  useSyncExternalStore(subscribeApiKeySecrets, getApiKeySecretsVersion, () => 0);
+  const [serverPublicBaseUrl, setServerPublicBaseUrl] = useState("");
+  const [publicUrlOverride, setPublicUrlOverride] = useState(() => readStoredPublicBaseUrl());
+  const secretsVersion = useSyncExternalStore(subscribeApiKeySecrets, getApiKeySecretsVersion, () => 0);
 
-  const baseUrl = useMemo(() => {
-    if (typeof window === "undefined") return "http://localhost:8080/v1";
-    return normalizeBaseUrl(window.location.origin);
-  }, []);
+  const baseUrl = useMemo(
+    () => resolveCliBaseUrl(serverPublicBaseUrl || publicUrlOverride),
+    [serverPublicBaseUrl, publicUrlOverride],
+  );
 
   const resolvedApiKey = useMemo(() => {
     const trimmed = apiKey.trim();
     if (trimmed) return trimmed;
     if (selectedKeyId) return getStoredApiKeySecret(selectedKeyId) ?? "";
     return "";
-  }, [apiKey, selectedKeyId]);
+  }, [apiKey, selectedKeyId, secretsVersion]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isLocalDashboardHost()) return;
+    if (!getStoredApiKeySecret("local")) {
+      storeApiKeySecret("local", defaultApiKey());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!secret) return;
+    let cancelled = false;
+    void fetchAdminSettings(secret)
+      .then((settings) => {
+        if (!cancelled) setServerPublicBaseUrl(settings.public_base_url || "");
+      })
+      .catch(() => {
+        /* settings endpoint may be unavailable during startup */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
+
+  useEffect(() => {
+    if (!secret) return;
+    let cancelled = false;
+    void fetchResolvableApiKeySecrets(secret)
+      .then(({ secrets }) => {
+        if (cancelled) return;
+        for (const [id, value] of Object.entries(secrets)) {
+          if (!getStoredApiKeySecret(id)) {
+            storeApiKeySecret(id, value);
+          }
+        }
+        const activeId = selectedKeyId || defaultKeyId;
+        const resolved = activeId ? getStoredApiKeySecret(activeId) ?? "" : "";
+        if (resolved) setApiKey(resolved);
+      })
+      .catch(() => {
+        /* secrets endpoint may be unavailable during startup */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret, selectedKeyId, defaultKeyId]);
 
   const replaceVars = (text: string) =>
     text
@@ -57,7 +124,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
 
   const copyText = async (text: string, field: string) => {
     try {
-      await navigator.clipboard.writeText(replaceVars(text));
+      await navigator.clipboard.writeText(text);
       setCopiedField(field);
       window.setTimeout(() => setCopiedField(null), 2000);
     } catch {
@@ -66,11 +133,40 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
   };
 
   const canShowGuide = () => {
-    if (tool.requiresExternalUrl && typeof window !== "undefined") {
-      const host = window.location.hostname;
-      if (host === "localhost" || host === "127.0.0.1") return false;
-    }
-    return true;
+    if (!tool.requiresExternalUrl) return true;
+    return !needsPublicBaseUrlForCliTools(serverPublicBaseUrl || publicUrlOverride);
+  };
+
+  const renderPublicUrlField = () => {
+    if (!tool.requiresExternalUrl) return null;
+    return (
+      <div className="cli-tool-step">
+        <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>
+          ★
+        </span>
+        <div className="cli-tool-step-body">
+          <p className="cli-tool-step-title">Public base URL</p>
+          <p className="cli-tool-step-desc">
+            Cursor gọi API qua server của họ, nên cần URL public trỏ về tproxy. Cấu hình tại{" "}
+            <Link to="/settings">Settings → Gateway</Link> hoặc nhập tạm bên dưới.
+          </p>
+          <div className="cli-tool-kv">
+            <Input
+              value={publicUrlOverride}
+              placeholder="https://your-tunnel.example.com"
+              onChange={(event) => {
+                const next = event.target.value;
+                setPublicUrlOverride(next);
+                storePublicBaseUrl(next);
+              }}
+            />
+          </div>
+          <p className="cli-tool-hint">
+            Effective endpoint: <code>{baseUrl}</code>
+          </p>
+        </div>
+      </div>
+    );
   };
 
   const renderNotes = (includeCloudCheck = false) => {
@@ -142,21 +238,81 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     </div>
   );
 
-  const renderGuideSteps = () => {
-    if (tool.configType === "mitm") {
-      return (
-        <div className="cli-tool-steps">
-          {renderNotes()}
-          {renderMitmMappings()}
-          {renderModelSelector()}
-        </div>
-      );
-    }
+  const manualConfigs = useMemo(
+    () => buildManualConfigs(tool, baseUrl, resolvedApiKey, model),
+    [tool, baseUrl, resolvedApiKey, model],
+  );
 
-    if (!tool.guideSteps?.length) {
-      return (
-        <div className="cli-tool-empty-guide">
-          <p>Manual setup: point this tool at tproxy&apos;s OpenAI-compatible endpoint.</p>
+  const commandPreview = useMemo(
+    () => buildGuideCommandPreview(tool, baseUrl, resolvedApiKey, model),
+    [tool, baseUrl, resolvedApiKey, model],
+  );
+
+  const renderStep = (item: CLIToolGuideStep) => (
+    <div key={item.step} className="cli-tool-step">
+      <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>
+        {item.step}
+      </span>
+      <div className="cli-tool-step-body">
+        <p className="cli-tool-step-title">{item.title}</p>
+        {item.desc ? <p className="cli-tool-step-desc">{item.desc}</p> : null}
+        {item.type === "apiKeySelector" ? renderApiKeySelector() : null}
+        {item.type === "modelSelector" ? renderModelSelector() : null}
+        {item.value ? (
+          <div className="cli-tool-kv">
+            <code>{replaceVars(item.value)}</code>
+            {item.copyable ? (
+              <Button
+                variant="outline"
+                size="sm"
+                icon={copiedField === `step-${item.step}` ? "check" : "content_copy"}
+                onClick={() => void copyText(replaceVars(item.value ?? ""), `step-${item.step}`)}
+              >
+                Copy
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const renderCodeBlock = () => {
+    if (!commandPreview) return null;
+    const language = tool.codeBlock?.language ?? "bash";
+    return (
+      <div className="cli-tool-codeblock">
+        <div className="cli-tool-codeblock-head">
+          <span>{language}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={copiedField === "codeblock" ? "check" : "content_copy"}
+            onClick={() => void copyText(commandPreview, "codeblock")}
+          >
+            {copiedField === "codeblock" ? "Copied" : "Copy"}
+          </Button>
+        </div>
+        <pre>
+          <code>{commandPreview}</code>
+        </pre>
+      </div>
+    );
+  };
+
+  const renderDefaultConfigFields = () => (
+    <div className="cli-tool-steps">
+      <div className="cli-tool-step">
+        <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>1</span>
+        <div className="cli-tool-step-body">
+          <p className="cli-tool-step-title">API Key</p>
+          {renderApiKeySelector()}
+        </div>
+      </div>
+      <div className="cli-tool-step">
+        <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>2</span>
+        <div className="cli-tool-step-body">
+          <p className="cli-tool-step-title">Base URL</p>
           <div className="cli-tool-kv">
             <code>{baseUrl}</code>
             <Button variant="outline" size="sm" icon={copiedField === "base" ? "check" : "content_copy"} onClick={() => void copyText(baseUrl, "base")}>
@@ -164,72 +320,132 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
             </Button>
           </div>
         </div>
-      );
-    }
+      </div>
+      <div className="cli-tool-step">
+        <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>3</span>
+        <div className="cli-tool-step-body">
+          <p className="cli-tool-step-title">Model</p>
+          {renderModelSelector()}
+        </div>
+      </div>
+    </div>
+  );
 
-    if (!canShowGuide()) {
+  const renderApplyPanel = () => (
+    <CLIToolApplyPanel
+      tool={tool}
+      secret={secret}
+      apiKey={resolvedApiKey}
+      model={model}
+      baseUrl={baseUrl}
+      onApiKeyChange={setApiKey}
+      hideScript
+    />
+  );
+
+  const renderCommandsColumn = (commandSteps: CLIToolGuideStep[]) => (
+    <>
+      <p className="cli-tool-col-title">Commands</p>
+      {commandSteps.length > 0 ? <div className="cli-tool-steps">{commandSteps.map(renderStep)}</div> : null}
+      {renderCodeBlock()}
+      {manualConfigs.length > 0 ? (
+        <CLIApplyScriptBlock configs={manualConfigs} disabled={!model || !resolvedApiKey.trim()} />
+      ) : null}
+      {tool.defaultCommand ? (
+        <div className="cli-tool-kv">
+          <code>{replaceVars(tool.defaultCommand)}</code>
+          <Button variant="outline" size="sm" icon={copiedField === "default-cmd" ? "check" : "content_copy"} onClick={() => void copyText(replaceVars(tool.defaultCommand ?? ""), "default-cmd")}>
+            Copy
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const renderSplitGuide = () => {
+    const steps = tool.guideSteps ?? [];
+    const configSteps = steps.filter(isConfigStep);
+    const commandSteps = steps.filter((step) => !isConfigStep(step));
+
+    return (
+      <div className="cli-tool-guide-columns">
+        <div className="cli-tool-guide-col cli-tool-guide-col-config">
+          <p className="cli-tool-col-title">Configuration</p>
+          {renderNotes()}
+          {renderPublicUrlField()}
+          <div className="cli-tool-steps">{configSteps.map(renderStep)}</div>
+          {renderApplyPanel()}
+        </div>
+        <div className="cli-tool-guide-col cli-tool-guide-col-commands">
+          {renderCommandsColumn(commandSteps)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderGuideSteps = () => {
+    if (tool.configType === "mitm") {
       return (
-        <div className="cli-tool-steps">
-          {renderNotes(true)}
-          <div className="cli-tool-note cli-tool-note-warning">
-            <span className="material-symbols-outlined">warning</span>
-            <p>This tool needs a publicly reachable tproxy URL. Deploy tproxy behind a tunnel or public host, then reopen this page.</p>
+        <div className="cli-tool-guide-columns">
+          <div className="cli-tool-guide-col cli-tool-guide-col-config">
+            <p className="cli-tool-col-title">Configuration</p>
+            {renderNotes()}
+            {renderMitmMappings()}
+            {renderModelSelector()}
+          </div>
+          <div className="cli-tool-guide-col cli-tool-guide-col-commands">
+            <p className="cli-tool-col-title">Commands</p>
+            {tool.mitmDomain ? (
+              <div className="cli-tool-kv">
+                <code>{tool.mitmDomain}</code>
+                <Button variant="outline" size="sm" icon={copiedField === "mitm-domain" ? "check" : "content_copy"} onClick={() => void copyText(tool.mitmDomain ?? "", "mitm-domain")}>
+                  Copy domain
+                </Button>
+              </div>
+            ) : null}
+            <p className="cli-tool-hint">Enable MITM in your proxy tool and route traffic through the configured domain.</p>
           </div>
         </div>
       );
     }
 
-    return (
-      <div className="cli-tool-steps">
-        {renderNotes()}
-        {tool.guideSteps.map((item) => (
-          <div key={item.step} className="cli-tool-step">
-            <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>
-              {item.step}
-            </span>
-            <div className="cli-tool-step-body">
-              <p className="cli-tool-step-title">{item.title}</p>
-              {item.desc ? <p className="cli-tool-step-desc">{item.desc}</p> : null}
-              {item.type === "apiKeySelector" ? renderApiKeySelector() : null}
-              {item.type === "modelSelector" ? renderModelSelector() : null}
-              {item.value ? (
-                <div className="cli-tool-kv">
-                  <code>{replaceVars(item.value)}</code>
-                  {item.copyable ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      icon={copiedField === `step-${item.step}` ? "check" : "content_copy"}
-                      onClick={() => void copyText(item.value ?? "", `step-${item.step}`)}
-                    >
-                      Copy
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
+    if (!tool.guideSteps?.length) {
+      return (
+        <div className="cli-tool-guide-columns">
+          <div className="cli-tool-guide-col cli-tool-guide-col-config">
+            <p className="cli-tool-col-title">Configuration</p>
+            {renderNotes()}
+            {renderDefaultConfigFields()}
+            {renderApplyPanel()}
+          </div>
+          <div className="cli-tool-guide-col cli-tool-guide-col-commands">
+            {renderCommandsColumn([])}
+          </div>
+        </div>
+      );
+    }
+
+    if (!canShowGuide()) {
+      return (
+        <div className="cli-tool-guide-columns">
+          <div className="cli-tool-guide-col cli-tool-guide-col-config">
+            <p className="cli-tool-col-title">Configuration</p>
+            {renderNotes(true)}
+            <div className="cli-tool-note cli-tool-note-warning">
+              <span className="material-symbols-outlined">warning</span>
+              <p>
+                Set a public base URL in <Link to="/settings">Settings → Gateway</Link> or enter one above. Cursor cannot reach localhost.
+              </p>
             </div>
           </div>
-        ))}
-        {tool.codeBlock ? (
-          <div className="cli-tool-codeblock">
-            <div className="cli-tool-codeblock-head">
-              <span>{tool.codeBlock.language}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={copiedField === "codeblock" ? "check" : "content_copy"}
-                onClick={() => void copyText(tool.codeBlock?.code ?? "", "codeblock")}
-              >
-                {copiedField === "codeblock" ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <pre>
-              <code>{replaceVars(tool.codeBlock.code)}</code>
-            </pre>
+          <div className="cli-tool-guide-col cli-tool-guide-col-commands">
+            {renderCommandsColumn(tool.guideSteps.filter((step) => !isConfigStep(step)))}
           </div>
-        ) : null}
-      </div>
-    );
+        </div>
+      );
+    }
+
+    return renderSplitGuide();
   };
 
   return (
@@ -244,17 +460,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
         </div>
         <Badge size="sm">{tool.configType}</Badge>
       </div>
-      <div className="cli-tool-guide-body">
-        {renderGuideSteps()}
-        <CLIToolApplyPanel
-          tool={tool}
-          secret={secret}
-          apiKey={resolvedApiKey}
-          model={model}
-          baseUrl={baseUrl}
-          onApiKeyChange={setApiKey}
-        />
-      </div>
+      <div className="cli-tool-guide-body">{renderGuideSteps()}</div>
       {tool.settingsFile ? (
         <p className="cli-tool-hint">
           Config file: <code>{tool.settingsFile}</code>
