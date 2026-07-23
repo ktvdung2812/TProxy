@@ -28,6 +28,7 @@ type Status struct {
 	ShortID         string `json:"shortId,omitempty"`
 	PublicURL       string `json:"publicUrl,omitempty"`
 	Running         bool   `json:"running"`
+	Reachable       bool   `json:"reachable"`
 }
 
 type SettingsSnapshot struct {
@@ -274,8 +275,14 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	}
 	publicURL := PublicURL(shortID)
 	running := false
+	reachable := false
 	if settings.Enabled {
 		running = s.cloudflared.IsRunning()
+		if publicURL != "" && ProbeURLAlive(ctx, publicURL) {
+			reachable = true
+		} else if tunnelURL != "" && ProbeURLAlive(ctx, tunnelURL) {
+			reachable = true
+		}
 	}
 	return Status{
 		Enabled:         settings.Enabled && running,
@@ -284,6 +291,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		ShortID:         shortID,
 		PublicURL:       publicURL,
 		Running:         running,
+		Reachable:       reachable,
 	}, nil
 }
 
@@ -293,6 +301,7 @@ type TailscaleStatus struct {
 	TunnelURL       string `json:"tunnelUrl,omitempty"`
 	Running         bool   `json:"running"`
 	LoggedIn        bool   `json:"loggedIn"`
+	Reachable       bool   `json:"reachable"`
 }
 
 func (s *Service) TailscaleStatus(ctx context.Context) (TailscaleStatus, error) {
@@ -313,6 +322,9 @@ func (s *Service) TailscaleStatus(ctx context.Context) (TailscaleStatus, error) 
 	status.Enabled = settings.TailscaleEnabled && probe.Running
 	if status.TunnelURL == "" && probe.URL != "" {
 		status.TunnelURL = probe.URL
+	}
+	if settings.TailscaleEnabled && status.TunnelURL != "" {
+		status.Reachable = ProbeURLAlive(ctx, status.TunnelURL)
 	}
 	return status, nil
 }

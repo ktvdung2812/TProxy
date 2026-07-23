@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { Button, ConfirmDialog, Modal, Toggle } from "../ui";
-import { EndpointRow } from "./EndpointRow";
+import { Button, ConfirmDialog, Input, Modal, Toggle } from "../ui";
 import { SecurityWarning } from "./SecurityWarning";
 import {
   checkTailscale,
@@ -26,38 +25,68 @@ type Props = {
 };
 
 const STATUS_POLL_MS = 5000;
-const PING_INTERVAL_MS = 2000;
+const PING_INTERVAL_MS = 3000;
 const PING_MAX_MS = 120000;
-const MISS_THRESHOLD = 2;
+const MISS_THRESHOLD = 3;
 
-function TunnelRow({
-  label,
-  active,
-  url,
-  copyId,
-  copied,
-  onCopy,
-  actions,
-}: {
+type EndpointTunnelRowProps = {
   label: string;
   active?: boolean;
   url?: string;
   copyId: string;
   copied: string | null;
   onCopy: (text: string, id: string) => void;
-  actions: React.ReactNode;
-}) {
-  if (url) {
-    return (
-      <EndpointRow label={label} url={url} copyId={copyId} copied={copied} onCopy={onCopy} actions={actions} />
-    );
-  }
+  statusText?: string;
+  statusTone?: "warn" | "error" | "muted";
+  trailing?: React.ReactNode;
+};
+
+function EndpointTunnelRow({
+  label,
+  active,
+  url,
+  copyId,
+  copied,
+  onCopy,
+  statusText,
+  statusTone = "muted",
+  trailing,
+}: EndpointTunnelRowProps) {
   return (
     <div className="endpoint-row">
       <span className={active ? "endpoint-row-badge active" : "endpoint-row-badge"}>{label}</span>
-      <div className="endpoint-row-placeholder" />
-      <div className="endpoint-row-actions">{actions}</div>
+      {url ? (
+        <>
+          <Input value={url} readOnly className="endpoint-row-input" />
+          <button
+            type="button"
+            className="endpoint-row-copy"
+            onClick={() => onCopy(url, copyId)}
+            aria-label={`Copy ${label}`}
+          >
+            <span className="material-symbols-outlined">{copied === copyId ? "check" : "content_copy"}</span>
+          </button>
+        </>
+      ) : statusText ? (
+        <div className={`endpoint-row-status-box ${statusTone}`}>
+          {statusTone === "warn" ? (
+            <span className="material-symbols-outlined endpoint-row-status-icon">progress_activity</span>
+          ) : null}
+          <span>{statusText}</span>
+        </div>
+      ) : (
+        <div className="endpoint-row-placeholder" />
+      )}
+      {trailing ? <div className="endpoint-row-trailing">{trailing}</div> : null}
     </div>
+  );
+}
+
+function PowerButton({ title, onClick }: { title: string; onClick: () => void }) {
+  return (
+    <button type="button" className="endpoint-row-power" onClick={onClick} title={title}>
+      <span className="material-symbols-outlined">power_settings_new</span>
+    </button>
   );
 }
 
@@ -71,8 +100,8 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const [tsLoading, setTsLoading] = useState(false);
   const [tunnelProgress, setTunnelProgress] = useState("");
   const [tsProgress, setTsProgress] = useState("");
-  const [tunnelReachable, setTunnelReachable] = useState(false);
-  const [tsReachable, setTsReachable] = useState(false);
+  const [clientTunnelReachable, setClientTunnelReachable] = useState(false);
+  const [clientTsReachable, setClientTsReachable] = useState(false);
   const [tunnelStatusMessage, setTunnelStatusMessage] = useState<string | null>(null);
   const [tsStatusMessage, setTsStatusMessage] = useState<string | null>(null);
   const [tsAuthUrl, setTsAuthUrl] = useState("");
@@ -83,12 +112,22 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const [showTsModal, setShowTsModal] = useState(false);
   const tunnelMissRef = useRef(0);
   const tsMissRef = useRef(0);
+  const tunnelEverReachableRef = useRef(false);
 
   const syncStatus = useCallback(async () => {
     try {
       const data = await fetchTunnelStatus(secret);
       setTunnel(data.tunnel);
       setTailscale(data.tailscale);
+      if (data.tunnel.reachable) {
+        tunnelEverReachableRef.current = true;
+        setClientTunnelReachable(true);
+        tunnelMissRef.current = 0;
+      }
+      if (data.tailscale.reachable) {
+        setClientTsReachable(true);
+        tsMissRef.current = 0;
+      }
     } catch (error) {
       onError(error instanceof Error ? error.message : "Failed to load tunnel status");
     } finally {
@@ -121,6 +160,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const tunnelPublicUrl = tunnel?.publicUrl || tunnel?.tunnelUrl || "";
   const tsUrl = tailscale?.tunnelUrl || "";
 
+  const tunnelHealthy =
+    Boolean(tunnel?.running || tunnel?.reachable || clientTunnelReachable);
+  const tsHealthy = Boolean(tailscale?.running || tailscale?.reachable || clientTsReachable);
+
   useEffect(() => {
     if (!tunnelEnabled && !tsEnabled) return;
     const timer = setInterval(() => void syncStatus(), STATUS_POLL_MS);
@@ -134,20 +177,21 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         const ok = await pingAnyHealth(tunnel?.publicUrl, tunnel?.tunnelUrl);
         if (ok) {
           tunnelMissRef.current = 0;
-          setTunnelReachable(true);
+          tunnelEverReachableRef.current = true;
+          setClientTunnelReachable(true);
         } else {
           tunnelMissRef.current += 1;
-          if (tunnelMissRef.current >= MISS_THRESHOLD) setTunnelReachable(false);
+          if (tunnelMissRef.current >= MISS_THRESHOLD) setClientTunnelReachable(false);
         }
       }
       if (tsEnabled && tsUrl) {
         const ok = await pingHealth(tsUrl);
         if (ok) {
           tsMissRef.current = 0;
-          setTsReachable(true);
+          setClientTsReachable(true);
         } else {
           tsMissRef.current += 1;
-          if (tsMissRef.current >= MISS_THRESHOLD) setTsReachable(false);
+          if (tsMissRef.current >= MISS_THRESHOLD) setClientTsReachable(false);
         }
       }
     };
@@ -161,8 +205,17 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     while (Date.now() - start < PING_MAX_MS) {
       await new Promise((resolve) => setTimeout(resolve, PING_INTERVAL_MS));
       if (await pingAnyHealth(publicUrl, directUrl)) {
-        setTunnelReachable(true);
+        setClientTunnelReachable(true);
         return true;
+      }
+      try {
+        const status = await fetchTunnelStatus(secret);
+        if (status.tunnel.reachable || status.tunnel.running) {
+          setClientTunnelReachable(true);
+          return true;
+        }
+      } catch {
+        // keep waiting
       }
     }
     return false;
@@ -210,7 +263,8 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     try {
       await disableTunnel(secret);
       setShowDisableModal(false);
-      setTunnelReachable(false);
+      setClientTunnelReachable(false);
+      tunnelEverReachableRef.current = false;
       onNotice("Tunnel disabled");
       await syncStatus();
     } catch (error) {
@@ -290,7 +344,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     try {
       await disableTailscale(secret);
       setShowDisableTsModal(false);
-      setTsReachable(false);
+      setClientTsReachable(false);
       onNotice("Tailscale disabled");
       await syncStatus();
     } catch (error) {
@@ -309,113 +363,182 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     }
   };
 
-  const renderTunnelActions = () => {
-    if (loading) return <span className="endpoint-row-status">Checking...</span>;
-    if (tunnelEnabled && tunnelReachable && !tunnelLoading) {
+  const renderTunnelRow = () => {
+    if (loading) {
       return (
-        <button type="button" className="endpoint-row-power" onClick={() => setShowDisableModal(true)} title="Disable tunnel">
-          <span className="material-symbols-outlined">power_settings_new</span>
-        </button>
+        <EndpointTunnelRow
+          label="Tunnel"
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          statusText="Checking..."
+        />
       );
     }
-    if (tunnelEnabled && !tunnelLoading) {
+    if (tunnelLoading) {
       return (
-        <>
-          <span className="endpoint-row-status warn">Reconnecting...</span>
-          <button type="button" className="endpoint-row-power" onClick={() => setShowDisableModal(true)} title="Disable tunnel">
-            <span className="material-symbols-outlined">power_settings_new</span>
-          </button>
-        </>
+        <EndpointTunnelRow
+          label="Tunnel"
+          active
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          statusText={tunnelProgress || "Creating tunnel..."}
+          statusTone="muted"
+        />
       );
     }
-    if (tunnelLoading) return <span className="endpoint-row-status">{tunnelProgress || "Creating tunnel..."}</span>;
     if (tunnelStatusMessage) {
       return (
-        <>
-          <span className="endpoint-row-status error">{tunnelStatusMessage}</span>
-          <Button size="sm" onClick={() => setShowEnableModal(true)}>Enable</Button>
-        </>
+        <EndpointTunnelRow
+          label="Tunnel"
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          statusText={tunnelStatusMessage}
+          statusTone="error"
+          trailing={<Button size="sm" onClick={() => setShowEnableModal(true)}>Enable</Button>}
+        />
+      );
+    }
+    if (!tunnelEnabled) {
+      return (
+        <EndpointTunnelRow
+          label="Tunnel"
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          trailing={
+            <Button
+              size="sm"
+              onClick={() => {
+                if (apiKeyCount === 0) {
+                  setTunnelStatusMessage("Create at least one API key before enabling the tunnel.");
+                  return;
+                }
+                setShowEnableModal(true);
+              }}
+            >
+              Enable
+            </Button>
+          }
+        />
+      );
+    }
+    if (tunnelHealthy) {
+      return (
+        <EndpointTunnelRow
+          label="Tunnel"
+          active
+          url={normalizeBaseUrl(tunnelPublicUrl)}
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          trailing={<PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />}
+        />
       );
     }
     return (
-      <Button
-        size="sm"
-        onClick={() => {
-          if (apiKeyCount === 0) {
-            setTunnelStatusMessage("Create at least one API key before enabling the tunnel.");
-            return;
-          }
-          setShowEnableModal(true);
-        }}
-      >
-        Enable
-      </Button>
+      <EndpointTunnelRow
+        label="Tunnel"
+        active
+        copyId="tunnel_url"
+        copied={copied}
+        onCopy={copy}
+        statusText={tunnelEverReachableRef.current ? "Tunnel reconnecting..." : "Tunnel checking..."}
+        statusTone="warn"
+        trailing={<PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />}
+      />
     );
   };
 
-  const renderTailscaleActions = () => {
-    if (loading) return <span className="endpoint-row-status">Checking...</span>;
-    if (tsEnabled && tsReachable && !tsLoading) {
+  const renderTailscaleRow = () => {
+    if (loading) {
       return (
-        <button type="button" className="endpoint-row-power" onClick={() => setShowDisableTsModal(true)} title="Disable Tailscale">
-          <span className="material-symbols-outlined">power_settings_new</span>
-        </button>
-      );
-    }
-    if (tsEnabled && !tsLoading) {
-      return (
-        <>
-          <span className="endpoint-row-status warn">Reconnecting...</span>
-          <button type="button" className="endpoint-row-power" onClick={() => setShowDisableTsModal(true)} title="Disable Tailscale">
-            <span className="material-symbols-outlined">power_settings_new</span>
-          </button>
-        </>
+        <EndpointTunnelRow
+          label="Tailscale"
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          statusText="Checking..."
+        />
       );
     }
     if (tsLoading) {
       return (
-        <>
-          <span className="endpoint-row-status">{tsProgress || "Connecting..."}</span>
-          {tsAuthUrl ? (
-            <Button size="sm" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
-              Open login
-            </Button>
-          ) : null}
-        </>
+        <EndpointTunnelRow
+          label="Tailscale"
+          active
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          statusText={tsProgress || "Connecting..."}
+          statusTone="muted"
+          trailing={
+            tsAuthUrl ? (
+              <Button size="sm" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
+                Open login
+              </Button>
+            ) : undefined
+          }
+        />
       );
     }
     if (tsStatusMessage) {
       return (
-        <>
-          <span className="endpoint-row-status error">{tsStatusMessage}</span>
-          <Button size="sm" onClick={() => void openTailscale()}>Enable</Button>
-        </>
+        <EndpointTunnelRow
+          label="Tailscale"
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          statusText={tsStatusMessage}
+          statusTone="error"
+          trailing={<Button size="sm" onClick={() => void openTailscale()}>Enable</Button>}
+        />
       );
     }
-    return <Button size="sm" onClick={() => void openTailscale()}>Enable</Button>;
-  };
-
-  return (
-  <div className="tunnel-section">
-      <TunnelRow
-        label="Tunnel"
-        active={tunnelEnabled}
-        url={tunnelEnabled && tunnelPublicUrl ? normalizeBaseUrl(tunnelPublicUrl) : undefined}
-        copyId="tunnel_url"
-        copied={copied}
-        onCopy={copy}
-        actions={renderTunnelActions()}
-      />
-
-      <TunnelRow
+    if (!tsEnabled) {
+      return (
+        <EndpointTunnelRow
+          label="Tailscale"
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          trailing={<Button size="sm" onClick={() => void openTailscale()}>Enable</Button>}
+        />
+      );
+    }
+    if (tsHealthy) {
+      return (
+        <EndpointTunnelRow
+          label="Tailscale"
+          active
+          url={normalizeBaseUrl(tsUrl)}
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          trailing={<PowerButton title="Disable Tailscale" onClick={() => setShowDisableTsModal(true)} />}
+        />
+      );
+    }
+    return (
+      <EndpointTunnelRow
         label="Tailscale"
-        active={tsEnabled}
-        url={tsEnabled && tsUrl ? normalizeBaseUrl(tsUrl) : undefined}
+        active
         copyId="ts_url"
         copied={copied}
         onCopy={copy}
-        actions={renderTailscaleActions()}
+        statusText="Tailscale reconnecting..."
+        statusTone="warn"
+        trailing={<PowerButton title="Disable Tailscale" onClick={() => setShowDisableTsModal(true)} />}
       />
+    );
+  };
+
+  return (
+    <div className="tunnel-section">
+      {renderTunnelRow()}
+      {renderTailscaleRow()}
 
       {(tunnelEnabled || tsEnabled) && apiKeyCount === 0 ? (
         <div className="apis-card-warning">
@@ -477,6 +600,6 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         onConfirm={() => void handleDisableTailscale()}
         onClose={() => setShowDisableTsModal(false)}
       />
-  </div>
+    </div>
   );
 }
