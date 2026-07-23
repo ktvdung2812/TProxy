@@ -4,28 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/security"
-	"github.com/tproxy/tproxy/internal/store"
 )
 
 func (s *Server) loadManagementSecret(ctx context.Context) {
-	saved, err := s.store.DashboardPasswordSaved(ctx)
-	if err == nil && saved {
-		pwd, loadErr := s.store.DashboardPassword(ctx)
-		if loadErr == nil && strings.TrimSpace(pwd) != "" {
-			s.managementSecret = pwd
-			return
-		}
-	}
 	if env := config.Env(s.cfg.Security.ManagementSecretEnv); env != "" {
 		s.managementSecret = env
 		return
 	}
-	s.managementSecret = store.DefaultDashboardPassword
+	pwd, generated, err := s.store.EnsureDashboardPassword(ctx)
+	if err != nil || strings.TrimSpace(pwd) == "" {
+		log.Printf("warning: dashboard password unavailable: %v", err)
+		return
+	}
+	s.managementSecret = pwd
+	if generated {
+		log.Printf("tproxy dashboard password (save this): %s", pwd)
+	}
 }
 
 func (s *Server) adminDashboardPassword(w http.ResponseWriter, r *http.Request) {

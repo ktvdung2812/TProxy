@@ -212,6 +212,9 @@ func TestLANManagementAllowsPrivateNetworkWithPassword(t *testing.T) {
 	if err := dataStore.SaveGatewaySettings(ctx, store.GatewaySettings{AllowLANManagement: true}); err != nil {
 		t.Fatal(err)
 	}
+	if err := dataStore.SaveDashboardPassword(ctx, testDashboardPassword); err != nil {
+		t.Fatal(err)
+	}
 	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
 	defer server.Close()
 
@@ -225,7 +228,7 @@ func TestLANManagementAllowsPrivateNetworkWithPassword(t *testing.T) {
 
 	allowed := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	allowed.RemoteAddr = "192.168.1.50:1234"
-	allowed.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
+	allowed.Header.Set("Authorization", "Bearer "+testDashboardPassword)
 	allowedRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(allowedRecorder, allowed)
 	if allowedRecorder.Code != http.StatusOK {
@@ -393,7 +396,7 @@ func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		logsRequest.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
+		logsRequest.Header.Set("Authorization", "Bearer "+testDashboardPassword)
 		logsResponse, err := http.DefaultClient.Do(logsRequest)
 		if err != nil {
 			t.Fatal(err)
@@ -1375,8 +1378,10 @@ func TestCORSPreflightAllowsClientAPIKeyHeader(t *testing.T) {
 	}
 }
 
+const testDashboardPassword = "test-dashboard-password"
+
 func withDefaultManagementAuth(r *http.Request) {
-	r.Header.Set("Authorization", "Bearer "+store.DefaultDashboardPassword)
+	r.Header.Set("Authorization", "Bearer "+testDashboardPassword)
 }
 
 func apiTestStore(t *testing.T, cfg *config.Config) *store.Store {
@@ -1395,6 +1400,9 @@ func apiTestStore(t *testing.T, cfg *config.Config) *store.Store {
 	}
 	t.Cleanup(func() { _ = dataStore.Close() })
 	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveDashboardPassword(context.Background(), testDashboardPassword); err != nil {
 		t.Fatal(err)
 	}
 	return dataStore
