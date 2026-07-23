@@ -5445,6 +5445,7 @@ button:disabled,
 
 .endpoint-row-input {
   flex: 1;
+  min-height: 38px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
 }
@@ -5485,6 +5486,45 @@ button:disabled,
 .endpoint-row-placeholder {
   flex: 1;
   min-height: 38px;
+}
+
+.endpoint-row-trailing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.endpoint-row-status-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-input);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+}
+
+.endpoint-row-status-box.warn {
+  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--color-input));
+  color: color-mix(in srgb, var(--color-warning) 85%, var(--color-text-main));
+}
+
+.endpoint-row-status-box.error {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-input));
+  color: var(--color-danger);
+}
+
+.endpoint-row-status-icon {
+  font-size: 16px;
+  animation: spin 1s linear infinite;
 }
 
 .endpoint-row-actions {

@@ -10,6 +10,7 @@ export type CloudflareTunnelStatus = {
   shortId?: string;
   publicUrl?: string;
   running: boolean;
+  reachable?: boolean;
 };
 
 export type TailscaleTunnelStatus = {
@@ -18,6 +19,7 @@ export type TailscaleTunnelStatus = {
   tunnelUrl?: string;
   running: boolean;
   loggedIn: boolean;
+  reachable?: boolean;
 };
 
 export type TunnelStatusResponse = {
@@ -108,8 +110,14 @@ export function saveTunnelDashboardAccess(secret: string, enabled: boolean) {
 export async function pingHealth(baseUrl: string): Promise<boolean> {
   const target = `${baseUrl.replace(/\/+$/, "")}/healthz`;
   try {
-    const response = await fetch(target, { mode: "cors", cache: "no-store" });
-    return response.ok;
+    const response = await fetch(target, { mode: "cors", cache: "no-store", signal: AbortSignal.timeout(8000) });
+    if (response.ok) return true;
+  } catch {
+    // CORS or network error — fall through to opaque probe.
+  }
+  try {
+    await fetch(target, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(8000) });
+    return true;
   } catch {
     return false;
   }
