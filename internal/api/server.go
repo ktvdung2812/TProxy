@@ -31,6 +31,7 @@ import (
 	"github.com/tproxy/tproxy/internal/router"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/tunnel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,6 +66,7 @@ type Server struct {
 	liveUsage        *LiveUsageTracker
 	liveLogs         *LiveRequestLogBuffer
 	claudeAliases    *bridge.Resolver
+	tunnel           *tunnel.Service
 	backgroundCancel context.CancelFunc
 	backgroundWG     sync.WaitGroup
 }
@@ -113,11 +115,18 @@ func (s *Server) StartBackground(ctx context.Context) {
 			}
 		}
 	}()
+	s.initTunnelService()
+	if s.tunnel != nil {
+		s.tunnel.StartBackground(backgroundCtx)
+	}
 }
 
 func (s *Server) Close() {
 	if s.backgroundCancel != nil {
 		s.backgroundCancel()
+	}
+	if s.tunnel != nil {
+		s.tunnel.StopBackground()
 	}
 	s.auth.Close()
 	s.backgroundWG.Wait()
@@ -1291,6 +1300,10 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 }
 
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/admin/tunnel") {
+		s.adminTunnel(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/cli-tools") {
 		clitools.NewHandler().ServeHTTP(w, r)
 		return

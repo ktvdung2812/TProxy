@@ -17,6 +17,7 @@ import {
 import { createApiKey, deleteApiKey, fetchApiKeyUsage, toggleApiKey, updateApiKey } from "./api";
 import { getStoredApiKeySecret, maskApiKeySecret, storeApiKeySecret } from "../../lib/apiKeySecrets";
 import { ApiKeySelect } from "../cli-tools/ApiKeySelect";
+import { TunnelSection } from "./TunnelSection";
 import { EndpointRow } from "./EndpointRow";
 import { SecurityWarning } from "./SecurityWarning";
 import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage } from "./types";
@@ -279,6 +280,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
         <div className="endpoint-row-list">
           <EndpointRow label="Local" url={baseUrl} copyId="local_url" copied={copied} onCopy={copy} highlight />
+          <TunnelSection secret={secret} apiKeyCount={apiKeys.length} onError={onError} onNotice={onNotice} />
           <EndpointRow
             label="Auth"
             url="Authorization: Bearer <api-key>"
