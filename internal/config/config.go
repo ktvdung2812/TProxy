@@ -359,6 +359,9 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 	if provider == nil {
 		return
 	}
+	if provider.ID == "cursor" && provider.Type == "openai-compatible" {
+		provider.Type = "cursor"
+	}
 	switch provider.Type {
 	case "codex":
 		if provider.Name == "" {
@@ -658,6 +661,13 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 			provider.OAuth.UserInfoURL = "https://app.kimchi.dev/api/v1/me"
 		}
 		provider.OAuth.ListenForCallback = true
+	case "cursor":
+		if provider.Name == "" {
+			provider.Name = "Cursor IDE"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api2.cursor.sh"
+		}
 	case "qoder":
 		if provider.Name == "" {
 			provider.Name = "Qoder"
@@ -860,7 +870,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}

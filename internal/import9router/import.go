@@ -191,6 +191,7 @@ func (i *importer) importConnection(ctx context.Context, conn ProviderConnection
 				"ninerouter_connection": conn.ID,
 			},
 		}
+		applyImportedOAuthExtras(providerID, conn, &token)
 		if i.dryRun {
 			i.result.Counts.Credentials++
 			return
@@ -456,6 +457,42 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func applyImportedOAuthExtras(providerID string, conn ProviderConnection, token *store.OAuthToken) {
+	if token == nil {
+		return
+	}
+	if token.Extra == nil {
+		token.Extra = map[string]any{}
+	}
+	if providerID != "cursor" {
+		return
+	}
+	machineID := firstNonEmpty(
+		stringFromAny(conn.ProviderSpecificData["machineId"]),
+		stringFromAny(conn.ProviderSpecificData["machine_id"]),
+	)
+	if machineID == "" {
+		return
+	}
+	token.Extra["machine_id"] = machineID
+	token.Extra["machineId"] = machineID
+	token.Extra["auth_method"] = firstNonEmpty(
+		stringFromAny(conn.ProviderSpecificData["authMethod"]),
+		"imported",
+	)
+	token.Extra["client_type"] = "ide"
+	token.Extra["client_version"] = "3.1.0"
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
 }
 
 func boolPtr(value bool) *bool {

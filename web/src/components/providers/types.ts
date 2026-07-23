@@ -51,6 +51,7 @@ export type Credential = {
   priority?: number;
   weight?: number;
   cooldown_until?: string;
+  last_error_code?: string;
   last_error?: string;
   proxy_pool_ids?: string[];
   last_used_at?: string;
@@ -60,7 +61,12 @@ export type Credential = {
 
 /** Aggregate connection counts for a provider. */
 export type ProviderStats = {
+  /** Enabled credentials currently healthy. */
   connected: number;
+  /** Enabled credentials (active accounts). */
+  active: number;
+  /** Disabled credentials. */
+  disabled: number;
   error: number;
   cooldown: number;
   total: number;
@@ -76,9 +82,20 @@ export function providerCategory(type: string): "oauth" | "apikey" | "media" | "
 
 /** Count credentials by effective status for a provider. */
 export function getProviderStats(credentials: Credential[] = []): ProviderStats {
-  const stats: ProviderStats = { connected: 0, error: 0, cooldown: 0, total: credentials.length };
+  const stats: ProviderStats = {
+    connected: 0,
+    active: 0,
+    disabled: 0,
+    error: 0,
+    cooldown: 0,
+    total: credentials.length,
+  };
   for (const c of credentials) {
-    if (!c.enabled) continue;
+    if (!c.enabled) {
+      stats.disabled++;
+      continue;
+    }
+    stats.active++;
     if (isOnCooldown(c.cooldown_until)) {
       stats.cooldown++;
       stats.error++;

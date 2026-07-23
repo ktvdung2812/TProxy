@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Badge } from "../ui";
 import type { ProviderTypeInfo } from "./catalog";
 import { ProviderLogo } from "./ProviderLogo";
-import { getProviderStats, type Credential, type Provider } from "./types";
+import { getProviderStats, type Credential, type Provider, type ProviderStats } from "./types";
 
 type Props = {
   catalog: ProviderTypeInfo;
@@ -33,7 +33,12 @@ export function ProviderCatalogCard({ catalog, instances, credentials, to }: Pro
         <div className="provider-catalog-copy">
           <h3 className="provider-catalog-name">{catalog.name}</h3>
           <div className="provider-catalog-status">
-            <ProviderStatus catalog={catalog} stats={stats} allDisabled={allDisabled} instances={instances} />
+            <ProviderAccountStatus
+              catalog={catalog}
+              stats={stats}
+              allDisabled={allDisabled}
+              instances={instances}
+            />
           </div>
         </div>
       </div>
@@ -41,14 +46,14 @@ export function ProviderCatalogCard({ catalog, instances, credentials, to }: Pro
   );
 }
 
-function ProviderStatus({
+function ProviderAccountStatus({
   catalog,
   stats,
   allDisabled,
   instances,
 }: {
   catalog: ProviderTypeInfo;
-  stats: ReturnType<typeof getProviderStats>;
+  stats: ProviderStats;
   allDisabled: boolean;
   instances: Provider[];
 }) {
@@ -69,21 +74,30 @@ function ProviderStatus({
       </Badge>
     );
   }
-  if (stats.connected > 0) {
-    return (
-      <Badge variant="success" size="sm" dot>
-        {stats.connected} Connected
-      </Badge>
-    );
-  }
-  if (stats.error > 0) {
-    return (
-      <Badge variant="error" size="sm" dot>
-        {stats.error} Error
-      </Badge>
-    );
+  if (stats.total > 0) {
+    return <AccountCountBadges stats={stats} />;
   }
   return <span className="provider-no-connections">No connections</span>;
+}
+
+function AccountCountBadges({ stats }: { stats: ProviderStats }) {
+  return (
+    <span className="provider-account-counts">
+      <Badge variant={stats.active > 0 ? "success" : "default"} size="sm" dot={stats.active > 0}>
+        {stats.active} active
+      </Badge>
+      {stats.disabled > 0 ? (
+        <Badge variant="neutral" size="sm">
+          {stats.disabled} disabled
+        </Badge>
+      ) : null}
+      {stats.active === 0 && stats.error > 0 ? (
+        <Badge variant="error" size="sm" dot>
+          {stats.error} error
+        </Badge>
+      ) : null}
+    </span>
+  );
 }
 
 type CustomCardProps = {
@@ -113,10 +127,8 @@ export function CustomProviderCard({ provider, credentials, to }: CustomCardProp
               <Badge variant="default" size="sm">
                 Disabled
               </Badge>
-            ) : stats.connected > 0 ? (
-              <Badge variant="success" size="sm" dot>
-                {stats.connected} Connected
-              </Badge>
+            ) : stats.total > 0 ? (
+              <AccountCountBadges stats={stats} />
             ) : (
               <span className="provider-no-connections">No connections</span>
             )}

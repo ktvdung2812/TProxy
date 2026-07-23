@@ -676,40 +676,6 @@ func hermesReset() error {
 	return writeFile(hermesEnvPath(), []byte(env))
 }
 
-func grokConfigPath() string { return expandHome("~/.grok/config.toml") }
-
-func grokStatus() (StatusResult, error) {
-	path := grokConfigPath()
-	raw, err := readFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return StatusResult{}, err
-	}
-	configured := strings.Contains(string(raw), "[model."+providerKey+"]") || strings.Contains(string(raw), "[model."+legacyProviderKey+"]")
-	return statusFromInstalled("grok", path, configured), nil
-}
-
-func grokApply(req ApplyRequest) error {
-	models := modelsFromRequest(req)
-	if len(models) == 0 || req.BaseURL == "" || req.APIKey == "" {
-		return fmt.Errorf("baseUrl, apiKey and model are required")
-	}
-	content := fmt.Sprintf(`[models]
-default = "%s"
-
-[model.%s]
-model = "%s"
-base_url = "%s"
-name = "TProxy"
-api_key = "%s"
-api_backend = "openai"
-`, providerKey, providerKey, models[0], normalizeBaseURL(req.BaseURL, true), req.APIKey)
-	return writeFile(grokConfigPath(), []byte(content))
-}
-
-func grokReset() error {
-	return os.Remove(grokConfigPath())
-}
-
 func jcodeConfigPath() string { return expandHome("~/.jcode/config.toml") }
 
 func jcodeStatus() (StatusResult, error) {

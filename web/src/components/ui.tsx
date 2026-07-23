@@ -233,18 +233,25 @@ type ToggleProps = InputHTMLAttributes<HTMLInputElement> & {
 };
 
 export function Toggle({ label, className, checked, ...props }: ToggleProps) {
-  const control = (
-    <span className={cn("toggle", className)}>
+  const switchControl = (
+    <>
       <input type="checkbox" checked={checked} {...props} />
-      <span className="toggle-track">
+      <span className="toggle-track" aria-hidden="true">
         <span className="toggle-thumb" />
       </span>
-    </span>
+    </>
   );
-  if (!label) return control;
+
+  if (!label) {
+    return <label className={cn("toggle", className)}>{switchControl}</label>;
+  }
+
   return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-      {control}
+    <label
+      className={cn("toggle-field", className)}
+      style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+    >
+      <span className="toggle">{switchControl}</span>
       <span style={{ fontSize: 13, color: "var(--color-text-main)" }}>{label}</span>
     </label>
   );

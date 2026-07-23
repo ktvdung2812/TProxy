@@ -9,6 +9,7 @@ import {
   buildCodexConfig,
   buildPowerShellExports,
   DEFAULT_CLAUDE_PRIMARY_MODEL,
+  CODEX_MAPPING_TIERS,
   GPT_CLIENT_TIER_PLACEHOLDERS,
   MAPPING_TIERS,
   type GptCodenameTier,
@@ -55,6 +56,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
   const [copied, setCopied] = useState(false);
 
   const serverTargets = useMemo(() => resolveTierTargets(overrides, data), [overrides, data]);
+  const visibleTiers = client === "claude" ? MAPPING_TIERS : CODEX_MAPPING_TIERS;
 
   const { content, filename, language, hint } = useMemo(() => {
     if (client === "codex") {
@@ -170,7 +172,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
       <div className="mapping-code-targets">
         <span className="mapping-code-targets-label">Server-side tier targets</span>
         <div className="mapping-code-targets-grid">
-          {MAPPING_TIERS.map((tier) => (
+          {visibleTiers.map((tier) => (
             <div key={tier} className="mapping-code-target-chip">
               <code>{tier}</code>
               <span className="mapping-placeholder-arrow">→</span>

@@ -121,6 +121,7 @@ func TestShouldSkipModelDiscovery(t *testing.T) {
 		{ID: "commandcode", Type: "openai-compatible", BaseURL: "https://api.commandcode.ai/alpha/generate"},
 		{ID: "perplexity-web", Type: "openai-compatible", BaseURL: "https://www.perplexity.ai/rest/sse/perplexity_ask"},
 		{ID: "kiro", Type: "kiro", BaseURL: "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"},
+		{ID: "cursor", Type: "cursor", BaseURL: "https://api2.cursor.sh"},
 		{ID: "minimax", Type: "anthropic-compatible", BaseURL: "https://api.minimax.io/anthropic"},
 	}
 	for _, provider := range skip {

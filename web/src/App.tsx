@@ -96,6 +96,7 @@ type Credential = {
   status?: string;
   priority?: number;
   cooldown_until?: string;
+  last_error_code?: string;
   last_error?: string;
   proxy_pool_ids?: string[];
   last_used_at?: string;
@@ -173,6 +174,12 @@ function App() {
   const [healthCheckAllBusy, setHealthCheckAllBusy] = useState(false);
   const authHeaders = useMemo<Record<string, string>>(() => ({ ...(secret ? { Authorization: `Bearer ${secret}` } : {}) }), [secret]);
   const logsStreamEnabled = location.pathname === "/logs" || location.pathname.startsWith("/logs/");
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const applyLogUpdate = useCallback((items: RequestLog[]) => {
     setLogs(items);
@@ -644,6 +651,7 @@ function App() {
         secret={secret}
         apiKeys={snapshot.api_keys || []}
         models={snapshot.models || []}
+        routesByModel={snapshot.routes || {}}
         onError={setError}
         onNotice={setNotice}
       />

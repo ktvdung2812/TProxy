@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -20,5 +21,19 @@ func TestNormalizeCursorDBValue(t *testing.T) {
 	}
 	if got := normalizeCursorDBValue("plain-token"); got != "plain-token" {
 		t.Fatalf("plain = %q", got)
+	}
+}
+
+func TestValidateCursorImportToken(t *testing.T) {
+	validToken := strings.Repeat("a", 50)
+	validMachine := "caea497f-0dfd-44f8-9afb-fb5497f746af"
+	if err := ValidateCursorImportToken(validToken, validMachine); err != nil {
+		t.Fatalf("expected valid token, got %v", err)
+	}
+	if err := ValidateCursorImportToken("short", validMachine); err == nil {
+		t.Fatal("expected short token error")
+	}
+	if err := ValidateCursorImportToken(validToken, "bad"); err == nil {
+		t.Fatal("expected invalid machine id error")
 	}
 }

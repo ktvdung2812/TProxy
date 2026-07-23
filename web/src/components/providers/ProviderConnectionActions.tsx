@@ -10,11 +10,27 @@ type Props = {
 
 /** Provider-specific connection action buttons (9router-style). */
 export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm" }: Props) {
-  const primary = profile.methods.filter(
-    (method) => method.kind !== "import_9router" && method.kind !== "import_cliproxy" && method.kind !== "import_cursor",
-  );
+  const cursorPrimary =
+    profile.methods.some((method) => method.kind === "import_cursor") &&
+    !profile.methods.some(
+      (method) =>
+        method.kind === "oauth" ||
+        method.kind === "api_key" ||
+        method.kind === "cookie" ||
+        method.kind === "service_account" ||
+        method.kind === "none",
+    );
+
+  const primary = profile.methods.filter((method) => {
+    if (method.kind === "import_9router" || method.kind === "import_cliproxy") return false;
+    if (method.kind === "import_cursor" && !cursorPrimary) return false;
+    return true;
+  });
   const secondary = profile.methods.filter(
-    (method) => method.kind === "import_9router" || method.kind === "import_cliproxy" || method.kind === "import_cursor",
+    (method) =>
+      method.kind === "import_9router" ||
+      method.kind === "import_cliproxy" ||
+      (method.kind === "import_cursor" && !cursorPrimary),
   );
 
   return (
@@ -25,9 +41,9 @@ export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm"
           <Button
             key={`${method.kind}-${method.label}`}
             size={size}
-            variant={method.kind === "oauth" ? "primary" : "secondary"}
+            variant={method.kind === "oauth" || method.kind === "import_cursor" ? "primary" : "secondary"}
             icon={iconForMethod(method.kind)}
-            loading={busy && method.kind === "oauth"}
+            loading={busy && (method.kind === "oauth" || method.kind === "import_cursor")}
             disabled={!method.available || busy}
             title={method.unavailableReason || method.description}
             onClick={() => onMethod(method)}

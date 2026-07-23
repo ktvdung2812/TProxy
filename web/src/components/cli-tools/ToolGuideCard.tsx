@@ -265,11 +265,12 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
               <Button
                 variant="outline"
                 size="sm"
+                className="btn-icon-only"
                 icon={copiedField === `step-${item.step}` ? "check" : "content_copy"}
+                aria-label={copiedField === `step-${item.step}` ? "Copied" : "Copy"}
+                title={copiedField === `step-${item.step}` ? "Copied" : "Copy"}
                 onClick={() => void copyText(replaceVars(item.value ?? ""), `step-${item.step}`)}
-              >
-                Copy
-              </Button>
+              />
             ) : null}
           </div>
         ) : null}
@@ -287,11 +288,12 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
           <Button
             variant="ghost"
             size="sm"
+            className="btn-icon-only"
             icon={copiedField === "codeblock" ? "check" : "content_copy"}
+            aria-label={copiedField === "codeblock" ? "Copied" : "Copy"}
+            title={copiedField === "codeblock" ? "Copied" : "Copy"}
             onClick={() => void copyText(commandPreview, "codeblock")}
-          >
-            {copiedField === "codeblock" ? "Copied" : "Copy"}
-          </Button>
+          />
         </div>
         <pre>
           <code>{commandPreview}</code>
@@ -315,9 +317,15 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
           <p className="cli-tool-step-title">Base URL</p>
           <div className="cli-tool-kv">
             <code>{baseUrl}</code>
-            <Button variant="outline" size="sm" icon={copiedField === "base" ? "check" : "content_copy"} onClick={() => void copyText(baseUrl, "base")}>
-              Copy
-            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="btn-icon-only"
+              icon={copiedField === "base" ? "check" : "content_copy"}
+              aria-label={copiedField === "base" ? "Copied" : "Copy"}
+              title={copiedField === "base" ? "Copied" : "Copy"}
+              onClick={() => void copyText(baseUrl, "base")}
+            />
           </div>
         </div>
       </div>
@@ -354,9 +362,15 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
       {tool.defaultCommand ? (
         <div className="cli-tool-kv">
           <code>{replaceVars(tool.defaultCommand)}</code>
-          <Button variant="outline" size="sm" icon={copiedField === "default-cmd" ? "check" : "content_copy"} onClick={() => void copyText(replaceVars(tool.defaultCommand ?? ""), "default-cmd")}>
-            Copy
-          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="btn-icon-only"
+            icon={copiedField === "default-cmd" ? "check" : "content_copy"}
+            aria-label={copiedField === "default-cmd" ? "Copied" : "Copy"}
+            title={copiedField === "default-cmd" ? "Copied" : "Copy"}
+            onClick={() => void copyText(replaceVars(tool.defaultCommand ?? ""), "default-cmd")}
+          />
         </div>
       ) : null}
     </>
@@ -398,9 +412,15 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
             {tool.mitmDomain ? (
               <div className="cli-tool-kv">
                 <code>{tool.mitmDomain}</code>
-                <Button variant="outline" size="sm" icon={copiedField === "mitm-domain" ? "check" : "content_copy"} onClick={() => void copyText(tool.mitmDomain ?? "", "mitm-domain")}>
-                  Copy domain
-                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="btn-icon-only"
+                  icon={copiedField === "mitm-domain" ? "check" : "content_copy"}
+                  aria-label={copiedField === "mitm-domain" ? "Copied" : "Copy domain"}
+                  title={copiedField === "mitm-domain" ? "Copied" : "Copy domain"}
+                  onClick={() => void copyText(tool.mitmDomain ?? "", "mitm-domain")}
+                />
               </div>
             ) : null}
             <p className="cli-tool-hint">Enable MITM in your proxy tool and route traffic through the configured domain.</p>

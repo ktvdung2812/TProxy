@@ -9,6 +9,7 @@ import {
   providersForUpstreamModel,
   reorderRoutePriorities,
   resolveCanonicalUpstreamModel,
+  resolveProviderUpstreamModel,
   routeFormsEqual,
   sortRouteForms,
   syncRoutesForUpstreamModel,
@@ -113,7 +114,11 @@ export function ProviderPriorityEditor({
         const next = { ...route, ...patch };
         if (patch.provider && patch.provider !== route.provider) {
           if (canonicalUpstream) {
-            next.upstream_model = canonicalUpstream;
+            next.upstream_model = resolveProviderUpstreamModel(
+              modelsByProvider,
+              patch.provider,
+              canonicalUpstream,
+            );
           } else {
             const providerModels = modelsByProvider[patch.provider] || [];
             next.upstream_model = providerModels[0]?.id || route.upstream_model;

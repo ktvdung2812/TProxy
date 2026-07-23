@@ -102,15 +102,17 @@ export function formatLimitSummary(key: ApiKeyRecord): string {
 
 type ExampleModelSource = {
   ID: string;
+  DisplayName?: string;
   Enabled?: boolean;
 };
 
 type ExampleComboSource = {
   id: string;
+  display_name?: string;
   enabled?: boolean;
 };
 
-/** Public model IDs exposed via Provider Priority Manager (and combo IDs). */
+/** Public models from PPM (and combos) — label is display name; value stays the request ID. */
 export function buildExampleModelOptions(
   models: ExampleModelSource[] | null | undefined,
   combos: ExampleComboSource[] | null | undefined,
@@ -119,12 +121,14 @@ export function buildExampleModelOptions(
 
   for (const model of models || []) {
     if (!model.Enabled) continue;
-    options.push({ value: model.ID, label: model.ID });
+    const label = model.DisplayName?.trim() || model.ID;
+    options.push({ value: model.ID, label });
   }
 
   for (const combo of combos || []) {
     if (!combo.enabled) continue;
-    options.push({ value: combo.id, label: combo.id });
+    const label = combo.display_name?.trim() || combo.id;
+    options.push({ value: combo.id, label });
   }
 
   return options.sort((a, b) => a.label.localeCompare(b.label));

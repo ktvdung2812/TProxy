@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
@@ -150,6 +151,101 @@ func (s *Server) claudeAliasResolver() *bridge.Resolver {
 		s.loadClaudeAliasResolver()
 	}
 	return s.claudeAliases
+}
+
+func placeholderDisplayName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "default":
+		return "Default"
+	case "gpt-sol":
+		return "GPT Sol"
+	case "gpt-terra":
+		return "GPT Terra"
+	case "gpt-luna":
+		return "GPT Luna"
+	case "claude-fable":
+		return "Claude Fable"
+	case "claude-opus":
+		return "Claude Opus"
+	case "claude-sonnet":
+		return "Claude Sonnet"
+	case "claude-haiku":
+		return "Claude Haiku"
+	case "fable":
+		return "Fable"
+	case "opus":
+		return "Opus"
+	case "opusplan":
+		return "Opus Plan"
+	case "sonnet":
+		return "Sonnet"
+	case "haiku":
+		return "Haiku"
+	default:
+		return name
+	}
+}
+
+func (s *Server) placeholderModelCatalog() []map[string]any {
+	resolver := s.claudeAliasResolver()
+	defaults := resolver.Defaults()
+	effective := resolver.EffectiveMapping()
+	effectiveResolved := resolver.EffectiveResolvedMapping()
+	entries := make([]map[string]any, 0, len(bridge.CatalogPlaceholderNames()))
+	for _, name := range bridge.CatalogPlaceholderNames() {
+		role, ok := bridge.PlaceholderRole(name)
+		if !ok {
+			continue
+		}
+		resolved := ""
+		route := ""
+		if entry, ok := effectiveResolved[string(role)]; ok {
+			resolved = entry["resolved"]
+			route = entry["route"]
+		}
+		if resolved == "" {
+			resolved = bridge.FormatTarget(effective[string(role)], defaults.DefaultCodexProvider)
+		}
+		item := map[string]any{
+			"id":          name,
+			"object":      "model",
+			"name":        placeholderDisplayName(name),
+			"owned_by":    "tproxy",
+			"placeholder": true,
+			"role":        string(role),
+			"resolves_to": resolved,
+			"endpoint":    "placeholder",
+			"created":     time.Now().Unix(),
+		}
+		if route != "" {
+			item["route"] = route
+		}
+		entries = append(entries, item)
+	}
+	return entries
+}
+
+func (s *Server) placeholderModelInfo(id string) (map[string]any, bool) {
+	normalized := bridge.NormalizeModel(id)
+	if normalized == "" {
+		return nil, false
+	}
+	if _, ok := bridge.PlaceholderRole(normalized); !ok {
+		return nil, false
+	}
+	for _, entry := range s.placeholderModelCatalog() {
+		entryID, _ := entry["id"].(string)
+		if entryID != normalized {
+			continue
+		}
+		info := make(map[string]any, len(entry)+1)
+		for key, value := range entry {
+			info[key] = value
+		}
+		info["supported_parameters"] = []string{"stream", "temperature", "max_tokens", "tools"}
+		return info, true
+	}
+	return nil, false
 }
 
 func (s *Server) resolveClaudeIngressModel(r *http.Request, model string) string {

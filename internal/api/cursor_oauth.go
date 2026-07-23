@@ -15,20 +15,28 @@ func (s *Server) adminCursorOAuthAutoImport(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
 		return
 	}
-	tokens, err := auth.AutoImportCursorTokens()
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
+	result := auth.AutoImportCursor()
+	if !result.Found {
+		errMsg := "could not auto-detect cursor tokens"
+		if result.Err != nil {
+			errMsg = result.Err.Error()
+		}
+		payload := map[string]any{
 			"found":   false,
-			"error":   err.Error(),
-			"db_path": tokens.DBPath,
-		})
+			"error":   errMsg,
+			"db_path": result.Tokens.DBPath,
+		}
+		if result.WindowsManual {
+			payload["windows_manual"] = true
+		}
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"found":         true,
-		"access_token":  tokens.AccessToken,
-		"machine_id":    tokens.MachineID,
-		"db_path":       tokens.DBPath,
+		"access_token":  result.Tokens.AccessToken,
+		"machine_id":    result.Tokens.MachineID,
+		"db_path":       result.Tokens.DBPath,
 	})
 }
 
@@ -60,6 +68,10 @@ func (s *Server) adminCursorOAuthImport(w http.ResponseWriter, r *http.Request) 
 	}
 	if machineID == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "machine_id is required", useClientRequestID(r))
+		return
+	}
+	if err := auth.ValidateCursorImportToken(accessToken, machineID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 		return
 	}
 	if _, err := s.store.Provider(r.Context(), providerID); err != nil {

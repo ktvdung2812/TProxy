@@ -15,6 +15,11 @@ type Props = {
   "aria-label"?: string;
 };
 
+function optionTitle(option: Option): string {
+  const label = option.label.trim();
+  return label || option.value;
+}
+
 export function ModelTargetCombobox({
   value,
   onChange,
@@ -26,17 +31,24 @@ export function ModelTargetCombobox({
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
 
+  const selectedOption = useMemo(
+    () => options.find((option) => option.value === value),
+    [options, value],
+  );
+
+  const inputValue = open ? query : selectedOption ? optionTitle(selectedOption) : value;
+
   const filteredOptions = useMemo(() => {
-    const query = value.trim().toLowerCase();
-    if (!query) return options;
-    return options.filter(
-      (option) =>
-        option.value.toLowerCase().includes(query) ||
-        option.label.toLowerCase().includes(query),
-    );
-  }, [options, value]);
+    const needle = (open ? query : value).trim().toLowerCase();
+    if (!needle) return options;
+    return options.filter((option) => {
+      const title = optionTitle(option).toLowerCase();
+      return title.includes(needle) || option.value.toLowerCase().includes(needle);
+    });
+  }, [open, options, query, value]);
 
   useEffect(() => {
     if (!open) {
@@ -60,14 +72,20 @@ export function ModelTargetCombobox({
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  const openMenu = () => {
+    setQuery(selectedOption ? optionTitle(selectedOption) : value);
+    setOpen(true);
+  };
+
   const selectOption = (option: Option) => {
     onChange(option.value);
+    setQuery(optionTitle(option));
     setOpen(false);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-      setOpen(true);
+      openMenu();
       return;
     }
     if (event.key === "Escape") {
@@ -101,34 +119,36 @@ export function ModelTargetCombobox({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        value={value}
+        value={inputValue}
         placeholder={placeholder}
-        onFocus={() => setOpen(true)}
+        onFocus={openMenu}
         onChange={(event) => {
-          onChange(event.target.value);
+          const next = event.target.value;
+          setQuery(next);
+          onChange(next);
           setOpen(true);
         }}
         onKeyDown={handleKeyDown}
       />
       {open && filteredOptions.length > 0 ? (
         <ul className="mapping-combobox-list custom-scrollbar" id={listId} role="listbox">
-          {filteredOptions.map((option, index) => (
-            <li key={option.value}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={value === option.value}
-                className={cn("mapping-combobox-option", index === activeIndex && "is-active")}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectOption(option)}
-              >
-                <span className="mapping-combobox-option-value">{option.value}</span>
-                {option.label !== option.value ? (
-                  <span className="mapping-combobox-option-label">{option.label}</span>
-                ) : null}
-              </button>
-            </li>
-          ))}
+          {filteredOptions.map((option, index) => {
+            const title = optionTitle(option);
+            return (
+              <li key={option.value}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={value === option.value}
+                  className={cn("mapping-combobox-option", index === activeIndex && "is-active")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => selectOption(option)}
+                >
+                  <span className="mapping-combobox-option-label">{title}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>

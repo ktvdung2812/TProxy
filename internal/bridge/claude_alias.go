@@ -269,6 +269,21 @@ func PlaceholderNames() []string {
 	}
 }
 
+// CatalogPlaceholderNames lists the canonical client-facing placeholders exposed
+// in /v1/models and the dashboard Placeholder rewrite panel.
+func CatalogPlaceholderNames() []string {
+	return []string{
+		"default",
+		"fable",
+		"opus",
+		"sonnet",
+		"haiku",
+		"gpt-sol",
+		"gpt-terra",
+		"gpt-luna",
+	}
+}
+
 func FormatTarget(target, defaultCodexProvider string) string {
 	trimmed := strings.TrimSpace(target)
 	if trimmed == "" {

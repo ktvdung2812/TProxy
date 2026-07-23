@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	cursorpkg "github.com/tproxy/tproxy/internal/providers/cursor"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -133,7 +134,7 @@ func shouldSkipModelDiscovery(provider store.Provider) bool {
 		return true
 	}
 	switch provider.Type {
-	case "tavily", "elevenlabs", "antigravity", "kiro", "qoder":
+	case "tavily", "elevenlabs", "antigravity", "kiro", "qoder", "cursor":
 		return true
 	}
 	if isTerminalOpenAIResourceBase(strings.TrimRight(provider.BaseURL, "/")) {
@@ -143,12 +144,29 @@ func shouldSkipModelDiscovery(provider store.Provider) bool {
 }
 
 func staticDiscoveryModels(provider store.Provider) []DiscoveredModel {
+	if provider.Type == "cursor" || provider.ID == "cursor" {
+		return cursorStaticModelEntries(provider)
+	}
 	switch provider.ID {
 	case "glm", "glm-cn":
 		return glmStaticModelEntries(provider)
 	default:
 		return nil
 	}
+}
+
+func cursorStaticModelEntries(provider store.Provider) []DiscoveredModel {
+	registry := NewRegistry()
+	items := make([]DiscoveredModel, 0, len(cursorpkg.StaticCursorModels))
+	for _, model := range cursorpkg.StaticCursorModels {
+		items = append(items, DiscoveredModel{
+			ID:           model.ID,
+			Name:         model.Name,
+			OwnedBy:      "cursor",
+			Capabilities: discoveryCapabilities(registry, provider, provider.Type, model.ID),
+		})
+	}
+	return items
 }
 
 func glmStaticModelEntries(provider store.Provider) []DiscoveredModel {

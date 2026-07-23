@@ -111,6 +111,7 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"qwen":                 {"text", "tools"},
 		"kiro":                 {"text", "vision", "tools", "reasoning"},
 		"qoder":                {"text", "tools", "reasoning"},
+		"cursor":               {"text", "tools", "reasoning"},
 		"cline":                {"text", "vision", "tools", "reasoning"},
 		"clinepass":            {"text", "tools", "reasoning"},
 		"iflow":                {"text", "vision", "tools", "reasoning"},
@@ -131,10 +132,10 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"openai-compatible": "openai", "image": "openai", "video": "openai", "ollama": "openai", "kimi": "openai", "xai": "openai",
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
-		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cline": "openai", "clinepass": "openai",
+		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cursor": "cursor", "cline": "openai", "clinepass": "openai",
 		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai",
 	}
-	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: providerType != "antigravity" && providerType != "tavily" && providerType != "elevenlabs", BootstrapRetry: true}, nil
+	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: providerType != "antigravity" && providerType != "tavily" && providerType != "elevenlabs" && providerType != "cursor", BootstrapRetry: true}, nil
 }
 
 // HealthCheck performs a lightweight non-generation request. It is safe to
@@ -169,6 +170,9 @@ func (r *Registry) DiscoverModels(ctx context.Context, provider store.Provider, 
 func (r *Registry) discover(ctx context.Context, provider store.Provider, credential store.Credential) ([]DiscoveredModel, error) {
 	if provider.Type == "antigravity" {
 		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity model discovery requires a project-scoped generation request"}
+	}
+	if provider.Type == "cursor" {
+		return discoverCursorModels(ctx, r, provider, credential)
 	}
 	if shouldSkipModelDiscovery(provider) {
 		if items := staticDiscoveryModels(provider); len(items) > 0 {
@@ -275,6 +279,7 @@ func NewRegistry() *Registry {
 		"kilocode":             &openAIAdapter{client: client},
 		"gitlab":               &openAIAdapter{client: client},
 		"kimchi":               &openAIAdapter{client: client},
+		"cursor":               &cursorAdapter{client: client},
 	}}
 }
 

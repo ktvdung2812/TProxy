@@ -314,6 +314,7 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=exclud
 			}
 		}
 	}
+	usedSeedRouteIDs := map[string]struct{}{}
 	for _, modelCfg := range cfg.Models {
 		aliases, _ := json.Marshal(modelCfg.Aliases)
 		caps, _ := json.Marshal(modelCfg.Capabilities)
@@ -330,10 +331,7 @@ ON CONFLICT(alias,scope_api_key_id,scope_team_id) DO UPDATE SET public_model_id=
 			}
 		}
 		for _, route := range modelCfg.Routes {
-			routeID := route.ID
-			if routeID == "" {
-				routeID = modelCfg.ID + "-" + route.Provider + "-" + route.UpstreamModel
-			}
+			routeID := allocateRouteTargetID(modelCfg.ID, route, usedSeedRouteIDs)
 			conditions, _ := json.Marshal(routeConditions(route))
 			if route.Weight <= 0 {
 				route.Weight = 1
@@ -399,7 +397,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		return rollback(errors.New("provider id and type are required"))
 	}
 	switch providerCfg.Type {
-	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
 	default:
 		return rollback(fmt.Errorf("unsupported provider type %q", providerCfg.Type))
 	}
@@ -469,11 +467,9 @@ func (s *Store) SavePublicModel(ctx context.Context, modelCfg config.PublicModel
 	if _, err = tx.ExecContext(ctx, `DELETE FROM route_targets WHERE public_model_id=?`, modelCfg.ID); err != nil {
 		return rollback(err)
 	}
+	usedRouteIDs := map[string]struct{}{}
 	for _, route := range modelCfg.Routes {
-		routeID := route.ID
-		if routeID == "" {
-			routeID = modelCfg.ID + "-" + route.Provider + "-" + route.UpstreamModel
-		}
+		routeID := allocateRouteTargetID(modelCfg.ID, route, usedRouteIDs)
 		if route.Weight <= 0 {
 			route.Weight = 1
 		}
@@ -1268,6 +1264,26 @@ func routeConditions(route config.RouteTargetConfig) map[string]any {
 		conditions["_tproxy_pricing"] = route.Pricing
 	}
 	return conditions
+}
+
+// allocateRouteTargetID picks a unique route id within one save/seed batch.
+// Empty ids default to "{model}-{provider}-{upstream}"; collisions get -2, -3, …
+func allocateRouteTargetID(modelID string, route config.RouteTargetConfig, used map[string]struct{}) string {
+	base := strings.TrimSpace(route.ID)
+	if base == "" {
+		base = modelID + "-" + route.Provider + "-" + route.UpstreamModel
+	}
+	if base == "" {
+		base = modelID + "-route"
+	}
+	id := base
+	for n := 2; ; n++ {
+		if _, exists := used[id]; !exists {
+			used[id] = struct{}{}
+			return id
+		}
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
 }
 
 func (s *Store) Provider(ctx context.Context, id string) (*Provider, error) {
@@ -2131,6 +2147,7 @@ type CredentialSummary struct {
 	Weight        int        `json:"weight"`
 	Enabled       bool       `json:"enabled"`
 	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
+	LastErrorCode       string     `json:"last_error_code,omitempty"`
 	LastError           string     `json:"last_error,omitempty"`
 	ProxyPoolIDs        []string   `json:"proxy_pool_ids,omitempty"`
 	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
@@ -2231,7 +2248,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{
 				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status,
 				Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown,
-				LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
+				LastErrorCode: c.LastErrorCode, LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
 				ConsecutiveUseCount: c.ConsecutiveUseCount, CreatedAt: createdAt,
 			})
 		}

@@ -26,6 +26,9 @@ func dashboardHandler() http.Handler {
 			serveDashboardIndex(w, root)
 			return
 		}
+		if strings.HasSuffix(path, ".webmanifest") {
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
 		r.URL.Path = "/" + strings.TrimPrefix(path, "/")
 		files.ServeHTTP(w, r)
 	})
