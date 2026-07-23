@@ -1,0 +1,43 @@
+server:
+  host: 127.0.0.1
+  port: 28120
+  allow-local-without-key: false
+  allow-remote-management: false
+  allow-upstream-models: false
+
+database:
+  driver: sqlite
+  dsn: tproxy.db
+
+security:
+  master-key-env: TPROXY_MASTER_KEY
+  management-secret-env: TPROXY_MANAGEMENT_SECRET
+  plugins-enabled: false
+
+routing:
+  strategy: round-robin
+  session-affinity: true
+  session-affinity-ttl: 1h
+
+retention:
+  usage-events: 2160h
+  request-logs: 720h
+  audit-events: 2160h
+  media-jobs: 720h
+  oauth-sessions: 24h
+  cleanup-interval: 1h
+
+limits:
+  requests-per-minute: 600
+  concurrent-streams: 64
+  max-input-bytes: 33554432
+  max-output-tokens: 65536
+  media-jobs: 32
+  budget-usd-per-day: 0
+
+proxy-pools: []
+teams: []
+client-api-keys: []
+providers: []
+models: []
+combos: []

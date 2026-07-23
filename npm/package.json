@@ -1,13 +1,21 @@
 {
-  "name": "tproxy",
-  "version": "0.1.0",
+  "name": "@ktvdung1606/tproxy",
+  "version": "0.1.1",
   "description": "npm wrapper for the tproxy AI gateway binary",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ktvdung2812/TProxy.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "tproxy": "bin/tproxy.js"
   },
   "files": [
-    "bin"
+    "bin",
+    "config.default.yaml"
   ],
   "engines": {
     "node": ">=18"

@@ -36,7 +36,7 @@ func main() {
 }
 
 func run() error {
-	configPath := flag.String("config", "config.yaml", "path to tproxy YAML config")
+	configFlag := flag.String("config", "config.yaml", "path to tproxy YAML config")
 	printKey := flag.Bool("print-master-key", false, "print a new base64 master key and exit")
 	backupPath := flag.String("backup-database", "", "write a consistent SQLite backup and exit")
 	restorePath := flag.String("restore-database", "", "restore a SQLite backup into the configured database and exit")
@@ -44,6 +44,10 @@ func run() error {
 	exportAuthPath := flag.String("export-auth", "", "export encrypted OAuth credential envelopes and exit")
 	importAuthPath := flag.String("import-auth", "", "import an encrypted OAuth credential bundle and exit")
 	flag.Parse()
+	configPath, err := config.ResolveConfigPath(*configFlag)
+	if err != nil {
+		return err
+	}
 	if *printKey {
 		key, err := security.GenerateMasterKey()
 		if err != nil {
@@ -52,7 +56,7 @@ func run() error {
 		fmt.Println(key)
 		return nil
 	}
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
@@ -128,7 +132,7 @@ func run() error {
 	server := api.NewServer(cfg, dataStore, requestRouter)
 	server.StartBackground(runCtx)
 	defer server.Close()
-	server.SetConfigPath(*configPath)
+	server.SetConfigPath(configPath)
 	httpServer := &http.Server{Addr: net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port)), Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 120 * time.Second}
 	listener, err := net.Listen("tcp", httpServer.Addr)
 	if err != nil {
