@@ -301,8 +301,8 @@ button:disabled,
   transition: width 0.2s ease, background-color 0.3s, border-color 0.3s;
 }
 .sidebar.is-collapsed {
-  width: 72px;
-  max-width: 72px;
+  width: 212px;
+  max-width: 212px;
 }
 .sidebar-header { padding: 18px 14px 6px; }
 .sidebar.is-collapsed .sidebar-header { padding: 16px 10px 8px; }
@@ -418,18 +418,33 @@ button:disabled,
   color: var(--color-primary);
 }
 .nav-link.active .material-symbols-outlined { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24; }
-.nav-link-label { white-space: nowrap; }
+.nav-link-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 .sidebar.is-collapsed .nav-link {
-  justify-content: center;
-  padding: 10px;
+  justify-content: flex-start;
+  padding: 7px 10px;
+  gap: 10px;
+}
+.sidebar.is-collapsed .nav-link-label {
+  font-size: 12px;
 }
 .sidebar.is-collapsed .sidebar-brand {
   justify-content: center;
 }
 .sidebar.is-collapsed .sidebar-status {
-  justify-content: center;
-  padding: 10px;
-  margin-inline: 12px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  margin-inline: 10px;
+  font-size: 12px;
+}
+.sidebar.is-collapsed .sidebar-logout-btn {
+  justify-content: flex-start;
+  width: calc(100% - 20px);
+  padding: 8px 10px;
 }
 
 .sidebar-status {
@@ -442,6 +457,12 @@ button:disabled,
   gap: 8px;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+.sidebar-status-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .status-dot {
   display: inline-block;

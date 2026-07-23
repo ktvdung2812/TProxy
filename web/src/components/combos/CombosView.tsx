@@ -224,7 +224,7 @@ export function CombosView({ secret, combos, models, routesByModel, onMutated, o
                       <Badge size="sm">paused</Badge>
                     )}
                     {client ? <Badge size="sm">{clientLabel(client as "claude-code" | "cowork" | "general")}</Badge> : null}
-                    <Badge size="sm">{combo.items.length} steps</Badge>
+                    <Badge size="sm">{(combo.items || []).length} steps</Badge>
                   </div>
                 </div>
 
