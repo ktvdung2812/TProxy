@@ -203,3 +203,49 @@ export async function runWithConcurrency<T, R>(
   await Promise.all(workers);
   return results;
 }
+
+export const QUOTA_URL_PARAMS = {
+  provider: "provider",
+  status: "status",
+  sort: "sort",
+} as const;
+
+export type QuotaUrlSort = "default" | "expiring";
+
+export function parseQuotaAccountFilter(raw: string | null): AccountFilter {
+  const value = raw?.trim().toLowerCase();
+  if (value === "active" || value === "inactive") return value;
+  return "all";
+}
+
+export function resolveQuotaProviderFilter(raw: string | null, providerOptions: string[]): string {
+  const value = raw?.trim().toLowerCase() || "";
+  if (!value || value === "all") return "all";
+  if (providerOptions.length === 0) return value;
+  return providerOptions.includes(value) ? value : "all";
+}
+
+export function isQuotaExpiringSort(raw: string | null): boolean {
+  return raw?.trim().toLowerCase() === "expiring";
+}
+
+export function patchQuotaSearchParams(
+  current: URLSearchParams,
+  patch: Partial<{ provider: string; status: AccountFilter; sort: QuotaUrlSort }>,
+): URLSearchParams {
+  const next = new URLSearchParams(current);
+  if (patch.provider !== undefined) {
+    const provider = patch.provider.trim().toLowerCase();
+    if (!provider || provider === "all") next.delete(QUOTA_URL_PARAMS.provider);
+    else next.set(QUOTA_URL_PARAMS.provider, provider);
+  }
+  if (patch.status !== undefined) {
+    if (!patch.status || patch.status === "all") next.delete(QUOTA_URL_PARAMS.status);
+    else next.set(QUOTA_URL_PARAMS.status, patch.status);
+  }
+  if (patch.sort !== undefined) {
+    if (patch.sort === "expiring") next.set(QUOTA_URL_PARAMS.sort, "expiring");
+    else next.delete(QUOTA_URL_PARAMS.sort);
+  }
+  return next;
+}

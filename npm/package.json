@@ -1,6 +1,6 @@
 {
   "name": "@ktvdung1606/tproxy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "npm wrapper for the tproxy AI gateway binary",
   "license": "MIT",
   "repository": {

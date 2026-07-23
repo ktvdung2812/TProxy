@@ -5482,6 +5482,65 @@ button:disabled,
   font-size: 14px;
 }
 
+.endpoint-row-placeholder {
+  flex: 1;
+  min-height: 38px;
+}
+
+.endpoint-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.endpoint-row-status {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.endpoint-row-status.warn {
+  color: var(--color-warning);
+}
+
+.endpoint-row-status.error {
+  color: var(--color-danger);
+}
+
+.endpoint-row-power {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-danger);
+  cursor: pointer;
+}
+
+.endpoint-row-power:hover {
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.tunnel-section {
+  display: contents;
+}
+
+.tunnel-dashboard-row {
+  margin-top: 4px;
+}
+
+.tunnel-dashboard-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  font-size: 13px;
+}
+
 .apis-card-warning {
   margin-top: 16px;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { deleteCredential, saveCredential } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
 import { ProviderLogo } from "../providers/ProviderLogo";
@@ -24,8 +24,13 @@ import {
   getQuotaVisibilityKey,
   isConnectionAtZero,
   isConnectionDepleted,
+  isQuotaExpiringSort,
+  parseQuotaAccountFilter,
+  patchQuotaSearchParams,
   quotaEntries,
+  resolveQuotaProviderFilter,
   runWithConcurrency,
+  type QuotaUrlSort,
 } from "./utils";
 
 const QUOTA_PROVIDER_TYPES = new Set([
@@ -95,16 +100,14 @@ function getCodexResetCreditCount(quota?: CredentialQuota) {
 
 export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Props) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [quotaById, setQuotaById] = useState<Record<string, CredentialQuota>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [countdown, setCountdown] = useState(60);
-  const [providerFilter, setProviderFilter] = useState("all");
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
-  const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
-  const [expiringFirst, setExpiringFirst] = useState(false);
   const [bulkToggling, setBulkToggling] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -140,6 +143,33 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     const types = new Set(eligible.map((item) => quotaProviderKey(item)));
     return [...types].sort();
   }, [eligible]);
+
+  const providerFilter = useMemo(
+    () => resolveQuotaProviderFilter(searchParams.get("provider"), providerOptions),
+    [searchParams, providerOptions],
+  );
+
+  const accountFilter = useMemo(
+    () => parseQuotaAccountFilter(searchParams.get("status")),
+    [searchParams],
+  );
+
+  const expiringFirst = isQuotaExpiringSort(searchParams.get("sort"));
+
+  const updateQuotaFilters = useCallback(
+    (patch: Partial<{ provider: string; status: AccountFilter; sort: QuotaUrlSort }>) => {
+      setSearchParams((current) => patchQuotaSearchParams(current, patch), { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  useEffect(() => {
+    const raw = searchParams.get("provider")?.trim().toLowerCase();
+    if (!raw || raw === "all" || providerOptions.length === 0) return;
+    if (!providerOptions.includes(raw)) {
+      setSearchParams((current) => patchQuotaSearchParams(current, { provider: "all" }), { replace: true });
+    }
+  }, [providerOptions, searchParams, setSearchParams]);
 
   const filteredCredentials = useMemo(() => {
     let rows = eligible;
@@ -475,7 +505,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                     type="button"
                     className={cn("quota-tracker-menu-item", providerFilter === "all" && "is-active")}
                     onClick={() => {
-                      setProviderFilter("all");
+                      updateQuotaFilters({ provider: "all" });
                       setProviderMenuOpen(false);
                     }}
                   >
@@ -491,7 +521,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                         type="button"
                         className={cn("quota-tracker-menu-item", providerFilter === providerType && "is-active")}
                         onClick={() => {
-                          setProviderFilter(providerType);
+                          updateQuotaFilters({ provider: providerType });
                           setProviderMenuOpen(false);
                         }}
                       >
@@ -513,7 +543,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
           <select
             className="quota-tracker-select"
             value={accountFilter}
-            onChange={(event) => setAccountFilter(event.target.value as AccountFilter)}
+            onChange={(event) => updateQuotaFilters({ status: event.target.value as AccountFilter })}
             aria-label="Filter accounts by status"
           >
             {ACCOUNT_FILTER_OPTIONS.map((option) => (
@@ -531,7 +561,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
           <button
             type="button"
             className={cn("quota-tracker-chip", expiringFirst && "quota-tracker-chip-amber")}
-            onClick={() => setExpiringFirst((value) => !value)}
+            onClick={() => updateQuotaFilters({ sort: expiringFirst ? "default" : "expiring" })}
             aria-pressed={expiringFirst}
           >
             <span className="material-symbols-outlined">hourglass_top</span>
