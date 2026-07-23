@@ -596,7 +596,13 @@ func (s *Store) ComboItems(ctx context.Context, comboID string) ([]ComboItem, er
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if items == nil {
+		return []ComboItem{}, nil
+	}
+	return items, nil
 }
 
 func (s *Store) ResolveCombo(ctx context.Context, comboID string) (*PublicModel, error) {

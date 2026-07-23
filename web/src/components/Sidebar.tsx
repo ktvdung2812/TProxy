@@ -66,12 +66,12 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
 
       <div className="sidebar-status" title={online ? "Gateway online" : "Gateway offline"}>
         <span className={cn("status-dot", !online && "offline")} />
-        {!collapsed && <span>{online ? "Gateway online" : "Gateway offline"}</span>}
+        <span className="sidebar-status-label">{online ? "Gateway online" : "Gateway offline"}</span>
       </div>
-      {onLogout && !collapsed ? (
-        <button type="button" className="sidebar-logout-btn" onClick={onLogout}>
+      {onLogout ? (
+        <button type="button" className="sidebar-logout-btn" onClick={onLogout} title="Đăng xuất">
           <span className="material-symbols-outlined">logout</span>
-          <span>Đăng xuất</span>
+          {!collapsed ? <span>Đăng xuất</span> : null}
         </button>
       ) : null}
     </aside>
@@ -99,7 +99,7 @@ function NavButton({
       title={collapsed ? item.label : undefined}
     >
       <span className="material-symbols-outlined">{item.icon}</span>
-      {!collapsed && <span className="nav-link-label">{item.label}</span>}
+      <span className="nav-link-label">{item.label}</span>
     </NavLink>
   );
 }

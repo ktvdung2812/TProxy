@@ -403,7 +403,7 @@ function App() {
       <div className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow", isMobileSidebar && "is-mobile", mobileNavOpen && "is-open")}>
         <Sidebar
           online={online}
-          collapsed={isNarrowSidebar}
+          collapsed={isMobileSidebar ? false : isNarrowSidebar}
           onToggleCollapse={isMobileSidebar ? undefined : toggleSidebar}
           collapseLabel={sidebarCollapseLabel}
           onClose={() => setMobileNavOpen(false)}

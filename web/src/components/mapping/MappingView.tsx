@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { ApiKeyOption } from "../cli-tools/ApiKeySelect";
 import { Badge, Button, Card, Select, cn } from "../ui";
 import { fetchClaudeMapping, saveClaudeMapping, type ClaudeMappingResponse } from "./api";
@@ -6,7 +7,7 @@ import type { ModelRecord, RouteRecord } from "../models/types";
 import { reasoningEffortOptionsForTarget, CLAUDE_MAPPING_PLACEHOLDER_NAMES, CODEX_MAPPING_PLACEHOLDER_NAMES, type ReasoningEffort } from "./codegen";
 import { MappingCodePanel } from "./MappingCodePanel";
 import { ModelTargetCombobox } from "./ModelTargetCombobox";
-import { formatMappingTargetLabel } from "./utils";
+import { formatMappingTargetLabel, parseMappingTab, type MappingClientTab } from "./utils";
 
 type Props = {
   secret: string;
@@ -17,7 +18,7 @@ type Props = {
   onNotice: (message: string) => void;
 };
 
-type ClientTab = "claude" | "codex";
+type ClientTab = MappingClientTab;
 
 const TIERS = [
   {
@@ -62,7 +63,22 @@ function isCodexPlaceholder(name: string) {
 }
 
 export function MappingView({ secret, apiKeys, models, routesByModel, onError, onNotice }: Props) {
-  const [activeTab, setActiveTab] = useState<ClientTab>("claude");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab = useMemo(() => parseMappingTab(location.hash), [location.hash]);
+  const setActiveTab = useCallback(
+    (tab: ClientTab) => {
+      navigate({ pathname: "/mapping", hash: tab }, { replace: true });
+    },
+    [navigate],
+  );
+
+  useEffect(() => {
+    if (!location.hash) {
+      navigate({ pathname: "/mapping", hash: "claude" }, { replace: true });
+    }
+  }, [location.hash, navigate]);
+
   const [data, setData] = useState<ClaudeMappingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

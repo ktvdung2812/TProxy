@@ -32,17 +32,16 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    // Bind IPv4 explicitly so localhost/127.0.0.1 both reach Vite (avoids ::1-only listen).
     host: "127.0.0.1",
     port: 28121,
     strictPort: true,
-    // base is /dashboard/; pin HMR to the Vite server so the client does not
-    // attempt a websocket against the SPA path under /dashboard/.
+    // Pin HMR websocket to the Vite port; use localhost to match typical browser URLs.
     hmr: {
       protocol: "ws",
-      host: "127.0.0.1",
+      host: "localhost",
       port: 28121,
       clientPort: 28121,
+      path: "/dashboard/",
     },
     proxy: {
       "/api": { target: backend, changeOrigin: true },
