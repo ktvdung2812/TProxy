@@ -65,6 +65,19 @@ export const GPT_CLIENT_TIER_PLACEHOLDERS: Partial<Record<MappingTier, string>> 
 
 export type GptCodenameTier = keyof typeof GPT_CLIENT_TIER_PLACEHOLDERS;
 
+export const CODEX_MAPPING_TIERS = Object.keys(GPT_CLIENT_TIER_PLACEHOLDERS) as GptCodenameTier[];
+
+/** Canonical placeholders shown in Mapping → Placeholder rewrite (Claude tab). */
+export const CLAUDE_MAPPING_PLACEHOLDER_NAMES = ["default", "fable", "opus", "sonnet", "haiku"] as const;
+
+/** Canonical placeholders shown in Mapping → Placeholder rewrite (Codex tab). */
+export const CODEX_MAPPING_PLACEHOLDER_NAMES = ["gpt-sol", "gpt-terra", "gpt-luna"] as const;
+
+export const CATALOG_PLACEHOLDER_NAMES = [
+  ...CLAUDE_MAPPING_PLACEHOLDER_NAMES,
+  ...CODEX_MAPPING_PLACEHOLDER_NAMES,
+] as const;
+
 export const DEFAULT_CLAUDE_PRIMARY_MODEL: MappingTier = "fable";
 export const CLAUDE_CODE_CONTEXT_TOKENS = "1048576";
 

@@ -22,9 +22,14 @@ export function ConnectionStatsInline({ credentials }: Props) {
 
   return (
     <span className="connection-stats-inline">
-      <Badge variant={stats.connected > 0 ? "success" : "default"} size="sm" dot>
-        {stats.connected} active
+      <Badge variant={stats.active > 0 ? "success" : "default"} size="sm" dot={stats.active > 0}>
+        {stats.active} active
       </Badge>
+      {stats.disabled > 0 ? (
+        <Badge variant="neutral" size="sm">
+          {stats.disabled} disabled
+        </Badge>
+      ) : null}
       {stats.error > 0 ? (
         <Badge variant="error" size="sm" dot>
           {stats.error} error

@@ -67,15 +67,35 @@ export function defaultRoutePriority(index: number) {
   return Math.max(10, 100 - index * 10);
 }
 
+export function newRouteId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function emptyRoute(provider = "", priority = 100, upstreamModel = ""): RouteFormData {
   return {
-    id: "",
+    id: newRouteId(),
     provider,
     upstream_model: upstreamModel,
     priority,
     weight: 1,
     enabled: true,
   };
+}
+
+/** Ensure every route has a non-empty, unique id before persisting. */
+export function ensureUniqueRouteIds(routes: RouteFormData[]): RouteFormData[] {
+  const used = new Set<string>();
+  return routes.map((route) => {
+    let id = route.id.trim() || newRouteId();
+    if (used.has(id)) {
+      id = newRouteId();
+    }
+    used.add(id);
+    return id === route.id ? route : { ...route, id };
+  });
 }
 
 export function formToPayload(form: ModelFormData) {
@@ -89,8 +109,8 @@ export function formToPayload(form: ModelFormData) {
     enabled: form.enabled,
     rewrite_response_model: form.rewrite_response_model,
     capabilities: form.capabilities.length ? form.capabilities : ["text"],
-    routes: form.routes.map((route) => ({
-      ...(route.id.trim() ? { id: route.id.trim() } : {}),
+    routes: ensureUniqueRouteIds(form.routes).map((route) => ({
+      id: route.id.trim(),
       provider: route.provider.trim(),
       upstream_model: route.upstream_model.trim(),
       priority: Number(route.priority) || 0,
@@ -202,14 +222,49 @@ export function resolveCanonicalUpstreamModel(model: ModelRecord, routes: RouteF
   return id;
 }
 
+/** Normalize for comparison; treat `org/model` and `model` as the same leaf id. */
+export function modelIdsEquivalent(left: string, right: string): boolean {
+  const a = left.trim().toLowerCase();
+  const b = right.trim().toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const leaf = (value: string) => {
+    const slash = value.lastIndexOf("/");
+    return slash >= 0 ? value.slice(slash + 1) : value;
+  };
+  const aLeaf = leaf(a);
+  const bLeaf = leaf(b);
+  if (aLeaf === bLeaf) return true;
+  return a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+}
+
+export function findDiscoveredUpstreamModel(
+  models: DiscoveredModel[] | undefined,
+  upstreamModel: string,
+): DiscoveredModel | undefined {
+  const needle = upstreamModel.trim();
+  if (!needle || !models?.length) return undefined;
+  const exact = models.find((item) => item.id.trim().toLowerCase() === needle.toLowerCase());
+  if (exact) return exact;
+  return models.find((item) => modelIdsEquivalent(item.id, needle));
+}
+
+/** Prefer the provider catalog id (e.g. DeepSeek `deepseek-v4-pro` vs OpenRouter `deepseek/deepseek-v4-pro`). */
+export function resolveProviderUpstreamModel(
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+  providerId: string,
+  upstreamModel: string,
+): string {
+  const match = findDiscoveredUpstreamModel(modelsByProvider[providerId], upstreamModel);
+  return match?.id?.trim() || upstreamModel.trim();
+}
+
 export function providerSupportsUpstreamModel(
   modelsByProvider: Record<string, DiscoveredModel[]>,
   providerId: string,
   upstreamModel: string,
 ): boolean {
-  const normalized = upstreamModel.trim().toLowerCase();
-  if (!normalized) return false;
-  return (modelsByProvider[providerId] || []).some((item) => item.id.trim().toLowerCase() === normalized);
+  return Boolean(findDiscoveredUpstreamModel(modelsByProvider[providerId], upstreamModel));
 }
 
 export function providersForUpstreamModel(
@@ -217,7 +272,7 @@ export function providersForUpstreamModel(
   modelsByProvider: Record<string, DiscoveredModel[]>,
   upstreamModel: string,
 ): ProviderOption[] {
-  const normalized = upstreamModel.trim().toLowerCase();
+  const normalized = upstreamModel.trim();
   if (!normalized) return providers;
   return providers.filter((provider) => providerSupportsUpstreamModel(modelsByProvider, provider.id, normalized));
 }
@@ -237,12 +292,21 @@ export function syncRoutesForUpstreamModel(
     if (!providerSupportsUpstreamModel(modelsByProvider, route.provider, canonical)) {
       return route;
     }
-    return { ...route, upstream_model: canonical };
+    return {
+      ...route,
+      upstream_model: resolveProviderUpstreamModel(modelsByProvider, route.provider, canonical),
+    };
   });
 
   for (const provider of supporting) {
     if (byProvider.has(provider.id)) continue;
-    merged.push(emptyRoute(provider.id, defaultRoutePriority(merged.length), canonical));
+    merged.push(
+      emptyRoute(
+        provider.id,
+        defaultRoutePriority(merged.length),
+        resolveProviderUpstreamModel(modelsByProvider, provider.id, canonical),
+      ),
+    );
   }
 
   return reorderRoutePriorities(merged);
@@ -320,3 +384,67 @@ export function routesToFormData(routes: RouteRecord[]): RouteFormData[] {
     enabled: route.Enabled,
   }));
 }
+
+export type DiscoveredPpmEntry = {
+  upstreamModel: string;
+  name: string;
+  capabilities: string[];
+  providerIds: string[];
+};
+
+/** Upstream models exposed by provider accounts that are not yet public PPM models. */
+export function collectUnmappedDiscoveredModels(
+  models: ModelRecord[],
+  routesByModel: Record<string, RouteRecord[]>,
+  providers: ProviderOption[],
+  modelsByProvider: Record<string, DiscoveredModel[]>,
+): DiscoveredPpmEntry[] {
+  const mappedUpstreams = new Set<string>();
+  for (const model of models) {
+    const display = model.DisplayName?.trim().toLowerCase();
+    if (display) mappedUpstreams.add(display);
+    const id = model.ID.trim().toLowerCase();
+    if (id) mappedUpstreams.add(id);
+    for (const route of routesByModel[model.ID] || []) {
+      const upstream = route.UpstreamModel.trim().toLowerCase();
+      if (upstream) mappedUpstreams.add(upstream);
+    }
+  }
+
+  const byUpstream = new Map<string, DiscoveredPpmEntry>();
+  for (const provider of providers) {
+    for (const item of modelsByProvider[provider.id] || []) {
+      const upstreamModel = item.id.trim();
+      if (!upstreamModel) continue;
+      const key = upstreamModel.toLowerCase();
+      if (mappedUpstreams.has(key)) continue;
+
+      const existing = byUpstream.get(key);
+      if (existing) {
+        if (!existing.providerIds.includes(provider.id)) {
+          existing.providerIds.push(provider.id);
+        }
+        if (!existing.name && item.name?.trim()) {
+          existing.name = item.name.trim();
+        }
+        if (existing.capabilities.length === 0 && item.capabilities?.length) {
+          existing.capabilities = [...item.capabilities];
+        }
+        continue;
+      }
+
+      byUpstream.set(key, {
+        upstreamModel,
+        name: item.name?.trim() || upstreamModel,
+        capabilities: item.capabilities?.length ? [...item.capabilities] : [],
+        providerIds: [provider.id],
+      });
+    }
+  }
+
+  return [...byUpstream.values()].sort((left, right) => {
+    const nameCmp = left.name.localeCompare(right.name);
+    return nameCmp !== 0 ? nameCmp : left.upstreamModel.localeCompare(right.upstreamModel);
+  });
+}
+

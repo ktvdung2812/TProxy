@@ -384,6 +384,7 @@ export type CursorAutoImportResult = {
   machine_id?: string;
   db_path?: string;
   error?: string;
+  windows_manual?: boolean;
 };
 
 export function autoImportCursorTokens(secret: string) {

@@ -3,6 +3,7 @@ package clitools
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +66,68 @@ func TestClaudeApplyWritesSettings(t *testing.T) {
 	}
 	if _, ok := settings["env"]; ok {
 		t.Fatalf("expected env removed, got %v", settings["env"])
+	}
+}
+
+func TestGrokApplyUpsertsAndResetRestoresDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	initial := `[models]
+default = "grok-build"
+
+[model.other]
+model = "grok-4"
+`
+	if err := writeFile(grokConfigPath(), []byte(initial)); err != nil {
+		t.Fatalf("write initial config: %v", err)
+	}
+
+	req := ApplyRequest{
+		BaseURL: "http://127.0.0.1:28120",
+		APIKey:  "tp_test_key",
+		Model:   "codex-gpt-5.5",
+	}
+	if err := grokApply(req); err != nil {
+		t.Fatalf("grokApply: %v", err)
+	}
+
+	raw, err := readFile(grokConfigPath())
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(raw)
+	if !strings.Contains(content, `default = "tproxy"`) {
+		t.Fatalf("expected tproxy default, got:\n%s", content)
+	}
+	if !strings.Contains(content, `api_backend = "chat_completions"`) {
+		t.Fatalf("expected chat_completions backend, got:\n%s", content)
+	}
+	if !strings.Contains(content, `description = "Routed via TProxy gateway"`) {
+		t.Fatalf("expected description, got:\n%s", content)
+	}
+	if !strings.Contains(content, `[model.other]`) {
+		t.Fatalf("expected other model section preserved, got:\n%s", content)
+	}
+	if !strings.Contains(content, `# tproxy-prev-default = "grok-build"`) {
+		t.Fatalf("expected prev-default marker, got:\n%s", content)
+	}
+
+	if err := grokReset(); err != nil {
+		t.Fatalf("grokReset: %v", err)
+	}
+	raw, err = readFile(grokConfigPath())
+	if err != nil {
+		t.Fatalf("read config after reset: %v", err)
+	}
+	content = string(raw)
+	if strings.Contains(content, "[model.tproxy]") {
+		t.Fatalf("expected tproxy section removed, got:\n%s", content)
+	}
+	if !strings.Contains(content, `default = "grok-build"`) {
+		t.Fatalf("expected previous default restored, got:\n%s", content)
+	}
+	if !strings.Contains(content, `[model.other]`) {
+		t.Fatalf("expected other model section preserved after reset, got:\n%s", content)
 	}
 }

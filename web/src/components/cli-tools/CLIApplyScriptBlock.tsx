@@ -71,12 +71,13 @@ export function CLIApplyScriptBlock({ configs, disabled = false }: Props) {
             <Button
               variant="ghost"
               size="sm"
+              className="btn-icon-only"
               icon={copied ? "check" : "content_copy"}
+              aria-label={copied ? "Copied" : "Copy"}
+              title={copied ? "Copied" : "Copy"}
               disabled={disabled || !script}
               onClick={() => void copyScript()}
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
+            />
           </div>
           <pre>
             <code>{script}</code>

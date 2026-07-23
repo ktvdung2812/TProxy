@@ -14,6 +14,8 @@ import (
 
 func (r *Registry) credentialQuotaByPreset(ctx context.Context, provider store.Provider, credential store.Credential) (CredentialQuota, bool) {
 	switch strings.ToLower(strings.TrimSpace(provider.ID)) {
+	case "deepseek":
+		return r.deepseekQuota(ctx, provider, credential), true
 	case "glm", "glm-cn":
 		return r.glmQuota(ctx, provider, credential), true
 	case "minimax", "minimax-cn":
@@ -727,4 +729,89 @@ func kimiQuotaWindowKey(window map[string]any, idx int) (string, string) {
 		return fmt.Sprintf("limit_%dmo", duration), fmt.Sprintf("%dmo", duration)
 	}
 	return fmt.Sprintf("limit_%d", idx+1), fmt.Sprintf("Limit #%d", idx+1)
+}
+
+func (r *Registry) deepseekQuota(ctx context.Context, provider store.Provider, credential store.Credential) CredentialQuota {
+	result := CredentialQuota{
+		CredentialID: credential.ID,
+		ProviderID:   provider.ID,
+		ProviderType: provider.Type,
+		Quotas:       map[string]QuotaEntry{},
+		Plan:         "Pay-as-you-go",
+	}
+	base := strings.TrimSpace(provider.BaseURL)
+	if base == "" {
+		base = "https://api.deepseek.com"
+	}
+	quotaURL := openAIResourceURL(base, "/user/balance")
+	headers := http.Header{
+		"Authorization": {"Bearer " + strings.TrimSpace(credential.Secret)},
+		"Accept":        {"application/json"},
+	}
+	body, status, err := r.quotaGET(withCredentialProxy(ctx, credential), quotaURL, headers)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	if status == http.StatusUnauthorized {
+		result.Message = "DeepSeek API key invalid or expired."
+		return result
+	}
+	if status < 200 || status >= 300 {
+		result.Message = fmt.Sprintf("DeepSeek balance API unavailable (HTTP %d)", status)
+		return result
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		result.Message = "Invalid DeepSeek balance response"
+		return result
+	}
+	available, quotas := parseDeepSeekBalancePayload(payload)
+	result.Quotas = quotas
+	if !available {
+		result.Message = "DeepSeek balance insufficient for API calls."
+	} else if len(quotas) == 0 {
+		result.Message = "DeepSeek connected. No balance info returned."
+	}
+	return result
+}
+
+func parseDeepSeekBalancePayload(payload map[string]any) (bool, map[string]QuotaEntry) {
+	quotas := map[string]QuotaEntry{}
+	available := true
+	if value, ok := payload["is_available"].(bool); ok {
+		available = value
+	}
+	rawInfos, _ := payload["balance_infos"].([]any)
+	for _, raw := range rawInfos {
+		info, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		currency := strings.ToUpper(strings.TrimSpace(stringValue(info["currency"])))
+		if currency == "" {
+			currency = "USD"
+		}
+		totalText := strings.TrimSpace(stringValue(firstValue(info, "total_balance", "totalBalance")))
+		total := kimiQuotaNumber(firstValue(info, "total_balance", "totalBalance"))
+		if total <= 0 && available {
+			continue
+		}
+		label := currency + " " + totalText
+		if totalText == "" {
+			label = fmt.Sprintf("%s %.4g", currency, total)
+		}
+		key := "balance_" + strings.ToLower(currency)
+		entry := QuotaEntry{Name: label, Used: 0, Total: total, Remaining: 100}
+		if total <= 0 {
+			entry.Used = 1
+			entry.Total = 1
+			entry.Remaining = 0
+		}
+		quotas[key] = entry
+	}
+	if len(quotas) == 0 && !available {
+		quotas["balance"] = QuotaEntry{Name: "Balance 0", Used: 1, Total: 1, Remaining: 0}
+	}
+	return available, quotas
 }

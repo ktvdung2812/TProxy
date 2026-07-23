@@ -18,18 +18,22 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
   const [detecting, setDetecting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
+  const [windowsManual, setWindowsManual] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const runAutoDetect = useCallback(async () => {
     setDetecting(true);
     setErrorMsg("");
     setAutoDetected(false);
+    setWindowsManual(false);
     try {
       const result = await autoImportCursorTokens(secret);
       if (result.found && result.access_token && result.machine_id) {
         setAccessToken(result.access_token);
         setMachineId(result.machine_id);
         setAutoDetected(true);
+      } else if (result.windows_manual) {
+        setWindowsManual(true);
       } else {
         setErrorMsg(result.error || "Could not auto-detect Cursor tokens");
       }
@@ -46,6 +50,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
     setMachineId("");
     setLabel("Cursor IDE");
     setAutoDetected(false);
+    setWindowsManual(false);
     setErrorMsg("");
     void runAutoDetect();
   }, [open, runAutoDetect]);
@@ -79,30 +84,36 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
     <Modal
       open={open}
       onClose={onClose}
-      title="Import Cursor IDE token"
+      title="Connect Cursor IDE"
       subtitle="Read from Cursor's local database or paste tokens manually"
       icon="edit"
       size="md"
       footer={
-        <>
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={importing}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            icon="upload"
-            loading={importing}
-            disabled={!accessToken.trim() || !machineId.trim()}
-            onClick={() => void handleImport()}
-          >
-            Import token
-          </Button>
-        </>
+        detecting ? null : (
+          <>
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={importing}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="upload"
+              loading={importing}
+              disabled={!accessToken.trim() || !machineId.trim()}
+              onClick={() => void handleImport()}
+            >
+              {importing ? "Importing…" : "Import token"}
+            </Button>
+          </>
+        )
       }
     >
       {detecting ? (
-        <p className="cli-tool-hint">Auto-detecting tokens from Cursor IDE…</p>
+        <div className="cursor-import-detecting" style={{ textAlign: "center", padding: "24px 0" }}>
+          <span className="material-symbols-outlined animate-spin">progress_activity</span>
+          <p className="cursor-import-detecting-title">Auto-detecting tokens…</p>
+          <p className="cli-tool-hint">Reading from Cursor IDE database</p>
+        </div>
       ) : (
         <>
           {autoDetected ? (
@@ -111,10 +122,30 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
               <p>Tokens auto-detected from Cursor IDE.</p>
             </div>
           ) : null}
-          {errorMsg && !autoDetected ? (
+          {windowsManual ? (
+            <div className="cli-tool-note cli-tool-note-warning">
+              <span className="material-symbols-outlined">info</span>
+              <div>
+                <p>Could not read the Cursor database automatically.</p>
+                <p className="cli-tool-hint">
+                  Open Cursor IDE at least once, then click Retry. If it still fails, paste your tokens manually below.
+                </p>
+                <Button variant="outline" size="sm" icon="refresh" onClick={() => void runAutoDetect()}>
+                  Retry
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {!autoDetected && !windowsManual && errorMsg ? (
             <div className="cli-tool-note cli-tool-note-warning">
               <span className="material-symbols-outlined">warning</span>
               <p>{errorMsg}</p>
+            </div>
+          ) : null}
+          {!autoDetected && !windowsManual && !errorMsg ? (
+            <div className="cli-tool-note cli-tool-note-info">
+              <span className="material-symbols-outlined">info</span>
+              <p>Cursor IDE not detected. Paste your tokens manually or retry auto-detect.</p>
             </div>
           ) : null}
           <div className="settings-form-grid">
@@ -138,9 +169,11 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
               />
             </Field>
           </div>
-          <Button variant="outline" size="sm" icon="refresh" disabled={detecting} onClick={() => void runAutoDetect()}>
-            Retry auto-detect
-          </Button>
+          {!windowsManual ? (
+            <Button variant="outline" size="sm" icon="refresh" disabled={detecting} onClick={() => void runAutoDetect()}>
+              Retry auto-detect
+            </Button>
+          ) : null}
           <p className="cli-tool-hint">
             Open Cursor IDE and sign in first. Tokens are read from <code>state.vscdb</code> in Cursor&apos;s globalStorage folder.
           </p>

@@ -513,11 +513,11 @@ model = "{{model}}"`,
     notes: [
       {
         type: "info",
-        text: "Grok Build uses ~/.grok/config.toml. Add a [model.tproxy] custom model and set it as the default.",
+        text: "Grok Build uses ~/.grok/config.toml. TProxy writes a [model.tproxy] custom model and sets it as the default.",
       },
       {
         type: "info",
-        text: 'After setup, run grok (or /model tproxy) to use the routed model.',
+        text: 'After Apply, run grok (or /model tproxy) to use the routed model. Switch back anytime with /model grok-build.',
       },
       { type: "warning", text: "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml" },
     ],
@@ -527,10 +527,16 @@ model = "{{model}}"`,
     ],
     codeBlock: {
       language: "toml",
-      code: `[model.tproxy]
+      code: `[models]
+default = "tproxy"
+
+[model.tproxy]
+model = "{{model}}"
 base_url = "{{baseUrl}}"
-api_key = "{{apiKey}}"
-model = "{{model}}"`,
+name = "TProxy"
+description = "Routed via TProxy gateway"
+api_backend = "chat_completions"
+api_key = "{{apiKey}}"`,
     },
   },
 };

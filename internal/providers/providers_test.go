@@ -642,6 +642,40 @@ func TestDiscoverGLMFallsBackOn404(t *testing.T) {
 	}
 }
 
+func TestDiscoverCursorStaticModels(t *testing.T) {
+	registry := NewRegistry()
+	models, err := registry.DiscoverModels(context.Background(), store.Provider{
+		ID: "cursor", Type: "cursor", BaseURL: "https://api2.cursor.sh",
+	}, store.Credential{})
+	if err != nil {
+		t.Fatalf("DiscoverModels() error: %v", err)
+	}
+	if len(models) < 10 {
+		t.Fatalf("expected static cursor models, got %+v", models)
+	}
+	if models[0].ID != "default" || models[0].OwnedBy != "cursor" {
+		t.Fatalf("first model = %+v", models[0])
+	}
+}
+
+func TestCursorAdapterRequiresMachineID(t *testing.T) {
+	adapter, err := NewRegistry().Adapter("cursor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.Execute(context.Background(), store.Provider{ID: "cursor", Type: "cursor", BaseURL: "https://api2.cursor.sh"}, store.Credential{
+		AuthType: "oauth",
+		OAuthToken: &store.OAuthToken{AccessToken: "cursor-token"},
+	}, canonical.Request{UpstreamModel: "default", Messages: []canonical.Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("expected error for missing machine ID")
+	}
+	providerErr, ok := err.(*ProviderError)
+	if !ok || providerErr.Code != "authorization_required" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestParseResponsesUsageIncludesCachedTokens(t *testing.T) {
 	usage := parseResponsesUsage(map[string]any{
 		"input_tokens":  120,

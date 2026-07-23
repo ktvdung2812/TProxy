@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Toggle } from "../ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Select, Toggle } from "../ui";
 import { CooldownTimer } from "./CooldownTimer";
 import { CredentialModelsModal } from "./CredentialModelsModal";
 import { EditConnectionModal } from "./EditConnectionModal";
@@ -18,7 +18,73 @@ import {
 } from "./connectionMethods";
 import { ProviderLogo } from "./ProviderLogo";
 import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
+import {
+  fetchCredentialProxyUsage,
+  fetchCredentialQuota,
+  type CredentialProxyUsage,
+  type CredentialQuota,
+} from "../quota/api";
+import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
 import { credentialStatusLabel, isOnCooldown, type Credential, type ModelAlias, type Provider } from "./types";
+
+/** Providers whose upstream quota/balance probe is implemented in tproxy. */
+const CONNECTION_QUOTA_PROVIDER_IDS = new Set([
+  "deepseek",
+  "codex",
+  "claude",
+  "copilot",
+  "github",
+  "antigravity",
+  "gemini-cli",
+  "glm",
+  "glm-cn",
+  "minimax",
+  "minimax-cn",
+  "kiro",
+  "qoder",
+  "qwen",
+  "xai",
+  "grok-cli",
+  "vercel-ai-gateway",
+  "codebuddy-cn",
+  "ollama",
+  "kimi",
+  "kimi-coding",
+]);
+
+function providerSupportsUpstreamQuota(providerId: string, presets: NinerouterPreset[]) {
+  if (CONNECTION_QUOTA_PROVIDER_IDS.has(providerId)) return true;
+  return Boolean(presets.find((preset) => preset.id === providerId)?.supports_quota);
+}
+
+function quotaBadgesFromQuota(quota: CredentialQuota | null | undefined): Array<{
+  key: string;
+  label: string;
+  tone: "success" | "warning" | "error" | "info" | "default";
+}> {
+  if (!quota?.quotas) return [];
+  return Object.entries(quota.quotas).map(([key, entry]) => {
+    const name = (entry.name || key).trim();
+    if (entry.unlimited) {
+      return { key, label: `${name} ∞`, tone: "info" as const };
+    }
+    // Absolute balance labels from DeepSeek-style probes: "USD 0.12"
+    if (/^[A-Z]{3}\s+-?\d/.test(name)) {
+      return { key, label: name, tone: "info" as const };
+    }
+    const total = entry.total || 0;
+    const used = entry.used || 0;
+    const remainingPct =
+      typeof entry.remaining === "number" && entry.remaining > 0 && entry.remaining <= 100
+        ? Math.round(entry.remaining)
+        : total > 0
+          ? Math.max(0, Math.round(((total - used) / total) * 100))
+          : 100;
+    const toneRaw = getColorTone(remainingPct);
+    const tone = toneRaw === "danger" ? ("error" as const) : toneRaw;
+    return { key, label: `${name} ${remainingPct}%`, tone };
+  });
+}
 
 type Props = {
   provider: Provider;
@@ -59,6 +125,78 @@ export function ProviderDetail({
     () => [...credentials].sort((a, b) => Number(b.enabled) - Number(a.enabled)),
     [credentials],
   );
+  const [accountQuery, setAccountQuery] = useState("");
+  const [errorCodeFilter, setErrorCodeFilter] = useState("");
+  const errorCodeOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const credential of sortedCredentials) {
+      const code = credential.last_error_code?.trim();
+      if (!code) continue;
+      counts.set(code, (counts.get(code) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([code, count]) => ({ code, count }));
+  }, [sortedCredentials]);
+  const erroredWithoutCodeCount = useMemo(
+    () =>
+      sortedCredentials.filter((credential) => {
+        if (credential.last_error_code?.trim()) return false;
+        return Boolean(
+          credential.last_error?.trim() ||
+            credential.status === "auth_required" ||
+            credential.status === "cooldown" ||
+            isOnCooldown(credential.cooldown_until),
+        );
+      }).length,
+    [sortedCredentials],
+  );
+  const filteredCredentials = useMemo(() => {
+    const query = accountQuery.trim().toLowerCase();
+    return sortedCredentials.filter((credential) => {
+      const code = credential.last_error_code?.trim() || "";
+      const hasError =
+        Boolean(code) ||
+        Boolean(credential.last_error?.trim()) ||
+        credential.status === "auth_required" ||
+        credential.status === "cooldown" ||
+        isOnCooldown(credential.cooldown_until);
+
+      if (errorCodeFilter === "__any__") {
+        if (!hasError) return false;
+      } else if (errorCodeFilter === "__none__") {
+        if (!hasError || code) return false;
+      } else if (errorCodeFilter) {
+        if (code !== errorCodeFilter) return false;
+      }
+
+      if (!query) return true;
+      const haystack = [
+        credential.id,
+        credential.label,
+        credential.email,
+        credential.auth_type,
+        credential.status,
+        credential.last_error_code,
+        credential.last_error,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [sortedCredentials, accountQuery, errorCodeFilter]);
+  useEffect(() => {
+    if (!errorCodeFilter) return;
+    if (errorCodeFilter === "__any__") return;
+    if (errorCodeFilter === "__none__") {
+      if (erroredWithoutCodeCount === 0) setErrorCodeFilter("");
+      return;
+    }
+    if (!errorCodeOptions.some((option) => option.code === errorCodeFilter)) {
+      setErrorCodeFilter("");
+    }
+  }, [errorCodeFilter, errorCodeOptions, erroredWithoutCodeCount]);
   const [showAddCredential, setShowAddCredential] = useState(false);
   const [credentialMethod, setCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [showOAuth, setShowOAuth] = useState(false);
@@ -67,11 +205,59 @@ export function ProviderDetail({
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
   const [confirmDeleteProvider, setConfirmDeleteProvider] = useState(false);
   const [confirmDeleteCred, setConfirmDeleteCred] = useState<Credential | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [selectedCredentialIds, setSelectedCredentialIds] = useState<string[]>([]);
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
   const [discoverNonce, setDiscoverNonce] = useState(0);
   const [modelsCredential, setModelsCredential] = useState<Credential | null>(null);
   const [showCursorImport, setShowCursorImport] = useState(false);
   const [proxyPools, setProxyPools] = useState<ProxyPoolOption[]>([]);
+  const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
+  const supportsUpstreamQuota = useMemo(
+    () => providerSupportsUpstreamQuota(provider.ID, presets),
+    [provider.ID, presets],
+  );
+
+  useEffect(() => {
+    const available = new Set(credentials.map((credential) => credential.id));
+    setSelectedCredentialIds((current) => {
+      const next = current.filter((id) => available.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [credentials]);
+
+  const filteredIdSet = useMemo(
+    () => new Set(filteredCredentials.map((credential) => credential.id)),
+    [filteredCredentials],
+  );
+  const selectedInView = useMemo(
+    () => selectedCredentialIds.filter((id) => filteredIdSet.has(id)),
+    [selectedCredentialIds, filteredIdSet],
+  );
+  const allFilteredSelected =
+    filteredCredentials.length > 0 && selectedInView.length === filteredCredentials.length;
+  const someFilteredSelected = selectedInView.length > 0 && !allFilteredSelected;
+
+  const toggleCredentialSelected = (credentialId: string, selected: boolean) => {
+    setSelectedCredentialIds((current) => {
+      if (selected) {
+        return current.includes(credentialId) ? current : [...current, credentialId];
+      }
+      return current.filter((id) => id !== credentialId);
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedCredentialIds((current) => {
+      if (allFilteredSelected) {
+        return current.filter((id) => !filteredIdSet.has(id));
+      }
+      const merged = new Set(current);
+      for (const credential of filteredCredentials) merged.add(credential.id);
+      return [...merged];
+    });
+  };
 
   // Fetch proxy pools once for the EditConnectionModal binding dropdown.
   useEffect(() => {
@@ -81,6 +267,20 @@ export function ProviderDetail({
       .catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
   }, [secret]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCredentialProxyUsage(secret, "today")
+      .then((result) => {
+        if (!cancelled) setProxyUsageById(result.by_credential || {});
+      })
+      .catch(() => {
+        if (!cancelled) setProxyUsageById({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret, credentials]);
 
   const handleHealth = async () => {
     setHealthBusy(true);
@@ -155,10 +355,39 @@ export function ProviderDetail({
     setConfirmDeleteCred(null);
     try {
       await deleteCredential(secret, cred.id);
+      setSelectedCredentialIds((current) => current.filter((id) => id !== cred.id));
       onNotice(`Credential ${cred.id} deleted`);
       onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Delete failed");
+    }
+  };
+
+  const handleBulkDeleteCredentials = async () => {
+    const ids = [...selectedCredentialIds];
+    if (ids.length === 0) return;
+    setConfirmBulkDelete(false);
+    setBulkDeleteBusy(true);
+    let deleted = 0;
+    const failures: string[] = [];
+    try {
+      for (const id of ids) {
+        try {
+          await deleteCredential(secret, id);
+          deleted += 1;
+        } catch (cause) {
+          failures.push(cause instanceof Error ? cause.message : id);
+        }
+      }
+      setSelectedCredentialIds([]);
+      if (deleted > 0) onMutated();
+      if (failures.length === 0) {
+        onNotice(`Deleted ${deleted} account${deleted === 1 ? "" : "s"}`);
+      } else {
+        onError(`Deleted ${deleted}/${ids.length}. Failed: ${failures[0]}`);
+      }
+    } finally {
+      setBulkDeleteBusy(false);
     }
   };
 
@@ -243,22 +472,113 @@ export function ProviderDetail({
             hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, cookie, or import."}
           />
         ) : (
-          sortedCredentials.map((cred) => (
-            <ConnectionRow
-              key={cred.id}
-              providerId={provider.ID}
-              credential={cred}
-              secret={secret}
-              supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
-              onEdit={(c) => setEditingCredential(c)}
-              onDeleted={(c) => setConfirmDeleteCred(c)}
-              onReAuth={(c) => setReAuthCredential(c)}
-              onShowModels={(c) => setModelsCredential(c)}
-              onMutated={onMutated}
-              onNotice={onNotice}
-              onError={onError}
-            />
-          ))
+          <>
+            <div className="connections-toolbar">
+              <Input
+                icon="search"
+                value={accountQuery}
+                onChange={(event) => setAccountQuery(event.target.value)}
+                placeholder="Search accounts by email, label, or id…"
+                aria-label="Search accounts"
+              />
+              <Select
+                className="connections-error-filter"
+                value={errorCodeFilter}
+                onChange={(event) => setErrorCodeFilter(event.target.value)}
+                aria-label="Filter by error code"
+              >
+                <option value="">All error codes</option>
+                <option value="__any__">Any error</option>
+                {erroredWithoutCodeCount > 0 ? (
+                  <option value="__none__">Error without code ({erroredWithoutCodeCount})</option>
+                ) : null}
+                {errorCodeOptions.map(({ code, count }) => (
+                  <option key={code} value={code}>
+                    {code} ({count})
+                  </option>
+                ))}
+              </Select>
+              {accountQuery.trim() || errorCodeFilter ? (
+                <span className="connections-toolbar-meta">
+                  {filteredCredentials.length}/{credentials.length}
+                </span>
+              ) : null}
+            </div>
+            {filteredCredentials.length === 0 ? (
+              <EmptyState
+                icon="search_off"
+                text="No accounts match your filters."
+                hint="Try email, label, credential id, status, or error code."
+              />
+            ) : (
+              <>
+                <div className="connections-selection-bar">
+                  <label className="connections-select-all">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      ref={(node) => {
+                        if (node) node.indeterminate = someFilteredSelected;
+                      }}
+                      onChange={toggleSelectAllFiltered}
+                      aria-label="Select all visible accounts"
+                    />
+                    <span>
+                      {allFilteredSelected
+                        ? "Deselect all"
+                        : someFilteredSelected
+                          ? `${selectedInView.length} selected`
+                          : "Select all"}
+                    </span>
+                  </label>
+                  {selectedCredentialIds.length > 0 ? (
+                    <div className="connections-selection-actions">
+                      <span className="connections-toolbar-meta">
+                        {selectedCredentialIds.length} selected
+                      </span>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        icon="delete"
+                        loading={bulkDeleteBusy}
+                        onClick={() => setConfirmBulkDelete(true)}
+                      >
+                        Delete selected
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedCredentialIds([])}
+                        disabled={bulkDeleteBusy}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+                {filteredCredentials.map((cred) => (
+                <ConnectionRow
+                  key={cred.id}
+                  providerId={provider.ID}
+                  credential={cred}
+                  secret={secret}
+                  selected={selectedCredentialIds.includes(cred.id)}
+                  onSelectedChange={toggleCredentialSelected}
+                  supportsUpstreamQuota={supportsUpstreamQuota}
+                  proxyUsage={proxyUsageById[cred.id]}
+                  supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
+                  onEdit={(c) => setEditingCredential(c)}
+                  onDeleted={(c) => setConfirmDeleteCred(c)}
+                  onReAuth={(c) => setReAuthCredential(c)}
+                  onShowModels={(c) => setModelsCredential(c)}
+                  onMutated={onMutated}
+                  onNotice={onNotice}
+                  onError={onError}
+                />
+              ))}
+              </>
+            )}
+          </>
         )}
       </Card>
 
@@ -379,6 +699,15 @@ export function ProviderDetail({
         onConfirm={handleDeleteCredential}
         onClose={() => setConfirmDeleteCred(null)}
       />
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title={`Delete ${selectedCredentialIds.length} account${selectedCredentialIds.length === 1 ? "" : "s"}?`}
+        message="This permanently removes the selected credentials and their encrypted secrets."
+        confirmText={`Delete ${selectedCredentialIds.length}`}
+        variant="danger"
+        onConfirm={() => void handleBulkDeleteCredentials()}
+        onClose={() => setConfirmBulkDelete(false)}
+      />
     </div>
   );
 }
@@ -388,6 +717,10 @@ function ConnectionRow({
   providerId,
   credential,
   secret,
+  selected,
+  onSelectedChange,
+  supportsUpstreamQuota,
+  proxyUsage,
   supportsOAuth,
   onDeleted,
   onMutated,
@@ -400,6 +733,10 @@ function ConnectionRow({
   providerId: string;
   credential: Credential;
   secret: string;
+  selected: boolean;
+  onSelectedChange: (credentialId: string, selected: boolean) => void;
+  supportsUpstreamQuota: boolean;
+  proxyUsage?: CredentialProxyUsage;
   supportsOAuth: boolean;
   onEdit: (credential: Credential) => void;
   onDeleted: (credential: Credential) => void;
@@ -410,11 +747,44 @@ function ConnectionRow({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [quotaBusy, setQuotaBusy] = useState(false);
+  const [quotaBadges, setQuotaBadges] = useState<Array<{ key: string; label: string; tone: "success" | "warning" | "error" | "info" | "default" }>>([]);
+  const [quotaMessage, setQuotaMessage] = useState("");
   const status = credentialStatusLabel(credential);
   const authIcon = credential.auth_type === "oauth" ? "lock_person" : credential.auth_type === "none" ? "lock_open" : "key";
   const hasProxy = (credential.proxy_pool_ids?.length ?? 0) > 0;
   const onCooldown = credential.cooldown_until && isOnCooldown(credential.cooldown_until);
   const needsReAuth = credential.status === "auth_required" && credential.auth_type === "oauth";
+  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
+
+  const loadQuota = async (silent = false) => {
+    if (!supportsUpstreamQuota) return;
+    setQuotaBusy(true);
+    try {
+      const quota = await fetchCredentialQuota(secret, credential.id);
+      const badges = quotaBadgesFromQuota(quota);
+      setQuotaBadges(badges);
+      setQuotaMessage(quota.message || "");
+      if (!silent && quota.message && badges.length === 0) {
+        onNotice(`${credential.id}: ${quota.message}`);
+      }
+    } catch (cause) {
+      setQuotaBadges([]);
+      setQuotaMessage(cause instanceof Error ? cause.message : "Quota check failed");
+      if (!silent) {
+        onError(cause instanceof Error ? cause.message : "Quota check failed");
+      }
+    } finally {
+      setQuotaBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!supportsUpstreamQuota || !credential.enabled) return;
+    void loadQuota(true);
+    // Intentionally refresh when credential identity/enabled changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supportsUpstreamQuota, credential.id, credential.enabled, secret]);
 
   const handleToggle = async () => {
     setBusy(true);
@@ -486,7 +856,15 @@ function ConnectionRow({
   };
 
   return (
-    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}`}>
+    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}`}>
+      <label className="connection-select">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(event) => onSelectedChange(credential.id, event.target.checked)}
+          aria-label={`Select ${credential.email || credential.label || credential.id}`}
+        />
+      </label>
       <span className="connection-auth-icon">
         <span className="material-symbols-outlined">{authIcon}</span>
       </span>
@@ -500,6 +878,26 @@ function ConnectionRow({
         {credential.last_error && <div className="connection-error">{credential.last_error}</div>}
         <div className="connection-badges">
           <Badge variant={status.tone} size="sm" dot>{status.label}</Badge>
+          {credential.last_error_code ? (
+            <Badge variant="error" size="sm" title={credential.last_error || credential.last_error_code}>
+              {credential.last_error_code}
+            </Badge>
+          ) : null}
+          {quotaBadges.map((badge) => (
+            <Badge key={badge.key} variant={badge.tone} size="sm" icon="donut_large" title={quotaMessage || badge.label}>
+              {badge.label}
+            </Badge>
+          ))}
+          {supportsUpstreamQuota && !quotaBusy && quotaBadges.length === 0 && quotaMessage ? (
+            <Badge variant="warning" size="sm" title={quotaMessage}>
+              quota unavailable
+            </Badge>
+          ) : null}
+          {proxyUsageLabel ? (
+            <Badge variant="default" size="sm" icon="monitoring" title="Usage through tproxy today">
+              {proxyUsageLabel}
+            </Badge>
+          ) : null}
           <Badge variant="default" size="sm">{credential.auth_type}</Badge>
           {(credential.priority ?? 0) > 0 && (
             <Badge variant="default" size="sm">prio {credential.priority}</Badge>
@@ -523,6 +921,17 @@ function ConnectionRow({
       <div className="connection-actions">
         <Button variant="ghost" size="sm" icon="apps" onClick={() => onShowModels(credential)} aria-label="Supported models" title="View supported models" />
         <Button variant="ghost" size="sm" icon="monitor_heart" onClick={handleHealthCheck} loading={busy} aria-label="Health check" title="Health check this connection" />
+        {supportsUpstreamQuota ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="donut_large"
+            onClick={() => void loadQuota(false)}
+            loading={quotaBusy}
+            aria-label="Refresh quota"
+            title="Refresh upstream quota / balance"
+          />
+        ) : null}
         {credential.auth_type === "oauth" && (
           <Button variant="ghost" size="sm" icon="sync" onClick={handleRefresh} loading={busy} aria-label="Refresh token" title="Force OAuth token refresh" />
         )}

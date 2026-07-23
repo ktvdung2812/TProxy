@@ -49,7 +49,7 @@ function connectionSortScore(
       ? providers.filter((p) => p.ID === entry.ID)
       : instancesForEntry(providers, entry);
   const stats = getProviderStats(instances.flatMap((p) => credentials[p.ID] || []));
-  return { hasAccounts: stats.total > 0 ? 1 : 0, connected: stats.connected };
+  return { hasAccounts: stats.total > 0 ? 1 : 0, connected: stats.active };
 }
 
 function sortByConnections<T extends PresetCatalogEntry | Provider>(
@@ -122,6 +122,29 @@ export function ProviderList({
   const pluginCatalog = filterCatalog(presetSections.plugin);
   const visibleCustom = filterCustom(customProviders);
 
+  const sortedCustomWithAccounts = useMemo(
+    () =>
+      sortByConnections(
+        visibleCustom.filter((provider) => (credentials[provider.ID] || []).length > 0),
+        providers,
+        credentials,
+      ),
+    [visibleCustom, providers, credentials],
+  );
+  const sortedCustomWithoutAccounts = useMemo(
+    () =>
+      sortByConnections(
+        visibleCustom.filter((provider) => (credentials[provider.ID] || []).length === 0),
+        providers,
+        credentials,
+      ),
+    [visibleCustom, providers, credentials],
+  );
+  const sortedVisibleCustom = useMemo(
+    () => [...sortedCustomWithAccounts, ...sortedCustomWithoutAccounts],
+    [sortedCustomWithAccounts, sortedCustomWithoutAccounts],
+  );
+
   const sortedOauthCatalog = useMemo(
     () => sortCatalogByConnections(oauthCatalog, providers, credentials),
     [oauthCatalog, providers, credentials],
@@ -142,16 +165,23 @@ export function ProviderList({
     () => sortCatalogByConnections(pluginCatalog, providers, credentials),
     [pluginCatalog, providers, credentials],
   );
-  const sortedVisibleCustom = useMemo(
-    () => sortByConnections(visibleCustom, providers, credentials),
-    [visibleCustom, providers, credentials],
-  );
 
   const isApikeySearching = !!searchQuery.trim();
-  const visibleApikeyCatalog =
-    isApikeySearching || showAllApikey
-      ? sortedApikeyCatalog
-      : sortedApikeyCatalog.slice(0, APIKEY_INITIAL_VISIBLE);
+  const apikeyWithAccounts = useMemo(
+    () =>
+      sortedApikeyCatalog.filter((entry) => {
+        const instances = instancesForEntry(providers, entry);
+        return instances.some((provider) => (credentials[provider.ID] || []).length > 0);
+      }),
+    [sortedApikeyCatalog, providers, credentials],
+  );
+  const visibleApikeyCatalog = useMemo(() => {
+    if (isApikeySearching || showAllApikey) return sortedApikeyCatalog;
+    const pinned = new Set(apikeyWithAccounts.map((entry) => entry.presetId || entry.type));
+    const rest = sortedApikeyCatalog.filter((entry) => !pinned.has(entry.presetId || entry.type));
+    const combined = [...apikeyWithAccounts, ...rest];
+    return combined.slice(0, Math.max(APIKEY_INITIAL_VISIBLE, apikeyWithAccounts.length));
+  }, [isApikeySearching, showAllApikey, sortedApikeyCatalog, apikeyWithAccounts]);
   const hiddenApikeyCount = Math.max(0, sortedApikeyCatalog.length - visibleApikeyCatalog.length);
 
   const hasResults =

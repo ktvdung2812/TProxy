@@ -110,6 +110,61 @@ func TestQueryCredentialRejected(t *testing.T) {
 	}
 }
 
+func TestModelsIncludesPlaceholderRewrite(t *testing.T) {
+	t.Setenv("TPROXY_TEST_API_KEY", "client-secret")
+	cfg := &config.Config{
+		Server:        config.ServerConfig{AllowLocalWithoutKey: false},
+		ClientAPIKeys: []config.ClientAPIKey{{ID: "test-client", Name: "Test", KeyEnv: "TPROXY_TEST_API_KEY"}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer client-secret")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Placeholder bool   `json:"placeholder"`
+			ResolvesTo  string `json:"resolves_to"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, item := range payload.Data {
+		seen[item.ID] = true
+	}
+	for _, name := range []string{"gpt-sol", "sonnet", "default"} {
+		if !seen[name] {
+			t.Fatalf("expected placeholder %q in /v1/models, got ids=%v", name, seen)
+		}
+	}
+	for _, name := range []string{"claude-sonnet", "claude-fable", "opusplan"} {
+		if seen[name] {
+			t.Fatalf("did not expect alias placeholder %q in /v1/models catalog", name)
+		}
+	}
+
+	infoRequest := httptest.NewRequest(http.MethodGet, "/v1/models/info?id=gpt-sol", nil)
+	infoRequest.Header.Set("Authorization", "Bearer client-secret")
+	infoRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(infoRecorder, infoRequest)
+	if infoRecorder.Code != http.StatusOK {
+		t.Fatalf("model info status = %d body=%s", infoRecorder.Code, infoRecorder.Body.String())
+	}
+	if !strings.Contains(infoRecorder.Body.String(), `"placeholder":true`) {
+		t.Fatalf("expected placeholder model info, got %s", infoRecorder.Body.String())
+	}
+}
+
 func TestAdminCanCreateVirtualModelWithoutExposingSecrets(t *testing.T) {
 	cfg := &config.Config{
 		Server:    config.ServerConfig{AllowRemoteManagement: false},

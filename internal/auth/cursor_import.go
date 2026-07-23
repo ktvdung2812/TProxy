@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -27,6 +28,15 @@ type CursorImportTokens struct {
 	MachineID   string
 	DBPath      string
 }
+
+type CursorAutoImportResult struct {
+	Tokens        CursorImportTokens
+	Found         bool
+	WindowsManual bool
+	Err           error
+}
+
+var cursorMachineIDPattern = regexp.MustCompile(`^[a-f0-9-]{32,}$`)
 
 func CursorDBCandidates() []string {
 	home, err := os.UserHomeDir()
@@ -52,6 +62,7 @@ func CursorDBCandidates() []string {
 			filepath.Join(appData, "Cursor", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(appData, "Cursor - Insiders", "User", "globalStorage", "state.vscdb"),
 			filepath.Join(localAppData, "Cursor", "User", "globalStorage", "state.vscdb"),
+			filepath.Join(localAppData, "Programs", "Cursor", "User", "globalStorage", "state.vscdb"),
 		}
 	default:
 		return []string{
@@ -62,6 +73,14 @@ func CursorDBCandidates() []string {
 }
 
 func AutoImportCursorTokens() (CursorImportTokens, error) {
+	result := AutoImportCursor()
+	if result.Err != nil {
+		return result.Tokens, result.Err
+	}
+	return result.Tokens, nil
+}
+
+func AutoImportCursor() CursorAutoImportResult {
 	var dbPath string
 	for _, candidate := range CursorDBCandidates() {
 		if _, err := os.Stat(candidate); err == nil {
@@ -70,17 +89,66 @@ func AutoImportCursorTokens() (CursorImportTokens, error) {
 		}
 	}
 	if dbPath == "" {
-		return CursorImportTokens{}, fmt.Errorf("cursor database not found; open Cursor IDE at least once")
+		return CursorAutoImportResult{
+			Err: fmt.Errorf("cursor database not found; open Cursor IDE at least once"),
+		}
 	}
+
+	if runtime.GOOS == "linux" && !linuxCursorInstalled() {
+		return CursorAutoImportResult{
+			Tokens: CursorImportTokens{DBPath: dbPath},
+			Err:    fmt.Errorf("cursor database found but Cursor IDE does not appear to be installed"),
+		}
+	}
+
 	tokens, err := readCursorTokensFromDB(dbPath)
-	if err != nil {
-		return CursorImportTokens{}, err
-	}
 	tokens.DBPath = dbPath
-	if tokens.AccessToken == "" || tokens.MachineID == "" {
-		return CursorImportTokens{DBPath: dbPath}, fmt.Errorf("cursor tokens missing; sign in to Cursor IDE first")
+	if err != nil {
+		return CursorAutoImportResult{Tokens: tokens, WindowsManual: true, Err: err}
 	}
-	return tokens, nil
+	if tokens.AccessToken == "" || tokens.MachineID == "" {
+		return CursorAutoImportResult{
+			Tokens:        tokens,
+			WindowsManual: true,
+			Err:           fmt.Errorf("cursor tokens missing; sign in to Cursor IDE first"),
+		}
+	}
+	if err := ValidateCursorImportToken(tokens.AccessToken, tokens.MachineID); err != nil {
+		return CursorAutoImportResult{Tokens: tokens, Err: err}
+	}
+	return CursorAutoImportResult{Tokens: tokens, Found: true}
+}
+
+func ValidateCursorImportToken(accessToken, machineID string) error {
+	accessToken = strings.TrimSpace(accessToken)
+	machineID = strings.TrimSpace(machineID)
+	if accessToken == "" {
+		return fmt.Errorf("access token is required")
+	}
+	if machineID == "" {
+		return fmt.Errorf("machine ID is required")
+	}
+	if len(accessToken) < 50 {
+		return fmt.Errorf("invalid token format: token appears too short")
+	}
+	normalizedMachineID := strings.ReplaceAll(machineID, "-", "")
+	if !cursorMachineIDPattern.MatchString(normalizedMachineID) {
+		return fmt.Errorf("invalid machine ID format: expected UUID format")
+	}
+	return nil
+}
+
+func linuxCursorInstalled() bool {
+	if _, err := exec.LookPath("cursor"); err == nil {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	desktopFile := filepath.Join(home, ".local/share/applications/cursor.desktop")
+	_, err = os.Stat(desktopFile)
+	return err == nil
 }
 
 func readCursorTokensFromDB(dbPath string) (CursorImportTokens, error) {

@@ -1151,6 +1151,17 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 		seen[display.ID] = struct{}{}
 		data = append(data, map[string]any{"id": display.ID, "object": "model", "name": display.Name, "owned_by": "tproxy", "capabilities": model.Capabilities, "limits": model.Limits, "endpoint": modelEndpointKind(model), "created": time.Now().Unix()})
 	}
+	for _, entry := range s.placeholderModelCatalog() {
+		id, _ := entry["id"].(string)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		data = append(data, entry)
+	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
 
@@ -1162,6 +1173,10 @@ func (s *Server) modelInfo(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		writeError(w, 400, "invalid_request", "id is required", useClientRequestID(r))
+		return
+	}
+	if info, ok := s.placeholderModelInfo(id); ok {
+		writeJSON(w, 200, info)
 		return
 	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)

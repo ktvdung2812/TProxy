@@ -127,6 +127,31 @@ export function resolveConnectionProfile(
     };
   }
 
+  // Cursor IDE uses token import from local SQLite — no browser OAuth or API key (9router parity).
+  if (presetId === "cursor" || preset?.id === "cursor") {
+    return {
+      noAuth: false,
+      showAdvancedCredential: false,
+      notice:
+        preset?.auth_hint ||
+        "Open Cursor IDE and sign in, then import the access token and machine ID from state.vscdb.",
+      methods: [
+        {
+          kind: "import_cursor",
+          label: "Connect Cursor IDE",
+          description: "Auto-detect access token and machine ID from Cursor's local SQLite database.",
+          available: true,
+        },
+        {
+          kind: "import_9router",
+          label: "Import 9router backup",
+          description: "Restore credentials from a 9router export via Import Data.",
+          available: true,
+        },
+      ],
+    };
+  }
+
   const methods: ConnectionMethod[] = [];
 
   if (isCookie) {
@@ -136,15 +161,6 @@ export function resolveConnectionProfile(
       description: preset?.auth_hint || "Paste the session cookie from your browser.",
       available: true,
       authHint: preset?.auth_hint,
-    });
-  }
-
-  if (presetId === "cursor" || preset?.id === "cursor") {
-    methods.push({
-      kind: "import_cursor",
-      label: "Import from Cursor IDE",
-      description: "Auto-detect access token and machine ID from Cursor's local SQLite database.",
-      available: true,
     });
   }
 
