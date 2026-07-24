@@ -174,6 +174,9 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 	if provider.Type == "cursor" {
 		return discoverCursorModels(ctx, r, provider, credential)
 	}
+	if provider.Type == "kiro" {
+		return discoverKiroModels(ctx, r, provider, credential)
+	}
 	if shouldSkipModelDiscovery(provider) {
 		if items := staticDiscoveryModels(provider); len(items) > 0 {
 			return items, nil

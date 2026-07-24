@@ -147,6 +147,9 @@ func staticDiscoveryModels(provider store.Provider) []DiscoveredModel {
 	if provider.Type == "cursor" || provider.ID == "cursor" {
 		return cursorStaticModelEntries(provider)
 	}
+	if provider.Type == "kiro" || provider.ID == "kiro" {
+		return kiroStaticModelEntries(NewRegistry(), provider)
+	}
 	switch provider.ID {
 	case "glm", "glm-cn":
 		return glmStaticModelEntries(provider)

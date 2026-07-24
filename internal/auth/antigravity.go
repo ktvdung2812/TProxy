@@ -34,6 +34,13 @@ func (m *Manager) prepareProviderToken(ctx context.Context, provider store.Provi
 			return token, email, err
 		}
 	}
+	if provider.Type == "kiro" {
+		var err error
+		token, email, err = m.enrichKiroToken(ctx, token, email)
+		if err != nil {
+			return token, email, err
+		}
+	}
 	if isClineProvider(provider.Type) {
 		var err error
 		token, email, err = m.enrichClineToken(ctx, token, email)

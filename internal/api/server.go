@@ -1584,6 +1584,14 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminCursorOAuthAutoImport(w, r)
 	case "/api/admin/oauth/cursor/import":
 		s.adminCursorOAuthImport(w, r)
+	case "/api/admin/oauth/kiro/auto-import":
+		s.adminKiroOAuthAutoImport(w, r)
+	case "/api/admin/oauth/kiro/import":
+		s.adminKiroOAuthImport(w, r)
+	case "/api/admin/oauth/kiro/import-cli-proxy":
+		s.adminKiroOAuthImportCLIProxy(w, r)
+	case "/api/admin/oauth/kiro/api-key":
+		s.adminKiroOAuthAPIKey(w, r)
 	case "/api/admin/auth/export":
 		s.adminAuthExport(w, r)
 	case "/api/admin/auth/import":

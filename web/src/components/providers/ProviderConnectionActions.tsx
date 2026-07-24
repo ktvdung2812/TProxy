@@ -89,6 +89,8 @@ function iconForMethod(kind: ConnectionMethod["kind"]): string {
       return "upload";
     case "import_cursor":
       return "edit";
+    case "connect_kiro":
+      return "shield";
     case "import_9router":
       return "cloud_download";
     default: {
