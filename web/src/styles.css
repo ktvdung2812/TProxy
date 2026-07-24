@@ -5554,6 +5554,104 @@ button:disabled,
   font-size: 14px;
 }
 
+.endpoint-row-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.endpoint-row-help:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-main);
+}
+
+.endpoint-row-help .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.lan-port-help {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lan-port-help-tabs {
+  align-self: flex-start;
+}
+
+.lan-port-help-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lan-port-help-section {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-surface-1);
+}
+
+.lan-port-help-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lan-port-help-code {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-main);
+}
+
+.lan-port-help-note {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.lan-port-help-footer {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.lan-port-help-footer code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.apis-endpoint-dev-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.apis-endpoint-dev-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .endpoint-row-placeholder {
   flex: 1;
   min-height: 38px;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORTS=(28120 28121)
+PORTS=(28120 28122)
 
 for port in "${PORTS[@]}"; do
   pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"

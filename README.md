@@ -221,10 +221,11 @@ npm run dev
 
 | Service | URL |
 |---------|-----|
-| Dashboard (Vite HMR) | http://127.0.0.1:28121/dashboard/ |
+| Dashboard + API (single port) | http://127.0.0.1:28120/dashboard/ |
 | API gateway | http://127.0.0.1:28120/v1 |
-| Embedded dashboard (prod build) | http://127.0.0.1:28120/dashboard/ |
 | Health | http://127.0.0.1:28120/healthz |
+
+`npm run dev` serves the dashboard and proxies `/v1` and `/api` through the same port (`28120`). The Go backend listens on an internal dev port (`28122`) only.
 
 ### 3. Production build
 

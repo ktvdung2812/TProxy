@@ -9,6 +9,7 @@
 .env
 .env.run
 /config.yaml
+.config.dev.yaml
 models.dev.json
 models.dev-catalog.json
 /deploy/bin/

@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const backend = "http://127.0.0.1:28120";
+const publicPort = 28120;
+const backendPort = 28122;
+const backend = `http://127.0.0.1:${backendPort}`;
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function readRunEnv(name: string): string {
@@ -32,15 +34,14 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    host: "127.0.0.1",
-    port: 28121,
+    host: "0.0.0.0",
+    port: publicPort,
     strictPort: true,
-    // Pin HMR websocket to the Vite port; use localhost to match typical browser URLs.
     hmr: {
       protocol: "ws",
       host: "localhost",
-      port: 28121,
-      clientPort: 28121,
+      port: publicPort,
+      clientPort: publicPort,
       path: "/dashboard/",
     },
     proxy: {

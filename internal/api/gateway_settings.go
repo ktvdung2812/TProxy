@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
+	"github.com/tproxy/tproxy/internal/netutil"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
 )
@@ -40,12 +43,7 @@ func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "gateway_settings_failed", err.Error(), useClientRequestID(r))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"allow_lan_management": settings.AllowLANManagement,
-			"public_base_url":      settings.PublicBaseURL,
-			"server_host":          s.cfg.Server.Host,
-			"server_port":          s.cfg.Server.Port,
-		})
+		writeJSON(w, http.StatusOK, gatewaySettingsPayload(s, settings))
 	case http.MethodPut, http.MethodPatch:
 		var payload struct {
 			AllowLANManagement *bool   `json:"allow_lan_management"`
@@ -74,17 +72,42 @@ func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.allowLanMgmt = settings.AllowLANManagement
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":                   true,
-			"allow_lan_management": settings.AllowLANManagement,
-			"public_base_url":      settings.PublicBaseURL,
-			"server_host":          s.cfg.Server.Host,
-			"server_port":          s.cfg.Server.Port,
-			"restart_required":     settings.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
-		})
+		response := gatewaySettingsPayload(s, settings)
+		response["ok"] = true
+		writeJSON(w, http.StatusOK, response)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET/PUT/PATCH required", useClientRequestID(r))
 	}
+}
+
+func (s *Server) clientFacingPort() int {
+	if raw := strings.TrimSpace(os.Getenv("TPROXY_PUBLIC_PORT")); raw != "" {
+		if port, err := strconv.Atoi(raw); err == nil && port >= 1 && port <= 65535 {
+			return port
+		}
+	}
+	return s.cfg.Server.Port
+}
+
+func lanIPsForGateway(allowLAN bool) []string {
+	if !allowLAN {
+		return []string{}
+	}
+	return netutil.LANIPv4Addresses()
+}
+
+func gatewaySettingsPayload(s *Server, settings store.GatewaySettings) map[string]any {
+	payload := map[string]any{
+		"allow_lan_management": settings.AllowLANManagement,
+		"public_base_url":      settings.PublicBaseURL,
+		"server_host":          s.cfg.Server.Host,
+		"server_port":          s.clientFacingPort(),
+		"restart_required":     settings.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
+	}
+	if settings.AllowLANManagement {
+		payload["lan_ips"] = lanIPsForGateway(true)
+	}
+	return payload
 }
 
 func isLoopbackBindHost(host string) bool {

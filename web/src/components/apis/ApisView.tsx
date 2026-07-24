@@ -15,19 +15,23 @@ import {
   Toggle,
 } from "../ui";
 import { createApiKey, deleteApiKey, fetchApiKeyUsage, toggleApiKey, updateApiKey } from "./api";
+import { fetchAdminSettings } from "../settings/api";
 import { getStoredApiKeySecret, maskApiKeySecret, storeApiKeySecret } from "../../lib/apiKeySecrets";
 import { ApiKeySelect } from "../cli-tools/ApiKeySelect";
 import { TunnelSection } from "./TunnelSection";
 import { EndpointRow } from "./EndpointRow";
+import { LanPortHelpModal } from "./LanPortHelpModal";
 import { SecurityWarning } from "./SecurityWarning";
 import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage } from "./types";
 import {
   PROXY_ENDPOINTS,
   apiKeyToForm,
   buildCurlExample,
+  buildHostBaseUrl,
+  buildLocalGatewayBaseUrl,
   emptyApiKeyForm,
   formatLimitSummary,
-  gatewayBaseUrl,
+  resolveExampleApiKeySecret,
 } from "./utils";
 
 type Props = {
@@ -71,20 +75,39 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     onConfirm: () => void;
   } | null>(null);
   const [exampleApiKey, setExampleApiKey] = useState("");
+  const [exampleApiKeyId, setExampleApiKeyId] = useState("");
   const [exampleModel, setExampleModel] = useState(() => modelOptions[0]?.value ?? "");
   const [showRoutes, setShowRoutes] = useState(false);
   const [isRemoteHost, setIsRemoteHost] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("/v1");
+  const [allowLanAccess, setAllowLanAccess] = useState(false);
+  const [lanIPs, setLanIPs] = useState<string[]>([]);
+  const [serverPort, setServerPort] = useState(28120);
+  const [lanRestartRequired, setLanRestartRequired] = useState(false);
+  const [showLanPortHelp, setShowLanPortHelp] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setBaseUrl(gatewayBaseUrl());
     setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
     if (isLocalDashboardHost() && !getStoredApiKeySecret("local")) {
       storeApiKeySecret("local", defaultApiKey());
     }
   }, []);
+
+  const baseUrl = useMemo(() => buildLocalGatewayBaseUrl(serverPort), [serverPort]);
+
+  useEffect(() => {
+    void fetchAdminSettings(secret)
+      .then((settings) => {
+        setAllowLanAccess(Boolean(settings.allow_lan_management));
+        setLanIPs(settings.lan_ips || []);
+        setServerPort(settings.server_port || 28120);
+        setLanRestartRequired(Boolean(settings.restart_required));
+      })
+      .catch(() => {
+        // Keep endpoint card usable when settings cannot be loaded.
+      });
+  }, [secret]);
 
   const loadUsage = useCallback(async () => {
     setLoadingUsage(true);
@@ -112,10 +135,10 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     }
   }, [exampleModel, modelOptions]);
 
-  const curlExample = useMemo(
-    () => buildCurlExample(baseUrl, exampleApiKey, exampleModel),
-    [baseUrl, exampleApiKey, exampleModel],
-  );
+  const curlExample = useMemo(() => {
+    const resolvedKey = resolveExampleApiKeySecret(exampleApiKeyId, exampleApiKey);
+    return buildCurlExample(baseUrl, resolvedKey, exampleModel);
+  }, [baseUrl, exampleApiKeyId, exampleApiKey, exampleModel]);
 
   const resetCreateForm = () => {
     setFormData(emptyApiKeyForm());
@@ -280,16 +303,39 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
         <div className="endpoint-row-list">
           <EndpointRow label="Local" url={baseUrl} copyId="local_url" copied={copied} onCopy={copy} highlight />
+          {allowLanAccess
+            ? lanIPs.length > 0
+              ? lanIPs.map((ip) => (
+                  <EndpointRow
+                    key={ip}
+                    label="LAN"
+                    url={buildHostBaseUrl(ip, serverPort)}
+                    copyId={`lan_url_${ip}`}
+                    copied={copied}
+                    onCopy={copy}
+                    highlight
+                    onHelpClick={() => setShowLanPortHelp(true)}
+                  />
+                ))
+              : (
+                  <EndpointRow
+                    label="LAN"
+                    url="No private IPv4 address found"
+                    copyId="lan_url_empty"
+                    copied={copied}
+                    onCopy={copy}
+                    onHelpClick={() => setShowLanPortHelp(true)}
+                  />
+                )
+            : null}
           <TunnelSection secret={secret} apiKeyCount={apiKeys.length} onError={onError} onNotice={onNotice} />
-          <EndpointRow
-            label="Auth"
-            url="Authorization: Bearer <api-key>"
-            copyId="auth_header"
-            copied={copied}
-            onCopy={copy}
-          />
-          <EndpointRow label="Query" url="?api_key=<api-key>" copyId="auth_query" copied={copied} onCopy={copy} />
         </div>
+
+        {allowLanAccess && lanRestartRequired ? (
+          <div className="apis-card-warning">
+            <SecurityWarning message="Set server.host to 0.0.0.0 in config.yaml and restart the server so LAN devices can connect." />
+          </div>
+        ) : null}
 
         {isRemoteHost && apiKeys.length === 0 ? (
           <div className="apis-card-warning">
@@ -304,6 +350,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               apiKeys={apiKeys}
               value={exampleApiKey}
               onChange={setExampleApiKey}
+              onSelectedIdChange={setExampleApiKeyId}
               emptyMessage="No API keys yet. Create one below to generate curl examples."
               missingSecretMessage="Secret for this key is not saved in this browser. Create a new key below and save the secret when it is shown."
             />
@@ -661,6 +708,8 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
           setConfirmState(null);
         }}
       />
+
+      <LanPortHelpModal open={showLanPortHelp} port={serverPort} onClose={() => setShowLanPortHelp(false)} />
     </section>
   );
 }

@@ -1,13 +1,32 @@
 import type { ApiKeyFormData, ApiKeyRecord, ProxyEndpoint } from "./types";
+import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
+import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
 
 export function normalizeBaseUrl(origin: string): string {
   const trimmed = origin.replace(/\/+$/, "");
   return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
 }
 
+export function buildLocalGatewayBaseUrl(port: number): string {
+  if (typeof window === "undefined") {
+    return buildHostBaseUrl("127.0.0.1", port);
+  }
+  const host = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+    ? "127.0.0.1"
+    : window.location.hostname;
+  return buildHostBaseUrl(host, port);
+}
+
 export function gatewayBaseUrl(): string {
   if (typeof window === "undefined") return "http://localhost:8080/v1";
   return normalizeBaseUrl(window.location.origin);
+}
+
+export function buildHostBaseUrl(host: string, port: number): string {
+  const trimmed = host.trim();
+  const needsBrackets = trimmed.includes(":") && !trimmed.startsWith("[");
+  const hostPart = needsBrackets ? `[${trimmed}]` : trimmed;
+  return normalizeBaseUrl(`http://${hostPart}:${port}`);
 }
 
 export function emptyApiKeyForm(): ApiKeyFormData {
@@ -157,6 +176,19 @@ export const PROXY_ENDPOINTS: ProxyEndpoint[] = [
   { path: "/v1/search", methods: ["POST"], description: "Web search proxy.", capability: "search" },
   { path: "/v1/web/fetch", methods: ["POST"], description: "Fetch and extract web page content.", capability: "web" },
 ];
+
+export function resolveExampleApiKeySecret(keyId: string, explicitSecret = ""): string {
+  const trimmed = explicitSecret.trim();
+  if (trimmed) return trimmed;
+  if (keyId) {
+    const stored = getStoredApiKeySecret(keyId);
+    if (stored) return stored;
+    if (keyId === "local" && isLocalDashboardHost()) {
+      return defaultApiKey();
+    }
+  }
+  return "";
+}
 
 export function buildCurlExample(baseUrl: string, apiKey: string, model: string): string {
   const key = apiKey.trim() || "your-api-key";
