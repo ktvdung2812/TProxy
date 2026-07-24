@@ -8,9 +8,10 @@ type Props = {
   onCopy: (text: string, id: string) => void;
   highlight?: boolean;
   actions?: React.ReactNode;
+  onHelpClick?: () => void;
 };
 
-export function EndpointRow({ label, url, copyId, copied, onCopy, highlight = false, actions }: Props) {
+export function EndpointRow({ label, url, copyId, copied, onCopy, highlight = false, actions, onHelpClick }: Props) {
   return (
     <div className="endpoint-row">
       <span className={highlight ? "endpoint-row-badge active" : "endpoint-row-badge"}>{label}</span>
@@ -23,6 +24,17 @@ export function EndpointRow({ label, url, copyId, copied, onCopy, highlight = fa
       >
         <span className="material-symbols-outlined">{copied === copyId ? "check" : "content_copy"}</span>
       </button>
+      {onHelpClick ? (
+        <button
+          type="button"
+          className="endpoint-row-help"
+          onClick={onHelpClick}
+          aria-label={`${label} firewall help`}
+          title="How to open this port"
+        >
+          <span className="material-symbols-outlined">help</span>
+        </button>
+      ) : null}
       {actions}
     </div>
   );

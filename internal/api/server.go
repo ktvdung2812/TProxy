@@ -1516,7 +1516,9 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			"allow_lan_management":    gateway.AllowLANManagement,
 			"public_base_url":         gateway.PublicBaseURL,
 			"server_host":             s.cfg.Server.Host,
-			"server_port":             s.cfg.Server.Port,
+			"server_port":             s.clientFacingPort(),
+			"restart_required":        gateway.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
+			"lan_ips":                 lanIPsForGateway(gateway.AllowLANManagement),
 			"token_saver": map[string]any{
 				"enabled":              true,
 				"rtk_enabled":          tokenSaver.RTKEnabled,

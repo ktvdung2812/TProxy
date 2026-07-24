@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-URL="${TPROXY_HEALTH_URL:-http://127.0.0.1:28120/healthz}"
+URL="${TPROXY_HEALTH_URL:-http://127.0.0.1:28122/healthz}"
 ATTEMPTS="${TPROXY_HEALTH_ATTEMPTS:-120}"
 
 for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do

@@ -15,6 +15,8 @@ export type AdminSettings = {
   public_base_url?: string;
   server_host: string;
   server_port: number;
+  restart_required?: boolean;
+  lan_ips?: string[];
   token_saver: {
     enabled: boolean;
     rtk_enabled: boolean;

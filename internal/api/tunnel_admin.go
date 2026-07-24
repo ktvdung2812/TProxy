@@ -67,7 +67,7 @@ func (s *Server) initTunnelService() {
 		return
 	}
 	layout := tunnel.DataLayoutFromDatabasePath(s.store.DatabasePath())
-	s.tunnel = tunnel.NewService(layout, s.cfg.Server.Port, tunnelSettingsAdapter{store: s.store})
+	s.tunnel = tunnel.NewService(layout, s.clientFacingPort(), tunnelSettingsAdapter{store: s.store})
 }
 
 func (s *Server) adminTunnel(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func (s *Server) adminTunnel(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
 			return
 		}
-		result, err := s.tunnel.Enable(r.Context(), s.cfg.Server.Port)
+		result, err := s.tunnel.Enable(r.Context(), s.clientFacingPort())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "tunnel_enable_failed", err.Error(), useClientRequestID(r))
 			return
@@ -127,7 +127,7 @@ func (s *Server) adminTunnel(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
 			return
 		}
-		result, err := s.tunnel.EnableTailscale(r.Context(), s.cfg.Server.Port)
+		result, err := s.tunnel.EnableTailscale(r.Context(), s.clientFacingPort())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "tailscale_enable_failed", err.Error(), useClientRequestID(r))
 			return
