@@ -11,6 +11,7 @@ import { resolveConnectionProfile, type ConnectionMethod } from "./connectionMet
 import { checkProviderHealth, deleteProvider, exportAuthBundle, fetchNinerouterPresets, importAuthBundle, saveProvider, type NinerouterPreset } from "./api";
 import { AddCredentialModal } from "./AddCredentialModal";
 import { CursorImportModal } from "./CursorImportModal";
+import { KiroOAuthModal } from "./KiroOAuthModal";
 import { OAuthModal } from "./OAuthModal";
 import type { Credential, ModelAlias, Provider } from "./types";
 
@@ -59,6 +60,7 @@ export function ProvidersView({
   const [catalogCredentialMethod, setCatalogCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [catalogProviderId, setCatalogProviderId] = useState<string | null>(null);
   const [showCursorImport, setShowCursorImport] = useState(false);
+  const [showKiroOAuth, setShowKiroOAuth] = useState(false);
   const importInputId = "tproxy-auth-bundle-import";
 
   useEffect(() => {
@@ -157,6 +159,9 @@ export function ProvidersView({
           break;
         case "import_cursor":
           setShowCursorImport(true);
+          break;
+        case "connect_kiro":
+          setShowKiroOAuth(true);
           break;
         default: {
           const _exhaustive: never = method.kind;
@@ -334,6 +339,19 @@ export function ProvidersView({
           onClose={() => setShowCursorImport(false)}
           onComplete={() => {
             onNotice("Cursor token imported");
+            onMutated();
+            onSelect(catalog.presetId || catalog.type);
+          }}
+          onError={onError}
+        />
+        <KiroOAuthModal
+          open={showKiroOAuth}
+          secret={secret}
+          providerId={catalogProviderId || catalog.presetId || catalog.type}
+          providerType={catalog.type}
+          onClose={() => setShowKiroOAuth(false)}
+          onComplete={() => {
+            onNotice("Kiro credential connected");
             onMutated();
             onSelect(catalog.presetId || catalog.type);
           }}

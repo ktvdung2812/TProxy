@@ -616,6 +616,14 @@ button:disabled,
 
 .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
+.header-github-link {
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+.header-github-link:hover {
+  color: var(--color-text-main);
+}
+
 .header-menu { position: relative; }
 
 .header-menu-panel {
@@ -3804,6 +3812,48 @@ button:disabled,
 .oauth-status.pending { background: color-mix(in srgb, var(--color-info) 12%, transparent); color: var(--color-info); }
 .oauth-status.success { background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-success); }
 .oauth-status.error { background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-danger); }
+
+.kiro-auth-methods { display: grid; gap: 10px; }
+.kiro-auth-method {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-brand-lg);
+  background: color-mix(in srgb, var(--color-surface-elevated) 80%, transparent);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.kiro-auth-method:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+.kiro-auth-method .material-symbols-outlined {
+  color: var(--color-primary);
+  margin-top: 2px;
+}
+.kiro-auth-method strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.kiro-auth-method small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+.kiro-json-input {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
 
 /* Discovered models chips */
 .discovered-list { display: flex; flex-wrap: wrap; gap: 6px; }

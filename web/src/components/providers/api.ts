@@ -42,6 +42,9 @@ export type OAuthStartParams = {
   email?: string;
   mode?: "browser" | "device";
   redirect_url?: string;
+  kiro_region?: string;
+  kiro_start_url?: string;
+  kiro_auth_method?: string;
 };
 
 export type OAuthStartResponse = {
@@ -404,6 +407,68 @@ export function importCursorTokens(
   return adminFetch<{ ok: boolean; provider_id: string; credential_id: string }>(
     secret,
     "/api/admin/oauth/cursor/import",
+    "POST",
+    payload,
+  );
+}
+
+export type KiroAutoImportResult = {
+  found: boolean;
+  refresh_token?: string;
+  client_id?: string;
+  client_secret?: string;
+  region?: string;
+  auth_method?: string;
+  profile_arn?: string;
+  source?: string;
+  error?: string;
+};
+
+export function autoImportKiroTokens(secret: string) {
+  return adminFetch<KiroAutoImportResult>(secret, "/api/admin/oauth/kiro/auto-import", "GET");
+}
+
+export function importKiroRefreshToken(
+  secret: string,
+  payload: {
+    provider_id: string;
+    credential_id?: string;
+    label?: string;
+    refresh_token: string;
+    client_id?: string;
+    client_secret?: string;
+    region?: string;
+    auth_method?: string;
+    profile_arn?: string;
+  },
+) {
+  return adminFetch<{ ok: boolean; provider_id: string; credential_id: string }>(
+    secret,
+    "/api/admin/oauth/kiro/import",
+    "POST",
+    payload,
+  );
+}
+
+export function importKiroCLIProxyJSON(
+  secret: string,
+  payload: { provider_id: string; credential_id?: string; label?: string; json: string },
+) {
+  return adminFetch<{ ok: boolean; provider_id: string; credential_id: string }>(
+    secret,
+    "/api/admin/oauth/kiro/import-cli-proxy",
+    "POST",
+    payload,
+  );
+}
+
+export function importKiroAPIKey(
+  secret: string,
+  payload: { provider_id: string; credential_id?: string; label?: string; api_key: string; region?: string },
+) {
+  return adminFetch<{ ok: boolean; provider_id: string; credential_id: string }>(
+    secret,
+    "/api/admin/oauth/kiro/api-key",
     "POST",
     payload,
   );

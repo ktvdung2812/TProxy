@@ -7,6 +7,7 @@ import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
 import { ConnectionStatsInline } from "./ConnectionStatsInline";
 import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
+import { KiroOAuthModal } from "./KiroOAuthModal";
 import { CursorImportModal } from "./CursorImportModal";
 import { AddCredentialModal } from "./AddCredentialModal";
 import { ProviderConnectionActions } from "./ProviderConnectionActions";
@@ -212,6 +213,7 @@ export function ProviderDetail({
   const [discoverNonce, setDiscoverNonce] = useState(0);
   const [modelsCredential, setModelsCredential] = useState<Credential | null>(null);
   const [showCursorImport, setShowCursorImport] = useState(false);
+  const [showKiroOAuth, setShowKiroOAuth] = useState(false);
   const [proxyPools, setProxyPools] = useState<ProxyPoolOption[]>([]);
   const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
   const supportsUpstreamQuota = useMemo(
@@ -338,6 +340,9 @@ export function ProviderDetail({
         break;
       case "import_cursor":
         setShowCursorImport(true);
+        break;
+      case "connect_kiro":
+        setShowKiroOAuth(true);
         break;
       case "import_9router":
         onOpenImport?.("9router");
@@ -647,6 +652,18 @@ export function ProviderDetail({
         onClose={() => setShowCursorImport(false)}
         onComplete={() => {
           onNotice("Cursor token imported");
+          onMutated();
+        }}
+        onError={onError}
+      />
+      <KiroOAuthModal
+        open={showKiroOAuth}
+        secret={secret}
+        providerId={provider.ID}
+        providerType={provider.Type}
+        onClose={() => setShowKiroOAuth(false)}
+        onComplete={() => {
+          onNotice("Kiro credential connected");
           onMutated();
         }}
         onError={onError}

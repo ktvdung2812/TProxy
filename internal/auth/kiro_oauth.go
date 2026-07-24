@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -249,14 +250,22 @@ func (m *Manager) refreshKiroToken(ctx context.Context, old store.OAuthToken) (s
 	if extra == nil {
 		extra = map[string]any{}
 	}
+	authMethod := strings.TrimSpace(firstNonEmpty(stringValue(extra["auth_method"]), stringValue(extra["authMethod"])))
+	if authMethod == "external_idp" {
+		return m.refreshKiroExternalIdpToken(ctx, refreshToken, extra)
+	}
 	clientID := strings.TrimSpace(firstNonEmpty(stringValue(extra["client_id"]), stringValue(extra["clientId"])))
 	clientSecret := strings.TrimSpace(firstNonEmpty(stringValue(extra["client_secret"]), stringValue(extra["clientSecret"])))
+	if clientID != "" && clientSecret != "" {
+		return m.refreshKiroAWSOIDCToken(ctx, refreshToken, clientID, clientSecret, extra)
+	}
+	return m.refreshKiroSocialToken(ctx, refreshToken, extra)
+}
+
+func (m *Manager) refreshKiroAWSOIDCToken(ctx context.Context, refreshToken, clientID, clientSecret string, extra map[string]any) (store.OAuthToken, error) {
 	region := strings.TrimSpace(stringValue(extra["region"]))
 	if region == "" {
 		region = kiroDefaultRegion
-	}
-	if clientID == "" || clientSecret == "" {
-		return store.OAuthToken{}, &Error{code: "authorization_required", permanent: true}
 	}
 	tokenURL := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", region)
 	body := map[string]any{
@@ -306,6 +315,113 @@ func (m *Manager) refreshKiroToken(ctx context.Context, old store.OAuthToken) (s
 		token.Extra["profileArn"] = profileARN
 	}
 	if expiresIn := int(numberValue(raw["expiresIn"])); expiresIn > 0 {
+		token.ExpiresAt = m.now().Add(time.Duration(expiresIn) * time.Second)
+	}
+	return token, nil
+}
+
+func (m *Manager) refreshKiroSocialToken(ctx context.Context, refreshToken string, extra map[string]any) (store.OAuthToken, error) {
+	body, err := json.Marshal(map[string]string{"refreshToken": refreshToken})
+	if err != nil {
+		return store.OAuthToken{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kiroAuthServiceURL+"/refreshToken", strings.NewReader(string(body)))
+	if err != nil {
+		return store.OAuthToken{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return store.OAuthToken{}, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return store.OAuthToken{}, oauthHTTPError(data, resp.StatusCode, false)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return store.OAuthToken{}, &Error{code: "oauth_provider_unavailable", err: err}
+	}
+	accessToken := strings.TrimSpace(stringValue(raw["accessToken"]))
+	if accessToken == "" {
+		return store.OAuthToken{}, &Error{code: "oauth_refresh_failed"}
+	}
+	token := store.OAuthToken{
+		AccessToken:  accessToken,
+		RefreshToken: firstNonEmpty(stringValue(raw["refreshToken"]), refreshToken),
+		TokenType:    "Bearer",
+		Extra:        map[string]any{},
+	}
+	for key, value := range extra {
+		token.Extra[key] = value
+	}
+	if profileARN := strings.TrimSpace(stringValue(raw["profileArn"])); profileARN != "" {
+		token.Extra["profile_arn"] = profileARN
+		token.Extra["profileArn"] = profileARN
+	}
+	expiresIn := int(numberValue(raw["expiresIn"]))
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
+	token.ExpiresAt = m.now().Add(time.Duration(expiresIn) * time.Second)
+	return token, nil
+}
+
+func (m *Manager) refreshKiroExternalIdpToken(ctx context.Context, refreshToken string, extra map[string]any) (store.OAuthToken, error) {
+	tokenEndpoint, err := validateMicrosoftTokenEndpoint(firstNonEmpty(stringValue(extra["token_endpoint"]), stringValue(extra["tokenEndpoint"])))
+	if err != nil {
+		return store.OAuthToken{}, &Error{code: "authorization_required", permanent: true, err: err}
+	}
+	clientID := strings.TrimSpace(firstNonEmpty(stringValue(extra["client_id"]), stringValue(extra["clientId"])))
+	scope := normalizeKiroScope(extra["scopes"], extra["scope"])
+	if clientID == "" || scope == "" {
+		return store.OAuthToken{}, &Error{code: "authorization_required", permanent: true}
+	}
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"refresh_token": {refreshToken},
+		"scope":         {scope},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return store.OAuthToken{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return store.OAuthToken{}, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return store.OAuthToken{}, oauthHTTPError(data, resp.StatusCode, false)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return store.OAuthToken{}, &Error{code: "oauth_provider_unavailable", err: err}
+	}
+	accessToken := strings.TrimSpace(firstNonEmpty(stringValue(raw["access_token"]), stringValue(raw["accessToken"])))
+	if accessToken == "" {
+		return store.OAuthToken{}, &Error{code: "oauth_refresh_failed"}
+	}
+	token := store.OAuthToken{
+		AccessToken:  accessToken,
+		RefreshToken: firstNonEmpty(stringValue(raw["refresh_token"]), stringValue(raw["refreshToken"]), refreshToken),
+		TokenType:    firstNonEmpty(stringValue(raw["token_type"]), "Bearer"),
+		Extra:        map[string]any{},
+	}
+	for key, value := range extra {
+		token.Extra[key] = value
+	}
+	expiresIn := int(numberValue(raw["expires_in"]))
+	if expiresIn == 0 {
+		expiresIn = int(numberValue(raw["expiresIn"]))
+	}
+	if expiresIn > 0 {
 		token.ExpiresAt = m.now().Add(time.Duration(expiresIn) * time.Second)
 	}
 	return token, nil

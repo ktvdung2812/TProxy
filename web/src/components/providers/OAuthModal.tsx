@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Input, Modal } from "../ui";
 import { getProviderTypeInfo, defaultOAuthMode, usesBrowserOAuth, allowsStatelessOAuthCallback, parseClineCallbackUrl } from "./catalog";
+import type { KiroDeviceConfig } from "./KiroAuthModal";
 import {
   cancelOAuth,
   completeOAuthCallback,
@@ -22,6 +23,7 @@ type Props = {
   initialLabel?: string;
   initialEmail?: string;
   autoStart?: boolean;
+  kiroConfig?: KiroDeviceConfig;
   onClose: () => void;
   onComplete?: () => void;
   onError?: (message: string) => void;
@@ -41,6 +43,7 @@ export function OAuthModal({
   initialLabel,
   initialEmail,
   autoStart,
+  kiroConfig,
   onClose,
   onComplete,
   onError,
@@ -157,6 +160,9 @@ export function OAuthModal({
         label: label || initialLabel || undefined,
         email: initialEmail,
         mode: defaultOAuthMode(providerType, presetId),
+        kiro_region: kiroConfig?.region,
+        kiro_start_url: kiroConfig?.startUrl,
+        kiro_auth_method: kiroConfig?.authMethod,
       });
       setSessionId(started.session_id);
       setStartResp(started);
@@ -192,6 +198,7 @@ export function OAuthModal({
     initialLabel,
     initialEmail,
     credentialId,
+    kiroConfig,
     startPolling,
     openAuthWindow,
     onError,

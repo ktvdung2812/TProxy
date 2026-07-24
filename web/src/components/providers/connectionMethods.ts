@@ -14,7 +14,8 @@ export type ConnectionMethodKind =
   | "none"
   | "import_cliproxy"
   | "import_9router"
-  | "import_cursor";
+  | "import_cursor"
+  | "connect_kiro";
 
 export type ConnectionMethod = {
   kind: ConnectionMethodKind;
@@ -140,6 +141,29 @@ export function resolveConnectionProfile(
           kind: "import_cursor",
           label: "Connect Cursor IDE",
           description: "Auto-detect access token and machine ID from Cursor's local SQLite database.",
+          available: true,
+        },
+        {
+          kind: "import_9router",
+          label: "Import 9router backup",
+          description: "Restore credentials from a 9router export via Import Data.",
+          available: true,
+        },
+      ],
+    };
+  }
+
+  // Kiro supports multiple auth methods (9router parity).
+  if (presetId === "kiro" || providerType === "kiro") {
+    return {
+      noAuth: false,
+      showAdvancedCredential: false,
+      notice: "Choose AWS Builder ID, IAM Identity Center, API key, or import a token from Kiro IDE.",
+      methods: [
+        {
+          kind: "connect_kiro",
+          label: "Connect Kiro",
+          description: "AWS Builder ID, IAM Identity Center, API key, token import, or CLIProxyAPI JSON.",
           available: true,
         },
         {

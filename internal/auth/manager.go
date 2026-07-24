@@ -41,12 +41,15 @@ const oauthCallbackSuccessHTML = `<!doctype html>
 </html>`
 
 type StartRequest struct {
-	ProviderID   string `json:"provider_id"`
-	CredentialID string `json:"credential_id"`
-	Label        string `json:"label"`
-	Email        string `json:"email"`
-	Mode         string `json:"mode"`
-	RedirectURL  string `json:"redirect_url"`
+	ProviderID     string `json:"provider_id"`
+	CredentialID   string `json:"credential_id"`
+	Label          string `json:"label"`
+	Email          string `json:"email"`
+	Mode           string `json:"mode"`
+	RedirectURL    string `json:"redirect_url"`
+	KiroRegion     string `json:"kiro_region,omitempty"`
+	KiroStartURL   string `json:"kiro_start_url,omitempty"`
+	KiroAuthMethod string `json:"kiro_auth_method,omitempty"`
 }
 
 type StartResponse struct {
@@ -491,13 +494,23 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		region := kiroDefaultRegion
 		startURL := kiroDefaultStartURL
 		authMethod := "builder-id"
-		if provider.Config != nil {
+		if value := strings.TrimSpace(request.KiroRegion); value != "" {
+			region = value
+		} else if provider.Config != nil {
 			if value := strings.TrimSpace(stringValue(provider.Config["kiro_region"])); value != "" {
 				region = value
 			}
+		}
+		if value := strings.TrimSpace(request.KiroStartURL); value != "" {
+			startURL = value
+		} else if provider.Config != nil {
 			if value := strings.TrimSpace(stringValue(provider.Config["kiro_start_url"])); value != "" {
 				startURL = value
 			}
+		}
+		if value := strings.TrimSpace(request.KiroAuthMethod); value != "" {
+			authMethod = value
+		} else if provider.Config != nil {
 			if value := strings.TrimSpace(stringValue(provider.Config["kiro_auth_method"])); value != "" {
 				authMethod = value
 			}
