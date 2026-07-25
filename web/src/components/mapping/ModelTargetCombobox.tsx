@@ -1,10 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { modelOptionGroupLabel, type ModelOption } from "../../lib/modelOptions";
 import { cn } from "../ui";
 
-type Option = {
-  value: string;
-  label: string;
-};
+type Option = ModelOption;
 
 type Props = {
   value: string;
@@ -50,17 +48,35 @@ export function ModelTargetCombobox({
     });
   }, [open, options, query, value]);
 
+  const listItems = useMemo(() => {
+    const items: Array<{ kind: "group"; key: string; label: string } | { kind: "option"; option: Option }> = [];
+    let lastGroup = "";
+    for (const option of filteredOptions) {
+      if (option.group && option.group !== lastGroup) {
+        items.push({ kind: "group", key: option.group, label: modelOptionGroupLabel(option.group) });
+        lastGroup = option.group;
+      }
+      items.push({ kind: "option", option });
+    }
+    return items;
+  }, [filteredOptions]);
+
+  const selectableOptions = useMemo(
+    () => listItems.filter((item): item is { kind: "option"; option: Option } => item.kind === "option"),
+    [listItems],
+  );
+
   useEffect(() => {
     if (!open) {
       setActiveIndex(-1);
       return;
     }
-    if (filteredOptions.length === 0) {
+    if (selectableOptions.length === 0) {
       setActiveIndex(-1);
       return;
     }
-    setActiveIndex((current) => (current >= 0 && current < filteredOptions.length ? current : 0));
-  }, [open, filteredOptions]);
+    setActiveIndex((current) => (current >= 0 && current < selectableOptions.length ? current : 0));
+  }, [open, selectableOptions]);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -94,21 +110,23 @@ export function ModelTargetCombobox({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (filteredOptions.length === 0) return;
-      setActiveIndex((current) => (current + 1) % filteredOptions.length);
+      if (selectableOptions.length === 0) return;
+      setActiveIndex((current) => (current + 1) % selectableOptions.length);
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      if (filteredOptions.length === 0) return;
-      setActiveIndex((current) => (current <= 0 ? filteredOptions.length - 1 : current - 1));
+      if (selectableOptions.length === 0) return;
+      setActiveIndex((current) => (current <= 0 ? selectableOptions.length - 1 : current - 1));
       return;
     }
-    if (event.key === "Enter" && open && activeIndex >= 0 && filteredOptions[activeIndex]) {
+    if (event.key === "Enter" && open && activeIndex >= 0 && selectableOptions[activeIndex]) {
       event.preventDefault();
-      selectOption(filteredOptions[activeIndex]);
+      selectOption(selectableOptions[activeIndex].option);
     }
   };
+
+  let optionIndex = -1;
 
   return (
     <div className={cn("mapping-combobox", className)} ref={rootRef}>
@@ -130,19 +148,27 @@ export function ModelTargetCombobox({
         }}
         onKeyDown={handleKeyDown}
       />
-      {open && filteredOptions.length > 0 ? (
+      {open && listItems.length > 0 ? (
         <ul className="mapping-combobox-list custom-scrollbar" id={listId} role="listbox">
-          {filteredOptions.map((option, index) => {
-            const title = optionTitle(option);
+          {listItems.map((item) => {
+            if (item.kind === "group") {
+              return (
+                <li key={`group-${item.key}`} className="mapping-combobox-group" role="presentation">
+                  {item.label}
+                </li>
+              );
+            }
+            optionIndex += 1;
+            const title = optionTitle(item.option);
             return (
-              <li key={option.value}>
+              <li key={item.option.value}>
                 <button
                   type="button"
                   role="option"
-                  aria-selected={value === option.value}
-                  className={cn("mapping-combobox-option", index === activeIndex && "is-active")}
+                  aria-selected={value === item.option.value}
+                  className={cn("mapping-combobox-option", optionIndex === activeIndex && "is-active")}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => selectOption(option)}
+                  onClick={() => selectOption(item.option)}
                 >
                   <span className="mapping-combobox-option-label">{title}</span>
                 </button>

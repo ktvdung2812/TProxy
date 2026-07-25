@@ -15,6 +15,7 @@ import (
 
 func bridgeConfigFromYAML(cfg config.ClaudeAliasConfig) bridge.Config {
 	return bridge.Config{
+		Default:              cfg.Default,
 		Opus:                 cfg.Opus,
 		Sonnet:               cfg.Sonnet,
 		Haiku:                cfg.Haiku,
@@ -69,17 +70,19 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"defaults": map[string]string{
-			string(bridge.RoleFable):  defaults.Fable,
-			string(bridge.RoleOpus):   defaults.Opus,
-			string(bridge.RoleSonnet): defaults.Sonnet,
-			string(bridge.RoleHaiku):  defaults.Haiku,
+			string(bridge.RoleDefault): defaults.Default,
+			string(bridge.RoleFable):   defaults.Fable,
+			string(bridge.RoleOpus):    defaults.Opus,
+			string(bridge.RoleSonnet):  defaults.Sonnet,
+			string(bridge.RoleHaiku):   defaults.Haiku,
 		},
 		"env_defaults": envOverridesMap(resolver.EnvOverrides()),
 		"overrides": map[string]string{
-			string(bridge.RoleFable):  overrides[bridge.RoleFable],
-			string(bridge.RoleOpus):   overrides[bridge.RoleOpus],
-			string(bridge.RoleSonnet): overrides[bridge.RoleSonnet],
-			string(bridge.RoleHaiku):  overrides[bridge.RoleHaiku],
+			string(bridge.RoleDefault): overrides[bridge.RoleDefault],
+			string(bridge.RoleFable):   overrides[bridge.RoleFable],
+			string(bridge.RoleOpus):    overrides[bridge.RoleOpus],
+			string(bridge.RoleSonnet):  overrides[bridge.RoleSonnet],
+			string(bridge.RoleHaiku):   overrides[bridge.RoleHaiku],
 		},
 		"reasoning_effort_overrides": reasoningEffortMap(reasoningEffort),
 		"effective_reasoning_effort": resolver.EffectiveReasoningEffortMapping(),

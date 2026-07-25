@@ -33,6 +33,7 @@ import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
 import { ProxyPoolsView } from "./components/proxy-pools/ProxyPoolsView";
 import { CombosView } from "./components/combos/CombosView";
+import { useComboStepOptions } from "./components/combos/modelOptions";
 import { MappingView } from "./components/mapping/MappingView";
 import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
@@ -620,25 +621,43 @@ function App() {
       [snapshot.models],
     );
 
-    const comboRoutes = useMemo(() => {
-      const mapped: Record<string, { id: string; provider_id: string; upstream_model: string; enabled: boolean }[]> = {};
-      for (const [modelId, routes] of Object.entries(snapshot.routes || {})) {
-        mapped[modelId] = (routes || []).map((route) => ({
-          id: route.ID,
-          provider_id: route.ProviderID,
-          upstream_model: route.UpstreamModel,
-          enabled: route.Enabled,
-        }));
-      }
-      return mapped;
-    }, [snapshot.routes]);
+    const chatSnapshot = useMemo(
+      () => ({
+        providers: (snapshot.providers || []).map((provider) => ({
+          ID: provider.ID,
+          Name: provider.Name || provider.ID,
+          Enabled: provider.Enabled !== false,
+        })),
+        credentials: snapshot.credentials || {},
+        models: (snapshot.models || []).map((model) => ({
+          ID: model.ID,
+          DisplayName: model.DisplayName,
+          Enabled: model.Enabled,
+          Capabilities: model.Capabilities,
+        })),
+        combos: (snapshot.combos || []).map((combo) => ({
+          id: combo.id,
+          display_name: combo.display_name || combo.id,
+          enabled: combo.enabled !== false,
+          capabilities: combo.capabilities || [],
+        })),
+      }),
+      [snapshot.providers, snapshot.credentials, snapshot.models, snapshot.combos],
+    );
+    const { models: discoveredModels } = useChatModels(secret, chatSnapshot);
+    const comboStepOptions = useComboStepOptions(
+      snapshot.models || [],
+      snapshot.combos || [],
+      snapshot.routes || {},
+      discoveredModels,
+    );
 
     return (
       <CombosView
         secret={secret}
         combos={snapshot.combos || []}
         models={comboModels}
-        routesByModel={comboRoutes}
+        modelOptions={comboStepOptions}
         onMutated={() => void load()}
         onNotice={setNotice}
         onError={setError}
@@ -652,7 +671,10 @@ function App() {
         secret={secret}
         apiKeys={snapshot.api_keys || []}
         models={snapshot.models || []}
+        combos={snapshot.combos || []}
         routesByModel={snapshot.routes || {}}
+        providers={snapshot.providers || []}
+        credentials={snapshot.credentials || {}}
         onError={setError}
         onNotice={setNotice}
       />

@@ -1,6 +1,7 @@
 import { Link, Navigate, useParams } from "react-router-dom";
 import { getAnyTool } from "../../cli-tools/constants";
-import { buildModelOptions, ToolGuideCard } from "./ToolGuideCard";
+import { buildModelOptions } from "../../lib/modelOptions";
+import { ToolGuideCard } from "./ToolGuideCard";
 
 type SnapshotSlice = {
   models: { ID: string; DisplayName?: string; Enabled?: boolean }[] | null;

@@ -9,10 +9,22 @@ import { getStoredApiKeySecret, getApiKeySecretsVersion, storeApiKeySecret, subs
 import {
   needsPublicBaseUrlForCliTools,
   readStoredPublicBaseUrl,
-  resolveCliBaseUrl,
   storePublicBaseUrl,
 } from "../../lib/publicBaseUrl";
+import {
+  buildCliLanBaseUrl,
+  buildCliTunnelBaseUrl,
+  defaultCliBaseUrlKind,
+  readStoredCliBaseUrlKind,
+  readStoredCliLanIP,
+  resolveCliBaseUrlForKind,
+  storeCliBaseUrlKind,
+  storeCliLanIP,
+  type CliBaseUrlKind,
+  type CliGatewaySettings,
+} from "../../lib/cliBaseUrl";
 import { ApiKeySelect, type ApiKeyOption } from "./ApiKeySelect";
+import { CliBaseUrlPicker } from "./CliBaseUrlPicker";
 import { CLIToolApplyPanel } from "./CLIToolApplyPanel";
 import { CLIApplyScriptBlock } from "./CLIApplyScriptBlock";
 import { buildGuideCommandPreview, buildManualConfigs } from "./manualConfigs";
@@ -31,11 +43,7 @@ function isConfigStep(step: CLIToolGuideStep): boolean {
   return stepColumn(step) === "config";
 }
 
-type ModelOption = {
-  value: string;
-  label: string;
-  group: string;
-};
+import { buildModelOptions, type ModelOption } from "../../lib/modelOptions";
 
 type Props = {
   tool: CLITool;
@@ -55,13 +63,34 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
   const [selectedKeyId, setSelectedKeyId] = useState(defaultKeyId);
   const [model, setModel] = useState(() => models[0]?.value ?? "");
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [serverPublicBaseUrl, setServerPublicBaseUrl] = useState("");
+  const [gatewaySettings, setGatewaySettings] = useState<CliGatewaySettings>({
+    serverPort: 28120,
+    allowLan: false,
+    lanIPs: [],
+    publicBaseUrl: "",
+  });
   const [publicUrlOverride, setPublicUrlOverride] = useState(() => readStoredPublicBaseUrl());
+  const [baseUrlKind, setBaseUrlKind] = useState<CliBaseUrlKind>("local");
+  const [lanIP, setLanIP] = useState(() => readStoredCliLanIP());
   const secretsVersion = useSyncExternalStore(subscribeApiKeySecrets, getApiKeySecretsVersion, () => 0);
 
+  const effectiveLanIP = lanIP || gatewaySettings.lanIPs[0] || "";
+  const lanUrl = useMemo(
+    () => (effectiveLanIP ? buildCliLanBaseUrl(effectiveLanIP, gatewaySettings.serverPort) : ""),
+    [effectiveLanIP, gatewaySettings.serverPort],
+  );
+  const tunnelUrl = useMemo(
+    () => buildCliTunnelBaseUrl(gatewaySettings.publicBaseUrl || publicUrlOverride),
+    [gatewaySettings.publicBaseUrl, publicUrlOverride],
+  );
   const baseUrl = useMemo(
-    () => resolveCliBaseUrl(serverPublicBaseUrl || publicUrlOverride),
-    [serverPublicBaseUrl, publicUrlOverride],
+    () =>
+      resolveCliBaseUrlForKind(baseUrlKind, {
+        settings: gatewaySettings,
+        publicUrlOverride,
+        lanIP: effectiveLanIP,
+      }),
+    [baseUrlKind, gatewaySettings, publicUrlOverride, effectiveLanIP],
   );
 
   const resolvedApiKey = useMemo(() => {
@@ -83,7 +112,25 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     let cancelled = false;
     void fetchAdminSettings(secret)
       .then((settings) => {
-        if (!cancelled) setServerPublicBaseUrl(settings.public_base_url || "");
+        if (cancelled) return;
+        const nextSettings: CliGatewaySettings = {
+          serverPort: settings.server_port || 28120,
+          allowLan: Boolean(settings.allow_lan_management),
+          lanIPs: settings.lan_ips || [],
+          publicBaseUrl: settings.public_base_url || "",
+        };
+        setGatewaySettings(nextSettings);
+        setBaseUrlKind(() => {
+          const stored = readStoredCliBaseUrlKind();
+          if (stored === "tunnel" && !buildCliTunnelBaseUrl(nextSettings.publicBaseUrl || publicUrlOverride)) {
+            return "local";
+          }
+          if (stored === "lan" && (!nextSettings.allowLan || nextSettings.lanIPs.length === 0)) {
+            return "local";
+          }
+          if (stored) return stored;
+          return defaultCliBaseUrlKind(nextSettings, publicUrlOverride);
+        });
       })
       .catch(() => {
         /* settings endpoint may be unavailable during startup */
@@ -91,7 +138,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [secret]);
+  }, [secret, publicUrlOverride]);
 
   useEffect(() => {
     if (!secret) return;
@@ -134,8 +181,36 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
 
   const canShowGuide = () => {
     if (!tool.requiresExternalUrl) return true;
-    return !needsPublicBaseUrlForCliTools(serverPublicBaseUrl || publicUrlOverride);
+    const configuredPublic = gatewaySettings.publicBaseUrl || publicUrlOverride;
+    if (baseUrlKind === "tunnel" && buildCliTunnelBaseUrl(configuredPublic)) return true;
+    return !needsPublicBaseUrlForCliTools(configuredPublic);
   };
+
+  const handleBaseUrlKindChange = (kind: CliBaseUrlKind) => {
+    setBaseUrlKind(kind);
+    storeCliBaseUrlKind(kind);
+  };
+
+  const handleLanIPChange = (ip: string) => {
+    setLanIP(ip);
+    storeCliLanIP(ip);
+  };
+
+  const renderBaseUrlPicker = (copyField = "base") => (
+    <CliBaseUrlPicker
+      kind={baseUrlKind}
+      baseUrl={baseUrl}
+      lanUrl={lanUrl}
+      tunnelUrl={tunnelUrl}
+      allowLan={gatewaySettings.allowLan}
+      lanIPs={gatewaySettings.lanIPs}
+      selectedLanIP={effectiveLanIP}
+      copied={copiedField === copyField}
+      onKindChange={handleBaseUrlKindChange}
+      onLanIPChange={handleLanIPChange}
+      onCopy={() => void copyText(baseUrl, copyField)}
+    />
+  );
 
   const renderPublicUrlField = () => {
     if (!tool.requiresExternalUrl) return null;
@@ -258,7 +333,8 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
         {item.desc ? <p className="cli-tool-step-desc">{item.desc}</p> : null}
         {item.type === "apiKeySelector" ? renderApiKeySelector() : null}
         {item.type === "modelSelector" ? renderModelSelector() : null}
-        {item.value ? (
+        {item.title.toLowerCase().trim() === "base url" ? renderBaseUrlPicker(`step-${item.step}`) : null}
+        {item.value && item.title.toLowerCase().trim() !== "base url" ? (
           <div className="cli-tool-kv">
             <code>{replaceVars(item.value)}</code>
             {item.copyable ? (
@@ -315,18 +391,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
         <span className="cli-tool-step-num" style={{ backgroundColor: tool.color }}>2</span>
         <div className="cli-tool-step-body">
           <p className="cli-tool-step-title">Base URL</p>
-          <div className="cli-tool-kv">
-            <code>{baseUrl}</code>
-            <Button
-              variant="outline"
-              size="sm"
-              className="btn-icon-only"
-              icon={copiedField === "base" ? "check" : "content_copy"}
-              aria-label={copiedField === "base" ? "Copied" : "Copy"}
-              title={copiedField === "base" ? "Copied" : "Copy"}
-              onClick={() => void copyText(baseUrl, "base")}
-            />
-          </div>
+          {renderBaseUrlPicker("base")}
         </div>
       </div>
       <div className="cli-tool-step">
@@ -496,44 +561,4 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
       ) : null}
     </Card>
   );
-}
-
-export function buildModelOptions(
-  models: { ID: string; DisplayName?: string; Enabled?: boolean }[],
-  combos: { id: string; display_name?: string; enabled?: boolean }[],
-  toolDefaults?: { id: string; name: string; alias: string }[],
-): ModelOption[] {
-  const options: ModelOption[] = [];
-  const seen = new Set<string>();
-
-  for (const model of models) {
-    if (model.Enabled === false) continue;
-    if (seen.has(model.ID)) continue;
-    seen.add(model.ID);
-    options.push({
-      value: model.ID,
-      label: model.DisplayName ? `${model.DisplayName} (${model.ID})` : model.ID,
-      group: "models",
-    });
-  }
-  for (const combo of combos) {
-    if (combo.enabled === false) continue;
-    if (seen.has(combo.id)) continue;
-    seen.add(combo.id);
-    options.push({
-      value: combo.id,
-      label: combo.display_name ? `${combo.display_name} (${combo.id})` : combo.id,
-      group: "combos",
-    });
-  }
-  for (const slot of toolDefaults ?? []) {
-    if (seen.has(slot.alias) || seen.has(slot.id)) continue;
-    seen.add(slot.alias);
-    options.push({
-      value: slot.alias,
-      label: `${slot.name} (suggested)`,
-      group: "suggested",
-    });
-  }
-  return options;
 }

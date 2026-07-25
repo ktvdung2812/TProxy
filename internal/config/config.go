@@ -31,6 +31,7 @@ type Config struct {
 }
 
 type ClaudeAliasConfig struct {
+	Default              string `yaml:"default" json:"default"`
 	Opus                 string `yaml:"opus" json:"opus"`
 	Sonnet               string `yaml:"sonnet" json:"sonnet"`
 	Haiku                string `yaml:"haiku" json:"haiku"`
