@@ -1,6 +1,6 @@
 import type { ClaudeMappingResponse } from "./api";
 
-export type MappingTier = "fable" | "opus" | "sonnet" | "haiku";
+export type MappingTier = "default" | "fable" | "opus" | "sonnet" | "haiku";
 
 export type ReasoningEffort = "" | "none" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -39,9 +39,10 @@ export function reasoningEffortOptionsForTarget(
   return options;
 }
 
-export const MAPPING_TIERS: MappingTier[] = ["fable", "opus", "sonnet", "haiku"];
+export const MAPPING_TIERS: MappingTier[] = ["default", "fable", "opus", "sonnet", "haiku"];
 
 export const TIER_ENV_VARS: Record<MappingTier, string> = {
+  default: "ANTHROPIC_DEFAULT_MODEL",
   fable: "ANTHROPIC_DEFAULT_FABLE_MODEL",
   opus: "ANTHROPIC_DEFAULT_OPUS_MODEL",
   sonnet: "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -50,6 +51,7 @@ export const TIER_ENV_VARS: Record<MappingTier, string> = {
 
 /** Placeholder tier names kept on the Claude Code client — tproxy rewrites server-side. */
 export const CLAUDE_CLIENT_TIER_PLACEHOLDERS: Record<MappingTier, string> = {
+  default: "default",
   fable: "fable",
   opus: "opus",
   sonnet: "sonnet",
@@ -96,6 +98,7 @@ export function buildClaudeCodeClientEnv(options: ClaudeClientEnvOptions): Recor
     ANTHROPIC_BASE_URL: options.baseUrl,
     ANTHROPIC_API_KEY: key,
     ANTHROPIC_MODEL: primary,
+    ANTHROPIC_DEFAULT_MODEL: CLAUDE_CLIENT_TIER_PLACEHOLDERS.default,
     ANTHROPIC_DEFAULT_FABLE_MODEL: CLAUDE_CLIENT_TIER_PLACEHOLDERS.fable,
     ANTHROPIC_DEFAULT_OPUS_MODEL: CLAUDE_CLIENT_TIER_PLACEHOLDERS.opus,
     ANTHROPIC_DEFAULT_SONNET_MODEL: CLAUDE_CLIENT_TIER_PLACEHOLDERS.sonnet,

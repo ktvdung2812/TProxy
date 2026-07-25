@@ -29,7 +29,10 @@ type Props = {
 type ClaudeFormat = "claude-settings" | "shell";
 type CodexFormat = "codex-settings";
 
-const PRIMARY_MODEL_OPTIONS = MAPPING_TIERS.map((tier) => ({ value: tier, label: tier }));
+const PRIMARY_MODEL_OPTIONS = MAPPING_TIERS.filter((tier) => tier !== "default").map((tier) => ({
+  value: tier,
+  label: tier,
+}));
 const GPT_MODEL_OPTIONS = (Object.keys(GPT_CLIENT_TIER_PLACEHOLDERS) as GptCodenameTier[]).map((tier) => ({
   value: tier,
   label: GPT_CLIENT_TIER_PLACEHOLDERS[tier] || tier,

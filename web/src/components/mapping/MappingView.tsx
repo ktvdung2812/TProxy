@@ -1,19 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { ApiKeyOption } from "../cli-tools/ApiKeySelect";
+import { useChatModels } from "../chat/useChatModels";
 import { Badge, Button, Card, Select, cn } from "../ui";
 import { fetchClaudeMapping, saveClaudeMapping, type ClaudeMappingResponse } from "./api";
 import type { ModelRecord, RouteRecord } from "../models/types";
 import { reasoningEffortOptionsForTarget, CLAUDE_MAPPING_PLACEHOLDER_NAMES, CODEX_MAPPING_PLACEHOLDER_NAMES, type ReasoningEffort } from "./codegen";
 import { MappingCodePanel } from "./MappingCodePanel";
 import { ModelTargetCombobox } from "./ModelTargetCombobox";
+import { useMappingTargetOptions } from "./modelOptions";
 import { formatMappingTargetLabel, parseMappingTab, type MappingClientTab } from "./utils";
+
+type ComboRecord = {
+  id: string;
+  display_name?: string;
+  enabled?: boolean;
+};
 
 type Props = {
   secret: string;
   apiKeys: ApiKeyOption[];
   models: ModelRecord[];
+  combos: ComboRecord[];
   routesByModel: Record<string, RouteRecord[]>;
+  providers: { ID: string; Name?: string; Enabled?: boolean }[];
+  credentials: Record<string, { enabled: boolean }[]>;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
 };
@@ -21,6 +32,13 @@ type Props = {
 type ClientTab = MappingClientTab;
 
 const TIERS = [
+  {
+    id: "default",
+    claudeLabel: "Default",
+    codexLabel: "Default",
+    claudeHint: "default",
+    codexHint: "Claude-only placeholder — not used by Codex CLI",
+  },
   {
     id: "fable",
     claudeLabel: "Claude Fable",
@@ -39,7 +57,7 @@ const TIERS = [
     id: "sonnet",
     claudeLabel: "Claude Sonnet",
     codexLabel: "Sonnet",
-    claudeHint: "claude-sonnet, sonnet, default",
+    claudeHint: "claude-sonnet, sonnet",
     codexHint: "Claude-only placeholder — not used by Codex CLI",
   },
   {
@@ -62,7 +80,7 @@ function isCodexPlaceholder(name: string) {
   return CODEX_PLACEHOLDER_SET.has(name.toLowerCase());
 }
 
-export function MappingView({ secret, apiKeys, models, routesByModel, onError, onNotice }: Props) {
+export function MappingView({ secret, apiKeys, models, combos, routesByModel, providers, credentials, onError, onNotice }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
   const activeTab = useMemo(() => parseMappingTab(location.hash), [location.hash]);
@@ -83,12 +101,14 @@ export function MappingView({ secret, apiKeys, models, routesByModel, onError, o
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({
+    default: "",
     fable: "",
     opus: "",
     sonnet: "",
     haiku: "",
   });
   const [reasoningEffortOverrides, setReasoningEffortOverrides] = useState<Record<string, ReasoningEffort>>({
+    default: "",
     fable: "",
     opus: "",
     sonnet: "",
@@ -101,12 +121,14 @@ export function MappingView({ secret, apiKeys, models, routesByModel, onError, o
       const response = await fetchClaudeMapping(secret);
       setData(response);
       setOverrides({
+        default: response.overrides?.default || "",
         fable: response.overrides?.fable || "",
         opus: response.overrides?.opus || "",
         sonnet: response.overrides?.sonnet || "",
         haiku: response.overrides?.haiku || "",
       });
       setReasoningEffortOverrides({
+        default: response.reasoning_effort_overrides?.default || "",
         fable: response.reasoning_effort_overrides?.fable || "",
         opus: response.reasoning_effort_overrides?.opus || "",
         sonnet: response.reasoning_effort_overrides?.sonnet || "",
@@ -123,10 +145,32 @@ export function MappingView({ secret, apiKeys, models, routesByModel, onError, o
     void load();
   }, [load]);
 
-  const modelOptions = useMemo(
-    () => models.map((model) => ({ value: model.ID, label: model.DisplayName || model.ID })),
-    [models],
+  const chatSnapshot = useMemo(
+    () => ({
+      providers: providers.map((provider) => ({
+        ID: provider.ID,
+        Name: provider.Name || provider.ID,
+        Enabled: provider.Enabled !== false,
+      })),
+      credentials,
+      models: models.map((model) => ({
+        ID: model.ID,
+        DisplayName: model.DisplayName,
+        Enabled: model.Enabled,
+        Capabilities: model.Capabilities,
+      })),
+      combos: combos.map((combo) => ({
+        id: combo.id,
+        display_name: combo.display_name || combo.id,
+        enabled: combo.enabled !== false,
+        capabilities: [],
+      })),
+    }),
+    [providers, credentials, models, combos],
   );
+  const { models: discoveredModels } = useChatModels(secret, chatSnapshot);
+
+  const modelOptions = useMappingTargetOptions(models, combos, routesByModel, discoveredModels);
 
   const formatTargetLabel = useCallback(
     (target: string) => formatMappingTargetLabel(target, models, routesByModel),
@@ -145,7 +189,7 @@ export function MappingView({ secret, apiKeys, models, routesByModel, onError, o
 
   const isClaude = activeTab === "claude";
   const visibleTiers = useMemo(
-    () => (isClaude ? TIERS : TIERS.filter((tier) => tier.id !== "sonnet")),
+    () => (isClaude ? TIERS : TIERS.filter((tier) => tier.id !== "sonnet" && tier.id !== "default")),
     [isClaude],
   );
 

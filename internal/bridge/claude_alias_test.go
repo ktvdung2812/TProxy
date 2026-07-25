@@ -55,6 +55,20 @@ func TestResolveGptCodenamePlaceholders(t *testing.T) {
 	}
 }
 
+func TestDefaultAndSonnetSeparateOverrides(t *testing.T) {
+	resolver := NewResolver(Config{})
+	resolver.SetOverrides(Overrides{
+		RoleDefault: "model-default",
+		RoleSonnet:  "model-sonnet",
+	})
+	if got := resolver.ResolveModel("default"); got != "model-default" {
+		t.Fatalf("default resolved = %q", got)
+	}
+	if got := resolver.ResolveModel("sonnet"); got != "model-sonnet" {
+		t.Fatalf("sonnet resolved = %q", got)
+	}
+}
+
 func TestFormatTargetProviderSelector(t *testing.T) {
 	if got := FormatTarget("codex::gpt-5.6-luna", ""); got != "codex:gpt-5.6-luna" {
 		t.Fatalf("formatted = %q", got)

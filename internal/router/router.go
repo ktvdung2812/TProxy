@@ -1379,6 +1379,22 @@ func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([
 				filtered = append(filtered, route)
 			}
 		}
+		if len(filtered) == 0 {
+			if providerPrefix, upstreamModel, ok := splitProviderModelSelector(comboItem.PublicModelID); ok {
+				provider, providerErr := r.store.ProviderByPrefix(ctx, providerPrefix)
+				if providerErr == nil && provider.Enabled {
+					filtered = []store.RouteTarget{{
+						ID:            "direct:" + comboItem.PublicModelID,
+						PublicModelID: comboItem.PublicModelID,
+						ProviderID:    provider.ID,
+						UpstreamModel: upstreamModel,
+						Priority:      100,
+						Weight:        1,
+						Enabled:       true,
+					}}
+				}
+			}
+		}
 		filtered = r.rotateRoutes(comboItem.PublicModelID, filtered)
 		basePriority := (len(model.ComboItems) - index) * 1_000_000
 		for _, route := range filtered {

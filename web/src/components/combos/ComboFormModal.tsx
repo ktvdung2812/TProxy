@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Field, Input, Modal, Select, Toggle } from "../ui";
-import type { ComboFormData, ComboModelOption, ComboRouteOption } from "./types";
+import { modelOptionGroupLabel } from "../../lib/modelOptions";
+import type { ModelOption } from "../../lib/modelOptions";
+import type { ComboFormData } from "./types";
 import { COMBO_ID_REGEX, emptyComboForm, validateComboForm } from "./utils";
 
 type Props = {
   open: boolean;
   editing: boolean;
   initial: ComboFormData | null;
-  models: ComboModelOption[];
-  routesByModel: Record<string, ComboRouteOption[]>;
+  modelOptions: ModelOption[];
   existingIds: string[];
   saving: boolean;
   onClose: () => void;
@@ -27,8 +28,7 @@ export function ComboFormModal({
   open,
   editing,
   initial,
-  models,
-  routesByModel,
+  modelOptions,
   existingIds,
   saving,
   onClose,
@@ -43,13 +43,13 @@ export function ComboFormModal({
     setIdError("");
   }, [open, initial]);
 
-  const modelOptions = useMemo(
-    () =>
-      models
-        .filter((model) => model.enabled)
-        .map((model) => ({ value: model.id, label: model.label })),
-    [models],
-  );
+  const groupedOptions = useMemo(() => {
+    const groups: ModelOption["group"][] = [];
+    for (const option of modelOptions) {
+      if (!groups.includes(option.group)) groups.push(option.group);
+    }
+    return groups;
+  }, [modelOptions]);
 
   const validationError = validateComboForm(form, existingIds, editing);
 
@@ -74,7 +74,7 @@ export function ComboFormModal({
     const firstModel = modelOptions[0]?.value || "";
     setForm((current) => ({
       ...current,
-      items: [...current.items, { public_model_id: firstModel, route_target_id: "" }],
+      items: [...current.items, { public_model_id: firstModel }],
     }));
   };
 
@@ -166,42 +166,30 @@ export function ComboFormModal({
           </div>
 
           {modelOptions.length === 0 ? (
-            <p className="combo-form-empty">Create a virtual model first, then add it to this combo.</p>
+            <p className="combo-form-empty">Create a virtual model or configure mapping targets first.</p>
           ) : form.items.length === 0 ? (
-            <p className="combo-form-empty">No steps yet. Add virtual models in priority order.</p>
+            <p className="combo-form-empty">No steps yet. Add models in priority order.</p>
           ) : (
             <div className="combo-form-item-list">
-              {form.items.map((item, index) => {
-                const routeOptions = routesByModel[item.public_model_id] || [];
-                return (
-                  <div className="combo-form-item" key={`${item.public_model_id}-${index}`}>
+              {form.items.map((item, index) => (
+                <div className="combo-form-item" key={`${item.public_model_id}-${index}`}>
                     <span className="combo-form-item-index">{index + 1}</span>
                     <div className="combo-form-item-fields">
-                      <Field label="Virtual model">
+                      <Field label="Model">
                         <Select
                           value={item.public_model_id}
-                          onChange={(event) =>
-                            updateItem(index, { public_model_id: event.target.value, route_target_id: "" })
-                          }
+                          onChange={(event) => updateItem(index, { public_model_id: event.target.value })}
                         >
-                          {modelOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
-                      <Field label="Route pin" hint="optional">
-                        <Select
-                          value={item.route_target_id || ""}
-                          onChange={(event) => updateItem(index, { route_target_id: event.target.value })}
-                        >
-                          <option value="">All routes</option>
-                          {routeOptions.map((route) => (
-                            <option key={route.id} value={route.id}>
-                              {route.id} · {route.provider_id}/{route.upstream_model}
-                              {route.enabled ? "" : " (disabled)"}
-                            </option>
+                          {groupedOptions.map((group) => (
+                            <optgroup key={group} label={modelOptionGroupLabel(group)}>
+                              {modelOptions
+                                .filter((option) => option.group === group)
+                                .map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                            </optgroup>
                           ))}
                         </Select>
                       </Field>
@@ -235,8 +223,7 @@ export function ComboFormModal({
                       </button>
                     </div>
                   </div>
-                );
-              })}
+              ))}
             </div>
           )}
         </div>

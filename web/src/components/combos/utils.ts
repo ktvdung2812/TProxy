@@ -43,7 +43,6 @@ export function formToPayload(form: ComboFormData) {
     capabilities: ["text", "tools"],
     items: form.items.map((item) => ({
       public_model_id: item.public_model_id,
-      ...(item.route_target_id?.trim() ? { route_target_id: item.route_target_id.trim() } : {}),
     })),
     ...(form.policy && Object.keys(form.policy).length > 0 ? { policy: form.policy } : {}),
   };
@@ -55,8 +54,8 @@ export function validateComboForm(form: ComboFormData, existingIds: string[], ed
   if (!COMBO_ID_REGEX.test(id)) return "Combo ID may only contain letters, numbers, -, _, and .";
   if (!editing && existingIds.includes(id)) return `Combo ID "${id}" already exists`;
   if (!form.display_name.trim()) return "Display name is required";
-  if (form.items.length === 0) return "Add at least one virtual model";
-  if (form.items.some((item) => !item.public_model_id)) return "Each step needs a virtual model";
+  if (form.items.length === 0) return "Add at least one model step";
+  if (form.items.some((item) => !item.public_model_id)) return "Each step needs a model";
   return "";
 }
 

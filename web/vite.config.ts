@@ -37,6 +37,8 @@ export default defineConfig({
     host: "0.0.0.0",
     port: publicPort,
     strictPort: true,
+    // Cloudflare quick tunnel and abc-tunnel.us worker send non-local Host headers.
+    allowedHosts: [".trycloudflare.com", ".abc-tunnel.us", "localhost", "127.0.0.1"],
     hmr: {
       protocol: "ws",
       host: "localhost",

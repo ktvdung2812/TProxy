@@ -150,6 +150,9 @@ func IsClaudePlaceholder(model string) bool {
 
 func EnvOverrides() Overrides {
 	layer := Overrides{}
+	if value := strings.TrimSpace(os.Getenv("ANTHROPIC_DEFAULT_MODEL")); value != "" {
+		layer[RoleDefault] = value
+	}
 	if value := strings.TrimSpace(os.Getenv("ANTHROPIC_DEFAULT_FABLE_MODEL")); value != "" {
 		layer[RoleFable] = value
 	}

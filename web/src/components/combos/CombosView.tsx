@@ -4,7 +4,8 @@ import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Badge, Button, Card, ConfirmDialog, EmptyState } from "../ui";
 import { deleteCombo, saveCombo } from "./api";
 import { ComboFormModal } from "./ComboFormModal";
-import type { ComboFormData, ComboModelOption, ComboRecord, ComboRouteOption } from "./types";
+import type { ModelOption } from "../../lib/modelOptions";
+import type { ComboFormData, ComboModelOption, ComboRecord } from "./types";
 import {
   buildComboPresets,
   clientLabel,
@@ -17,7 +18,7 @@ type Props = {
   secret: string;
   combos: ComboRecord[];
   models: ComboModelOption[];
-  routesByModel: Record<string, ComboRouteOption[]>;
+  modelOptions: ModelOption[];
   onMutated?: () => void;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
@@ -30,7 +31,7 @@ type ConfirmState = {
   onConfirm: () => void;
 };
 
-export function CombosView({ secret, combos, models, routesByModel, onMutated, onNotice, onError }: Props) {
+export function CombosView({ secret, combos, models, modelOptions, onMutated, onNotice, onError }: Props) {
   const { copied, copy } = useCopyToClipboard();
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingCombo, setEditingCombo] = useState<ComboRecord | null>(null);
@@ -233,8 +234,10 @@ export function CombosView({ secret, combos, models, routesByModel, onMutated, o
                     <div className="combo-card-item" key={`${combo.id}-${index}`}>
                       <span className="combo-card-item-index">{index + 1}</span>
                       <div className="combo-card-item-main">
-                        <strong>{item.public_model_id}</strong>
-                        <span>{item.route_target_id || "all routes"}</span>
+                        <strong>
+                          {modelOptions.find((option) => option.value === item.public_model_id)?.label ||
+                            item.public_model_id}
+                        </strong>
                       </div>
                     </div>
                   ))}
@@ -258,8 +261,11 @@ export function CombosView({ secret, combos, models, routesByModel, onMutated, o
         open={showFormModal}
         editing={!!editingCombo}
         initial={formSeed}
-        models={models}
-        routesByModel={routesByModel}
+        modelOptions={
+          editingCombo
+            ? modelOptions.filter((option) => option.value !== editingCombo.id)
+            : modelOptions
+        }
         existingIds={existingIds}
         saving={saving}
         onClose={() => {

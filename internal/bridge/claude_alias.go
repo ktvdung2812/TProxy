@@ -10,15 +10,17 @@ const AppSettingClaudeAliases = "claude.alias_models"
 type Role string
 
 const (
-	RoleOpus   Role = "opus"
-	RoleSonnet Role = "sonnet"
-	RoleHaiku  Role = "haiku"
-	RoleFable  Role = "fable"
+	RoleDefault Role = "default"
+	RoleOpus    Role = "opus"
+	RoleSonnet  Role = "sonnet"
+	RoleHaiku   Role = "haiku"
+	RoleFable   Role = "fable"
 )
 
-var Roles = []Role{RoleFable, RoleOpus, RoleSonnet, RoleHaiku}
+var Roles = []Role{RoleDefault, RoleFable, RoleOpus, RoleSonnet, RoleHaiku}
 
 type Config struct {
+	Default              string `yaml:"default" json:"default"`
 	Opus                 string `yaml:"opus" json:"opus"`
 	Sonnet               string `yaml:"sonnet" json:"sonnet"`
 	Haiku                string `yaml:"haiku" json:"haiku"`
@@ -38,14 +40,15 @@ type Resolver struct {
 }
 
 var defaultRoleTargets = Config{
-	Opus:   "gpt-5.5",
-	Sonnet: "gpt-5.4",
-	Haiku:  "gpt-5.1-codex-mini",
-	Fable:  "gpt-5.6-luna",
+	Default: "gpt-5.4",
+	Opus:    "gpt-5.5",
+	Sonnet:  "gpt-5.4",
+	Haiku:   "gpt-5.1-codex-mini",
+	Fable:   "gpt-5.6-luna",
 }
 
 var placeholderToRole = map[string]Role{
-	"default":       RoleSonnet,
+	"default":       RoleDefault,
 	"opus":          RoleOpus,
 	"sonnet":        RoleSonnet,
 	"haiku":         RoleHaiku,
@@ -61,6 +64,9 @@ var placeholderToRole = map[string]Role{
 }
 
 func NewResolver(cfg Config) *Resolver {
+	if strings.TrimSpace(cfg.Default) == "" {
+		cfg.Default = defaultRoleTargets.Default
+	}
 	if strings.TrimSpace(cfg.Opus) == "" {
 		cfg.Opus = defaultRoleTargets.Opus
 	}
@@ -81,6 +87,9 @@ func (r *Resolver) SetConfig(cfg Config) {
 	defer r.mu.Unlock()
 	if strings.TrimSpace(cfg.Opus) != "" {
 		r.defaults.Opus = strings.TrimSpace(cfg.Opus)
+	}
+	if strings.TrimSpace(cfg.Default) != "" {
+		r.defaults.Default = strings.TrimSpace(cfg.Default)
 	}
 	if strings.TrimSpace(cfg.Sonnet) != "" {
 		r.defaults.Sonnet = strings.TrimSpace(cfg.Sonnet)
@@ -180,10 +189,11 @@ func (r *Resolver) EffectiveMapping() map[string]string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return map[string]string{
-		string(RoleFable):  r.roleTargetLocked(RoleFable),
-		string(RoleOpus):   r.roleTargetLocked(RoleOpus),
-		string(RoleSonnet): r.roleTargetLocked(RoleSonnet),
-		string(RoleHaiku):  r.roleTargetLocked(RoleHaiku),
+		string(RoleDefault): r.roleTargetLocked(RoleDefault),
+		string(RoleFable):   r.roleTargetLocked(RoleFable),
+		string(RoleOpus):    r.roleTargetLocked(RoleOpus),
+		string(RoleSonnet):  r.roleTargetLocked(RoleSonnet),
+		string(RoleHaiku):   r.roleTargetLocked(RoleHaiku),
 	}
 }
 
@@ -329,12 +339,16 @@ func (r *Resolver) roleTargetLocked(role Role) string {
 		return value
 	}
 	switch role {
+	case RoleDefault:
+		return r.defaults.Default
 	case RoleOpus:
 		return r.defaults.Opus
 	case RoleHaiku:
 		return r.defaults.Haiku
 	case RoleFable:
 		return r.defaults.Fable
+	case RoleSonnet:
+		return r.defaults.Sonnet
 	default:
 		return r.defaults.Sonnet
 	}
