@@ -241,25 +241,25 @@ export function OAuthModal({
     setErrorMsg("");
     try {
       const parsed = new URL(manualUrl.trim());
+      const statelessCallback = allowsStatelessOAuthCallback(providerType);
       const code =
         (providerType === "cline" || providerType === "clinepass"
           ? parseClineCallbackUrl(manualUrl.trim())
           : null) ||
         parsed.searchParams.get("code") ||
         parsed.searchParams.get("token");
-      const state = parsed.searchParams.get("state") || "";
+      const oauthState = statelessCallback ? "" : parsed.searchParams.get("state") || "";
       const oauthError = parsed.searchParams.get("error");
-      const statelessCallback = allowsStatelessOAuthCallback(providerType);
       if (oauthError) {
         throw new Error(parsed.searchParams.get("error_description") || oauthError);
       }
       if (!code) {
         throw new Error("Callback URL must include a code (or token) query parameter");
       }
-      if (!state && !statelessCallback) {
+      if (!oauthState && !statelessCallback) {
         throw new Error("Callback URL must include code and state query parameters");
       }
-      const status = await completeOAuthCallback(secret, code, state || undefined);
+      const status = await completeOAuthCallback(secret, code, oauthState || undefined, sessionId || undefined);
       setSession(status);
       if (["complete", "failed", "cancelled", "expired"].includes(status.status)) {
         handleTerminal(status);

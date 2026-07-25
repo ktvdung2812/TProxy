@@ -122,7 +122,7 @@ func TestClineOAuthCompleteCallbackSavesCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := manager.CompleteCallback(context.Background(), mustClineSessionState(t, manager, started.SessionID), code)
+	status, err := manager.CompleteCallback(context.Background(), mustClineSessionState(t, manager, started.SessionID), code, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,40 @@ func TestClineOAuthStatelessCompleteCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := manager.CompleteCallback(context.Background(), "", code)
+	status, err := manager.CompleteCallback(context.Background(), "", code, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "complete" {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestClineOAuthCompleteCallbackWithExternalWorkOSState(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{
+		"accessToken":  "external-state-access",
+		"refreshToken": "external-state-refresh",
+		"email":        "cline@example.com",
+		"expiresAt":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	code := base64.StdEncoding.EncodeToString(payload)
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "cline", Type: "cline", Enabled: true, OAuth: &config.OAuthConfig{}}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, http.DefaultClient)
+	defer manager.Close()
+
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{
+		ProviderID:   "cline",
+		CredentialID: "cline-account",
+		Mode:         "browser",
+		RedirectURL:  "http://127.0.0.1:28120/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := manager.CompleteCallback(context.Background(), "workos-external-state", code, started.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}

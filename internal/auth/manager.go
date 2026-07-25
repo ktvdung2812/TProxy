@@ -609,7 +609,7 @@ func (m *Manager) startLocalCallback(item *session) error {
 			http.Error(w, rejectErr.Error(), http.StatusBadRequest)
 			return
 		}
-		_, completeErr := m.CompleteCallback(r.Context(), state, code)
+		_, completeErr := m.CompleteCallback(r.Context(), state, code, item.id)
 		if completeErr != nil {
 			http.Error(w, completeErr.Error(), http.StatusBadRequest)
 			return
@@ -661,16 +661,23 @@ func localCallbackValues(r *http.Request) (state, code, providerError string, er
 	}
 }
 
-func (m *Manager) CompleteCallback(ctx context.Context, state, code string) (SessionStatus, error) {
+func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID string) (SessionStatus, error) {
 	state = strings.TrimSpace(state)
 	code = strings.TrimSpace(code)
+	sessionID = strings.TrimSpace(sessionID)
 	if code == "" {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
 	var item *session
-	if state != "" {
+	if sessionID != "" {
+		m.mu.Lock()
+		item = m.sessions[sessionID]
+		m.mu.Unlock()
+	}
+	if item == nil && state != "" {
 		item = m.sessionForState(state)
-	} else {
+	}
+	if item == nil {
 		item = m.sessionForSinglePendingStatelessBrowser()
 	}
 	if item == nil {

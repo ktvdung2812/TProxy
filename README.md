@@ -16,6 +16,7 @@ tproxy sits between your applications and upstream AI providers. Clients talk to
 - [Architecture](#architecture)
 - [Supported APIs & providers](#supported-apis--providers)
 - [Control center](#control-center)
+- [Installation](#installation)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Client integration](#client-integration)
@@ -189,55 +190,218 @@ Default login password: `123123` (change it under **Settings**).
 
 ---
 
-## Quick start
+## Installation
 
-### Prerequisites
+### System requirements
 
-- **Go 1.26+** (to build from source)
-- **Node.js 18+** (for dashboard development or npm wrapper)
+| Component | Version | Notes |
+|-----------|---------|--------|
+| **Go** | 1.26+ | Required to build the gateway binary from source |
+| **Node.js** | 18+ | Required for dashboard build and `npm run dev` |
+| **OS** | macOS, Linux | Windows is not officially supported; use WSL2 or Docker |
+| **Disk** | ~100 MB + SQLite | Grows with usage logs and credentials |
 
-### 1. Clone and configure
+Default ports:
+
+| Port | Service |
+|------|---------|
+| `28120` | Dashboard, `/v1/*` API, `/api/admin/*` (production and dev UI) |
+| `28122` | Go backend only (internal, `npm run dev` only) |
+
+---
+
+### 1. Get the source
 
 ```bash
 git clone https://github.com/ktvdung2812/TProxy.git
 cd TProxy
+```
+
+All commands below assume you are in the repository root (where `package.json` and `config.example.yaml` live).
+
+---
+
+### 2. First-time setup (all install methods)
+
+**a) Configuration file**
+
+```bash
 cp config.example.yaml config.yaml
+```
+
+For a completely empty database, you can skip this and let tproxy seed defaults on first boot — then configure providers from the dashboard.
+
+**b) Environment secrets**
+
+```bash
 cp .env.example .env.run
 ```
 
-Generate a master encryption key and add it to `.env.run`:
+Generate a master encryption key (required before storing provider credentials):
 
 ```bash
 go run ./cmd/tproxy --print-master-key
-# Set TPROXY_MASTER_KEY in .env.run to the printed value
 ```
 
-### 2. Development (hot reload)
+Edit `.env.run` and set at least:
+
+```bash
+TPROXY_MASTER_KEY=<output-from-print-master-key>
+TPROXY_API_KEY=<your-client-api-key>          # used by apps calling /v1/*
+```
+
+Optional for remote admin API access:
+
+```bash
+TPROXY_MANAGEMENT_SECRET=<long-random-secret>
+```
+
+Load secrets before starting:
+
+```bash
+source .env.run
+```
+
+> **Dashboard login:** default password is `123123`. Change it under **Settings** after the first login.
+
+---
+
+### 3. Choose an install method
+
+#### Option A — Development (hot reload)
+
+Best for local hacking on the dashboard or backend.
 
 ```bash
 npm install
 npm run dev
 ```
 
-| Service | URL |
-|---------|-----|
-| Dashboard + API (single port) | http://127.0.0.1:28120/dashboard/ |
-| API gateway | http://127.0.0.1:28120/v1 |
-| Health | http://127.0.0.1:28120/healthz |
+| URL | Purpose |
+|-----|---------|
+| http://127.0.0.1:28120/dashboard/ | Control center (Vite + proxy) |
+| http://127.0.0.1:28120/v1 | Gateway API |
+| http://127.0.0.1:28120/healthz | Health check |
 
-`npm run dev` serves the dashboard and proxies `/v1` and `/api` through the same port (`28120`). The Go backend listens on an internal dev port (`28122`) only.
+`npm run dev` frees ports `28120`/`28122`, starts the Go backend on `28122`, and serves the React UI on `28120` with API proxying.
 
-### 3. Production build
+---
+
+#### Option B — Production binary (local / single machine)
+
+Build the embedded dashboard and compile the Go binary:
 
 ```bash
+npm install
 npm run build
-source .env.run
-./bin/tproxy --config config.yaml
 ```
 
-### 4. Smoke test
+Start the server:
 
 ```bash
+source .env.run
+npm start
+# or: ./bin/tproxy --config config.yaml
+```
+
+Open http://127.0.0.1:28120/dashboard/
+
+---
+
+#### Option C — Docker (Linux server)
+
+Use the deployment bundle under [`deploy/`](deploy/README.md):
+
+```bash
+cd deploy
+cp .env.example .env
+./bin/tproxy-linux-amd64 --print-master-key   # paste into .env
+mkdir -p data
+docker compose up -d --build
+docker compose logs -f tproxy
+```
+
+The container binds `0.0.0.0:28120` and stores SQLite data in `./data/tproxy.db`.
+
+For a public server, set `server.allow-remote-management: true` in `deploy/config.yaml` and put TLS in front (nginx, Caddy, Cloudflare Tunnel, etc.).
+
+---
+
+#### Option D — Pre-built Linux binary (no Docker)
+
+Copy the `deploy/` directory to your server (for example `/opt/tproxy`):
+
+```bash
+cd deploy
+cp .env.example .env
+chmod +x start.sh bin/tproxy-linux-*
+mkdir -p /data
+./start.sh
+```
+
+Optional **systemd** service: see [`deploy/README.md`](deploy/README.md).
+
+---
+
+#### Option E — npm global wrapper
+
+```bash
+npm install -g @ktvdung1606/tproxy
+tproxy --config config.yaml
+```
+
+The npm package is a CLI wrapper around the Go binary. For a global install you still need a built `tproxy` executable (from `npm run build` in a clone) or run from a local checkout where `go run ./cmd/tproxy` is available. See [`npm/README.md`](npm/README.md).
+
+---
+
+### 4. Verify installation
+
+```bash
+curl http://127.0.0.1:28120/healthz
+
+curl http://127.0.0.1:28120/v1/models \
+  -H "Authorization: Bearer $TPROXY_API_KEY"
+```
+
+Then open the dashboard, log in, and:
+
+1. Create or confirm a **client API key** under **Dashboard**.
+2. Add a **provider** under **Providers** (OAuth wizard or API key).
+3. Define a **public model** under **PPM** and test from **Chat** or your client.
+
+---
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `address already in use` on `28120` | Stop the other process: `lsof -t -iTCP:28120 \| xargs kill` or run `bash scripts/free-ports.sh` before `npm run dev` |
+| `bin/tproxy not found` | Run `npm run build` |
+| Cannot save provider credentials | Set `TPROXY_MASTER_KEY` in `.env.run` and restart |
+| OAuth callback fails on a remote host | Set `server.allow-remote-management: true` and configure `oauth.redirect-url` to your public URL |
+| Dashboard loads but API returns 401 | Check `TPROXY_API_KEY` / management secret; re-login from the dashboard |
+
+---
+
+## Quick start
+
+If you already completed [Installation](#installation), tproxy should be running. Otherwise, the fastest path on a developer machine is:
+
+```bash
+git clone https://github.com/ktvdung2812/TProxy.git
+cd TProxy
+cp config.example.yaml config.yaml
+cp .env.example .env.run
+go run ./cmd/tproxy --print-master-key   # add to .env.run as TPROXY_MASTER_KEY
+npm install && npm run dev
+```
+
+Open http://127.0.0.1:28120/dashboard/ (password: `123123`).
+
+### Smoke test
+
+```bash
+source .env.run
 curl http://127.0.0.1:28120/healthz
 
 curl http://127.0.0.1:28120/v1/models \
@@ -251,7 +415,7 @@ npm install -g @ktvdung1606/tproxy
 tproxy --config config.yaml
 ```
 
-The npm package ships a CLI wrapper and default config. Place a built `tproxy` binary next to the package, or run from a local clone with `go run ./cmd/tproxy`. See [`npm/README.md`](npm/README.md).
+See [Option E — npm global wrapper](#option-e--npm-global-wrapper) and [`npm/README.md`](npm/README.md) for details.
 
 ---
 

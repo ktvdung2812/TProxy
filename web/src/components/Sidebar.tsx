@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "./ui";
-import { isRouteActive, NAV_SECTIONS } from "../navigation";
+import { NAV_SECTIONS, isRouteActive } from "../navigation";
+import { UpdateNotice } from "./UpdateNotice";
 
 type SidebarProps = {
   onClose?: () => void;
@@ -9,10 +10,11 @@ type SidebarProps = {
   onToggleCollapse?: () => void;
   collapseLabel?: string;
   onLogout?: () => void;
+  secret?: string;
 };
 
 /** Vibrancy sidebar with macOS traffic lights, gradient brand logo, grouped nav, status. */
-export function Sidebar({ onClose, online = true, collapsed = false, onToggleCollapse, collapseLabel, onLogout }: SidebarProps) {
+export function Sidebar({ onClose, online = true, collapsed = false, onToggleCollapse, collapseLabel, onLogout, secret = "" }: SidebarProps) {
   return (
     <aside className={cn("sidebar bg-vibrancy", collapsed && "is-collapsed")}>
       <div className="sidebar-header">
@@ -50,6 +52,7 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
             </button>
           )}
         </div>
+        {secret ? <UpdateNotice secret={secret} collapsed={collapsed} /> : null}
       </div>
 
       <nav className="sidebar-nav custom-scrollbar">
