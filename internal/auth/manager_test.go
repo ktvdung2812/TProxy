@@ -69,7 +69,7 @@ func TestBrowserPKCEStateSingleUseAndEncryptedToken(t *testing.T) {
 	if state == "" || expectedChallenge == "" || parsed.Query().Get("code_verifier") != "" {
 		t.Fatalf("invalid authorization URL: %s", started.AuthorizationURL)
 	}
-	completed, err := manager.CompleteCallback(context.Background(), state, "accepted-code")
+	completed, err := manager.CompleteCallback(context.Background(), state, "accepted-code", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestBrowserPKCEStateSingleUseAndEncryptedToken(t *testing.T) {
 	if tokenCalls.Load() != 1 {
 		t.Fatalf("token calls = %d", tokenCalls.Load())
 	}
-	if _, err = manager.CompleteCallback(context.Background(), state, "accepted-code"); Code(err) != "invalid_state" {
+	if _, err = manager.CompleteCallback(context.Background(), state, "accepted-code", ""); Code(err) != "invalid_state" {
 		t.Fatalf("reused callback error = %v code=%s", err, Code(err))
 	}
 	if tokenCalls.Load() != 1 {
@@ -314,7 +314,7 @@ func TestBrowserOnlyDiscoveryDoesNotRequireDeviceEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	authorization, _ := url.Parse(started.AuthorizationURL)
-	if _, err = manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "discovery-code"); err != nil {
+	if _, err = manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "discovery-code", ""); err != nil {
 		t.Fatal(err)
 	}
 	if tokenCalls.Load() != 1 {
@@ -358,7 +358,7 @@ func TestCancelledBrowserFlowCannotPersistCredential(t *testing.T) {
 	authorization, _ := url.Parse(started.AuthorizationURL)
 	result := make(chan error, 1)
 	go func() {
-		_, callbackErr := manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "cancelled-code")
+		_, callbackErr := manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "cancelled-code", "")
 		result <- callbackErr
 	}()
 	select {
@@ -816,7 +816,7 @@ func TestJSONTokenExchangeIncludesState(t *testing.T) {
 	}
 	authorization, _ := url.Parse(started.AuthorizationURL)
 	state := authorization.Query().Get("state")
-	if _, err = manager.CompleteCallback(context.Background(), state, "json-code#"+state); err != nil {
+	if _, err = manager.CompleteCallback(context.Background(), state, "json-code#"+state, ""); err != nil {
 		t.Fatal(err)
 	}
 	if received["grant_type"] != "authorization_code" || received["state"] != state || received["code"] != "json-code" {
@@ -1129,7 +1129,7 @@ func TestAntigravityBrowserOAuthEnrichesCredentialAndPreservesProjectOnRefresh(t
 	if authorization.Query().Get("access_type") != "offline" || authorization.Query().Get("prompt") != "consent" || authorization.Query().Get("code_challenge") == "" {
 		t.Fatalf("authorization URL = %s", started.AuthorizationURL)
 	}
-	if _, err = manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "google-code"); err != nil {
+	if _, err = manager.CompleteCallback(context.Background(), authorization.Query().Get("state"), "google-code", ""); err != nil {
 		t.Fatal(err)
 	}
 	provider, _ := dataStore.Provider(context.Background(), "antigravity")

@@ -294,10 +294,13 @@ export function cancelOAuth(secret: string, sessionId: string) {
   );
 }
 
-export function completeOAuthCallback(secret: string, code: string, state?: string) {
+export function completeOAuthCallback(secret: string, code: string, state?: string, sessionId?: string) {
   const params = new URLSearchParams({ code });
   if (state) {
     params.set("state", state);
+  }
+  if (sessionId) {
+    params.set("session_id", sessionId);
   }
   return adminFetch<OAuthSessionStatus>(secret, `/api/admin/oauth/callback?${params.toString()}`, "GET");
 }

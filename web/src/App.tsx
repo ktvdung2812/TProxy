@@ -408,6 +408,7 @@ function App() {
           collapseLabel={sidebarCollapseLabel}
           onClose={() => setMobileNavOpen(false)}
           onLogout={logout}
+          secret={secret}
         />
       </div>
 

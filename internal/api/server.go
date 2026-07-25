@@ -1533,6 +1533,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminDashboardPassword(w, r)
 	case "/api/admin/settings/gateway":
 		s.adminGatewaySettings(w, r)
+	case "/api/admin/version":
+		s.adminVersion(w, r)
 	case "/api/admin/import/9router":
 		s.adminImport9router(w, r)
 	case "/api/admin/ninerouter/presets":
@@ -2859,6 +2861,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, code, providerError := oauthCallbackValues(r)
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
 	if providerError != "" {
 		_, err := s.auth.RejectCallback(state, providerError)
 		if err != nil {
@@ -2868,7 +2871,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "oauth_authorization_rejected", "OAuth authorization was rejected", useClientRequestID(r))
 		return
 	}
-	result, err := s.auth.CompleteCallback(r.Context(), state, code)
+	result, err := s.auth.CompleteCallback(r.Context(), state, code, sessionID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, auth.Code(err), err.Error(), useClientRequestID(r))
 		return
