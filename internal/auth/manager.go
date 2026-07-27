@@ -287,6 +287,9 @@ func (m *Manager) resolveOAuthConfig(ctx context.Context, provider store.Provide
 		return nil, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
 	resolved := *provider.OAuth
+	if provider.Type == "claude" {
+		config.NormalizeClaudeOAuth(&resolved)
+	}
 	if strings.TrimSpace(resolved.DiscoveryURL) == "" {
 		return &resolved, nil
 	}
@@ -419,9 +422,9 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		if oauthConfig.AuthorizationURL == "" && !usesCustomBrowserOAuth(provider.Type) {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("browser OAuth requires authorization-url")}
 		}
-		redirectURL := strings.TrimSpace(oauthConfig.RedirectURL)
+		redirectURL := strings.TrimSpace(request.RedirectURL)
 		if redirectURL == "" {
-			redirectURL = strings.TrimSpace(request.RedirectURL)
+			redirectURL = strings.TrimSpace(oauthConfig.RedirectURL)
 		}
 		if redirectURL == "" {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("OAuth redirect URL is required")}
@@ -454,6 +457,8 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 				return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("GitLab OAuth requires gitlab_client_id in provider config")}
 			}
 			response.AuthorizationURL = gitlabAuthorizationURL(gitlabCfg, redirectURL, item.state, pkceChallenge(verifier))
+		case "claude":
+			response.AuthorizationURL = claudeAuthorizationURL(item.state, verifier, redirectURL, m.clientID(*oauthConfig), oauthConfig.Scopes)
 		default:
 			response.AuthorizationURL = authorizationURL(*oauthConfig, item.state, verifier, redirectURL, m.clientID(*oauthConfig))
 		}

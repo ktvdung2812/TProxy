@@ -996,6 +996,30 @@ func newStore(t *testing.T, cfg *config.Config) *store.Store {
 	return dataStore
 }
 
+func TestResolveCodexBareInternalModel(t *testing.T) {
+	dataStore := newStore(t, &config.Config{
+		Providers: []config.ProviderConfig{
+			{
+				ID:      "codex",
+				Type:    "codex",
+				Enabled: true,
+				Credentials: []config.CredentialConfig{{
+					ID:       "codex-cred",
+					AuthType: "none",
+				}},
+			},
+		},
+	})
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "codex-auto-review", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.ID != "codex:codex-auto-review" {
+		t.Fatalf("model id=%s", model.ID)
+	}
+}
+
 func TestResolveAutoModelPrefersFastCodingModel(t *testing.T) {
 	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

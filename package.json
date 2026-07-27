@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "bash scripts/free-ports.sh && concurrently -k -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev": "bash scripts/free-ports.sh && concurrently -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
     "dev:web": "bash scripts/wait-for-backend.sh && npm --prefix web run dev",
     "dev:backend": "bash scripts/dev-backend.sh",
     "build": "node scripts/sync-version.mjs && npm --prefix web run build && go build -o bin/tproxy ./cmd/tproxy",

@@ -48,6 +48,7 @@ export default defineConfig({
     },
     proxy: {
       "/api": { target: backend, changeOrigin: true },
+      "/callback": { target: backend, changeOrigin: true },
       "/healthz": { target: backend, changeOrigin: true },
       "/v1": { target: backend, changeOrigin: true },
       "/v1beta": { target: backend, changeOrigin: true },
