@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -75,6 +76,9 @@ func (s *Service) StopBackground() {
 }
 
 func (s *Service) runDeferredStartup(ctx context.Context) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TPROXY_SKIP_TUNNEL_AUTO")), "1") {
+		return
+	}
 	settings, err := s.settings.LoadSettings(ctx)
 	if err != nil {
 		log.Printf("[tunnel] startup settings load failed: %v", err)

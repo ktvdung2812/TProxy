@@ -285,6 +285,34 @@ func TestOAuthExtraParamsCannotOverrideProtocolFields(t *testing.T) {
 	}
 }
 
+func TestClaudeAuthorizationURLUsesCodeFlowScopes(t *testing.T) {
+	authorization := claudeAuthorizationURL(
+		"oauth_state_test",
+		"verifier-test",
+		"http://localhost:28120/callback",
+		"client-id",
+		config.ClaudeOAuthScopes(),
+	)
+	parsed, err := url.Parse(authorization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("code") != "true" {
+		t.Fatalf("Claude authorize URL must include code=true: %s", authorization)
+	}
+	if query.Get("response_type") != "code" || query.Get("code_challenge") == "" {
+		t.Fatalf("authorize URL missing PKCE fields: %s", authorization)
+	}
+	wantScope := "org:create_api_key user:profile user:inference"
+	if query.Get("scope") != wantScope {
+		t.Fatalf("unexpected scope: %q", query.Get("scope"))
+	}
+	if query.Get("redirect_uri") != "http://localhost:28120/callback" {
+		t.Fatalf("unexpected redirect_uri: %q", query.Get("redirect_uri"))
+	}
+}
+
 func TestBrowserOnlyDiscoveryDoesNotRequireDeviceEndpoint(t *testing.T) {
 	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
 	var tokenCalls atomic.Int32

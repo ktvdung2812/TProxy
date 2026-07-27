@@ -157,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 	// browser. This exact callback route relies on opaque, single-use state; the
 	// rest of the admin subtree remains behind management authentication.
 	mux.HandleFunc("/api/admin/oauth/callback", s.oauthCallback)
+	mux.HandleFunc("/callback", s.browserOAuthCallback)
 	mux.Handle("/api/admin/", s.managementAuth(http.HandlerFunc(s.admin)))
 
 	proxy := s.clientAuth(http.HandlerFunc(s.proxyIngress))
@@ -2835,16 +2836,25 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 		return
 	}
-	if request.RedirectURL == "" {
-		provider, providerErr := s.store.Provider(r.Context(), request.ProviderID)
-		hasConfiguredRedirect := providerErr == nil && provider.OAuth != nil && strings.TrimSpace(provider.OAuth.RedirectURL) != ""
-		if !hasConfiguredRedirect && security.IsLoopback(r) {
-			callbackURL, callbackErr := defaultOAuthCallbackURL(r)
+	provider, providerErr := s.store.Provider(r.Context(), request.ProviderID)
+	if providerErr == nil && security.IsLoopback(r) {
+		if provider.Type == "claude" {
+			callbackURL, callbackErr := loopbackBrowserOAuthCallbackURL(r)
 			if callbackErr != nil {
 				writeError(w, http.StatusBadRequest, "oauth_configuration_invalid", callbackErr.Error(), useClientRequestID(r))
 				return
 			}
 			request.RedirectURL = callbackURL
+		} else if request.RedirectURL == "" {
+			hasConfiguredRedirect := provider.OAuth != nil && strings.TrimSpace(provider.OAuth.RedirectURL) != ""
+			if !hasConfiguredRedirect {
+				callbackURL, callbackErr := defaultOAuthCallbackURL(r)
+				if callbackErr != nil {
+					writeError(w, http.StatusBadRequest, "oauth_configuration_invalid", callbackErr.Error(), useClientRequestID(r))
+					return
+				}
+				request.RedirectURL = callbackURL
+			}
 		}
 	}
 	result, err := s.auth.StartAuthorization(r.Context(), request)
@@ -2878,6 +2888,26 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.router.SyncProviderHealth(r.Context(), result.ProviderID)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) browserOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	state, code, providerError := oauthCallbackValues(r)
+	if providerError != "" {
+		_, _ = s.auth.RejectCallback(state, providerError)
+		writeBrowserOAuthPage(w, http.StatusBadRequest, "Authorization failed", providerError)
+		return
+	}
+	result, err := s.auth.CompleteCallback(r.Context(), state, code, "")
+	if err != nil {
+		writeBrowserOAuthPage(w, http.StatusBadRequest, "Authorization failed", err.Error())
+		return
+	}
+	_ = s.router.SyncProviderHealth(r.Context(), result.ProviderID)
+	writeBrowserOAuthPage(w, http.StatusOK, "Authorization complete", "The credential is ready. This window will close in a few seconds.")
 }
 
 func (s *Server) oauthStatus(w http.ResponseWriter, r *http.Request) {
@@ -2947,6 +2977,45 @@ func defaultOAuthCallbackURL(r *http.Request) (string, error) {
 		scheme = forwarded
 	}
 	return scheme + "://" + host + "/api/admin/oauth/callback", nil
+}
+
+func loopbackBrowserOAuthCallbackURL(r *http.Request) (string, error) {
+	host, err := loopbackCallbackHost(r.Host)
+	if err != nil {
+		return "", err
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	} else if forwarded := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); forwarded != "" {
+		if forwarded != "http" && forwarded != "https" {
+			return "", errors.New("OAuth callback forwarded scheme must be http or https")
+		}
+		scheme = forwarded
+	}
+	return scheme + "://" + host + "/callback", nil
+}
+
+func writeBrowserOAuthPage(w http.ResponseWriter, status int, title, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>%s</title>
+</head>
+<body>
+<h1>%s</h1>
+<p>%s</p>
+<script>window.setTimeout(function(){window.close()},3000)</script>
+</body>
+</html>`, htmlEscape(title), htmlEscape(title), htmlEscape(message))
+}
+
+func htmlEscape(value string) string {
+	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return replacer.Replace(value)
 }
 
 func loopbackCallbackHost(raw string) (string, error) {

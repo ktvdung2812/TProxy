@@ -1664,6 +1664,87 @@ func (s *Store) Providers(ctx context.Context) ([]Provider, error) {
 	return items, rows.Err()
 }
 
+// MigrateClaudeOAuthConfigs rewrites legacy Claude OAuth scopes stored in SQLite.
+func (s *Store) MigrateClaudeOAuthConfigs(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, config_json FROM providers WHERE type='claude'`)
+	if err != nil {
+		return 0, err
+	}
+	type claudeRow struct {
+		id          string
+		rawConfig   string
+	}
+	pending := make([]claudeRow, 0, 4)
+	for rows.Next() {
+		var row claudeRow
+		if err := rows.Scan(&row.id, &row.rawConfig); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	for _, row := range pending {
+		var stored struct {
+			OAuth        *config.OAuthConfig `json:"oauth"`
+			ProxyPoolIDs []string            `json:"proxy_pool_ids"`
+			Config       map[string]any      `json:"config"`
+			Limits       config.LimitPolicy  `json:"limits"`
+		}
+		if strings.TrimSpace(row.rawConfig) != "" {
+			_ = json.Unmarshal([]byte(row.rawConfig), &stored)
+		}
+		if stored.OAuth == nil {
+			stored.OAuth = &config.OAuthConfig{}
+		}
+		beforeScopes := append([]string(nil), stored.OAuth.Scopes...)
+		beforeCode := ""
+		if stored.OAuth.ExtraAuthParams != nil {
+			beforeCode = stored.OAuth.ExtraAuthParams["code"]
+		}
+		beforeRedirect := strings.TrimSpace(stored.OAuth.RedirectURL)
+		beforeListen := stored.OAuth.ListenForCallback
+		config.NormalizeClaudeOAuth(stored.OAuth)
+		afterCode := stored.OAuth.ExtraAuthParams["code"]
+		if stringSlicesEqual(beforeScopes, stored.OAuth.Scopes) && beforeCode == afterCode && beforeRedirect == strings.TrimSpace(stored.OAuth.RedirectURL) && beforeListen == stored.OAuth.ListenForCallback {
+			continue
+		}
+		encoded, err := json.Marshal(map[string]any{
+			"oauth":          stored.OAuth,
+			"proxy_pool_ids": stored.ProxyPoolIDs,
+			"config":         stored.Config,
+			"limits":         stored.Limits,
+		})
+		if err != nil {
+			return updated, err
+		}
+		if _, err = s.db.ExecContext(ctx, `UPDATE providers SET config_json=?, updated_at=? WHERE id=?`, string(encoded), time.Now().UTC().Format(time.RFC3339Nano), row.id); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Store) OAuthCredentials(ctx context.Context) ([]ProviderCredential, error) {
 	providers, err := s.Providers(ctx)
 	if err != nil {
@@ -1726,6 +1807,12 @@ func decodeProviderConfig(raw string, provider *Provider) {
 		provider.ProxyPoolIDs = stored.ProxyPoolIDs
 		provider.Config = stored.Config
 		provider.Limits = stored.Limits
+	}
+	if provider.Type == "claude" {
+		if provider.OAuth == nil {
+			provider.OAuth = &config.OAuthConfig{}
+		}
+		config.NormalizeClaudeOAuth(provider.OAuth)
 	}
 }
 

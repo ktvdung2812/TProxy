@@ -114,6 +114,11 @@ func run() error {
 	if err = dataStore.Seed(context.Background(), cfg); err != nil {
 		return err
 	}
+	if migrated, err := dataStore.MigrateClaudeOAuthConfigs(context.Background()); err != nil {
+		log.Printf("warning: migrate Claude OAuth configs: %v", err)
+	} else if migrated > 0 {
+		log.Printf("migrated Claude OAuth config for %d provider(s)", migrated)
+	}
 	if err = dataStore.RecordConfigVersion(context.Background(), "startup", cfg); err != nil {
 		log.Printf("warning: record startup config version: %v", err)
 	}

@@ -417,18 +417,11 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		if provider.OAuth == nil {
 			provider.OAuth = &OAuthConfig{}
 		}
-		setOAuthDefault(provider.OAuth, "https://claude.ai/oauth/authorize", "https://api.anthropic.com/v1/oauth/token", "9d1c250a-e61b-44d9-88ed-5944d1962f5e", "http://localhost:54545/callback")
-		if len(provider.OAuth.Scopes) == 0 {
-			provider.OAuth.Scopes = []string{"user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"}
-		}
-		if provider.OAuth.ExtraAuthParams == nil {
-			provider.OAuth.ExtraAuthParams = map[string]string{"code": "true"}
-		} else if _, exists := provider.OAuth.ExtraAuthParams["code"]; !exists {
-			provider.OAuth.ExtraAuthParams["code"] = "true"
-		}
+		setOAuthDefault(provider.OAuth, "https://claude.ai/oauth/authorize", "https://api.anthropic.com/v1/oauth/token", "9d1c250a-e61b-44d9-88ed-5944d1962f5e", "")
+		NormalizeClaudeOAuth(provider.OAuth)
 		provider.OAuth.TokenRequestFormat = "json"
 		provider.OAuth.IncludeStateInToken = true
-		provider.OAuth.ListenForCallback = true
+		provider.OAuth.ListenForCallback = false
 		if provider.OAuth.RefreshSafetyWindow == "" {
 			provider.OAuth.RefreshSafetyWindow = "4h"
 		}
@@ -759,6 +752,55 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 			provider.BaseURL = "https://aiplatform.googleapis.com"
 		}
 	}
+}
+
+var claudeOAuthScopes = []string{
+	"org:create_api_key",
+	"user:profile",
+	"user:inference",
+}
+
+// ClaudeOAuthScopes returns the canonical Claude OAuth scopes (9router-compatible).
+func ClaudeOAuthScopes() []string {
+	return append([]string(nil), claudeOAuthScopes...)
+}
+
+// NormalizeClaudeOAuth aligns stored Claude OAuth settings with the dashboard browser flow.
+func NormalizeClaudeOAuth(oauth *OAuthConfig) {
+	if oauth == nil {
+		return
+	}
+	if len(oauth.Scopes) == 0 || claudeOAuthScopesDiffer(oauth.Scopes) {
+		oauth.Scopes = ClaudeOAuthScopes()
+	}
+	if oauth.ExtraAuthParams == nil {
+		oauth.ExtraAuthParams = map[string]string{}
+	}
+	if _, exists := oauth.ExtraAuthParams["code"]; !exists {
+		oauth.ExtraAuthParams["code"] = "true"
+	}
+	if strings.TrimSpace(oauth.RedirectURL) == "http://localhost:54545/callback" {
+		oauth.RedirectURL = ""
+	}
+	oauth.ListenForCallback = false
+}
+
+func claudeOAuthScopesDiffer(scopes []string) bool {
+	canonical := claudeOAuthScopes
+	if len(scopes) != len(canonical) {
+		return true
+	}
+	for i := range scopes {
+		if scopes[i] != canonical[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// UsesLegacyClaudeOAuthScopes reports non-canonical Claude OAuth scope sets stored in older configs.
+func UsesLegacyClaudeOAuthScopes(scopes []string) bool {
+	return claudeOAuthScopesDiffer(scopes)
 }
 
 func setOAuthDefault(oauth *OAuthConfig, authorizationURL, tokenURL, clientID, redirectURL string) {

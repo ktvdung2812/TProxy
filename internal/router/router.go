@@ -337,6 +337,9 @@ func (r *Router) Resolve(ctx context.Context, requested string, apiKey *store.AP
 			model, err = r.store.ResolveUpstreamModel(ctx, requested)
 		}
 		if errors.Is(err, sql.ErrNoRows) {
+			model, err = r.resolveCodexBareModel(ctx, requested)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("model_not_found: %s", requested)
 		}
 		if err != nil {
@@ -344,12 +347,34 @@ func (r *Router) Resolve(ctx context.Context, requested string, apiKey *store.AP
 		}
 	}
 	if model == nil {
-		return nil, fmt.Errorf("model_not_found: %s", requested)
+		if model, err = r.resolveCodexBareModel(ctx, requested); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("model_not_found: %s", requested)
+			}
+			return nil, err
+		}
 	}
 	if !r.store.PublicModelAllowed(apiKey, model.ID) {
 		return nil, fmt.Errorf("model_forbidden: %s", model.ID)
 	}
 	return model, nil
+}
+
+// resolveCodexBareModel routes Codex-internal upstream slugs (e.g. codex-auto-review)
+// that the CLI calls without a provider prefix when approvals_reviewer=auto_review.
+func (r *Router) resolveCodexBareModel(ctx context.Context, requested string) (*store.PublicModel, error) {
+	if !isCodexBareUpstreamModel(requested) {
+		return nil, sql.ErrNoRows
+	}
+	return r.resolveDirectProviderModel(ctx, "codex", strings.TrimSpace(requested))
+}
+
+func isCodexBareUpstreamModel(requested string) bool {
+	trimmed := strings.TrimSpace(requested)
+	if trimmed == "" || strings.Contains(trimmed, ":") {
+		return false
+	}
+	return strings.HasPrefix(trimmed, "codex-")
 }
 
 func splitProviderModelSelector(requested string) (providerPrefix, alias string, ok bool) {

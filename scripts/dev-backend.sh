@@ -31,6 +31,7 @@ awk -v backend_port="${BACKEND_PORT}" '
 ' config.yaml > .config.dev.yaml
 
 export TPROXY_PUBLIC_PORT="${PUBLIC_PORT}"
+export TPROXY_SKIP_TUNNEL_AUTO=1
 
 echo "tproxy dev backend → http://127.0.0.1:${BACKEND_PORT}"
 echo "public entry (dashboard + API) → http://127.0.0.1:${PUBLIC_PORT}"
