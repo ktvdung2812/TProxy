@@ -104,7 +104,7 @@ func TestModelsDiscoveryURL(t *testing.T) {
 		{
 			name: "clinepass",
 			p:    store.Provider{ID: "clinepass", Type: "clinepass", BaseURL: "https://api.cline.bot/api/v1"},
-			want: "https://api.cline.bot/api/v1/ai/cline/models",
+			want: "https://api.cline.bot/api/v1/models",
 		},
 	}
 	for _, tc := range cases {
@@ -119,7 +119,7 @@ func TestModelsDiscoveryURL(t *testing.T) {
 func TestShouldSkipModelDiscovery(t *testing.T) {
 	skip := []store.Provider{
 		{ID: "commandcode", Type: "openai-compatible", BaseURL: "https://api.commandcode.ai/alpha/generate"},
-		{ID: "perplexity-web", Type: "openai-compatible", BaseURL: "https://www.perplexity.ai/rest/sse/perplexity_ask"},
+		{ID: "perplexity-web", Type: "perplexity-web", BaseURL: "https://www.perplexity.ai/rest/sse/perplexity_ask"},
 		{ID: "kiro", Type: "kiro", BaseURL: "https://runtime.us-east-1.kiro.dev/generateAssistantResponse"},
 		{ID: "cursor", Type: "cursor", BaseURL: "https://api2.cursor.sh"},
 		{ID: "minimax", Type: "anthropic-compatible", BaseURL: "https://api.minimax.io/anthropic"},

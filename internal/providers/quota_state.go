@@ -40,10 +40,14 @@ func quotaKeyAffectsRouting(providerType, key string) bool {
 }
 
 // QuotaAtZero reports whether routing quota is fully depleted (0% left).
+// A credential is depleted only when every routing-relevant window is empty.
+// Multi-window providers (e.g. Grok monthly + prepaid) stay routable while any
+// window still has remaining capacity.
 func QuotaAtZero(quota CredentialQuota) bool {
 	if len(quota.Quotas) == 0 {
 		return false
 	}
+	hasRoutingWindow := false
 	for key, entry := range quota.Quotas {
 		if !quotaKeyAffectsRouting(quota.ProviderType, key) {
 			continue
@@ -51,9 +55,10 @@ func QuotaAtZero(quota CredentialQuota) bool {
 		if entry.Unlimited || entry.Total <= 0 {
 			continue
 		}
-		if QuotaEntryRemainingPercent(entry) <= QuotaDepletedAutoDisableThreshold {
-			return true
+		hasRoutingWindow = true
+		if QuotaEntryRemainingPercent(entry) > QuotaDepletedAutoDisableThreshold {
+			return false
 		}
 	}
-	return false
+	return hasRoutingWindow
 }

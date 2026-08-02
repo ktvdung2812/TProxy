@@ -3128,7 +3128,56 @@ button:disabled,
 .mapping-card-head p { margin: 4px 0 0; font-size: 12px; color: var(--color-text-muted); }
 .mapping-tier-grid { display: grid; gap: 12px; margin-top: 12px; }
 .mapping-tier-row { display: grid; gap: 6px; }
-.mapping-tier-controls { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 8px; align-items: center; }
+.mapping-tier-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 132px); gap: 8px; align-items: center; }
+.mapping-tier-controls:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+.mapping-cursor-catalog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.mapping-cursor-discovery-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-warning, #b45309);
+  line-height: 1.4;
+}
+.mapping-cursor-add-form {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-muted, color-mix(in srgb, var(--color-surface) 92%, var(--color-border)));
+}
+.mapping-cursor-add-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.mapping-cursor-field { display: grid; gap: 6px; min-width: 0; }
+.mapping-cursor-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mapping-cursor-field-target { min-width: 0; }
+.mapping-cursor-arrow {
+  align-self: center;
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+.mapping-cursor-rows { margin-top: 14px; }
+@media (max-width: 900px) {
+  .mapping-cursor-add-fields {
+    grid-template-columns: 1fr;
+  }
+  .mapping-cursor-arrow { display: none; }
+}
 .mapping-tier-effort { width: 100%; }
 .mapping-combobox { position: relative; min-width: 0; }
 .mapping-combobox-input { width: 100%; }
@@ -3774,6 +3823,7 @@ button:disabled,
 
 /* Connection row (credential in detail) */
 .connection-row {
+  position: relative;
   display: grid;
   grid-template-columns: auto auto 1fr auto;
   gap: 12px;
@@ -3835,6 +3885,19 @@ button:disabled,
   gap: 8px;
   flex-wrap: wrap;
 }
+.connections-add-bar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.connections-add-bar--top {
+  margin-top: 0;
+  margin-bottom: 12px;
+  padding-top: 0;
+  padding-bottom: 12px;
+  border-top: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
 .connection-row.is-enabled .connection-label {
   font-weight: 700;
   color: var(--color-text-main);
@@ -3846,8 +3909,12 @@ button:disabled,
   font-weight: 500;
   color: var(--color-text-muted);
 }
+.connection-row.is-disabled .connection-label-index {
+  color: var(--color-text-subtle);
+}
 .connection-row.is-disabled .connection-sub,
-.connection-row.is-disabled .connection-auth-icon {
+.connection-row.is-disabled .connection-auth-icon,
+.connection-row.is-disabled .connection-plan-badge--fallback {
   color: var(--color-text-subtle);
 }
 
@@ -3896,15 +3963,70 @@ button:disabled,
 
 .connection-row-test-ok { border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border-subtle)); }
 .connection-row-test-error { border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border-subtle)); }
-.connection-auth-icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border-radius: 8px;
-  background: var(--color-surface-2); color: var(--color-text-muted);
+.connection-auth-icon,
+.connection-plan-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
   flex-shrink: 0;
 }
-.connection-auth-icon .material-symbols-outlined { font-size: 18px; }
+.connection-plan-badge {
+  width: auto;
+  min-width: 32px;
+  max-width: 64px;
+  padding: 0 6px;
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.05;
+  text-align: center;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+.connection-plan-badge--fallback {
+  color: var(--color-text-muted);
+}
+.connection-auth-icon .material-symbols-outlined,
+.connection-plan-badge--fallback .material-symbols-outlined {
+  font-size: 18px;
+}
+.connection-plan-badge-loading {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.connection-row.is-disabled .connection-plan-badge:not(.connection-plan-badge--fallback) {
+  opacity: 0.72;
+}
 .connection-main { min-width: 0; }
-.connection-label { font-size: 14px; font-weight: 600; color: var(--color-text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-updated-at {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.01em;
+}
+.connection-row.has-updated-at .connection-main {
+  padding-right: 112px;
+}
+.connection-row.is-disabled .connection-updated-at {
+  color: var(--color-text-subtle);
+}
+.connection-label { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 14px; font-weight: 600; color: var(--color-text-main); }
+.connection-label-index { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.02em; }
+.connection-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-sub { font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-error { font-size: 12px; color: var(--color-danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 .connection-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

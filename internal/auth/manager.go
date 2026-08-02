@@ -139,12 +139,13 @@ func IsPermanent(err error) bool {
 }
 
 type session struct {
-	mu             sync.Mutex
-	id             string
-	providerID     string
-	credentialID   string
-	label          string
-	email          string
+	mu                 sync.Mutex
+	id                 string
+	providerID         string
+	credentialID       string
+	explicitCredential bool
+	label              string
+	email              string
 	mode           string
 	state          string
 	verifier       string
@@ -411,12 +412,17 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("OAuth mode must be browser or device")}
 	}
 	credentialID := strings.TrimSpace(request.CredentialID)
+	explicitCredential := credentialID != ""
 	if credentialID == "" {
 		credentialID = security.NewID("oauth_cred_")
 	}
 	sessionID := security.NewID("oauth_session_")
 	expiresAt := m.now().Add(defaultSessionTTL)
-	item := &session{id: sessionID, providerID: provider.ID, credentialID: credentialID, label: request.Label, email: request.Email, mode: mode, expiresAt: expiresAt, status: "pending", interval: 5 * time.Second, cancel: make(chan struct{})}
+	item := &session{
+		id: sessionID, providerID: provider.ID, credentialID: credentialID, explicitCredential: explicitCredential,
+		label: request.Label, email: request.Email, mode: mode, expiresAt: expiresAt, status: "pending",
+		interval: 5 * time.Second, cancel: make(chan struct{}),
+	}
 	response := StartResponse{SessionID: sessionID, ProviderID: provider.ID, CredentialID: credentialID, Mode: mode, ExpiresAt: expiresAt}
 	if mode == "browser" {
 		if oauthConfig.AuthorizationURL == "" && !usesCustomBrowserOAuth(provider.Type) {
@@ -703,7 +709,7 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	}
 	item.status = "consumed"
 	item.consumedAt = m.now()
-	providerID, credentialID, verifier, redirectURL, expectedState := item.providerID, item.credentialID, item.verifier, item.redirectURL, item.state
+	providerID, _, verifier, redirectURL, expectedState := item.providerID, item.credentialID, item.verifier, item.redirectURL, item.state
 	label, email := item.label, item.email
 	item.mu.Unlock()
 
@@ -720,12 +726,21 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 		m.failSession(item, Code(err))
 		return m.statusFor(item), err
 	}
+	// Claude (and some Anthropic-style flows) return authorization codes as
+	// "code#state". Prefer the embedded state for the token exchange body —
+	// matching 9router / Claude Code / CLIProxyAPI — while still rejecting a
+	// mismatch against the session state when both are present.
+	tokenState := expectedState
 	if parts := strings.SplitN(code, "#", 2); len(parts) == 2 {
-		if parts[1] != "" && parts[1] != expectedState {
-			m.failSession(item, "invalid_state")
-			return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+		codeState := strings.TrimSpace(parts[1])
+		code = strings.TrimSpace(parts[0])
+		if codeState != "" {
+			if expectedState != "" && codeState != expectedState {
+				m.failSession(item, "invalid_state")
+				return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
+			}
+			tokenState = codeState
 		}
-		code = parts[0]
 	}
 	var token store.OAuthToken
 	switch provider.Type {
@@ -739,7 +754,7 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 		gitlabCfg := gitlabOAuthFromProvider(*provider, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
 		token, err = m.exchangeGitlabCode(ctx, gitlabCfg, code, redirectURL, verifier)
 	default:
-		token, err = m.exchangeCode(ctx, *oauthConfig, code, expectedState, verifier, redirectURL)
+		token, err = m.exchangeCode(ctx, *oauthConfig, code, tokenState, verifier, redirectURL)
 	}
 	if err != nil {
 		m.failSession(item, Code(err))
@@ -753,7 +768,7 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	if !m.beginSessionCommit(item, "consumed") {
 		return m.statusFor(item), &Error{code: "invalid_state", permanent: true}
 	}
-	if err = m.store.SaveOAuthCredential(ctx, providerID, credentialID, label, email, token); err != nil {
+	if err = m.saveOAuthCredentialFromLogin(ctx, item, providerID, label, email, token); err != nil {
 		m.failSession(item, "oauth_credential_save_failed")
 		return m.statusFor(item), err
 	}
@@ -1181,7 +1196,7 @@ func (m *Manager) pollDevice(item *session) {
 			if !m.beginSessionCommit(item, "polling") {
 				return
 			}
-			if err = m.store.SaveOAuthCredential(m.rootCtx, providerID, item.credentialID, label, email, token); err != nil {
+			if err = m.saveOAuthCredentialFromLogin(m.rootCtx, item, providerID, label, email, token); err != nil {
 				m.failSession(item, "oauth_credential_save_failed")
 				return
 			}
@@ -1441,6 +1456,10 @@ func parseToken(data []byte, now time.Time) (store.OAuthToken, error) {
 			token.Extra[key] = value
 		}
 	}
+	// Claude token responses embed account.email_address (no id_token).
+	if email := claudeAccountEmail(raw); email != "" {
+		token.Extra["email"] = email
+	}
 	if idToken := stringValue(raw["id_token"]); idToken != "" {
 		if claims := parseJWTClaims(idToken); claims != nil {
 			if email := stringValue(claims["email"]); email != "" {
@@ -1476,6 +1495,22 @@ func parseJWTClaims(token string) map[string]any {
 		return nil
 	}
 	return claims
+}
+
+// claudeAccountEmail extracts the login email from Anthropic Claude token JSON.
+func claudeAccountEmail(raw map[string]any) string {
+	if raw == nil {
+		return ""
+	}
+	if account, ok := raw["account"].(map[string]any); ok {
+		if email := strings.TrimSpace(stringValue(account["email_address"])); email != "" {
+			return email
+		}
+		if email := strings.TrimSpace(stringValue(account["email"])); email != "" {
+			return email
+		}
+	}
+	return ""
 }
 
 func authorizationURL(cfg config.OAuthConfig, state, verifier, redirectURL, clientID string) string {
@@ -1542,6 +1577,24 @@ func refreshWindow(cfg *config.OAuthConfig) time.Duration {
 		}
 	}
 	return defaultRefreshWindow
+}
+
+func (m *Manager) saveOAuthCredentialFromLogin(ctx context.Context, item *session, providerID, label, email string, token store.OAuthToken) error {
+	item.mu.Lock()
+	candidateID := item.credentialID
+	explicit := item.explicitCredential
+	item.mu.Unlock()
+	credentialID, err := m.store.OAuthCredentialIDForLogin(ctx, providerID, candidateID, email, explicit)
+	if err != nil {
+		return err
+	}
+	if existing, loadErr := m.store.CredentialByID(ctx, credentialID); loadErr == nil && existing.OAuthToken != nil {
+		mergeTokenExtra(&token, *existing.OAuthToken)
+	}
+	item.mu.Lock()
+	item.credentialID = credentialID
+	item.mu.Unlock()
+	return m.store.SaveOAuthCredential(ctx, providerID, credentialID, label, email, token)
 }
 
 func (m *Manager) clientID(cfg config.OAuthConfig) string {

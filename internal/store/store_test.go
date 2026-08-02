@@ -485,6 +485,112 @@ func TestEncryptedOAuthAuthBundleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestOAuthCredentialIDForLoginMergesByEmail(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "oauth-login.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "oauth-provider", Type: "openai-compatible", BaseURL: "http://127.0.0.1", Enabled: true}}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "existing-account", "Primary", "User@Example.com", OAuthToken{AccessToken: "old-access"}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := dataStore.OAuthCredentialIDForLogin(context.Background(), "oauth-provider", "oauth_cred_new", "user@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "existing-account" {
+		t.Fatalf("resolved credential id=%q", resolved)
+	}
+	explicit, err := dataStore.OAuthCredentialIDForLogin(context.Background(), "oauth-provider", "forced-account", "user@example.com", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit != "forced-account" {
+		t.Fatalf("explicit credential id=%q", explicit)
+	}
+}
+
+func TestSaveOAuthCredentialPreservesHistoryAndRemovesDuplicates(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "oauth-history.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "oauth-provider", Type: "openai-compatible", BaseURL: "http://127.0.0.1", Enabled: true}}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "keep-account", "Primary", "user@example.com", OAuthToken{AccessToken: "old-access", Extra: map[string]any{"machine_id": "machine-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.UpdateCredentialMetadata(context.Background(), "keep-account", map[string]any{"notes": "keep-me"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = dataStore.db.ExecContext(context.Background(), `UPDATE credentials SET priority=7, weight=3, enabled=0, last_used_at=?, consecutive_use_count=4, created_at=? WHERE id=?`,
+		time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC).Format(time.RFC3339Nano),
+		time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		"keep-account"); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "duplicate-account", "Duplicate", "User@Example.com", OAuthToken{AccessToken: "dup-access"}); err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	if err = dataStore.AddUsage(context.Background(), UsageEvent{RequestID: "req-keep", CredentialID: "keep-account", ProviderID: "oauth-provider", CreatedAt: createdAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.AddUsage(context.Background(), UsageEvent{RequestID: "req-dup", CredentialID: "duplicate-account", ProviderID: "oauth-provider", CreatedAt: createdAt.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "keep-account", "", "user@example.com", OAuthToken{AccessToken: "new-access", RefreshToken: "new-refresh", TokenType: "Bearer", Extra: map[string]any{"account_id": "acct-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "oauth-provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 {
+		t.Fatalf("credentials=%+v", credentials)
+	}
+	credential := credentials[0]
+	if credential.ID != "keep-account" || credential.OAuthToken == nil || credential.OAuthToken.AccessToken != "new-access" {
+		t.Fatalf("credential=%+v", credential)
+	}
+	if credential.OAuthToken.Extra["machine_id"] != "machine-1" || credential.OAuthToken.Extra["account_id"] != "acct-1" {
+		t.Fatalf("merged token extra=%#v", credential.OAuthToken.Extra)
+	}
+	if credential.Metadata["notes"] != "keep-me" || credential.Priority != 7 || credential.Weight != 3 || !credential.Enabled == false || credential.ConsecutiveUseCount != 4 {
+		t.Fatalf("preserved fields=%+v", credential)
+	}
+	var usageCount int
+	if err = dataStore.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM usage_events WHERE credential_id='keep-account'`).Scan(&usageCount); err != nil {
+		t.Fatal(err)
+	}
+	if usageCount != 2 {
+		t.Fatalf("usage count=%d", usageCount)
+	}
+}
+
 func TestOAuthAuthBundleImportRejectsUnknownProviderAtomically(t *testing.T) {
 	key, err := security.GenerateMasterKey()
 	if err != nil {

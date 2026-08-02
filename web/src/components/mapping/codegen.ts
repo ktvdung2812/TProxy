@@ -212,3 +212,41 @@ export function buildDockerEnv(targets: Record<MappingTier, string>): string {
   }
   return `    environment:\n${lines.join("\n")}`;
 }
+
+export function buildCursorSetupGuide(
+  baseUrl: string,
+  apiKey: string,
+  overrides: Record<string, string>,
+): string {
+  const origin = baseUrl.replace(/\/v1\/?$/, "");
+  const mappings = Object.entries(overrides)
+    .filter(([, target]) => target.trim())
+    .sort(([left], [right]) => left.localeCompare(right));
+  const modelList =
+    mappings.length > 0
+      ? mappings.map(([source]) => `  - ${source}`).join("\n")
+      : "  - (add mappings on Mapping → Cursor first)";
+
+  return [
+    `# Cursor IDE → tproxy`,
+    `#`,
+    `# 1. Settings → Models → enable OpenAI API key`,
+    `# 2. Base URL (public/tunnel URL required — not localhost):`,
+    `#    ${origin}/v1`,
+    `# 3. API Key:`,
+    `#    ${apiKey || "your-tproxy-api-key"}`,
+    `# 4. Add Custom Models using the Cursor model IDs you mapped:`,
+    modelList,
+    `# 5. In chat, pick one of those custom models.`,
+    `#`,
+    `# tproxy rewrites each Cursor model ID using Mapping → Cursor, then routes`,
+    `# to the chosen virtual model / provider selector.`,
+    ``,
+    `OpenAI Base URL: ${origin}/v1`,
+    `OpenAI API Key:  ${apiKey || "your-tproxy-api-key"}`,
+    `Mapped models:`,
+    ...(mappings.length > 0
+      ? mappings.map(([source, target]) => `  ${source}  →  ${target}`)
+      : ["  (none yet)"]),
+  ].join("\n");
+}

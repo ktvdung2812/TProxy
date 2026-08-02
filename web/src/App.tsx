@@ -38,6 +38,7 @@ import { MappingView } from "./components/mapping/MappingView";
 import { ModelsView } from "./components/models/ModelsView";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
+import { SkillsView } from "./components/skills/SkillsView";
 import { LogsView } from "./components/logs/LogsView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { fetchAuditEvents, type AuditEvent } from "./components/logs/api";
@@ -475,6 +476,7 @@ function App() {
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/cli-tools" element={<CLIToolsPage />} />
               <Route path="/cli-tools/:toolId" element={<CLIToolDetailPage />} />
+              <Route path="/skills" element={<SkillsView />} />
               <Route path="/logs" element={<LogsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

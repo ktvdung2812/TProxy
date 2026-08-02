@@ -12,15 +12,11 @@ export function isLocalDashboardHost(): boolean {
 
 /** Default secret for the embedded dashboard on loopback during local development. */
 export function defaultManagementSecret(): string {
-  const fromRun = import.meta.env.VITE_TPROXY_MANAGEMENT_SECRET;
-  if (fromRun) return fromRun;
   return isLocalDashboardHost() ? DEV_MANAGEMENT_SECRET : "";
 }
 
 /** Default client API key for chat on loopback during local development. */
 export function defaultApiKey(): string {
-  const fromRun = import.meta.env.VITE_TPROXY_API_KEY;
-  if (fromRun) return fromRun;
   return isLocalDashboardHost() ? DEV_API_KEY : "";
 }
 

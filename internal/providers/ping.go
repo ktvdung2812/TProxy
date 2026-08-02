@@ -133,7 +133,16 @@ func (r *Registry) pingJSON(ctx context.Context, provider store.Provider, creden
 }
 
 func pingMaxTokens(provider store.Provider, modelID string) int {
-	if isGLMProvider(provider) || strings.Contains(strings.ToLower(modelID), "glm") {
+	lowerModel := strings.ToLower(modelID)
+	// Reasoning-heavy models often spend the first tokens on thinking; keep
+	// enough headroom so probe content (or reasoning) is non-empty.
+	if isGLMProvider(provider) ||
+		strings.Contains(lowerModel, "glm") ||
+		provider.Type == "cline" ||
+		provider.Type == "clinepass" ||
+		strings.Contains(lowerModel, "kimi") ||
+		strings.Contains(lowerModel, "claude") ||
+		strings.Contains(lowerModel, "deepseek") {
 		return 256
 	}
 	return 16

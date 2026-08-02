@@ -1,44 +1,26 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const publicPort = 28120;
 const backendPort = 28122;
 const backend = `http://127.0.0.1:${backendPort}`;
-const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-function readRunEnv(name: string): string {
-  try {
-    const text = readFileSync(resolve(rootDir, ".env.run"), "utf8");
-    const match = text.match(new RegExp(`export ${name}="([^"]*)"`));
-    return match?.[1] ?? "";
-  } catch {
-    return "";
-  }
-}
-
-const runApiKey = readRunEnv("TPROXY_API_KEY");
-const runManagementSecret = readRunEnv("TPROXY_MANAGEMENT_SECRET");
+const devBindHost = process.env.TPROXY_DEV_BIND_HOST || "127.0.0.1";
 
 export default defineConfig({
   plugins: [react()],
   base: "/dashboard/",
-  define: {
-    "import.meta.env.VITE_TPROXY_API_KEY": JSON.stringify(runApiKey),
-    "import.meta.env.VITE_TPROXY_MANAGEMENT_SECRET": JSON.stringify(runManagementSecret),
-  },
   build: {
     outDir: "../internal/api/dashboard",
     emptyOutDir: true,
   },
   server: {
-    host: "0.0.0.0",
+    // cloudflared connects to this loopback listener. Set
+    // TPROXY_DEV_BIND_HOST=0.0.0.0 only when LAN access is intentional.
+    host: devBindHost,
     port: publicPort,
     strictPort: true,
-    // Cloudflare quick tunnel and abc-tunnel.us worker send non-local Host headers.
-    allowedHosts: [".trycloudflare.com", ".abc-tunnel.us", "localhost", "127.0.0.1"],
+    // The direct Cloudflare quick-tunnel hostname is forwarded as Host.
+    allowedHosts: [".trycloudflare.com", "localhost", "127.0.0.1"],
     hmr: {
       protocol: "ws",
       host: "localhost",

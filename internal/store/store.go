@@ -1572,12 +1572,155 @@ func (s *Store) MarkCredentialAuthRequired(ctx context.Context, credentialID, co
 	return nil
 }
 
+// OAuthCredentialIDForLogin picks the credential row that should receive a fresh OAuth login.
+// Reconnecting the same account (matching email) updates the existing credential instead of creating a duplicate.
+func (s *Store) OAuthCredentialIDForLogin(ctx context.Context, providerID, candidateID, email string, explicitCredential bool) (string, error) {
+	candidateID = strings.TrimSpace(candidateID)
+	if candidateID == "" {
+		return "", errors.New("credential id is required")
+	}
+	if explicitCredential || normalizeCredentialEmail(email) == "" {
+		return candidateID, nil
+	}
+	existing, err := s.oauthCredentialIDByEmail(ctx, providerID, email)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	return candidateID, nil
+}
+
+func normalizeCredentialEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func mergeOAuthTokenExtra(token *OAuthToken, old *OAuthToken) {
+	if token == nil || old == nil || len(old.Extra) == 0 {
+		return
+	}
+	if token.Extra == nil {
+		token.Extra = make(map[string]any, len(old.Extra))
+	}
+	for key, value := range old.Extra {
+		if _, exists := token.Extra[key]; !exists {
+			token.Extra[key] = value
+		}
+	}
+}
+
+func (s *Store) oauthCredentialIDByEmail(ctx context.Context, providerID, email string) (string, error) {
+	normalized := normalizeCredentialEmail(email)
+	if normalized == "" {
+		return "", nil
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT id FROM credentials WHERE provider_id=? AND auth_type='oauth' AND lower(trim(email))=? ORDER BY CASE WHEN last_validated_at='' THEN 0 ELSE 1 END DESC, last_validated_at DESC, id LIMIT 1`, providerID, normalized)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+func (s *Store) oauthCredentialIDsByEmailExcept(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, providerID, email, keepID string) ([]string, error) {
+	normalized := normalizeCredentialEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `SELECT id FROM credentials WHERE provider_id=? AND auth_type='oauth' AND lower(trim(email))=? AND id<>? ORDER BY id`, providerID, normalized, keepID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func reassignCredentialHistoryTx(ctx context.Context, tx *sql.Tx, fromID, toID string) error {
+	if fromID == "" || toID == "" || fromID == toID {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE usage_events SET credential_id=? WHERE credential_id=?`, toID, fromID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE request_logs SET credential_id=? WHERE credential_id=?`, toID, fromID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE media_jobs SET credential_id=? WHERE credential_id=?`, toID, fromID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE credential_model_cooldowns SET credential_id=? WHERE credential_id=? AND model NOT IN (SELECT model FROM credential_model_cooldowns WHERE credential_id=?)`, toID, fromID, toID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM credential_model_cooldowns WHERE credential_id=?`, fromID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) purgeOAuthCredentialDuplicatesTx(ctx context.Context, tx *sql.Tx, providerID, credentialID, email string) error {
+	duplicateIDs, err := s.oauthCredentialIDsByEmailExcept(ctx, tx, providerID, email, credentialID)
+	if err != nil {
+		return err
+	}
+	for _, duplicateID := range duplicateIDs {
+		if err := reassignCredentialHistoryTx(ctx, tx, duplicateID, credentialID); err != nil {
+			return err
+		}
+		var dupLastUsed string
+		var dupConsecutive int
+		if err := tx.QueryRowContext(ctx, `SELECT last_used_at, consecutive_use_count FROM credentials WHERE id=?`, duplicateID).Scan(&dupLastUsed, &dupConsecutive); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if dupLastUsed != "" || dupConsecutive > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE credentials SET
+last_used_at=CASE
+  WHEN ?<>'' AND (last_used_at='' OR ?>last_used_at) THEN ?
+  ELSE last_used_at
+END,
+consecutive_use_count=CASE
+  WHEN ?>consecutive_use_count THEN ?
+  ELSE consecutive_use_count
+END
+WHERE id=?`, dupLastUsed, dupLastUsed, dupLastUsed, dupConsecutive, dupConsecutive, credentialID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM credentials WHERE id=?`, duplicateID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) SaveOAuthCredential(ctx context.Context, providerID, credentialID, label, email string, token OAuthToken) error {
 	if providerID == "" || credentialID == "" || token.AccessToken == "" {
 		return errors.New("provider id, credential id and access token are required")
 	}
 	if token.TokenType == "" {
 		token.TokenType = "Bearer"
+	}
+	existingRow := false
+	if existing, err := s.CredentialByID(ctx, credentialID); err == nil {
+		existingRow = true
+		if existing.OAuthToken != nil {
+			mergeOAuthTokenExtra(&token, existing.OAuthToken)
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
 	}
 	data, err := json.Marshal(token)
 	if err != nil {
@@ -1609,9 +1752,14 @@ func (s *Store) SaveOAuthCredential(ctx context.Context, providerID, credentialI
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,status,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,last_validated_at,created_at)
 VALUES(?,?,?,'healthy',?,?,?,'{}',0,1,1,?,?)
-ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type='oauth',status='healthy',label=CASE WHEN excluded.label<>'' THEN excluded.label ELSE credentials.label END,email=CASE WHEN excluded.email<>'' THEN excluded.email ELSE credentials.email END,secret_ciphertext=excluded.secret_ciphertext,enabled=1,cooldown_until='',last_error_code='',last_error='',last_validated_at=excluded.last_validated_at`,
+ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type='oauth',status='healthy',label=CASE WHEN excluded.label<>'' THEN excluded.label ELSE credentials.label END,email=CASE WHEN excluded.email<>'' THEN excluded.email ELSE credentials.email END,secret_ciphertext=excluded.secret_ciphertext,metadata_json=credentials.metadata_json,priority=credentials.priority,weight=credentials.weight,enabled=credentials.enabled,last_used_at=credentials.last_used_at,consecutive_use_count=credentials.consecutive_use_count,created_at=CASE WHEN credentials.created_at<>'' THEN credentials.created_at ELSE excluded.created_at END,cooldown_until='',last_error_code='',last_error='',last_validated_at=excluded.last_validated_at`,
 		credentialID, providerID, "oauth", label, email, ciphertext, now, now); err != nil {
 		return rollback(err)
+	}
+	if existingRow {
+		if err = s.purgeOAuthCredentialDuplicatesTx(ctx, tx, providerID, credentialID, email); err != nil {
+			return rollback(err)
+		}
 	}
 	return tx.Commit()
 }
@@ -2244,6 +2392,7 @@ type CredentialSummary struct {
 	LastError           string     `json:"last_error,omitempty"`
 	ProxyPoolIDs        []string   `json:"proxy_pool_ids,omitempty"`
 	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
+	LastValidatedAt     *time.Time `json:"last_validated_at,omitempty"`
 	ConsecutiveUseCount int        `json:"consecutive_use_count,omitempty"`
 	CreatedAt           *time.Time `json:"created_at,omitempty"`
 }
@@ -2338,11 +2487,16 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 				value := c.CreatedAt
 				createdAt = &value
 			}
+			var lastValidated *time.Time
+			if !c.LastValidated.IsZero() {
+				value := c.LastValidated
+				lastValidated = &value
+			}
 			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{
 				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status,
 				Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown,
 				LastErrorCode: c.LastErrorCode, LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
-				ConsecutiveUseCount: c.ConsecutiveUseCount, CreatedAt: createdAt,
+				LastValidatedAt: lastValidated, ConsecutiveUseCount: c.ConsecutiveUseCount, CreatedAt: createdAt,
 			})
 		}
 	}

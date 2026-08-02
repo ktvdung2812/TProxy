@@ -121,6 +121,71 @@ func TestBrowserPKCEStateSingleUseAndEncryptedToken(t *testing.T) {
 	}
 }
 
+func TestOAuthLoginMergesExistingCredentialByEmail(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer providerServer.Close()
+
+	dataStore, _ := newAuthStore(t, oauthConfig(providerServer.URL))
+	if err := dataStore.SaveOAuthCredential(context.Background(), "oauth-provider", "existing-account", "Primary", "user@example.com", store.OAuthToken{AccessToken: "old-access", RefreshToken: "old-refresh", TokenType: "Bearer"}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", Mode: "browser", Email: "user@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(started.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := manager.CompleteCallback(context.Background(), parsed.Query().Get("state"), "accepted-code", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.CredentialID != "existing-account" {
+		t.Fatalf("credential id=%q", completed.CredentialID)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "oauth-provider")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if credentials[0].ID != "existing-account" || credentials[0].OAuthToken == nil || credentials[0].OAuthToken.AccessToken != "new-access" {
+		t.Fatalf("stored credential=%+v", credentials[0])
+	}
+	if err := dataStore.AddUsage(context.Background(), store.UsageEvent{RequestID: "req-before-relogin", CredentialID: "existing-account", ProviderID: "oauth-provider", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	startedAgain, err := manager.StartAuthorization(context.Background(), StartRequest{ProviderID: "oauth-provider", Mode: "browser", Email: "user@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedAgain, err := url.Parse(startedAgain.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = manager.CompleteCallback(context.Background(), parsedAgain.Query().Get("state"), "accepted-code-2", ""); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := dataStore.CredentialUsageByPeriod(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := usage["existing-account"]
+	if summary.Requests != 1 {
+		t.Fatalf("usage summary=%+v", summary)
+	}
+}
+
 func TestConcurrentRefreshIsDeduplicated(t *testing.T) {
 	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
 	var refreshCalls atomic.Int32
@@ -310,6 +375,163 @@ func TestClaudeAuthorizationURLUsesCodeFlowScopes(t *testing.T) {
 	}
 	if query.Get("redirect_uri") != "http://localhost:28120/callback" {
 		t.Fatalf("unexpected redirect_uri: %q", query.Get("redirect_uri"))
+	}
+}
+
+func TestClaudeOAuthCodeHashStateAndAccountEmail(t *testing.T) {
+	// Claude returns code as "authcode#state" and token JSON includes account.email_address.
+	// Exchange body must be JSON with that state and the credential email must be saved.
+	var received map[string]any
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Errorf("expected JSON token request, got %q", ct)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Errorf("token body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"access_token":"claude-access",
+			"refresh_token":"claude-refresh",
+			"token_type":"Bearer",
+			"expires_in":3600,
+			"account":{"uuid":"acc-1","email_address":"claude-user@example.com"},
+			"organization":{"uuid":"org-1","name":"Personal"}
+		}`))
+	}))
+	defer providerServer.Close()
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "claude", Type: "claude", Name: "Claude Code", BaseURL: "https://api.anthropic.com", Enabled: true,
+		OAuth: &config.OAuthConfig{
+			AuthorizationURL:    "https://claude.ai/oauth/authorize",
+			TokenURL:            providerServer.URL + "/token",
+			ClientID:            "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+			Scopes:              config.ClaudeOAuthScopes(),
+			TokenRequestFormat:  "json",
+			IncludeStateInToken: true,
+			RedirectURL:         "http://127.0.0.1:28120/callback",
+		},
+	}}}
+	// Apply defaults the same way production bootstrap does.
+	config.ApplyProviderDefaults(&cfg.Providers[0])
+
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{
+		ProviderID: "claude", CredentialID: "claude-account", Mode: "browser",
+		RedirectURL: "http://127.0.0.1:28120/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authURL, err := url.Parse(started.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := authURL.Query().Get("state")
+	if state == "" {
+		t.Fatal("missing state in Claude authorize URL")
+	}
+	if authURL.Query().Get("code") != "true" {
+		t.Fatalf("Claude authorize URL missing code=true: %s", started.AuthorizationURL)
+	}
+	if !strings.Contains(authURL.Query().Get("scope"), "user:inference") {
+		t.Fatalf("unexpected scopes: %q", authURL.Query().Get("scope"))
+	}
+
+	// Paste format Claude shows after browser login: authorization_code#state
+	completed, err := manager.CompleteCallback(context.Background(), state, "auth-code-xyz#"+state, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "complete" {
+		t.Fatalf("status = %+v", completed)
+	}
+	if received["code"] != "auth-code-xyz" {
+		t.Fatalf("token exchange code = %#v want auth-code-xyz", received["code"])
+	}
+	if received["state"] != state {
+		t.Fatalf("token exchange state = %#v want session state", received["state"])
+	}
+	if received["grant_type"] != "authorization_code" {
+		t.Fatalf("grant_type = %#v", received["grant_type"])
+	}
+	if received["redirect_uri"] != "http://127.0.0.1:28120/callback" {
+		t.Fatalf("redirect_uri = %#v", received["redirect_uri"])
+	}
+	if received["code_verifier"] == "" {
+		t.Fatal("missing code_verifier in token exchange")
+	}
+
+	credentials, err := dataStore.Credentials(context.Background(), "claude")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if credentials[0].Secret != "claude-access" {
+		t.Fatalf("access token = %q", credentials[0].Secret)
+	}
+	if credentials[0].Email != "claude-user@example.com" {
+		t.Fatalf("email = %q want claude-user@example.com", credentials[0].Email)
+	}
+}
+
+func TestClaudeOAuthRejectsMismatchedCodeHashState(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("token endpoint should not be called on state mismatch")
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer providerServer.Close()
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "claude", Type: "claude", Name: "Claude Code", BaseURL: "https://api.anthropic.com", Enabled: true,
+		OAuth: &config.OAuthConfig{
+			AuthorizationURL:    "https://claude.ai/oauth/authorize",
+			TokenURL:            providerServer.URL + "/token",
+			ClientID:            "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+			Scopes:              config.ClaudeOAuthScopes(),
+			TokenRequestFormat:  "json",
+			IncludeStateInToken: true,
+			RedirectURL:         "http://127.0.0.1:28120/callback",
+		},
+	}}}
+	config.ApplyProviderDefaults(&cfg.Providers[0])
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{
+		ProviderID: "claude", Mode: "browser", RedirectURL: "http://127.0.0.1:28120/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := ""
+	if parsed, parseErr := url.Parse(started.AuthorizationURL); parseErr == nil {
+		state = parsed.Query().Get("state")
+	}
+	_, err = manager.CompleteCallback(context.Background(), state, "auth-code#wrong-state", "")
+	if Code(err) != "invalid_state" {
+		t.Fatalf("err=%v code=%s", err, Code(err))
+	}
+}
+
+func TestClaudeAccountEmailParse(t *testing.T) {
+	email := claudeAccountEmail(map[string]any{
+		"account": map[string]any{"email_address": "a@b.com", "uuid": "x"},
+	})
+	if email != "a@b.com" {
+		t.Fatalf("email = %q", email)
+	}
+	if claudeAccountEmail(nil) != "" || claudeAccountEmail(map[string]any{}) != "" {
+		t.Fatal("expected empty for missing account")
 	}
 }
 

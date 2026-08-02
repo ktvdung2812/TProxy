@@ -80,12 +80,18 @@ func (s *Server) adminKiroOAuthImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	credentialID := strings.TrimSpace(payload.CredentialID)
+	explicitCredential := credentialID != ""
 	if credentialID == "" {
 		credentialID = "kiro-" + uuid.NewString()[:8]
 	}
 	label := strings.TrimSpace(payload.Label)
 	if label == "" {
 		label = "Kiro"
+	}
+	credentialID, err = s.store.OAuthCredentialIDForLogin(r.Context(), providerID, credentialID, email, explicitCredential)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "credential_save_failed", err.Error(), useClientRequestID(r))
+		return
 	}
 	if err := s.store.SaveOAuthCredential(r.Context(), providerID, credentialID, label, email, token); err != nil {
 		writeError(w, http.StatusBadRequest, "credential_save_failed", err.Error(), useClientRequestID(r))
@@ -132,12 +138,18 @@ func (s *Server) adminKiroOAuthImportCLIProxy(w http.ResponseWriter, r *http.Req
 		return
 	}
 	credentialID := strings.TrimSpace(payload.CredentialID)
+	explicitCredential := credentialID != ""
 	if credentialID == "" {
 		credentialID = "kiro-" + uuid.NewString()[:8]
 	}
 	label := strings.TrimSpace(payload.Label)
 	if label == "" {
 		label = "Kiro CLIProxyAPI"
+	}
+	credentialID, err = s.store.OAuthCredentialIDForLogin(r.Context(), providerID, credentialID, email, explicitCredential)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "credential_save_failed", err.Error(), useClientRequestID(r))
+		return
 	}
 	if err := s.store.SaveOAuthCredential(r.Context(), providerID, credentialID, label, email, token); err != nil {
 		writeError(w, http.StatusBadRequest, "credential_save_failed", err.Error(), useClientRequestID(r))

@@ -14,7 +14,7 @@ import (
 var virtualIfacePattern = regexp.MustCompile(`(?i)^(utun|tun|tap|docker|veth|br-|vmnet|lo|wg)`)
 
 type networkMonitor struct {
-	lastFingerprint string
+	lastFingerprint  string
 	lastWatchdogTick time.Time
 	lastOnline       *bool
 }
@@ -54,6 +54,7 @@ func (s *Service) StartBackground(ctx context.Context) {
 		go s.safeRestartTunnel(ctx, "unexpected-exit")
 	}
 	s.mu.Unlock()
+	s.installUnexpectedExitHandler()
 
 	go func() {
 		select {
@@ -136,8 +137,13 @@ func (s *Service) safeRestartTunnel(ctx context.Context, reason string) {
 	}
 	s.mu.Unlock()
 
-	if s.cloudflared.IsRunning() {
+	running := s.cloudflared.IsRunning()
+	connected := s.cloudflared.IsConnected()
+	if running && connected {
 		return
+	}
+	if running {
+		log.Printf("[tunnel] cloudflared has no active Cloudflare connection; restarting (%s)", reason)
 	}
 
 	_, force := forceRestartReasons[reason]

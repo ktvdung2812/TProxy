@@ -1,14 +1,12 @@
 package tunnel
 
 import (
-	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
 
 const (
-	defaultWorkerURL    = "https://abc-tunnel.us"
-	defaultPublicHost   = "abc-tunnel.us"
 	healthCheckInterval = 2
 	healthCheckTimeout  = 60
 	healthFetchTimeout  = 5
@@ -18,29 +16,22 @@ const (
 	networkSettleSec    = 3
 )
 
-func WorkerURL() string {
-	if value := strings.TrimSpace(os.Getenv("TPROXY_TUNNEL_WORKER_URL")); value != "" {
-		return strings.TrimRight(value, "/")
-	}
-	if value := strings.TrimSpace(os.Getenv("TUNNEL_WORKER_URL")); value != "" {
-		return strings.TrimRight(value, "/")
-	}
-	return defaultWorkerURL
-}
-
-func PublicHost() string {
-	if value := strings.TrimSpace(os.Getenv("TPROXY_TUNNEL_PUBLIC_HOST")); value != "" {
-		return strings.Trim(strings.TrimSpace(value), ".")
-	}
-	return defaultPublicHost
-}
-
-func PublicURL(shortID string) string {
-	shortID = strings.TrimSpace(shortID)
-	if shortID == "" {
+// CloudflareQuickTunnelURL returns the canonical public origin emitted by
+// cloudflared's quick-tunnel mode. Quick tunnels are intentionally ephemeral:
+// a new URL is allocated whenever cloudflared reconnects.
+func CloudflareQuickTunnelURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return ""
 	}
-	return fmt.Sprintf("https://r%s.%s", shortID, PublicHost())
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" || !strings.HasSuffix(host, ".trycloudflare.com") || strings.TrimSuffix(host, ".trycloudflare.com") == "" {
+		return ""
+	}
+	if parsed.Port() != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return ""
+	}
+	return "https://" + host
 }
 
 func QuickTunnelProtocol() string {

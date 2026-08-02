@@ -1,11 +1,58 @@
 package providers
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/store"
 	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
 )
+
+// unwrapOpenAIChatCompletion flattens gateway envelopes such as Cline's
+// { "success": true, "data": { "id": ..., "choices": [...] } } into a standard
+// OpenAI chat.completion object. Leaves standard responses unchanged.
+func unwrapOpenAIChatCompletion(raw map[string]any) map[string]any {
+	if raw == nil {
+		return raw
+	}
+	if _, hasChoices := raw["choices"]; hasChoices {
+		return raw
+	}
+	data, ok := raw["data"].(map[string]any)
+	if !ok || data == nil {
+		return raw
+	}
+	if _, hasChoices := data["choices"]; !hasChoices {
+		return raw
+	}
+	return data
+}
+
+// unwrapOpenAIChatCompletionBody rewrites a JSON body when it uses the Cline
+// {success,data} envelope so downstream clients receive a normal OpenAI payload.
+func unwrapOpenAIChatCompletionBody(body []byte) []byte {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	unwrapped := unwrapOpenAIChatCompletion(raw)
+	if unwrapped == nil || len(unwrapped) == 0 {
+		return body
+	}
+	// Only rewrite when we actually unwrapped (identity pointer means no change
+	// is hard to detect; compare presence of top-level choices after unwrap).
+	if _, had := raw["choices"]; had {
+		return body
+	}
+	if _, has := unwrapped["choices"]; !has {
+		return body
+	}
+	out, err := json.Marshal(unwrapped)
+	if err != nil {
+		return body
+	}
+	return out
+}
 
 func sanitizeOpenAIUpstreamBody(provider store.Provider, body map[string]any, stream bool) map[string]any {
 	if body == nil {

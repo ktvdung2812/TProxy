@@ -10,6 +10,7 @@ export type CloudflareTunnelStatus = {
   shortId?: string;
   publicUrl?: string;
   running: boolean;
+  connected?: boolean;
   reachable?: boolean;
 };
 

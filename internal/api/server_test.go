@@ -1378,6 +1378,69 @@ func TestCORSPreflightAllowsClientAPIKeyHeader(t *testing.T) {
 	}
 }
 
+func TestAdminCursorMappingRoundTripAndIngress(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["model"] != "upstream-fast" {
+			t.Errorf("upstream model = %v", body["model"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","model":"upstream-fast","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	t.Setenv("TPROXY_TEST_API_KEY", "client-secret")
+	cfg := &config.Config{
+		Server:        config.ServerConfig{AllowLocalWithoutKey: false, AllowRemoteManagement: false},
+		ClientAPIKeys: []config.ClientAPIKey{{ID: "test-client", Name: "Test", KeyEnv: "TPROXY_TEST_API_KEY"}},
+		Providers: []config.ProviderConfig{{
+			ID: "mock", Type: "openai-compatible", Name: "Mock", BaseURL: upstream.URL, Enabled: true,
+			Credentials: []config.CredentialConfig{{ID: "mock-credential", AuthType: "none"}},
+		}},
+		Models: []config.PublicModelConfig{{
+			ID: "virtual-fast", DisplayName: "Virtual Fast", Enabled: true, RewriteResponseModel: true,
+			Routes: []config.RouteTargetConfig{{ID: "route", Provider: "mock", UpstreamModel: "upstream-fast", Priority: 10}},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+
+	put := httptest.NewRequest(http.MethodPut, "/api/admin/mapping/cursor", bytes.NewBufferString(`{"overrides":{"cursor-fast":"virtual-fast","custom-slot":"fable"}}`))
+	put.RemoteAddr = "127.0.0.1:1234"
+	put.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(put)
+	putRec := httptest.NewRecorder()
+	handler.ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%s", putRec.Code, putRec.Body.String())
+	}
+	if !strings.Contains(putRec.Body.String(), `"cursor-fast":"virtual-fast"`) {
+		t.Fatalf("expected cursor-fast override in response: %s", putRec.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/admin/mapping/cursor", nil)
+	get.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(get)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+
+	chat := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"cursor-fast","messages":[{"role":"user","content":"hi"}]}`))
+	chat.Header.Set("Authorization", "Bearer client-secret")
+	chat.Header.Set("Content-Type", "application/json")
+	chatRec := httptest.NewRecorder()
+	handler.ServeHTTP(chatRec, chat)
+	if chatRec.Code != http.StatusOK {
+		t.Fatalf("chat status=%d body=%s", chatRec.Code, chatRec.Body.String())
+	}
+	if !strings.Contains(chatRec.Body.String(), `"model":"virtual-fast"`) {
+		t.Fatalf("expected public model rewrite to virtual-fast: %s", chatRec.Body.String())
+	}
+}
+
 const testDashboardPassword = "test-dashboard-password"
 
 func withDefaultManagementAuth(r *http.Request) {

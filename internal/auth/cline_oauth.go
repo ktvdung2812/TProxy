@@ -75,6 +75,18 @@ func clineTokenFromMap(data map[string]any, now time.Time) (store.OAuthToken, er
 	if email := stringValue(data["email"]); email != "" {
 		token.Extra["email"] = email
 	}
+	// Token endpoint may nest profile under userInfo (9router-compatible).
+	if userInfo, ok := data["userInfo"].(map[string]any); ok {
+		if email := stringValue(userInfo["email"]); email != "" {
+			token.Extra["email"] = email
+		}
+		if first := stringValue(firstValue(userInfo, "firstName", "first_name")); first != "" {
+			token.Extra["first_name"] = first
+		}
+		if last := stringValue(firstValue(userInfo, "lastName", "last_name")); last != "" {
+			token.Extra["last_name"] = last
+		}
+	}
 	if first := stringValue(data["firstName"]); first != "" {
 		token.Extra["first_name"] = first
 	}

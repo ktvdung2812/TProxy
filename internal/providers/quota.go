@@ -99,6 +99,13 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		return r.copilotQuota(ctx, credential)
 	case "antigravity":
 		return r.antigravityQuota(ctx, credential)
+	case "xai":
+		// Grok CLI subscription billing (not public api.x.ai pay-as-you-go keys).
+		if isGrokCLIQuotaProvider(provider) {
+			return r.grokCLIQuota(ctx, provider, credential), nil
+		}
+		result.Message = "Upstream quota API is not implemented for xAI public API keys"
+		return result, nil
 	default:
 		result.Message = fmt.Sprintf("Upstream quota API is not implemented for %s", provider.Type)
 		return result, nil
