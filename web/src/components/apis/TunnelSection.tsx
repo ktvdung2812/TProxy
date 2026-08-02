@@ -161,7 +161,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const tsUrl = tailscale?.tunnelUrl || "";
 
   const tunnelHealthy =
-    Boolean(tunnel?.running || tunnel?.reachable || clientTunnelReachable);
+    Boolean(tunnel?.connected || tunnel?.reachable || clientTunnelReachable);
   const tsHealthy = Boolean(tailscale?.running || tailscale?.reachable || clientTsReachable);
 
   useEffect(() => {
@@ -210,7 +210,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       }
       try {
         const status = await fetchTunnelStatus(secret);
-        if (status.tunnel.reachable || status.tunnel.running) {
+        if (status.tunnel.reachable || status.tunnel.connected) {
           setClientTunnelReachable(true);
           return true;
         }
@@ -222,6 +222,11 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   };
 
   const handleEnableTunnel = async () => {
+    if (apiKeyCount === 0) {
+      setShowEnableModal(false);
+      setTunnelStatusMessage("Create at least one API key before enabling the tunnel.");
+      return;
+    }
     setShowEnableModal(false);
     setTunnelLoading(true);
     setTunnelStatusMessage(null);
@@ -447,7 +452,12 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         onCopy={copy}
         statusText={tunnelEverReachableRef.current ? "Tunnel reconnecting..." : "Tunnel checking..."}
         statusTone="warn"
-        trailing={<PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />}
+        trailing={
+          <>
+            <Button size="sm" variant="outline" onClick={() => setShowEnableModal(true)}>Reconnect</Button>
+            <PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />
+          </>
+        }
       />
     );
   };
@@ -558,8 +568,8 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
       <Modal open={showEnableModal} title="Enable Cloudflare Tunnel" onClose={() => setShowEnableModal(false)}>
         <p className="modal-copy">
-          Expose tproxy on the internet via Cloudflare quick tunnel. A stable short URL is registered automatically.
-          Requires outbound port 7844. Setup may take 10–30 seconds.
+          Expose tproxy with a direct Cloudflare Quick Tunnel. Cloudflare assigns a temporary <code>*.trycloudflare.com</code> URL,
+          which changes whenever the tunnel reconnects. Requires outbound port 7844; setup may take 10–30 seconds.
         </p>
         <div className="modal-actions">
           <Button onClick={() => void handleEnableTunnel()}>Start tunnel</Button>

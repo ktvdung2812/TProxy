@@ -55,9 +55,66 @@ export type Credential = {
   last_error?: string;
   proxy_pool_ids?: string[];
   last_used_at?: string;
+  last_validated_at?: string;
   consecutive_use_count?: number;
   created_at?: string;
 };
+
+/** Sort credentials by first-seen time (oldest first), then id. */
+export function compareCredentialsByCreatedAt(left: Credential, right: Credential): number {
+  const leftTime = left.created_at ? Date.parse(left.created_at) : Number.NaN;
+  const rightTime = right.created_at ? Date.parse(right.created_at) : Number.NaN;
+  if (!Number.isNaN(leftTime) && !Number.isNaN(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  if (!Number.isNaN(leftTime) && Number.isNaN(rightTime)) return -1;
+  if (Number.isNaN(leftTime) && !Number.isNaN(rightTime)) return 1;
+  return left.id.localeCompare(right.id);
+}
+
+export function formatCredentialAddedAt(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
+const SERVICE_PLAN_LABELS: Record<string, string> = {
+  plus: "Plus",
+  pro: "Pro",
+  team: "Teams",
+  teams: "Teams",
+  free: "Free",
+  enterprise: "Enterprise",
+  business: "Business",
+};
+
+export function formatServicePlanLabel(plan?: string) {
+  const raw = plan?.trim();
+  if (!raw) return "";
+  const key = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (SERVICE_PLAN_LABELS[key]) return SERVICE_PLAN_LABELS[key];
+  if (key.includes("team")) return "Teams";
+  if (key.includes("plus")) return "Plus";
+  if (key === "pro" || key.endsWith("_pro")) return "Pro";
+  return raw
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+/** Stable account numbers (#1, #2, …) by first-seen time, not last update. */
+export function buildCredentialAccountNumbers(credentials: Credential[] = []): Map<string, number> {
+  const ranked = [...credentials].sort(compareCredentialsByCreatedAt);
+  const numbers = new Map<string, number>();
+  ranked.forEach((credential, index) => numbers.set(credential.id, index + 1));
+  return numbers;
+}
 
 /** Aggregate connection counts for a provider. */
 export type ProviderStats = {

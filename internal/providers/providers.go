@@ -97,6 +97,8 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"ollama":               {"text", "vision", "tools"},
 		"kimi":                 {"text", "tools", "reasoning"},
 		"xai":                  {"text", "vision", "tools", "reasoning"},
+		"grok-web":             {"text", "reasoning"},
+		"perplexity-web":       {"text", "reasoning", "web-search"},
 		"anthropic-compatible": {"text", "vision", "tools", "reasoning"},
 		"claude":               {"text", "vision", "tools", "reasoning"},
 		"codex":                {"text", "vision", "tools", "reasoning"},
@@ -130,12 +132,14 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 	}
 	protocols := map[string]string{
 		"openai-compatible": "openai", "image": "openai", "video": "openai", "ollama": "openai", "kimi": "openai", "xai": "openai",
+		"grok-web": "openai", "perplexity-web": "openai",
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
 		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cursor": "cursor", "cline": "openai", "clinepass": "openai",
 		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai",
 	}
-	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: providerType != "antigravity" && providerType != "tavily" && providerType != "elevenlabs" && providerType != "cursor", BootstrapRetry: true}, nil
+	noDiscovery := providerType == "antigravity" || providerType == "tavily" || providerType == "elevenlabs" || providerType == "cursor" || providerType == "grok-web" || providerType == "perplexity-web"
+	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: !noDiscovery, BootstrapRetry: true}, nil
 }
 
 // HealthCheck performs a lightweight non-generation request. It is safe to
@@ -212,42 +216,62 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 		return nil, upstreamResponseError(response, body)
 	}
 	var payload map[string]any
+	var models []any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, &ProviderError{Code: "model_discovery_failed", Message: "provider returned invalid model catalog", Err: err}
+		// ClinePass (and some OpenAI clones) return a bare JSON array of models.
+		if arrErr := json.Unmarshal(body, &models); arrErr != nil {
+			return nil, &ProviderError{Code: "model_discovery_failed", Message: "provider returned invalid model catalog", Err: err}
+		}
+	} else {
+		if provider.Type == "codex" {
+			items := make([]DiscoveredModel, 0)
+			for _, raw := range toAnySlice(payload["models"]) {
+				item, _ := raw.(map[string]any)
+				id := stringValue(firstValue(item, "slug", "id"))
+				if id == "" {
+					continue
+				}
+				items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: "openai", Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
+			}
+			return items, nil
+		}
+		if provider.Type == "gemini" {
+			items := make([]DiscoveredModel, 0)
+			for _, raw := range toAnySlice(payload["models"]) {
+				item, _ := raw.(map[string]any)
+				id := strings.TrimPrefix(stringValue(item["name"]), "models/")
+				if id == "" {
+					continue
+				}
+				items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["displayName"]), OwnedBy: "google", Capabilities: r.Capabilities(provider.Type)})
+			}
+			return items, nil
+		}
+		models, _ = payload["data"].([]any)
+		if len(models) == 0 {
+			models, _ = payload["models"].([]any)
+		}
 	}
 	items := make([]DiscoveredModel, 0)
-	if provider.Type == "codex" {
-		models, _ := payload["models"].([]any)
-		for _, raw := range models {
-			item, _ := raw.(map[string]any)
-			id := stringValue(firstValue(item, "slug", "id"))
-			if id == "" {
-				continue
-			}
-			items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: "openai", Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
-		}
-		return items, nil
-	}
-	if provider.Type == "gemini" {
-		models, _ := payload["models"].([]any)
-		for _, raw := range models {
-			item, _ := raw.(map[string]any)
-			id := strings.TrimPrefix(stringValue(item["name"]), "models/")
-			if id == "" {
-				continue
-			}
-			items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["displayName"]), OwnedBy: "google", Capabilities: r.Capabilities(provider.Type)})
-		}
-		return items, nil
-	}
-	models, _ := payload["data"].([]any)
 	for _, raw := range models {
 		item, _ := raw.(map[string]any)
 		id := stringValue(item["id"])
 		if id == "" {
 			continue
 		}
-		items = append(items, DiscoveredModel{ID: id, Name: stringValue(item["name"]), OwnedBy: stringValue(item["owned_by"]), Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
+		if provider.Type == "clinepass" && !strings.HasPrefix(id, "cline-pass/") {
+			continue
+		}
+		ownedBy := stringValue(item["owned_by"])
+		if ownedBy == "" && (provider.Type == "cline" || provider.Type == "clinepass") {
+			ownedBy = provider.Type
+		}
+		items = append(items, DiscoveredModel{ID: id, Name: stringValue(firstValue(item, "name", "display_name")), OwnedBy: ownedBy, Capabilities: discoveryCapabilities(r, provider, provider.Type, id)})
+	}
+	if len(items) == 0 && (provider.Type == "cline" || provider.Type == "clinepass") {
+		if fallback := staticDiscoveryModels(provider); len(fallback) > 0 {
+			return fallback, nil
+		}
 	}
 	return items, nil
 }
@@ -261,6 +285,8 @@ func NewRegistry() *Registry {
 		"ollama":               &openAIAdapter{client: client},
 		"kimi":                 &openAIAdapter{client: client},
 		"xai":                  newXAIAdapter(client),
+		"grok-web":             &grokWebAdapter{client: client},
+		"perplexity-web":       &perplexityWebAdapter{client: client},
 		"anthropic-compatible": &anthropicAdapter{client: client},
 		"claude":               &anthropicAdapter{client: client},
 		"codex":                &codexAdapter{client: client},
@@ -342,10 +368,7 @@ func authHeaders(provider store.Provider, credential store.Credential) http.Head
 		applyGrokCLIHeaders(headers, provider.BaseURL)
 	}
 	if provider.Type == "cline" || provider.Type == "clinepass" {
-		applyClineHeaders(headers)
-		if credential.Secret != "" {
-			headers.Set("Authorization", clineAuthorizationValue(credential.Secret))
-		}
+		applyClineAuthHeaders(headers, credential)
 	}
 	if provider.Type == "iflow" {
 		applyIflowHeaders(headers, credential)
@@ -460,6 +483,9 @@ func (a *openAIAdapter) Proxy(ctx context.Context, provider store.Provider, cred
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return &RawResponse{Status: response.StatusCode, Headers: response.Header.Clone(), Body: data, ContentType: response.Header.Get("Content-Type")}, upstreamResponseError(response, data)
 	}
+	if provider.Type == "cline" || provider.Type == "clinepass" {
+		data = unwrapOpenAIChatCompletionBody(data)
+	}
 	return &RawResponse{Status: response.StatusCode, Headers: response.Header.Clone(), Body: data, ContentType: response.Header.Get("Content-Type")}, nil
 }
 
@@ -512,6 +538,8 @@ func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, cr
 	if err = json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return nil, &ProviderError{Status: 502, Code: "invalid_upstream_response", Err: err}
 	}
+	// Cline / ClinePass (and some gateways) wrap chat.completion as {success, data:{...}}.
+	raw = unwrapOpenAIChatCompletion(raw)
 	result := &canonical.Response{Raw: raw, Role: "assistant", Model: stringValue(raw["model"]), ID: stringValue(raw["id"])}
 	choices, _ := raw["choices"].([]any)
 	if len(choices) > 0 {

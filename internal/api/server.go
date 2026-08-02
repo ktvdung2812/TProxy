@@ -66,6 +66,7 @@ type Server struct {
 	liveUsage        *LiveUsageTracker
 	liveLogs         *LiveRequestLogBuffer
 	claudeAliases    *bridge.Resolver
+	cursorAliases    *bridge.CursorResolver
 	tunnel           *tunnel.Service
 	backgroundCancel context.CancelFunc
 	backgroundWG     sync.WaitGroup
@@ -85,6 +86,7 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 	server.loadGatewaySettings(context.Background())
 	_ = requestRouter.SyncAccountRotationSettings(context.Background())
 	server.loadClaudeAliasResolver()
+	server.loadCursorAliasResolver()
 	return server
 }
 
@@ -1493,6 +1495,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminConfigVersions(w, r)
 	case "/api/admin/mapping/claude":
 		s.adminClaudeMapping(w, r)
+	case "/api/admin/mapping/cursor":
+		s.adminCursorMapping(w, r)
 	case "/api/admin/rotation":
 		s.adminAccountRotation(w, r)
 	case "/api/admin/rotation/reset":

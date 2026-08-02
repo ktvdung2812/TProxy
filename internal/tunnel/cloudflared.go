@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -24,6 +25,7 @@ import (
 const minBinarySize = 1024 * 1024
 
 var quickTunnelURLPattern = regexp.MustCompile(`https://([a-z0-9-]+)\.trycloudflare\.com`)
+var cloudflaredConnectionIndexPattern = regexp.MustCompile(`\bconnIndex=([0-9]+)\b`)
 
 type DownloadStatus struct {
 	Downloading bool `json:"downloading"`
@@ -33,11 +35,41 @@ type DownloadStatus struct {
 type Cloudflared struct {
 	layout DataLayout
 
-	mu              sync.Mutex
-	process         *exec.Cmd
-	intentionalKill bool
+	mu               sync.Mutex
+	process          *exec.Cmd
+	intentionalKill  bool
 	onUnexpectedExit func()
-	download        DownloadStatus
+	download         DownloadStatus
+	connections      map[string]struct{}
+	connectionSerial int
+}
+
+type quickTunnelReadiness struct {
+	mu         sync.Mutex
+	url        string
+	registered bool
+}
+
+func (r *quickTunnelReadiness) setURL(url string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if url == "" || url == r.url {
+		return false
+	}
+	r.url = url
+	return true
+}
+
+func (r *quickTunnelReadiness) markRegistered() {
+	r.mu.Lock()
+	r.registered = true
+	r.mu.Unlock()
+}
+
+func (r *quickTunnelReadiness) snapshot() (url string, registered bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.url, r.registered
 }
 
 func NewCloudflared(layout DataLayout) *Cloudflared {
@@ -235,12 +267,68 @@ func (c *Cloudflared) IsRunning() bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
+// IsConnected reports whether the cloudflared process that this service
+// started currently has at least one registered Cloudflare edge connection.
+// A live process alone is not sufficient: Cloudflare returns error 1033 when
+// the connector has lost every edge connection but has not exited yet.
+func (c *Cloudflared) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.process != nil && len(c.connections) > 0
+}
+
+func (c *Cloudflared) resetConnectionsLocked() {
+	c.connections = make(map[string]struct{})
+	c.connectionSerial = 0
+}
+
+// observeTunnelConnectionLog keeps a small connection-state model from the
+// structured cloudflared log lines. The connIndex is stable for each HA
+// connection, so multiple registrations for the same index do not inflate the
+// count. If an older cloudflared build omits connIndex, we still keep a best
+// effort count and restart conservatively when it disconnects.
+func (c *Cloudflared) observeTunnelConnectionLog(line string) {
+	message := strings.ToLower(line)
+	registered := strings.Contains(message, "registered tunnel connection")
+	unregistered := strings.Contains(message, "unregistered tunnel connection")
+	if !registered && !unregistered {
+		return
+	}
+
+	connectionID := ""
+	if match := cloudflaredConnectionIndexPattern.FindStringSubmatch(line); len(match) == 2 {
+		connectionID = match[1]
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.connections == nil {
+		c.resetConnectionsLocked()
+	}
+	if unregistered {
+		if connectionID != "" {
+			delete(c.connections, connectionID)
+			return
+		}
+		for id := range c.connections {
+			delete(c.connections, id)
+			break
+		}
+		return
+	}
+	if connectionID == "" {
+		c.connectionSerial++
+		connectionID = fmt.Sprintf("unknown-%d", c.connectionSerial)
+	}
+	c.connections[connectionID] = struct{}{}
+}
+
 func (c *Cloudflared) Kill(localPort int) {
 	c.mu.Lock()
 	c.intentionalKill = true
 	cmd := c.process
 	c.process = nil
-	c.onUnexpectedExit = nil
+	c.resetConnectionsLocked()
 	c.mu.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
@@ -253,6 +341,29 @@ func (c *Cloudflared) Kill(localPort int) {
 	}
 	_ = os.Remove(c.layout.CloudflaredPID)
 	killCloudflaredByPort(localPort)
+}
+
+// takeUnexpectedExitHandler detaches the process that exited and returns the
+// restart callback only when that exact process was still current and was not
+// deliberately stopped. A replacement process must never trigger a restart
+// because its predecessor happened to exit afterward.
+func (c *Cloudflared) takeUnexpectedExitHandler(cmd *exec.Cmd) func() {
+	handler, _ := c.finishProcess(cmd)
+	return handler
+}
+
+func (c *Cloudflared) finishProcess(cmd *exec.Cmd) (handler func(), wasCurrent bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.process != cmd {
+		return nil, false
+	}
+	c.process = nil
+	c.resetConnectionsLocked()
+	if c.intentionalKill {
+		return nil, true
+	}
+	return c.onUnexpectedExit, true
 }
 
 func killCloudflaredByPort(port int) {
@@ -281,7 +392,10 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, binary,
+	// Do not bind cloudflared to the admin request context. The API request
+	// naturally ends once the URL is returned, whereas the connector must keep
+	// running until it is explicitly disabled or exits unexpectedly.
+	cmd := exec.Command(binary,
 		"tunnel", "--url", fmt.Sprintf("http://127.0.0.1:%d", localPort),
 		"--config", configPath,
 		"--no-autoupdate",
@@ -309,6 +423,7 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 	c.mu.Lock()
 	c.process = cmd
 	c.intentionalKill = false
+	c.resetConnectionsLocked()
 	c.mu.Unlock()
 
 	type result struct {
@@ -340,69 +455,63 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 		return ""
 	}
 
-	var resolvedURL string
-	var resolveOnce sync.Once
-	handleChunk := func(chunk string) {
-		appendLog(chunk)
-		url := parseURL(chunk)
-		if url == "" {
-			return
-		}
-		resolveOnce.Do(func() {
-			resolvedURL = url
-			done <- result{url: url}
-		})
-		if url != resolvedURL && onURLUpdate != nil {
-			resolvedURL = url
-			onURLUpdate(url)
+	readiness := &quickTunnelReadiness{}
+	var readyOnce sync.Once
+	markReady := func() {
+		url, registered := readiness.snapshot()
+		if url != "" && registered {
+			readyOnce.Do(func() {
+				done <- result{url: url}
+			})
 		}
 	}
+	handleLine := func(line string) {
+		appendLog(line + "\n")
+		c.observeTunnelConnectionLog(line)
+		if strings.Contains(strings.ToLower(line), "registered tunnel connection") &&
+			!strings.Contains(strings.ToLower(line), "unregistered tunnel connection") {
+			readiness.markRegistered()
+		}
+		url := parseURL(line)
+		if readiness.setURL(url) && onURLUpdate != nil {
+			onURLUpdate(url)
+		}
+		markReady()
+	}
 
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				handleChunk(string(buf[:n]))
-			}
-			if err != nil {
-				break
-			}
+	var logReaders sync.WaitGroup
+	readLogs := func(reader io.Reader) {
+		defer logReaders.Done()
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 4096), 256*1024)
+		for scanner.Scan() {
+			handleLine(scanner.Text())
 		}
-	}()
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := stderr.Read(buf)
-			if n > 0 {
-				handleChunk(string(buf[:n]))
-			}
-			if err != nil {
-				break
-			}
-		}
-	}()
+	}
+	logReaders.Add(2)
+	go readLogs(stdout)
+	go readLogs(stderr)
 
 	go func() {
 		err := cmd.Wait()
+		logReaders.Wait()
 		_ = os.RemoveAll(configDir)
-		_ = os.Remove(c.layout.CloudflaredPID)
-		c.mu.Lock()
-		intentional := c.intentionalKill
-		handler := c.onUnexpectedExit
-		c.process = nil
-		c.mu.Unlock()
-		if resolvedURL == "" {
+		handler, wasCurrent := c.finishProcess(cmd)
+		if wasCurrent {
+			_ = os.Remove(c.layout.CloudflaredPID)
+		}
+		resolvedURL, registered := readiness.snapshot()
+		if resolvedURL == "" || !registered {
 			tailMu.Lock()
 			tail := strings.TrimSpace(logTail.String())
 			tailMu.Unlock()
 			if tail == "" {
 				tail = "(empty)"
 			}
-			done <- result{err: fmt.Errorf("cloudflared exited before URL ready: %v; log: %s", err, tail)}
+			done <- result{err: fmt.Errorf("cloudflared exited before tunnel connection was ready: %v; log: %s", err, tail)}
 			return
 		}
-		if !intentional && handler != nil {
+		if handler != nil {
 			handler()
 		}
 	}()

@@ -33,4 +33,22 @@ func TestQuotaAtZero(t *testing.T) {
 	if QuotaAtZero(quota) {
 		t.Fatal("unlimited windows should not trigger auto-disable")
 	}
+
+	// Multi-window: depleted monthly + remaining prepaid stays routable.
+	quota = CredentialQuota{
+		ProviderType: "xai",
+		Quotas: map[string]QuotaEntry{
+			"monthly": {Name: "Monthly included", Used: 150, Total: 150, Remaining: 0},
+			"prepaid": {Name: "Prepaid", Used: 0, Total: 25, Remaining: 100},
+		},
+	}
+	if QuotaAtZero(quota) {
+		t.Fatal("prepaid remaining should keep Grok credential routable")
+	}
+
+	// All finite windows empty → depleted.
+	quota.Quotas["prepaid"] = QuotaEntry{Name: "Prepaid", Used: 25, Total: 25, Remaining: 0}
+	if !QuotaAtZero(quota) {
+		t.Fatal("expected fully depleted multi-window quota")
+	}
 }

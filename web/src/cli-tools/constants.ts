@@ -273,11 +273,18 @@ api_key = "{{apiKey}}"`,
     id: "cline",
     name: "Cline",
     icon: "extension",
-    color: "#00D1B2",
-    description: "Cline AI Coding Assistant",
+    color: "#5B9BD5",
+    description:
+      "Cline AI Coding Assistant — use tproxy as OpenAI Compatible, or enroll Cline/ClinePass OAuth under Providers for cline.bot models.",
     configType: "custom",
+    notes: [
+      {
+        type: "info",
+        text: "For Cline/ClinePass account models (anthropic/*, cline-pass/*), add a Cline or ClinePass provider with OAuth in Dashboard → Providers. For routing through tproxy virtual models, use OpenAI Compatible below.",
+      },
+    ],
     guideSteps: [
-      { step: 1, title: "Open Cline settings", desc: "Choose API Provider → OpenAI Compatible", column: "commands" },
+      { step: 1, title: "Open Cline settings", desc: "Choose API Provider → OpenAI Compatible (for tproxy) or Cline (for direct cline.bot)", column: "commands" },
       ...CUSTOM_GUIDE_STEPS.map((step, index) => ({ ...step, step: index + 2 })),
     ],
   },

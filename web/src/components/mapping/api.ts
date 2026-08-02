@@ -12,18 +12,42 @@ export type ClaudeMappingResponse = {
   content_mapping: Record<string, Record<string, string>>;
 };
 
+export type CursorCatalogModel = {
+  id: string;
+  name: string;
+};
+
+export type CursorMappingResponse = {
+  /** Known Cursor client model IDs for the source dropdown (live discovery when available). */
+  cursor_models: CursorCatalogModel[];
+  overrides: Record<string, string>;
+  effective: Record<string, string>;
+  placeholders: Array<{ name: string; role: string; label?: string; resolves: string }>;
+  content_mapping: Record<string, Record<string, string>>;
+  catalog_source?: "discovery" | "static" | "mixed" | string;
+  catalog_count?: number;
+  provider_id?: string;
+  discovery_error?: string;
+};
+
 async function adminFetch<T>(secret: string, path: string, method: "GET" | "PUT" = "GET", body?: unknown) {
   const response = await fetch(path, {
     method,
     headers: {
       ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  const data = await response.json();
+  let data: any = null;
+  const text = await response.text();
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(text?.slice(0, 200) || `HTTP ${response.status}`);
+  }
   if (!response.ok) {
-    throw new Error(data?.error?.message || `HTTP ${response.status}`);
+    throw new Error(data?.error?.message || data?.message || `HTTP ${response.status}`);
   }
   return data as T;
 }
@@ -40,4 +64,13 @@ export function saveClaudeMapping(
   },
 ) {
   return adminFetch<ClaudeMappingResponse>(secret, "/api/admin/mapping/claude", "PUT", payload);
+}
+
+export function fetchCursorMapping(secret: string, options?: { refresh?: boolean }) {
+  const query = options?.refresh ? "?refresh=1" : "";
+  return adminFetch<CursorMappingResponse>(secret, `/api/admin/mapping/cursor${query}`);
+}
+
+export function saveCursorMapping(secret: string, payload: { overrides: Record<string, string> }) {
+  return adminFetch<CursorMappingResponse>(secret, "/api/admin/mapping/cursor", "PUT", payload);
 }

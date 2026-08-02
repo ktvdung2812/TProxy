@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -9,7 +10,13 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
-const providerDiscoveryCacheTTL = 90 * time.Second
+const (
+	providerDiscoveryCacheTTL   = 90 * time.Second
+	providerDiscoveryTimeout    = 60 * time.Second
+	providerDiscoverySuccessTTL = 90 * time.Second
+	// Transient failures (timeouts/cancels) must not poison the cache.
+	providerDiscoveryErrorTTL = 5 * time.Second
+)
 
 type discoveryCacheEntry struct {
 	items     []providers.DiscoveredModel
@@ -18,7 +25,7 @@ type discoveryCacheEntry struct {
 }
 
 type discoveryFlight struct {
-	done chan struct{}
+	done  chan struct{}
 	items []providers.DiscoveredModel
 	err   error
 }
@@ -38,14 +45,34 @@ func (r *Router) discoverProviderModels(ctx context.Context, providerID string, 
 		}
 	}
 	if items, err, shared := r.awaitProviderDiscoveryFlight(providerID, refresh); shared {
+		// If another request's canceled context poisoned the shared flight, retry
+		// once on this caller's context instead of returning a stale cancel.
+		if isTransientDiscoveryErr(err) && ctx.Err() == nil {
+			return r.discoverProviderModels(ctx, providerID, true)
+		}
 		return items, err
 	}
-	items, err := r.discoverProviderModelsFromUpstream(ctx, providerID, refresh)
+	// Detach from the HTTP request context so a client disconnect / short proxy
+	// timeout cannot cancel an in-flight Cursor AvailableModels call and poison
+	// the shared flight + cache for everyone.
+	discoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerDiscoveryTimeout)
+	defer cancel()
+	items, err := r.discoverProviderModelsFromUpstream(discoverCtx, providerID, refresh)
 	r.finishProviderDiscoveryFlight(providerID, items, err)
 	if !refresh {
 		r.storeProviderDiscoveryCache(providerID, items, err)
+	} else if err == nil && len(items) > 0 {
+		// Refresh successes should repopulate the positive cache.
+		r.storeProviderDiscoveryCache(providerID, items, nil)
 	}
 	return items, err
+}
+
+func isTransientDiscoveryErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (r *Router) cachedProviderDiscovery(providerID string) (discoveryCacheEntry, bool) {
@@ -58,20 +85,37 @@ func (r *Router) cachedProviderDiscovery(providerID string) (discoveryCacheEntry
 	if !ok || time.Now().After(entry.expiresAt) {
 		return discoveryCacheEntry{}, false
 	}
+	// Never serve a cached cancel/timeout — those usually came from a dead client.
+	if isTransientDiscoveryErr(entry.err) {
+		delete(r.discoveryCache, providerID)
+		return discoveryCacheEntry{}, false
+	}
 	return entry, true
 }
 
 func (r *Router) storeProviderDiscoveryCache(providerID string, items []providers.DiscoveredModel, err error) {
+	// Do not cache request-cancel errors at all.
+	if isTransientDiscoveryErr(err) {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.discoveryCache == nil {
 		r.discoveryCache = make(map[string]discoveryCacheEntry)
 	}
+	ttl := providerDiscoverySuccessTTL
+	if err != nil {
+		ttl = providerDiscoveryErrorTTL
+	} else if len(items) == 0 {
+		ttl = providerDiscoveryErrorTTL
+	}
+	// Keep the legacy name in sync for callers that reference the const.
+	_ = providerDiscoveryCacheTTL
 	copied := append([]providers.DiscoveredModel(nil), items...)
 	r.discoveryCache[providerID] = discoveryCacheEntry{
 		items:     copied,
 		err:       err,
-		expiresAt: time.Now().Add(providerDiscoveryCacheTTL),
+		expiresAt: time.Now().Add(ttl),
 	}
 }
 

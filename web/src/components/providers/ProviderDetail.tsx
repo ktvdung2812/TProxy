@@ -26,7 +26,7 @@ import {
   type CredentialQuota,
 } from "../quota/api";
 import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
-import { credentialStatusLabel, isOnCooldown, type Credential, type ModelAlias, type Provider } from "./types";
+import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByCreatedAt, formatCredentialAddedAt, formatServicePlanLabel, type Credential, type ModelAlias, type Provider } from "./types";
 
 /** Providers whose upstream quota/balance probe is implemented in tproxy. */
 const CONNECTION_QUOTA_PROVIDER_IDS = new Set([
@@ -123,7 +123,11 @@ export function ProviderDetail({
     [catalog, presets, provider.ID],
   );
   const sortedCredentials = useMemo(
-    () => [...credentials].sort((a, b) => Number(b.enabled) - Number(a.enabled)),
+    () => [...credentials].sort(compareCredentialsByCreatedAt),
+    [credentials],
+  );
+  const credentialAccountNumbers = useMemo(
+    () => buildCredentialAccountNumbers(credentials),
     [credentials],
   );
   const [accountQuery, setAccountQuery] = useState("");
@@ -466,7 +470,9 @@ export function ProviderDetail({
         action={
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <ModelAvailabilityBadge credentials={credentials} />
-            <ProviderConnectionActions profile={connectionProfile} onMethod={handleConnectionMethod} />
+            {credentials.length === 0 ? (
+              <ProviderConnectionActions profile={connectionProfile} onMethod={handleConnectionMethod} />
+            ) : null}
           </div>
         }
       >
@@ -478,6 +484,13 @@ export function ProviderDetail({
           />
         ) : (
           <>
+            <div className="connections-add-bar connections-add-bar--top">
+              <ProviderConnectionActions
+                profile={connectionProfile}
+                onMethod={handleConnectionMethod}
+                placement="footer"
+              />
+            </div>
             <div className="connections-toolbar">
               <Input
                 icon="search"
@@ -566,6 +579,7 @@ export function ProviderDetail({
                   key={cred.id}
                   providerId={provider.ID}
                   credential={cred}
+                  accountNumber={credentialAccountNumbers.get(cred.id)}
                   secret={secret}
                   selected={selectedCredentialIds.includes(cred.id)}
                   onSelectedChange={toggleCredentialSelected}
@@ -733,6 +747,7 @@ export function ProviderDetail({
 function ConnectionRow({
   providerId,
   credential,
+  accountNumber,
   secret,
   selected,
   onSelectedChange,
@@ -749,6 +764,7 @@ function ConnectionRow({
 }: {
   providerId: string;
   credential: Credential;
+  accountNumber?: number;
   secret: string;
   selected: boolean;
   onSelectedChange: (credentialId: string, selected: boolean) => void;
@@ -765,6 +781,7 @@ function ConnectionRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [quotaBusy, setQuotaBusy] = useState(false);
+  const [servicePlan, setServicePlan] = useState("");
   const [quotaBadges, setQuotaBadges] = useState<Array<{ key: string; label: string; tone: "success" | "warning" | "error" | "info" | "default" }>>([]);
   const [quotaMessage, setQuotaMessage] = useState("");
   const status = credentialStatusLabel(credential);
@@ -773,6 +790,7 @@ function ConnectionRow({
   const onCooldown = credential.cooldown_until && isOnCooldown(credential.cooldown_until);
   const needsReAuth = credential.status === "auth_required" && credential.auth_type === "oauth";
   const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
+  const connectionTitle = credential.email || credential.label || credential.id;
 
   const loadQuota = async (silent = false) => {
     if (!supportsUpstreamQuota) return;
@@ -781,12 +799,14 @@ function ConnectionRow({
       const quota = await fetchCredentialQuota(secret, credential.id);
       const badges = quotaBadgesFromQuota(quota);
       setQuotaBadges(badges);
+      setServicePlan(formatServicePlanLabel(quota.plan));
       setQuotaMessage(quota.message || "");
       if (!silent && quota.message && badges.length === 0) {
         onNotice(`${credential.id}: ${quota.message}`);
       }
     } catch (cause) {
       setQuotaBadges([]);
+      setServicePlan("");
       setQuotaMessage(cause instanceof Error ? cause.message : "Quota check failed");
       if (!silent) {
         onError(cause instanceof Error ? cause.message : "Quota check failed");
@@ -797,11 +817,11 @@ function ConnectionRow({
   };
 
   useEffect(() => {
-    if (!supportsUpstreamQuota || !credential.enabled) return;
+    if (!supportsUpstreamQuota) return;
     void loadQuota(true);
-    // Intentionally refresh when credential identity/enabled changes.
+    // Intentionally refresh when credential identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supportsUpstreamQuota, credential.id, credential.enabled, secret]);
+  }, [supportsUpstreamQuota, credential.id, secret]);
 
   const handleToggle = async () => {
     setBusy(true);
@@ -873,7 +893,15 @@ function ConnectionRow({
   };
 
   return (
-    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}`}>
+    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}${credential.last_validated_at ? " has-updated-at" : ""}`}>
+      {credential.last_validated_at ? (
+        <span
+          className="connection-updated-at"
+          title={`Last updated: ${new Date(credential.last_validated_at).toLocaleString()}`}
+        >
+          Updated {formatRelativeTime(credential.last_validated_at)}
+        </span>
+      ) : null}
       <label className="connection-select">
         <input
           type="checkbox"
@@ -882,14 +910,26 @@ function ConnectionRow({
           aria-label={`Select ${credential.email || credential.label || credential.id}`}
         />
       </label>
-      <span className="connection-auth-icon">
-        <span className="material-symbols-outlined">{authIcon}</span>
+      <span
+        className={`connection-plan-badge${servicePlan ? "" : " connection-plan-badge--fallback"}`}
+        title={servicePlan ? `Service plan: ${servicePlan}` : credential.auth_type}
+      >
+        {supportsUpstreamQuota && quotaBusy && !servicePlan ? (
+          <span className="connection-plan-badge-loading" aria-hidden="true">…</span>
+        ) : servicePlan ? (
+          servicePlan
+        ) : (
+          <span className="material-symbols-outlined">{authIcon}</span>
+        )}
       </span>
       <div className="connection-main">
-        <div className="connection-label">{credential.email || credential.label || credential.id}</div>
-        {(credential.email || credential.label) && (
-          <div className="connection-sub">
-            <code style={{ color: "var(--color-brand-600)" }}>{credential.id}</code>
+        <div className="connection-label">
+          {accountNumber ? <span className="connection-label-index">#{accountNumber}</span> : null}
+          <span className="connection-label-text">{connectionTitle}</span>
+        </div>
+        {(credential.email || credential.label || credential.created_at) && (
+          <div className="connection-sub" title={`Credential ID: ${credential.id}`}>
+            Added {formatCredentialAddedAt(credential.created_at)}
           </div>
         )}
         {credential.last_error && <div className="connection-error">{credential.last_error}</div>}

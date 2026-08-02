@@ -1,7 +1,7 @@
 {
   "name": "@ktvdung1606/tproxy",
-  "version": "0.1.9",
-  "description": "npm wrapper for the tproxy AI gateway binary",
+  "version": "0.1.10",
+  "description": "npm wrapper for the tproxy AI gateway binary — includes system tray and auto-start",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,8 +15,12 @@
   },
   "files": [
     "bin",
+    "lib",
     "config.default.yaml"
   ],
+  "scripts": {
+    "postinstall": "node -e \"try{require('./lib/trayRuntime').ensureTrayRuntime({silent:true})}catch(e){}\""
+  },
   "engines": {
     "node": ">=18"
   },
@@ -25,6 +29,8 @@
     "gateway",
     "proxy",
     "llm",
-    "openai"
+    "openai",
+    "tray",
+    "autostart"
   ]
 }

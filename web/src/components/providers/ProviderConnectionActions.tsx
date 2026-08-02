@@ -6,10 +6,38 @@ type Props = {
   onMethod: (method: ConnectionMethod) => void;
   busy?: boolean;
   size?: "sm" | "md";
+  /** empty = first-time connect (prominent); footer = provider already has accounts */
+  placement?: "empty" | "footer";
 };
 
+function methodLabel(method: ConnectionMethod, placement: "empty" | "footer"): string {
+  if (placement === "footer" && method.kind === "oauth") {
+    return "Add account";
+  }
+  return method.label;
+}
+
+function methodVariant(
+  method: ConnectionMethod,
+  placement: "empty" | "footer",
+): "primary" | "secondary" {
+  if (placement === "footer") {
+    return "secondary";
+  }
+  if (method.kind === "oauth" || method.kind === "import_cursor") {
+    return "primary";
+  }
+  return "secondary";
+}
+
 /** Provider-specific connection action buttons (9router-style). */
-export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm" }: Props) {
+export function ProviderConnectionActions({
+  profile,
+  onMethod,
+  busy,
+  size = "sm",
+  placement = "empty",
+}: Props) {
   const cursorPrimary =
     profile.methods.some((method) => method.kind === "import_cursor") &&
     !profile.methods.some(
@@ -41,14 +69,14 @@ export function ProviderConnectionActions({ profile, onMethod, busy, size = "sm"
           <Button
             key={`${method.kind}-${method.label}`}
             size={size}
-            variant={method.kind === "oauth" || method.kind === "import_cursor" ? "primary" : "secondary"}
+            variant={methodVariant(method, placement)}
             icon={iconForMethod(method.kind)}
             loading={busy && (method.kind === "oauth" || method.kind === "import_cursor")}
             disabled={!method.available || busy}
             title={method.unavailableReason || method.description}
             onClick={() => onMethod(method)}
           >
-            {method.label}
+            {methodLabel(method, placement)}
           </Button>
         ))}
       </div>

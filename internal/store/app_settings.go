@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/tproxy/tproxy/internal/bridge"
 )
@@ -108,3 +109,48 @@ func (s *Store) SaveClaudeAliasOverrides(ctx context.Context, overrides bridge.O
 	settings.Models = overrides
 	return s.SaveClaudeAliasSettings(ctx, settings)
 }
+
+// CursorAliasSettings stores free-form Cursor client model → target rewrites.
+type CursorAliasSettings struct {
+	Models bridge.CursorAliases
+}
+
+func (s *Store) CursorAliasSettings(ctx context.Context) (CursorAliasSettings, error) {
+	raw, err := s.GetAppSettingJSON(ctx, bridge.AppSettingCursorAliases)
+	if err != nil {
+		return CursorAliasSettings{}, err
+	}
+	settings := CursorAliasSettings{Models: bridge.CursorAliases{}}
+	// Preferred shape: { "models": { "cursor-fast": "my-virtual" } }
+	if nested, ok := raw["models"].(map[string]any); ok {
+		for source, value := range nested {
+			if target, ok := value.(string); ok && strings.TrimSpace(target) != "" {
+				settings.Models[source] = target
+			}
+		}
+	} else {
+		// Flat shape for backwards compatibility / simple imports.
+		for source, value := range raw {
+			if source == "models" {
+				continue
+			}
+			if target, ok := value.(string); ok && strings.TrimSpace(target) != "" {
+				settings.Models[source] = target
+			}
+		}
+	}
+	settings.Models = bridge.NormalizeCursorAliases(settings.Models)
+	return settings, nil
+}
+
+func (s *Store) SaveCursorAliasSettings(ctx context.Context, settings CursorAliasSettings) error {
+	models := bridge.NormalizeCursorAliases(settings.Models)
+	payloadModels := map[string]any{}
+	for source, target := range models {
+		payloadModels[source] = target
+	}
+	return s.SetAppSettingJSON(ctx, bridge.AppSettingCursorAliases, map[string]any{
+		"models": payloadModels,
+	})
+}
+

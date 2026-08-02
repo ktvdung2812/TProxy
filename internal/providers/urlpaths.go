@@ -111,9 +111,13 @@ func modelsDiscoveryURL(provider store.Provider) string {
 		return endpoint(provider.BaseURL, "/models?client_version=1.0.0")
 	case "ollama":
 		return ollamaDiscoveryURL(provider.BaseURL)
-	case "cline", "clinepass":
-		// Cline's catalog is not OpenAI /models; the extension uses /ai/cline/models.
+	case "cline":
+		// Extension account catalog (OAuth / Cline account models).
 		return openAIResourceURL(provider.BaseURL, "/ai/cline/models")
+	case "clinepass":
+		// ClinePass subscription catalog is the OpenAI-style /models list
+		// (ids prefixed with cline-pass/). Mirrors 9router resolveClinepassModels.
+		return openAIResourceURL(provider.BaseURL, "/models")
 	}
 	if provider.ID == "opencode" {
 		return endpoint(provider.BaseURL, "/zen/v1/models")
@@ -150,12 +154,63 @@ func staticDiscoveryModels(provider store.Provider) []DiscoveredModel {
 	if provider.Type == "kiro" || provider.ID == "kiro" {
 		return kiroStaticModelEntries(NewRegistry(), provider)
 	}
+	if provider.Type == "cline" || provider.ID == "cline" {
+		return clineStaticModelEntries(provider)
+	}
+	if provider.Type == "clinepass" || provider.ID == "clinepass" {
+		return clinepassStaticModelEntries(provider)
+	}
 	switch provider.ID {
 	case "glm", "glm-cn":
 		return glmStaticModelEntries(provider)
 	default:
 		return nil
 	}
+}
+
+// Static catalogs from 9router open-sse/providers/registry/cline.js + clinepass.js.
+func clineStaticModelEntries(provider store.Provider) []DiscoveredModel {
+	ids := []struct{ id, name string }{
+		{"anthropic/claude-opus-4.7", "Claude Opus 4.7"},
+		{"anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6"},
+		{"anthropic/claude-opus-4.6", "Claude Opus 4.6"},
+		{"openai/gpt-5.3-codex", "GPT-5.3 Codex"},
+		{"openai/gpt-5.4", "GPT-5.4"},
+		{"google/gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview"},
+		{"google/gemini-3.1-flash-lite-preview", "Gemini 3.1 Flash Lite Preview"},
+		{"kwaipilot/kat-coder-pro", "KAT Coder Pro"},
+	}
+	return clineDiscoveredFromIDs(provider, "cline", ids)
+}
+
+func clinepassStaticModelEntries(provider store.Provider) []DiscoveredModel {
+	ids := []struct{ id, name string }{
+		{"cline-pass/glm-5.2", "GLM-5.2 (ClinePass)"},
+		{"cline-pass/kimi-k2.7-code", "Kimi K2.7 Code (ClinePass)"},
+		{"cline-pass/kimi-k2.6", "Kimi K2.6 (ClinePass)"},
+		{"cline-pass/deepseek-v4-pro", "DeepSeek V4 Pro (ClinePass)"},
+		{"cline-pass/deepseek-v4-flash", "DeepSeek V4 Flash (ClinePass)"},
+		{"cline-pass/mimo-v2.5", "MiMo-V2.5 (ClinePass)"},
+		{"cline-pass/mimo-v2.5-pro", "MiMo-V2.5-Pro (ClinePass)"},
+		{"cline-pass/minimax-m3", "MiniMax M3 (ClinePass)"},
+		{"cline-pass/qwen3.7-max", "Qwen3.7 Max (ClinePass)"},
+		{"cline-pass/qwen3.7-plus", "Qwen3.7 Plus (ClinePass)"},
+	}
+	return clineDiscoveredFromIDs(provider, "clinepass", ids)
+}
+
+func clineDiscoveredFromIDs(provider store.Provider, ownedBy string, ids []struct{ id, name string }) []DiscoveredModel {
+	registry := NewRegistry()
+	items := make([]DiscoveredModel, 0, len(ids))
+	for _, model := range ids {
+		items = append(items, DiscoveredModel{
+			ID:           model.id,
+			Name:         model.name,
+			OwnedBy:      ownedBy,
+			Capabilities: discoveryCapabilities(registry, provider, provider.Type, model.id),
+		})
+	}
+	return items
 }
 
 func cursorStaticModelEntries(provider store.Provider) []DiscoveredModel {

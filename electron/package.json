@@ -1,8 +1,8 @@
 {
   "name": "tproxy-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
-  "description": "Electron shell for the embedded tproxy dashboard",
+  "description": "Electron shell for TProxy — tray icon, hide-to-tray, start at login",
   "main": "main.js",
   "scripts": {
     "start": "electron ."

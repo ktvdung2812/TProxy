@@ -54,6 +54,11 @@ export function CLIToolsView({ secret }: Props) {
           <span className="material-symbols-outlined">security</span>
           <h3>MITM Tools</h3>
         </div>
+        <p className="cli-tool-hint" style={{ marginBottom: 12 }}>
+          <strong>Not supported in tproxy.</strong> 9Router-style MITM/pxpipe capture is intentionally out of scope.
+          Connect these products via <strong>Providers</strong> OAuth/API key instead (Antigravity, GitHub Copilot, Kiro, …).
+          Domain labels below are for reference only.
+        </p>
         <div className="cli-tools-grid">
           {mitmTools.map(([toolId, tool]) => (
             <MitmToolCard key={toolId} toolId={toolId} tool={tool} />

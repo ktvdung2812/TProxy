@@ -488,7 +488,10 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
                 />
               </div>
             ) : null}
-            <p className="cli-tool-hint">Enable MITM in your proxy tool and route traffic through the configured domain.</p>
+            <p className="cli-tool-hint">
+              MITM interception is <strong>not implemented</strong> in tproxy. Use Dashboard → Providers to enroll this product with OAuth
+              or an API key. The domain is listed only for migration notes from 9Router.
+            </p>
           </div>
         </div>
       );

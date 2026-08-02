@@ -328,6 +328,7 @@ func applyClineProviderDefaults(provider *ProviderConfig, name string) {
 		provider.Name = name
 	}
 	if provider.BaseURL == "" {
+		// OpenAI-compatible root; chat uses /chat/completions, discovery differs by type.
 		provider.BaseURL = "https://api.cline.bot/api/v1"
 	}
 	if len(provider.Headers) == 0 {
@@ -339,6 +340,7 @@ func applyClineProviderDefaults(provider *ProviderConfig, name string) {
 	if provider.OAuth == nil {
 		provider.OAuth = &OAuthConfig{}
 	}
+	// Shared WorkOS / AuthKit flow for both Cline account and ClinePass.
 	if provider.OAuth.AuthorizationURL == "" {
 		provider.OAuth.AuthorizationURL = "https://api.cline.bot/api/v1/auth/authorize"
 	}
@@ -354,6 +356,8 @@ func applyClineProviderDefaults(provider *ProviderConfig, name string) {
 	if provider.OAuth.ClientID == "" {
 		provider.OAuth.ClientID = "extension"
 	}
+	// Browser callback paste flow (authkit.cline.bot) — no fixed loopback listener.
+	provider.OAuth.ListenForCallback = false
 }
 
 func ApplyProviderDefaults(provider *ProviderConfig) {
@@ -480,6 +484,20 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		}
 		if _, exists := provider.OAuth.ExtraAuthParams["referrer"]; !exists {
 			provider.OAuth.ExtraAuthParams["referrer"] = "tproxy"
+		}
+	case "grok-web":
+		if provider.Name == "" {
+			provider.Name = "Grok Web (Subscription)"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://grok.com/rest/app-chat/conversations/new"
+		}
+	case "perplexity-web":
+		if provider.Name == "" {
+			provider.Name = "Perplexity Web (Pro/Max)"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://www.perplexity.ai/rest/sse/perplexity_ask"
 		}
 	case "copilot":
 		if provider.Name == "" {
@@ -913,7 +931,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}

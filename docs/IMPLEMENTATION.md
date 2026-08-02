@@ -52,6 +52,9 @@
 - Search supports Tavily; additional search providers and provider-specific ranking/citation options remain.
 - Usage records contain token counts and estimated route cost when pricing is configured; global/team/client daily budgets and client-key resource limits are enforced before fallback.
 - Raw upstream model access is optional and maps back to the owning public model.
+- Web-cookie providers: **Grok Web** and **Perplexity Web** have dedicated adapters (`internal/providers/grok_web.go`, `perplexity_web.go`); other webCookie presets may still need wire-protocol adapters.
+- Agent skills pack under `skills/` + dashboard **Skills** page; remote raw-URL hosting depends on the published repo.
+- MITM/pxpipe from 9Router is **not** implemented (CLI Tools MITM section is reference-only).
 
 ## Staged extensions
 

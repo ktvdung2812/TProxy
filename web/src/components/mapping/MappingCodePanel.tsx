@@ -7,6 +7,7 @@ import {
   buildBashExports,
   buildClaudeSettings,
   buildCodexConfig,
+  buildCursorSetupGuide,
   buildPowerShellExports,
   DEFAULT_CLAUDE_PRIMARY_MODEL,
   CODEX_MAPPING_TIERS,
@@ -17,7 +18,7 @@ import {
   resolveTierTargets,
 } from "./codegen";
 
-type Client = "claude" | "codex";
+type Client = "claude" | "codex" | "cursor";
 
 type Props = {
   client: Client;
@@ -59,9 +60,25 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
   const [copied, setCopied] = useState(false);
 
   const serverTargets = useMemo(() => resolveTierTargets(overrides, data), [overrides, data]);
-  const visibleTiers = client === "claude" ? MAPPING_TIERS : CODEX_MAPPING_TIERS;
+  const visibleTiers = client === "claude" ? MAPPING_TIERS : client === "codex" ? CODEX_MAPPING_TIERS : [];
+  const cursorTargets = useMemo(() => {
+    if (client !== "cursor") return [] as Array<{ id: string; target: string }>;
+    return Object.entries(overrides)
+      .filter(([, target]) => target.trim())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([id, target]) => ({ id, target: target.trim() }));
+  }, [client, overrides]);
 
   const { content, filename, language, hint } = useMemo(() => {
+    if (client === "cursor") {
+      return {
+        content: buildCursorSetupGuide(baseUrl, apiKey, overrides),
+        filename: "cursor-setup.txt",
+        language: "text",
+        hint: "Use a publicly reachable base URL (tunnel). Add each custom model ID in Cursor Settings → Models.",
+      };
+    }
+
     if (client === "codex") {
       return {
         content: buildCodexConfig(baseUrl, apiKey, gptModel),
@@ -93,7 +110,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
           language: "powershell",
           hint: CLAUDE_FORMAT_HINTS.shell,
         };
-  }, [client, claudeFormat, shell, baseUrl, apiKey, primaryModel, gptModel]);
+  }, [client, claudeFormat, shell, baseUrl, apiKey, primaryModel, gptModel, overrides]);
 
   const copyContent = async () => {
     try {
@@ -105,11 +122,13 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
     }
   };
 
-  const title = client === "claude" ? "Claude Code" : "Codex CLI";
+  const title = client === "claude" ? "Claude Code" : client === "codex" ? "Codex CLI" : "Cursor IDE";
   const description =
     client === "claude"
       ? "Generate client config that keeps placeholder tier names — tproxy rewrites them on /v1/messages."
-      : "Generate Codex config with GPT codenames like gpt-sol — tproxy rewrites them on /v1/chat/completions.";
+      : client === "codex"
+        ? "Generate Codex config with GPT codenames like gpt-sol — tproxy rewrites them on /v1/chat/completions."
+        : "Generate Cursor setup notes. Add the listed custom model IDs in Settings → Models; tproxy rewrites them on /v1/chat/completions.";
 
   return (
     <Card pad="md" className="mapping-card mapping-card-wide mapping-code-panel">
@@ -127,7 +146,9 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
           hint={
             client === "claude"
               ? "Anthropic-compatible endpoint, usually your tproxy origin with /v1."
-              : "OpenAI-compatible endpoint, usually your tproxy origin with /v1."
+              : client === "cursor"
+                ? "Public OpenAI-compatible URL (tunnel / cloud). Cursor does not support localhost."
+                : "OpenAI-compatible endpoint, usually your tproxy origin with /v1."
           }
         >
           <Input
@@ -156,7 +177,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
               ))}
             </Select>
           </Field>
-        ) : (
+        ) : client === "codex" ? (
           <Field
             label="Primary model"
             hint="Codex model field — GPT codename placeholder mapped to the configured tier target."
@@ -169,21 +190,36 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
               ))}
             </Select>
           </Field>
-        )}
+        ) : null}
       </div>
 
-      <div className="mapping-code-targets">
-        <span className="mapping-code-targets-label">Server-side tier targets</span>
-        <div className="mapping-code-targets-grid">
-          {visibleTiers.map((tier) => (
-            <div key={tier} className="mapping-code-target-chip">
-              <code>{tier}</code>
-              <span className="mapping-placeholder-arrow">→</span>
-              <code>{serverTargets[tier] || "—"}</code>
-            </div>
-          ))}
+      {client === "cursor" ? (
+        <div className="mapping-code-targets">
+          <span className="mapping-code-targets-label">Cursor custom model targets</span>
+          <div className="mapping-code-targets-grid">
+            {cursorTargets.map((row) => (
+              <div key={row.id} className="mapping-code-target-chip">
+                <code>{row.id}</code>
+                <span className="mapping-placeholder-arrow">→</span>
+                <code>{row.target || "—"}</code>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="mapping-code-targets">
+          <span className="mapping-code-targets-label">Server-side tier targets</span>
+          <div className="mapping-code-targets-grid">
+            {visibleTiers.map((tier) => (
+              <div key={tier} className="mapping-code-target-chip">
+                <code>{tier}</code>
+                <span className="mapping-placeholder-arrow">→</span>
+                <code>{serverTargets[tier] || "—"}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {client === "claude" ? (
         <div className="mapping-code-toolbar">

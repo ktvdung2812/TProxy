@@ -343,14 +343,18 @@ Optional **systemd** service: see [`deploy/README.md`](deploy/README.md).
 
 ---
 
-#### Option E — npm global wrapper
+#### Option E — npm global wrapper (+ system tray / auto-start)
 
 ```bash
 npm install -g @ktvdung1606/tproxy
-tproxy --config config.yaml
+tproxy --config config.yaml          # foreground
+tproxy --tray                        # menu bar / notification area (like 9Router)
+tproxy autostart enable              # launch at login in tray mode
 ```
 
-The npm package is a CLI wrapper around the Go binary. For a global install you still need a built `tproxy` executable (from `npm run build` in a clone) or run from a local checkout where `go run ./cmd/tproxy` is available. See [`npm/README.md`](npm/README.md).
+Tray menu: **Open Dashboard**, **Enable Auto-start**, **Quit**. See [`npm/README.md`](npm/README.md).
+
+The npm package wraps the Go binary. You still need a built `tproxy` executable (from `npm run build` in a clone) or a local checkout where `go run ./cmd/tproxy` is available.
 
 ---
 
@@ -480,7 +484,7 @@ Model:     <your public model ID or alias>
 
 **CLI Tools** — the dashboard includes setup guides for popular coding CLIs (environment exports, config file patches, and copy-paste scripts).
 
-**Remote access** — expose the gateway via Cloudflare quick tunnel or Tailscale from **APIs → Tunnel**, or put a reverse proxy with TLS in front of port `28120`.
+**Remote access** — from **APIs → Tunnel**, enable a direct Cloudflare Quick Tunnel. It returns a temporary `https://&lt;random&gt;.trycloudflare.com` origin; that URL changes when the tunnel restarts, so update remote clients after a reconnect. For a permanent hostname, use a Cloudflare named tunnel with a domain you control or a reverse proxy with TLS in front of port `28120`.
 
 ---
 
@@ -510,6 +514,10 @@ For remote management or OAuth callbacks on a public host, set `server.allow-rem
 # Generate encryption key
 tproxy --print-master-key
 
+# System tray + auto-start (npm wrapper)
+tproxy --tray
+tproxy autostart enable|disable|status
+
 # Consistent SQLite backup
 tproxy --config config.yaml --backup-database backups/tproxy.db
 
@@ -527,6 +535,8 @@ tproxy --config config.yaml --import-auth oauth-bundle.enc
 tproxy connect <remote-url>
 ```
 
+Electron desktop shell (optional): `cd electron && npm install && npm start` — tray icon, hide-to-tray, and **Start at Login**.
+
 ---
 
 ## Security
@@ -537,6 +547,7 @@ tproxy connect <remote-url>
 - OAuth tokens use encrypted envelopes with refresh deduplication and redacted admin responses.
 - Request logging supports correlation IDs with sensitive field redaction.
 - `allow-local-without-key` and `allow-remote-management` are **opt-in** — keep them disabled unless you understand the exposure.
+- The development dashboard never embeds `.env.run` credentials in browser assets. Keep Vite bound to loopback (the default); set `TPROXY_DEV_BIND_HOST=0.0.0.0` only when you intentionally need LAN access.
 
 ---
 

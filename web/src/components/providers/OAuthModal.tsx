@@ -240,23 +240,52 @@ export function OAuthModal({
     if (!sessionId || !manualUrl.trim()) return;
     setErrorMsg("");
     try {
-      const parsed = new URL(manualUrl.trim());
+      const trimmed = manualUrl.trim();
       const statelessCallback = allowsStatelessOAuthCallback(providerType);
-      const code =
-        (providerType === "cline" || providerType === "clinepass"
-          ? parseClineCallbackUrl(manualUrl.trim())
-          : null) ||
-        parsed.searchParams.get("code") ||
-        parsed.searchParams.get("token");
-      const oauthState = statelessCallback ? "" : parsed.searchParams.get("state") || "";
-      const oauthError = parsed.searchParams.get("error");
+      let code: string | null = null;
+      let oauthState = "";
+      let oauthError: string | null = null;
+      let oauthErrorDescription: string | null = null;
+
+      // Prefer full callback URL parse; fall back to bare Claude "code#state".
+      try {
+        const parsed = new URL(trimmed);
+        code =
+          (providerType === "cline" || providerType === "clinepass"
+            ? parseClineCallbackUrl(trimmed)
+            : null) ||
+          parsed.searchParams.get("code") ||
+          parsed.searchParams.get("token");
+        oauthState = statelessCallback ? "" : parsed.searchParams.get("state") || "";
+        oauthError = parsed.searchParams.get("error");
+        oauthErrorDescription = parsed.searchParams.get("error_description");
+      } catch {
+        // Not a URL — Claude OAuth often shows a copyable "authorization_code#state".
+        if (providerType === "claude" || trimmed.includes("#")) {
+          const hashIdx = trimmed.indexOf("#");
+          if (hashIdx >= 0) {
+            code = trimmed.slice(0, hashIdx).trim();
+            oauthState = trimmed.slice(hashIdx + 1).trim();
+          } else if (providerType === "claude") {
+            code = trimmed;
+            oauthState = "";
+          }
+        }
+      }
+
       if (oauthError) {
-        throw new Error(parsed.searchParams.get("error_description") || oauthError);
+        throw new Error(oauthErrorDescription || oauthError);
       }
       if (!code) {
-        throw new Error("Callback URL must include a code (or token) query parameter");
+        throw new Error(
+          providerType === "claude"
+            ? "Paste the full callback URL, or the authorization code (code#state) shown by Claude."
+            : "Callback URL must include a code (or token) query parameter",
+        );
       }
-      if (!oauthState && !statelessCallback) {
+      // Claude can complete with session_id alone when state is embedded in code#state
+      // or when the popup already bound the session; allow empty state for that path.
+      if (!oauthState && !statelessCallback && providerType !== "claude") {
         throw new Error("Callback URL must include code and state query parameters");
       }
       const status = await completeOAuthCallback(secret, code, oauthState || undefined, sessionId || undefined);
@@ -355,15 +384,19 @@ export function OAuthModal({
             <p className="oauth-step-hint">
               {providerType === "cline" || providerType === "clinepass"
                 ? "After sign-in, paste the full URL from authkit.cline.bot (for example .../device?code=...)."
-                : "After authorization, copy the full URL from your browser address bar."}
+                : providerType === "claude"
+                  ? "After authorization, paste the full callback URL from the address bar, or the authorization code Claude shows (format: code#state)."
+                  : "After authorization, copy the full URL from your browser address bar."}
             </p>
             <Input
               placeholder={
                 providerType === "cline" || providerType === "clinepass"
                   ? "https://authkit.cline.bot/device?user_code=...&code=..."
-                  : allowsStatelessOAuthCallback(providerType)
-                    ? "http://localhost:1455/auth/callback?code=..."
-                    : "http://localhost:1455/auth/callback?code=...&state=..."
+                  : providerType === "claude"
+                    ? "http://localhost:…/callback?code=…&state=…  or  code#state"
+                    : allowsStatelessOAuthCallback(providerType)
+                      ? "http://localhost:1455/auth/callback?code=..."
+                      : "http://localhost:1455/auth/callback?code=...&state=..."
               }
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}
