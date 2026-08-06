@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Badge, Card } from "../ui";
 import type { CLITool } from "../../cli-tools/constants";
 import type { CLIToolStatus } from "./api";
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function ToolSummaryCard({ toolId, tool, status }: Props) {
+  const { t } = useTranslation();
   const connected = status?.has_tproxy || status?.has_9router;
 
   return (
@@ -24,11 +26,11 @@ export function ToolSummaryCard({ toolId, tool, status }: Props) {
               <h3>{tool.name}</h3>
               {connected ? (
                 <Badge variant="success" size="sm">
-                  Connected
+                  {t("cliTools.connected")}
                 </Badge>
               ) : status?.installed ? (
                 <Badge variant="warning" size="sm">
-                  Not configured
+                  {t("cliTools.notConfigured")}
                 </Badge>
               ) : null}
             </div>

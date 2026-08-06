@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "../ui";
 import { isOnCooldown, type Credential } from "./types";
 
@@ -18,6 +19,7 @@ type Props = {
  * because there is no backend endpoint to force-clear a tdproxy cooldown.
  */
 export function ModelAvailabilityBadge({ credentials }: Props) {
+  const { t } = useTranslation();
   // Tick every 30s so cooldown expiry is reflected even without a snapshot refetch.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -35,13 +37,13 @@ export function ModelAvailabilityBadge({ credentials }: Props) {
   const unhealthy = cooldown + authRequired;
 
   if (unhealthy === 0) {
-    return <Badge variant="success" size="sm" dot>all available</Badge>;
+    return <Badge variant="success" size="sm" dot>{t("providers.allAvailable")}</Badge>;
   }
   if (cooldown > 0 && authRequired === 0) {
-    return <Badge variant="warning" size="sm" dot>{cooldown} cooldown</Badge>;
+    return <Badge variant="warning" size="sm" dot>{cooldown} {t("providers.cooldownBadge")}</Badge>;
   }
   if (authRequired > 0 && cooldown === 0) {
-    return <Badge variant="error" size="sm" dot>{authRequired} auth required</Badge>;
+    return <Badge variant="error" size="sm" dot>{authRequired} {t("providers.authRequiredBadge")}</Badge>;
   }
-  return <Badge variant="error" size="sm" dot>{unhealthy} unavailable</Badge>;
+  return <Badge variant="error" size="sm" dot>{unhealthy} {t("providers.unavailableBadge")}</Badge>;
 }

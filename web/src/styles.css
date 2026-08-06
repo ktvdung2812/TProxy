@@ -5409,6 +5409,71 @@ button:disabled,
   font-size: 16px;
 }
 
+/* Error message styling */
+.chat-message.is-error .chat-message-content {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border-radius: 18px;
+  padding: 12px 16px;
+  color: var(--color-danger);
+}
+
+.dark .chat-message.is-error .chat-message-content {
+  color: #d4737c;
+}
+
+/* Inline error banner inside chat area */
+.chat-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.dark .chat-error-banner {
+  color: #d4737c;
+}
+
+.chat-error-banner .material-symbols-outlined {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.chat-error-banner > span:nth-child(2) {
+  flex: 1;
+  line-height: 1.5;
+}
+
+.chat-error-dismiss {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.chat-error-dismiss:hover {
+  opacity: 1;
+}
+
+.chat-error-dismiss .material-symbols-outlined {
+  font-size: 16px;
+}
+
 .chat-message.is-user .chat-message-content {
   background: var(--color-surface-3);
   border: 1px solid var(--color-border-subtle);
@@ -7261,6 +7326,13 @@ a { text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .matrix-rain { display: none; }
+}
+
+.auth-language-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 3;
 }
 
 /* ============================================================

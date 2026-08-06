@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { getProviderTypeInfo, defaultOAuthMode, usesBrowserOAuth, allowsStatelessOAuthCallback, parseClineCallbackUrl } from "./catalog";
 import type { KiroDeviceConfig } from "./KiroAuthModal";
@@ -48,6 +49,7 @@ export function OAuthModal({
   onComplete,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const info = getProviderTypeInfo(providerType);
   const browserFlow = usesBrowserOAuth(providerType, presetId);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -185,7 +187,7 @@ export function OAuthModal({
       startPolling(started.session_id);
     } catch (cause) {
       setPhase("failed");
-      const msg = cause instanceof Error ? cause.message : "Failed to start OAuth";
+      const msg = cause instanceof Error ? cause.message : t("providers.oauthFailed");
       setErrorMsg(msg);
       onError?.(msg);
     }
@@ -232,7 +234,7 @@ export function OAuthModal({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      setErrorMsg("Could not copy authorization URL");
+      setErrorMsg(t("providers.oauthCopyFailed"));
     }
   }, [startResp?.authorization_url]);
 
@@ -279,14 +281,14 @@ export function OAuthModal({
       if (!code) {
         throw new Error(
           providerType === "claude"
-            ? "Paste the full callback URL, or the authorization code (code#state) shown by Claude."
-            : "Callback URL must include a code (or token) query parameter",
+            ? t("providers.pasteCallbackClaude")
+            : t("providers.callbackUrlHint"),
         );
       }
       // Claude can complete with session_id alone when state is embedded in code#state
       // or when the popup already bound the session; allow empty state for that path.
       if (!oauthState && !statelessCallback && providerType !== "claude") {
-        throw new Error("Callback URL must include code and state query parameters");
+        throw new Error(t("providers.callbackUrlHint"));
       }
       const status = await completeOAuthCallback(secret, code, oauthState || undefined, sessionId || undefined);
       setSession(status);
@@ -296,7 +298,7 @@ export function OAuthModal({
         startPolling(sessionId);
       }
     } catch (cause) {
-      const msg = cause instanceof Error ? cause.message : "Failed to submit callback URL";
+      const msg = cause instanceof Error ? cause.message : t("providers.oauthSubmitFailed");
       setErrorMsg(msg);
       onError?.(msg);
     }
@@ -313,7 +315,7 @@ export function OAuthModal({
       open={open}
       onClose={handleCancel}
       title={`Connect ${info.name}`}
-      subtitle="Sign in with your provider account to link a credential."
+      subtitle={t("providers.oauthSubtitle")}
       icon="lock_person"
       size="lg"
       footer={
@@ -350,7 +352,7 @@ export function OAuthModal({
       }
     >
       {phase === "idle" && !autoStart && (
-        <Field label="Account label" hint="Optional friendly name for this credential.">
+        <Field label={t("providers.accountLabel")} hint={t("providers.accountLabelHint")}>
           <Input placeholder="e.g. primary" value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
       )}
@@ -359,7 +361,7 @@ export function OAuthModal({
         <div className="oauth-connect">
           <div className="oauth-status pending">
             <span className="material-symbols-outlined animate-spin">progress_activity</span>
-            <span>{isStarting ? "Starting authorization…" : "Waiting for popup authorization…"}</span>
+            <span>{isStarting ? t("providers.startingAuth") : t("providers.waitingPopup")}</span>
           </div>
 
           <div className="oauth-divider">
@@ -371,7 +373,7 @@ export function OAuthModal({
             <div className="oauth-url-row">
               <Input value={authUrl} readOnly className="oauth-url-input" />
               <Button variant="secondary" size="sm" icon={copied ? "check" : "content_copy"} onClick={() => void handleCopyAuthUrl()} disabled={!authUrl}>
-                {copied ? "Copied" : "Copy"}
+                {copied ? t("common.copied") : t("common.copy")}
               </Button>
               <Button variant="secondary" size="sm" icon="open_in_new" onClick={() => authUrl && openAuthWindow(authUrl)} disabled={!authUrl}>
                 Open
@@ -410,7 +412,7 @@ export function OAuthModal({
         <div className="oauth-connect">
           <div className="oauth-status pending">
             <span className="material-symbols-outlined animate-spin">progress_activity</span>
-            <span>{isStarting ? "Starting authorization…" : "Waiting for authorization to complete…"}</span>
+            <span>{isStarting ? t("providers.startingAuth") : "Waiting for authorization to complete…"}</span>
           </div>
           <p className="oauth-step-hint">
             Complete sign-in in the browser tab that opened. This provider uses device authorization — no code entry is required in the dashboard.

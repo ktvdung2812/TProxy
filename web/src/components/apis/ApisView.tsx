@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useApiKeySecrets } from "../../hooks/useApiKeySecrets";
-import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
 import {
   Badge,
   Button,
@@ -56,6 +56,7 @@ function compact(value: number) {
 }
 
 export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onMutated }: Props) {
+  const { t } = useTranslation();
   useApiKeySecrets();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
   const [loadingUsage, setLoadingUsage] = useState(true);
@@ -89,9 +90,6 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
   useEffect(() => {
     if (typeof window === "undefined") return;
     setIsRemoteHost(!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname));
-    if (isLocalDashboardHost() && !getStoredApiKeySecret("local")) {
-      storeApiKeySecret("local", defaultApiKey());
-    }
   }, []);
 
   const baseUrl = useMemo(() => buildLocalGatewayBaseUrl(serverPort), [serverPort]);
@@ -119,7 +117,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
       }
       setUsageById(mapped);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to load API key usage");
+      onError(error instanceof Error ? error.message : t("apis.failedLoadUsage"));
     } finally {
       setLoadingUsage(false);
     }
@@ -166,11 +164,11 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
       setCreatedSecret(result.key);
       setShowCreateModal(false);
       resetCreateForm();
-      onNotice("API key created — copy the secret now");
+      onNotice(t("apis.keyCreatedNotice"));
       onMutated?.();
       await loadUsage();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to create API key");
+      onError(error instanceof Error ? error.message : t("apis.failedCreateKey"));
     } finally {
       setSaving(false);
     }
@@ -185,14 +183,14 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
       if (editSecret.trim()) {
         storeApiKeySecret(editingKey.id, editSecret.trim());
       }
-      onNotice(`API key "${formData.name}" updated`);
+      onNotice(t("apis.keyUpdatedNotice", { name: formData.name }));
       setShowEditModal(false);
       setEditingKey(null);
       setEditSecret("");
       onMutated?.();
       await loadUsage();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update API key");
+      onError(error instanceof Error ? error.message : t("apis.failedUpdateKey"));
     } finally {
       setSaving(false);
     }
@@ -202,11 +200,11 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
     setTogglingId(key.id);
     try {
       await toggleApiKey(secret, key, enabled);
-      onNotice(`API key "${key.name || key.id}" ${enabled ? "enabled" : "disabled"}`);
+      onNotice(key.enabled ? t("apis.keyEnabledNotice", { name: key.name || key.id }) : t("apis.keyDisabledNotice", { name: key.name || key.id }));
       onMutated?.();
       await loadUsage();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update API key");
+      onError(error instanceof Error ? error.message : t("apis.failedUpdateKey"));
     } finally {
       setTogglingId(null);
     }
@@ -214,18 +212,18 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
   const handleDelete = (key: ApiKeyRecord) => {
     setConfirmState({
-      title: "Delete API key",
-      message: `Delete "${key.name || key.id}"? Clients using this key will lose access immediately.`,
-      confirmText: "Delete",
+      title: t("apis.deleteKeyTitle"),
+      message: t("apis.deleteKeyConfirm", { name: key.name || key.id }),
+      confirmText: t("apis.deleteKeyConfirmText"),
       onConfirm: () => {
         void (async () => {
           try {
             await deleteApiKey(secret, key.id);
-            onNotice(`API key "${key.name || key.id}" deleted`);
+            onNotice(t("apis.keyDeletedNotice", { name: key.name || key.id }));
             onMutated?.();
             await loadUsage();
           } catch (error) {
-            onError(error instanceof Error ? error.message : "Failed to delete API key");
+            onError(error instanceof Error ? error.message : t("apis.failedDeleteKey"));
           }
         })();
       },
@@ -234,9 +232,9 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
   const renderKeyLimitsForm = () => (
     <div className="apis-form-limits">
-      <p className="apis-form-section-title">Rate limits</p>
+      <p className="apis-form-section-title">{t("apis.rateLimits")}</p>
       <div className="inline-fields">
-        <Field label="Requests / min">
+        <Field label={t("apis.requestsPerMin")}>
           <Input
             type="number"
             min={0}
@@ -244,7 +242,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
             onChange={(event) => setFormData({ ...formData, rpm: Number(event.target.value) })}
           />
         </Field>
-        <Field label="Concurrent streams">
+        <Field label={t("apis.concurrentStreams")}>
           <Input
             type="number"
             min={0}
@@ -254,7 +252,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
         </Field>
       </div>
       <div className="inline-fields">
-        <Field label="Max input bytes">
+        <Field label={t("apis.maxInputBytes")}>
           <Input
             type="number"
             min={0}
@@ -262,7 +260,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
             onChange={(event) => setFormData({ ...formData, max_input_bytes: Number(event.target.value) })}
           />
         </Field>
-        <Field label="Max output tokens">
+        <Field label={t("apis.maxOutputTokens")}>
           <Input
             type="number"
             min={0}
@@ -272,7 +270,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
         </Field>
       </div>
       <div className="inline-fields">
-        <Field label="Media jobs">
+        <Field label={t("apis.mediaJobs")}>
           <Input
             type="number"
             min={0}
@@ -280,7 +278,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
             onChange={(event) => setFormData({ ...formData, media_jobs: Number(event.target.value) })}
           />
         </Field>
-        <Field label="Daily budget (USD)">
+        <Field label={t("apis.dailyBudget")}>
           <Input
             type="number"
             min={0}
@@ -298,17 +296,17 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
       <Card className="apis-endpoint-card" pad="md">
         <h2 className="apis-card-title">
           <span className="material-symbols-outlined">api</span>
-          API Endpoint
+          {t("apis.apiEndpoint")}
         </h2>
 
         <div className="endpoint-row-list">
-          <EndpointRow label="Local" url={baseUrl} copyId="local_url" copied={copied} onCopy={copy} highlight />
+          <EndpointRow label={t("apis.local")} url={baseUrl} copyId="local_url" copied={copied} onCopy={copy} highlight />
           {allowLanAccess
             ? lanIPs.length > 0
               ? lanIPs.map((ip) => (
                   <EndpointRow
                     key={ip}
-                    label="LAN"
+                    label={t("apis.lan")}
                     url={buildHostBaseUrl(ip, serverPort)}
                     copyId={`lan_url_${ip}`}
                     copied={copied}
@@ -319,8 +317,8 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                 ))
               : (
                   <EndpointRow
-                    label="LAN"
-                    url="No private IPv4 address found"
+                    label={t("apis.lan")}
+                    url={t("apis.noLanIp")}
                     copyId="lan_url_empty"
                     copied={copied}
                     onCopy={copy}
@@ -333,18 +331,18 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
         {allowLanAccess && lanRestartRequired ? (
           <div className="apis-card-warning">
-            <SecurityWarning message="Set server.host to 0.0.0.0 in config.yaml and restart the server so LAN devices can connect." />
+            <SecurityWarning message={t("apis.lanRestartWarning")} />
           </div>
         ) : null}
 
         {isRemoteHost && apiKeys.length === 0 ? (
           <div className="apis-card-warning">
-            <SecurityWarning message="No client API keys configured. Remote clients must authenticate with a valid key." />
+            <SecurityWarning message={t("apis.noKeysRemoteWarning")} />
           </div>
         ) : null}
 
         <div className="apis-example-form">
-          <Field label="Example API key">
+          <Field label={t("apis.exampleApiKey")}>
             <ApiKeySelect
               embedded
               apiKeys={apiKeys}
@@ -355,7 +353,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               missingSecretMessage="Secret for this key is not saved in this browser. Create a new key below and save the secret when it is shown."
             />
           </Field>
-          <Field label="Example model" hint="Display names from PPM — curl uses the public model ID">
+          <Field label={t("apis.exampleModel")} hint={t("apis.exampleModelHint")}>
             <Select value={exampleModel} onChange={(event) => setExampleModel(event.target.value)}>
               {modelOptions.length === 0 ? (
                 <option value="">No models yet</option>
@@ -440,7 +438,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
 
         {apiKeys.length === 0 ? (
           <div className="apis-keys-empty">
-            <EmptyState icon="vpn_key" text="No API keys yet" hint="Create your first API key to authenticate clients." />
+            <EmptyState icon="vpn_key" text={t("overview.noApiKeys")} hint={t("apis.createKeyHint")} />
             <Button variant="primary" icon="add" onClick={openCreateModal}>
               Create Key
             </Button>
@@ -466,7 +464,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                             type="button"
                             className="endpoint-row-copy small"
                             onClick={() => copy(storedSecret, `secret_${key.id}`)}
-                            aria-label="Copy API key"
+                            aria-label={t("apis.copySecret")}
                           >
                             <span className="material-symbols-outlined">
                               {copied === `secret_${key.id}` ? "check" : "content_copy"}
@@ -481,7 +479,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                       {key.models?.length ? key.models.join(", ") : "*"} · {formatLimitSummary(key)}
                     </p>
                     <p className="apis-key-row-meta">
-                      {loadingUsage ? "Loading usage…" : `${compact(requests)} requests today · ${usd(spent)} spent`}
+                      {loadingUsage ? t("apis.loadingUsage") : `${compact(requests)} requests today · ${usd(spent)} spent`}
                       {budget ? ` · ${usd(budget)} budget` : ""}
                     </p>
                     {!key.enabled ? <p className="apis-key-row-paused">Paused</p> : null}

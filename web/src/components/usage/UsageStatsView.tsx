@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { fetchUsageStats } from "./api";
 import type { UsagePeriod, UsageStats } from "./api";
 import { OverviewCards } from "./OverviewCards";
@@ -32,14 +33,18 @@ type Props = {
   onError: (message: string) => void;
 };
 
-const TABLE_OPTIONS: Array<{ value: UsageTableView; label: string }> = [
-  { value: "model", label: "Usage by Model" },
-  { value: "account", label: "Usage by Credential" },
-  { value: "apiKey", label: "Usage by API Key" },
-  { value: "endpoint", label: "Usage by Upstream Model" },
-];
+function buildTableOptions(t: (key: string) => string): Array<{ value: UsageTableView; label: string }> {
+  return [
+    { value: "model", label: t("usage.byModel") },
+    { value: "account", label: t("usage.byCredential") },
+    { value: "apiKey", label: t("usage.byApiKey") },
+    { value: "endpoint", label: t("usage.byUpstreamModel") },
+  ];
+}
 
 export function UsageStatsView({ secret, period, providers, onError }: Props) {
+  const { t } = useTranslation();
+  const TABLE_OPTIONS = useMemo(() => buildTableOptions(t), [t]);
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -57,7 +62,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
         if (!cancelled) setStats(data);
       })
       .catch((error) => {
-        if (!cancelled) onError(error instanceof Error ? error.message : "Failed to load usage stats");
+        if (!cancelled) onError(error instanceof Error ? error.message : t("usage.failedToLoad"));
       })
       .finally(() => {
         if (!cancelled) {
@@ -129,10 +134,10 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
     if (tableView === "model") {
       return {
         columns: [
-          { field: "rawModel", label: "Model" },
-          { field: "provider", label: "Provider" },
-          { field: "requests", label: "Requests", align: "right" as const },
-          { field: "lastUsed", label: "Last used", align: "right" as const },
+          { field: "rawModel", label: t("usage.model") },
+          { field: "provider", label: t("usage.provider") },
+          { field: "requests", label: t("usage.requests"), align: "right" as const },
+          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
         ],
         groupedData,
         storageKey: "tproxy-usage:expanded-models",
@@ -158,11 +163,11 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
     if (tableView === "account") {
       return {
         columns: [
-          { field: "rawModel", label: "Model" },
-          { field: "provider", label: "Provider" },
-          { field: "accountName", label: "Credential" },
-          { field: "requests", label: "Requests", align: "right" as const },
-          { field: "lastUsed", label: "Last used", align: "right" as const },
+          { field: "rawModel", label: t("usage.model") },
+          { field: "provider", label: t("usage.provider") },
+          { field: "accountName", label: t("usage.credential") },
+          { field: "requests", label: t("usage.requests"), align: "right" as const },
+          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
         ],
         groupedData,
         storageKey: "tproxy-usage:expanded-accounts",
@@ -191,10 +196,10 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
       return {
         columns: [
           { field: "keyName", label: "API key" },
-          { field: "rawModel", label: "Model" },
-          { field: "provider", label: "Provider" },
-          { field: "requests", label: "Requests", align: "right" as const },
-          { field: "lastUsed", label: "Last used", align: "right" as const },
+          { field: "rawModel", label: t("usage.model") },
+          { field: "provider", label: t("usage.provider") },
+          { field: "requests", label: t("usage.requests"), align: "right" as const },
+          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
         ],
         groupedData,
         storageKey: "tproxy-usage:expanded-apikeys",
@@ -221,11 +226,11 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
 
     return {
       columns: [
-        { field: "endpoint", label: "Upstream model" },
-        { field: "rawModel", label: "Virtual model" },
-        { field: "provider", label: "Provider" },
-        { field: "requests", label: "Requests", align: "right" as const },
-        { field: "lastUsed", label: "Last used", align: "right" as const },
+        { field: "endpoint", label: t("usage.upstreamModel") },
+        { field: "rawModel", label: t("usage.virtualModel") },
+        { field: "provider", label: t("usage.provider") },
+        { field: "requests", label: t("usage.requests"), align: "right" as const },
+        { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
       ],
       groupedData,
       storageKey: "tproxy-usage:expanded-endpoints",

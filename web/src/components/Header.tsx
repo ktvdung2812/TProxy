@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, IconButton, cn } from "./ui";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageToggle } from "./LanguageToggle";
 
 const GITHUB_REPO_URL = "https://github.com/ktvdung2812/TProxy";
 const BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/ktvdung";
@@ -26,6 +28,7 @@ export function Header({
   loading = false,
   extra,
 }: HeaderProps) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +54,7 @@ export function Header({
     <header className="app-header">
       <div className="header-title">
         {onOpenNav ? (
-          <IconButton icon="menu" label="Mở menu" className="header-menu-btn" onClick={onOpenNav} />
+          <IconButton icon="menu" label={t("nav.expandMenu")} className="header-menu-btn" onClick={onOpenNav} />
         ) : null}
         <div className="header-title-copy">
           <h1>
@@ -66,7 +69,7 @@ export function Header({
         {extra}
         {onRefresh && (
           <Button variant="secondary" size="md" icon={loading ? "" : "refresh"} loading={loading} onClick={onRefresh}>
-            {loading ? "Loading…" : "Refresh"}
+            {loading ? t("common.loading") : t("common.refresh")}
           </Button>
         )}
         <a
@@ -100,6 +103,7 @@ export function Header({
           </svg>
         </a>
         <ThemeToggle />
+        <LanguageToggle />
         <div className="header-menu" ref={menuRef}>
           <IconButton
             icon="more_vert"
@@ -120,7 +124,7 @@ export function Header({
                   }}
                 >
                   <span className="material-symbols-outlined">logout</span>
-                  <span>Đăng xuất</span>
+                  <span>{t("nav.logout")}</span>
                 </button>
               ) : null}
             </div>

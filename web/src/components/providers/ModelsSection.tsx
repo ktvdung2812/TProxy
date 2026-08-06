@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, EmptyState, Input } from "../ui";
 import { discoverProviderModels, testModel } from "./api";
 import type { DiscoveredModel } from "./api";
@@ -20,6 +21,7 @@ export function ModelsSection({
   secret,
   discoverNonce = 0,
 }: Props) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [availableModels, setAvailableModels] = useState<DiscoveredModel[]>([]);
@@ -70,7 +72,7 @@ export function ModelsSection({
       .catch((cause) => {
         if (cancelled) return;
         setAvailableModels([]);
-        setDiscoveryError(cause instanceof Error ? cause.message : "Model discovery failed");
+        setDiscoveryError(cause instanceof Error ? cause.message : t("providers.modelDiscoveryFailed"));
       })
       .finally(() => {
         if (!cancelled) setDiscovering(false);
@@ -101,7 +103,7 @@ export function ModelsSection({
     setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
     if (!result.ok) {
       const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
-      setTestError(`${model.id}: ${result.error || "Model not reachable"}${latency}`);
+      setTestError(`${model.id}: ${result.error || t("providers.modelNotReachable")}${latency}`);
     }
     return result.ok;
   };
@@ -114,7 +116,7 @@ export function ModelsSection({
       await runModelTest(model);
     } catch (cause) {
       setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
-      setTestError(cause instanceof Error ? cause.message : "Test failed");
+      setTestError(cause instanceof Error ? cause.message : t("providers.testFailed"));
     } finally {
       setTestingModelId(null);
     }
@@ -142,11 +144,11 @@ export function ModelsSection({
 
   const accountCount = enabledCredentials.length;
   const availableSubtitle = discovering
-    ? "Discovering models from accounts..."
+    ? t("providers.discoveringFromAccounts")
     : `${availableModels.length} model${availableModels.length === 1 ? "" : "s"} across ${accountCount} account${accountCount === 1 ? "" : "s"}`;
 
   const cardSubtitle = discovering
-    ? "Loading models from all accounts..."
+    ? t("providers.loadingFromAccounts")
     : enabledCredentials.length === 0
       ? "Connect an account to discover upstream models"
       : normalizedQuery
@@ -168,8 +170,8 @@ export function ModelsSection({
             icon={testingAll ? "progress_activity" : "science"}
             onClick={() => void handleTestAllModels()}
             disabled={testingAll || !!testingModelId || availableModels.length === 0 || discovering}
-            aria-label="Test all models"
-            title="Test all models"
+            aria-label={t("providers.testAllModels")}
+            title={t("providers.testAllModels")}
           >
             {testingAll ? "Testing..." : "Test all"}
           </Button>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, ConfirmDialog, Modal } from "./ui";
 import { fetchVersionInfo, type VersionInfo } from "../lib/version";
 
@@ -8,6 +9,7 @@ type Props = {
 };
 
 export function UpdateNotice({ secret, collapsed = false }: Props) {
+  const { t } = useTranslation();
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
@@ -49,9 +51,9 @@ export function UpdateNotice({ secret, collapsed = false }: Props) {
         <button
           type="button"
           className="sidebar-update-dot"
-          title={`New version available: v${info.latest_version}`}
+          title={t("updates.newVersionTitle", { version: info.latest_version })}
           onClick={() => setShowPanel(true)}
-          aria-label={`New version available: v${info.latest_version}`}
+          aria-label={t("updates.newVersionTitle", { version: info.latest_version })}
         />
         <UpdatePanelModal
           open={showPanel}
@@ -75,9 +77,9 @@ export function UpdateNotice({ secret, collapsed = false }: Props) {
           setShowConfirm(false);
           setShowPanel(true);
         }}
-        title="Update tproxy"
-        message={`Show install commands for v${info.latest_version || ""}? Copy the command that matches how you installed tproxy.`}
-        confirmText="Show commands"
+        title={t("updates.updateTproxy")}
+        message={t("updates.showCommands", { version: info.latest_version || "" })}
+        confirmText={t("updates.showCommandsBtn")}
         variant="primary"
       />
 
@@ -103,23 +105,24 @@ function VersionBlock({
   onOpen: () => void;
   onCopy: (command: string, kind: "npm" | "source") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="sidebar-version-block">
       <span className="sidebar-version-label">v{info.current_version}</span>
       {info.has_update ? (
         <div className="sidebar-update-banner">
-          <span className="sidebar-update-title">↑ New version available: v{info.latest_version}</span>
+          <span className="sidebar-update-title">{t("updates.newVersionBanner", { version: info.latest_version })}</span>
           <div className="sidebar-update-actions">
             <button type="button" className="sidebar-update-btn" onClick={onOpen}>
-              Update now
+              {t("updates.updateNow")}
             </button>
             <button
               type="button"
               className="sidebar-update-cmd"
               onClick={() => void onCopy(info.install_command, "npm")}
-              title="Copy install command"
+              title={t("updates.copyCommand")}
             >
-              <code>{copied === "npm" ? "✓ copied!" : info.install_command}</code>
+              <code>{copied === "npm" ? t("updates.copiedExclaim") : info.install_command}</code>
             </button>
           </div>
         </div>
@@ -141,18 +144,19 @@ function UpdatePanelModal({
   onClose: () => void;
   onCopy: (command: string, kind: "npm" | "source") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={info.latest_version ? `Update to v${info.latest_version}` : "Update tproxy"}
-      subtitle={`Current version: v${info.current_version}`}
+      title={info.latest_version ? t("updates.updateToVersion", { version: info.latest_version }) : t("updates.updateTproxy")}
+      subtitle={t("updates.currentVersion", { version: info.current_version })}
       icon="system_update_alt"
       size="md"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
+            {t("common.close")}
           </Button>
           <Button
             variant="secondary"
@@ -160,23 +164,23 @@ function UpdatePanelModal({
             icon="open_in_new"
             onClick={() => window.open(info.release_url, "_blank", "noopener,noreferrer")}
           >
-            Release notes
+            {t("updates.releaseNotes")}
           </Button>
         </>
       }
     >
       <div className="update-panel">
         <p className="update-panel-lead">
-          A newer release is available on npm. Choose the update path that matches your setup.
+          {t("updates.newerReleaseLead")}
         </p>
         <UpdateCommandSection
-          title="npm global install"
+          title={t("updates.npmGlobal")}
           command={info.install_command}
           copied={copied === "npm"}
           onCopy={() => void onCopy(info.install_command, "npm")}
         />
         <UpdateCommandSection
-          title="From git source"
+          title={t("updates.gitSource")}
           command={info.source_update_command}
           copied={copied === "source"}
           onCopy={() => void onCopy(info.source_update_command, "source")}
@@ -197,12 +201,13 @@ function UpdateCommandSection({
   copied: boolean;
   onCopy: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="update-panel-section">
       <div className="update-panel-section-head">
         <span className="update-panel-section-title">{title}</span>
         <Button variant="outline" size="sm" icon="content_copy" onClick={onCopy}>
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("common.copied") : t("common.copy")}
         </Button>
       </div>
       <pre className="update-panel-code">{command}</pre>

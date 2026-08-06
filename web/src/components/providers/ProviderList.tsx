@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../ui";
 import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
 import { providerDetailPath, type ProviderTypeInfo } from "./catalog";
@@ -90,6 +91,7 @@ export function ProviderList({
   onTestSection,
   testingSection,
 }: Props) {
+  const { t } = useTranslation();
   const [showAllApikey, setShowAllApikey] = useState(false);
   const [presetSections, setPresetSections] = useState(() => groupPresetsBySection([]));
 
@@ -210,7 +212,7 @@ export function ProviderList({
       )}
 
       <ProviderSection
-        title="Custom Providers (OpenAI/Anthropic Compatible)"
+        title={t("providers.customProviders")}
         actions={
           <>
             <Button size="sm" icon="add" onClick={onAddAnthropic}>
@@ -248,7 +250,7 @@ export function ProviderList({
             <>
               <ModelAvailabilityBadge credentials={oauthCredentials} />
               <TestAllButton
-                label="Test All"
+                label={t("providers.testAll")}
                 busy={testingSection === "oauth"}
                 onClick={() => onTestSection?.("oauth", sectionProviderIds(sortedOauthCatalog))}
               />
@@ -261,10 +263,10 @@ export function ProviderList({
 
       {sortedFreeTierCatalog.length > 0 && (
         <ProviderSection
-          title="Free Tier Providers"
+          title={t("providers.freeTierProviders")}
           actions={
             <TestAllButton
-              label="Test All"
+              label={t("providers.testAll")}
               busy={testingSection === "freeTier"}
               onClick={() => onTestSection?.("freeTier", sectionProviderIds(sortedFreeTierCatalog))}
             />
@@ -279,7 +281,7 @@ export function ProviderList({
           title="API Key Providers"
           actions={
             <TestAllButton
-              label="Test All"
+              label={t("providers.testAll")}
               busy={testingSection === "apikey"}
               onClick={() => onTestSection?.("apikey", sectionProviderIds(sortedApikeyCatalog))}
             />

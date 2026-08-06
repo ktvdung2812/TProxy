@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, EmptyState, Input, Modal } from "../ui";
 import { discoverCredentialModels, testModel, type DiscoveredModel } from "./api";
 import type { Credential } from "./types";
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function CredentialModelsModal({ open, credential, providerId, secret, onClose }: Props) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
       .catch((cause) => {
         if (cancelled) return;
         setModels([]);
-        setError(cause instanceof Error ? cause.message : "Model discovery failed");
+        setError(cause instanceof Error ? cause.message : t("providers.modelDiscoveryFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -101,7 +103,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
     setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
     if (!result.ok) {
       const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
-      setTestError(`${model.id}: ${result.error || "Model not reachable"}${latency}`);
+      setTestError(`${model.id}: ${result.error || t("providers.modelNotReachable")}${latency}`);
     }
     return result.ok;
   };
@@ -114,7 +116,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
       await runModelTest(model);
     } catch (cause) {
       setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
-      setTestError(cause instanceof Error ? cause.message : "Test failed");
+      setTestError(cause instanceof Error ? cause.message : t("providers.testFailed"));
     } finally {
       setTestingModelId(null);
     }
@@ -161,8 +163,8 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
               icon={testingAll ? "progress_activity" : "science"}
               onClick={() => void handleTestAllModels()}
               disabled={testingAll || !!testingModelId}
-              aria-label="Test all models"
-              title="Test all models"
+              aria-label={t("providers.testAllModels")}
+              title={t("providers.testAllModels")}
             >
               {testingAll ? "Testing..." : "Test all"}
             </Button>

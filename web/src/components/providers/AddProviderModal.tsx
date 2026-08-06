@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { ADDABLE_PROVIDERS, getProviderTypeInfo, type ProviderTypeInfo } from "./catalog";
 import { fetchNinerouterPresets, saveProvider, type NinerouterPreset } from "./api";
@@ -19,6 +20,7 @@ type Props = {
  * but uses tdproxy types and the /api/admin/providers endpoint.
  */
 export function AddProviderModal({ open, secret, presetType, onClose, onSaved }: Props) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<"pick" | "form">("pick");
   const [selected, setSelected] = useState<ProviderTypeInfo | null>(null);
   const [id, setId] = useState("");
@@ -105,7 +107,7 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
       onSaved?.(id, selected.type);
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to save provider");
+      setError(cause instanceof Error ? cause.message : t("providers.failedSaveProvider"));
     } finally {
       setSaving(false);
     }
@@ -115,8 +117,8 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
     <Modal
       open={open}
       onClose={onClose}
-      title={step === "pick" ? "Add a provider" : `Add ${selected?.name ?? "provider"}`}
-      subtitle={step === "pick" ? "Choose the upstream type to configure." : "Set the provider identity and endpoint."}
+      title={step === "pick" ? t("providers.addProvider") : `Add ${selected?.name ?? "provider"}`}
+      subtitle={step === "pick" ? t("providers.chooseUpstreamType") : t("providers.setProviderIdentity")}
       icon={step === "pick" ? "add" : selected?.icon}
       size="md"
     >
@@ -140,9 +142,9 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
           </div>
           {presets.length > 0 ? (
             <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
-              <Field label="9router presets" hint="Import-ready provider definitions from the 9router registry.">
+              <Field label={t("providers.9routerPresets")} hint={t("providers.9routerPresetsHint")}>
                 <Input
-                  placeholder="Filter presets (glm, minimax, grok-cli…)"
+                  placeholder={t("providers.filterPresets")}
                   value={presetFilter}
                   onChange={(e) => setPresetFilter(e.target.value)}
                 />

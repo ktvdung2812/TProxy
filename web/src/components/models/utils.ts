@@ -74,14 +74,14 @@ export function newRouteId(): string {
   return `route-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function emptyRoute(provider = "", priority = 100, upstreamModel = ""): RouteFormData {
+export function emptyRoute(provider = "", priority = 100, upstreamModel = "", enabled = true): RouteFormData {
   return {
     id: newRouteId(),
     provider,
     upstream_model: upstreamModel,
     priority,
     weight: 1,
-    enabled: true,
+    enabled,
   };
 }
 
@@ -132,7 +132,6 @@ export function validatePriorityRoutes(routes: RouteFormData[]) {
   if (routes.length === 0) return "Add at least one provider route";
   if (routes.some((route) => !route.provider.trim())) return "Each route needs a provider";
   if (routes.some((route) => !route.upstream_model.trim())) return "Each route needs an upstream model";
-  if (!routes.some((route) => route.enabled)) return "Enable at least one provider route";
   return "";
 }
 
@@ -169,7 +168,9 @@ export function buildModelFormFromSelection(input: {
   modelName?: string;
   capabilities?: string[];
   existingIds: string[];
+  credentialCounts?: Record<string, number>;
 }): ModelFormData {
+  const accountCount = input.credentialCounts?.[input.providerId] ?? 1;
   const baseId = virtualModelIdFromSelection(input.providerId, input.upstreamModel);
   return {
     id: uniqueVirtualModelId(baseId, input.existingIds),
@@ -178,7 +179,7 @@ export function buildModelFormFromSelection(input: {
     enabled: true,
     rewrite_response_model: true,
     capabilities: deriveCapabilities(input.capabilities),
-    routes: [emptyRoute(input.providerId, defaultRoutePriority(0), input.upstreamModel)],
+    routes: [emptyRoute(input.providerId, defaultRoutePriority(0), input.upstreamModel, accountCount > 0)],
   };
 }
 
@@ -282,6 +283,7 @@ export function syncRoutesForUpstreamModel(
   providers: ProviderOption[],
   modelsByProvider: Record<string, DiscoveredModel[]>,
   upstreamModel: string,
+  credentialCounts?: Record<string, number>,
 ): RouteFormData[] {
   const canonical = upstreamModel.trim();
   if (!canonical) return routes;
@@ -292,19 +294,23 @@ export function syncRoutesForUpstreamModel(
     if (!providerSupportsUpstreamModel(modelsByProvider, route.provider, canonical)) {
       return route;
     }
+    const accountCount = credentialCounts?.[route.provider] ?? 0;
     return {
       ...route,
       upstream_model: resolveProviderUpstreamModel(modelsByProvider, route.provider, canonical),
+      enabled: accountCount > 0 ? route.enabled : false,
     };
   });
 
   for (const provider of supporting) {
     if (byProvider.has(provider.id)) continue;
+    const accountCount = credentialCounts?.[provider.id] ?? 1;
     merged.push(
       emptyRoute(
         provider.id,
         defaultRoutePriority(merged.length),
         resolveProviderUpstreamModel(modelsByProvider, provider.id, canonical),
+        accountCount > 0,
       ),
     );
   }
@@ -350,10 +356,11 @@ export function buildModelCardRoutes(
   savedRoutes: RouteRecord[],
   providers: ProviderOption[],
   modelsByProvider: Record<string, DiscoveredModel[]>,
+  credentialCounts?: Record<string, number>,
 ): ModelCardRoute[] {
   const savedForms = modelToForm(model, savedRoutes).routes;
   const canonicalUpstream = resolveCanonicalUpstreamModel(model, savedForms);
-  const synced = syncRoutesForUpstreamModel(savedForms, providers, modelsByProvider, canonicalUpstream);
+  const synced = syncRoutesForUpstreamModel(savedForms, providers, modelsByProvider, canonicalUpstream, credentialCounts);
   const savedProviders = new Set(savedForms.map((route) => route.provider));
   const enabledSynced = synced.filter((route) => route.enabled);
 
@@ -399,15 +406,21 @@ export function collectUnmappedDiscoveredModels(
   providers: ProviderOption[],
   modelsByProvider: Record<string, DiscoveredModel[]>,
 ): DiscoveredPpmEntry[] {
-  const mappedUpstreams = new Set<string>();
+  // Model-level dedup: a model already created in PPM should not appear as "available"
+  const mappedModelKeys = new Set<string>();
   for (const model of models) {
     const display = model.DisplayName?.trim().toLowerCase();
-    if (display) mappedUpstreams.add(display);
+    if (display) mappedModelKeys.add(display);
     const id = model.ID.trim().toLowerCase();
-    if (id) mappedUpstreams.add(id);
+    if (id) mappedModelKeys.add(id);
+  }
+
+  // Per-provider dedup: only hide a (provider, upstreamModel) pair that is already routed
+  const mappedPairs = new Set<string>();
+  for (const model of models) {
     for (const route of routesByModel[model.ID] || []) {
-      const upstream = route.UpstreamModel.trim().toLowerCase();
-      if (upstream) mappedUpstreams.add(upstream);
+      const pair = `${route.ProviderID}::${route.UpstreamModel.trim().toLowerCase()}`;
+      if (pair) mappedPairs.add(pair);
     }
   }
 
@@ -417,7 +430,13 @@ export function collectUnmappedDiscoveredModels(
       const upstreamModel = item.id.trim();
       if (!upstreamModel) continue;
       const key = upstreamModel.toLowerCase();
-      if (mappedUpstreams.has(key)) continue;
+
+      // Skip if this upstream model is already a PPM model ID or display name
+      if (mappedModelKeys.has(key)) continue;
+
+      // Skip only if this specific (provider, upstreamModel) pair is already routed
+      const pairKey = `${provider.id}::${key}`;
+      if (mappedPairs.has(pairKey)) continue;
 
       const existing = byUpstream.get(key);
       if (existing) {
@@ -447,4 +466,3 @@ export function collectUnmappedDiscoveredModels(
     return nameCmp !== 0 ? nameCmp : left.upstreamModel.localeCompare(right.upstreamModel);
   });
 }
-

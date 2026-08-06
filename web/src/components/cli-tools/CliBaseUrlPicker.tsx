@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Button, Select } from "../ui";
 import type { CliBaseUrlKind } from "../../lib/cliBaseUrl";
 
@@ -28,6 +29,7 @@ export function CliBaseUrlPicker({
   onLanIPChange,
   onCopy,
 }: Props) {
+  const { t } = useTranslation();
   const tunnelAvailable = Boolean(tunnelUrl);
   const lanAvailable = allowLan && lanIPs.length > 0 && Boolean(lanUrl);
 
@@ -35,25 +37,25 @@ export function CliBaseUrlPicker({
     <div className="cli-base-url-picker">
       <div className="usage-segmented cli-base-url-tabs">
         <button type="button" className={kind === "local" ? "active" : ""} onClick={() => onKindChange("local")}>
-          Localhost
+          {t("cliTools.localhost")}
         </button>
         <button
           type="button"
           className={kind === "lan" ? "active" : ""}
           disabled={!lanAvailable}
-          title={lanAvailable ? lanUrl : "Enable LAN access in Settings"}
+          title={lanAvailable ? lanUrl : t("cliTools.enableLanAccess")}
           onClick={() => onKindChange("lan")}
         >
-          LAN
+          {t("cliTools.lan")}
         </button>
         <button
           type="button"
           className={kind === "tunnel" ? "active" : ""}
           disabled={!tunnelAvailable}
-          title={tunnelAvailable ? tunnelUrl : "Configure a public URL in Settings or APIs → Tunnel"}
+          title={tunnelAvailable ? tunnelUrl : t("cliTools.configurePublicUrl")}
           onClick={() => onKindChange("tunnel")}
         >
-          Tunnel
+          {t("cliTools.tunnel")}
         </button>
       </div>
 
@@ -76,17 +78,17 @@ export function CliBaseUrlPicker({
           size="sm"
           className="btn-icon-only"
           icon={copied ? "check" : "content_copy"}
-          aria-label={copied ? "Copied" : "Copy"}
-          title={copied ? "Copied" : "Copy"}
+          aria-label={copied ? t("common.copied") : t("common.copy")}
+          title={copied ? t("common.copied") : t("common.copy")}
           onClick={onCopy}
         />
       </div>
 
       {kind === "lan" && !lanAvailable ? (
-        <p className="cli-tool-hint">Enable LAN access in Settings and set server.host to 0.0.0.0.</p>
+        <p className="cli-tool-hint">{t("cliTools.enableLanHint")}</p>
       ) : null}
       {kind === "tunnel" && !tunnelAvailable ? (
-        <p className="cli-tool-hint">Set a public URL in Settings → Gateway or start a tunnel on the APIs page.</p>
+        <p className="cli-tool-hint">{t("cliTools.setPublicUrlHint")}</p>
       ) : null}
     </div>
   );

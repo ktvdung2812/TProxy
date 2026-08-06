@@ -1,192 +1,152 @@
 export type NavRoute = {
   id: string;
   path: string;
-  label: string;
+  i18nKey: string;
   icon: string;
-  title: string;
-  description: string;
 };
 
 export type NavSection = {
   id: string;
-  label: string;
+  i18nKey: string;
   routes: NavRoute[];
 };
 
 export const NAV_SECTIONS: NavSection[] = [
   {
     id: "dashboard",
-    label: "Dashboard",
+    i18nKey: "nav.dashboard",
     routes: [
       {
         id: "overview",
         path: "/",
-        label: "Overview",
+        i18nKey: "nav.overview",
         icon: "space_dashboard",
-        title: "Routing overview",
-        description: "Stable model IDs across every upstream.",
       },
     ],
   },
   {
     id: "routing",
-    label: "Routing",
+    i18nKey: "nav.routing",
     routes: [
       {
         id: "models",
         path: "/models",
-        label: "PPM",
+        i18nKey: "nav.ppm",
         icon: "route",
-        title: "Provider Priority Manager",
-        description: "Define public model IDs and the provider priority chain that decides which upstream handles each request.",
       },
       {
         id: "combos",
         path: "/combos",
-        label: "Combos",
+        i18nKey: "nav.combos",
         icon: "layers",
-        title: "Combos",
-        description: "Ordered fallback policies across virtual models.",
       },
       {
         id: "mapping",
         path: "/mapping",
-        label: "Mapping",
+        i18nKey: "nav.mapping",
         icon: "swap_horiz",
-        title: "Protocol mapping",
-        description: "Transparent Claude, Codex, and Cursor model routing — rewrite client model names server-side without changing them in the IDE/CLI.",
       },
     ],
   },
   {
     id: "infrastructure",
-    label: "Infrastructure",
+    i18nKey: "nav.infrastructure",
     routes: [
       {
         id: "providers",
         path: "/providers",
-        label: "Providers",
+        i18nKey: "nav.providers",
         icon: "dns",
-        title: "Providers",
-        description: "Manage your AI provider connections.",
       },
       {
         id: "upstreams",
         path: "/upstreams",
-        label: "Health overview",
+        i18nKey: "nav.healthOverview",
         icon: "cloud",
-        title: "Provider health overview",
-        description: "Quick health checks and model discovery across all providers.",
       },
       {
         id: "proxy-pools",
         path: "/proxy-pools",
-        label: "Proxy pools",
+        i18nKey: "nav.proxyPools",
         icon: "lan",
-        title: "Proxy pools",
-        description: "Encrypted egress pools bound to providers and credentials.",
       },
     ],
   },
   {
     id: "monitoring",
-    label: "Monitoring",
+    i18nKey: "nav.monitoring",
     routes: [
       {
         id: "usage",
         path: "/usage",
-        label: "Usage",
+        i18nKey: "nav.usage",
         icon: "monitoring",
-        title: "Usage",
-        description: "Token usage, estimated cost, and request history.",
       },
       {
         id: "token-saver",
         path: "/token-saver",
-        label: "Token Saver",
+        i18nKey: "nav.tokenSaver",
         icon: "compress",
-        title: "Token Saver",
-        description: "RTK + Caveman compression pipeline and CLI hook setup.",
       },
       {
         id: "quota",
         path: "/quota",
-        label: "Quota Tracker",
+        i18nKey: "nav.quotaTracker",
         icon: "data_usage",
-        title: "Quota Tracker",
-        description: "Track and manage your API quota limits.",
       },
     ],
   },
   {
     id: "developer",
-    label: "Developer",
+    i18nKey: "nav.developer",
     routes: [
       {
         id: "apis",
         path: "/apis",
-        label: "APIs",
+        i18nKey: "nav.apis",
         icon: "api",
-        title: "API Endpoint",
-        description: "Gateway URL, client API keys, and authentication.",
       },
       {
         id: "chat",
         path: "/chat",
-        label: "Chat",
+        i18nKey: "nav.chat",
         icon: "chat",
-        title: "Chat",
-        description: "Test models with a conversational playground.",
       },
       {
         id: "cli-tools",
         path: "/cli-tools",
-        label: "CLI Tools",
+        i18nKey: "nav.cliTools",
         icon: "terminal",
-        title: "CLI Tools",
-        description: "Connect coding CLIs and IDE extensions to tproxy.",
       },
       {
         id: "skills",
         path: "/skills",
-        label: "Skills",
+        i18nKey: "nav.skills",
         icon: "auto_awesome",
-        title: "Agent skills",
-        description: "Drop-in skill prompts so agents use tproxy for chat, media, search, and more.",
       },
     ],
   },
   {
     id: "system",
-    label: "System",
+    i18nKey: "nav.system",
     routes: [
       {
         id: "observability",
         path: "/logs",
-        label: "Logs & audit",
+        i18nKey: "nav.logs",
         icon: "receipt_long",
-        title: "Logs & audit",
-        description: "Recent requests and admin changes.",
       },
       {
         id: "settings",
         path: "/settings",
-        label: "Settings",
+        i18nKey: "nav.settings",
         icon: "settings",
-        title: "Settings",
-        description: "Gateway behavior, rotation, retention, and configuration backup.",
       },
     ],
   },
 ];
 
 export const ALL_ROUTES = NAV_SECTIONS.flatMap((section) => section.routes);
-
-/** @deprecated Use NAV_SECTIONS */
-export const PRIMARY_ROUTES = NAV_SECTIONS.filter((section) => section.id !== "system").flatMap((section) => section.routes);
-
-/** @deprecated Use NAV_SECTIONS */
-export const SYSTEM_ROUTES = NAV_SECTIONS.find((section) => section.id === "system")?.routes ?? [];
 
 export function matchRoute(pathname: string): NavRoute {
   const normalized = pathname.replace(/\/+$/, "") || "/";

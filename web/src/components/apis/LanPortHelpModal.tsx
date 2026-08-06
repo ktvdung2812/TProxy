@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
 import {
   LAN_PORT_OS_TABS,
@@ -13,6 +14,7 @@ type Props = {
 };
 
 export function LanPortHelpModal({ open, port, onClose }: Props) {
+  const { t } = useTranslation();
   const [osTab, setOsTab] = useState<LanPortOsTab>("windows");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -32,7 +34,7 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Open port for LAN access"
+      title={t("apis.lan.openPort")}
       subtitle={`Allow inbound TCP ${port} so other devices on your network can reach tproxy.`}
       size="lg"
     >
@@ -62,8 +64,8 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
                     size="sm"
                     className="btn-icon-only"
                     icon={copiedKey === copyId ? "check" : "content_copy"}
-                    aria-label={copiedKey === copyId ? "Copied" : "Copy command"}
-                    title={copiedKey === copyId ? "Copied" : "Copy command"}
+                    aria-label={copiedKey === copyId ? t("common.copied") : t("apis.lan.copyCommand")}
+                    title={copiedKey === copyId ? t("common.copied") : t("apis.lan.copyCommand")}
                     onClick={() => void copyCommand(copyId, section.command)}
                   />
                 </div>

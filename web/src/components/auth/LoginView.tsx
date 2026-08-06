@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Card, Input } from "../ui";
 
 type Props = {
@@ -6,6 +7,7 @@ type Props = {
 };
 
 export function LoginView({ onLogin }: Props) {
+  const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -17,7 +19,7 @@ export function LoginView({ onLogin }: Props) {
     try {
       await onLogin(password);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Đăng nhập thất bại");
+      setError(cause instanceof Error ? cause.message : t("auth.loginFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -32,17 +34,15 @@ export function LoginView({ onLogin }: Props) {
           </span>
           <div>
             <p className="login-eyebrow">tproxy control center</p>
-            <h1>Đăng nhập</h1>
+            <h1>{t("auth.login")}</h1>
           </div>
         </div>
 
-        <p className="login-desc">
-          Mật khẩu mặc định là <code>123123</code>, đổi mật khẩu trong <code>/settings</code>.
-        </p>
+        <p className="login-desc" dangerouslySetInnerHTML={{ __html: t("auth.defaultPassword") }} />
 
         <form className="login-form" onSubmit={(event) => void submit(event)}>
           <label className="login-field">
-            <span>Mật khẩu</span>
+            <span>{t("auth.password")}</span>
             <Input
               type="password"
               autoComplete="current-password"
@@ -62,13 +62,11 @@ export function LoginView({ onLogin }: Props) {
           ) : null}
 
           <Button type="submit" variant="primary" size="md" className="login-submit" disabled={submitting || !password.trim()}>
-            {submitting ? "Đang xác thực…" : "Đăng nhập"}
+            {submitting ? t("auth.authenticating") : t("auth.login")}
           </Button>
         </form>
 
-        <p className="login-hint">
-          Phiên đăng nhập được lưu trên trình duyệt này. Chỉ bạn có quyền truy cập — không chia sẻ secret.
-        </p>
+        <p className="login-hint">{t("auth.sessionHint")}</p>
       </Card>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ApiKeySelect, type ApiKeyOption } from "../cli-tools/ApiKeySelect";
 import { gatewayBaseUrl } from "../apis/utils";
 import { Button, Card, Field, Input, Select } from "../ui";
@@ -51,6 +52,7 @@ const CODEX_FORMAT_HINT: Record<CodexFormat, string> = {
 };
 
 export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
+  const { t } = useTranslation();
   const [baseUrl, setBaseUrl] = useState(() => gatewayBaseUrl());
   const [apiKey, setApiKey] = useState("");
   const [primaryModel, setPrimaryModel] = useState<MappingTier>(DEFAULT_CLAUDE_PRIMARY_MODEL);
@@ -142,7 +144,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
 
       <div className="mapping-code-form">
         <Field
-          label="Gateway base URL"
+          label={t("mapping.gatewayBaseUrl")}
           hint={
             client === "claude"
               ? "Anthropic-compatible endpoint, usually your tproxy origin with /v1."

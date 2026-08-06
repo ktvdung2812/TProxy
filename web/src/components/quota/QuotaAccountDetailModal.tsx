@@ -108,6 +108,10 @@ export function QuotaAccountDetailModal({
   useEffect(() => {
     if (!open || !credential) return;
     let cancelled = false;
+    let source: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelay = 1000;
+
     setLogsLoading(true);
     setLogsError("");
     fetchCredentialRequestLogs(secret, credential.id)
@@ -123,21 +127,43 @@ export function QuotaAccountDetailModal({
         if (!cancelled) setLogsLoading(false);
       });
 
-    const params = new URLSearchParams({ limit: "100", credential_id: credential.id });
-    if (secret) params.set("token", secret);
-    const source = new EventSource(`/api/admin/logs/stream?${params.toString()}`);
-    source.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as { data?: RequestLog[] };
-        applyLogs(payload.data || []);
-      } catch {
-        // Ignore malformed SSE payloads.
-      }
-    };
+    function connectStream() {
+      if (cancelled) return;
+
+      const params = new URLSearchParams({ limit: "100", credential_id: credential!.id });
+      if (secret) params.set("token", secret);
+      source = new EventSource(`/api/admin/logs/stream?${params.toString()}`);
+
+      source.onopen = () => {
+        reconnectDelay = 1000;
+      };
+
+      source.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as { data?: RequestLog[] };
+          applyLogs(payload.data || []);
+        } catch {
+          // Ignore malformed SSE payloads.
+        }
+      };
+
+      source.onerror = () => {
+        source?.close();
+        source = null;
+        if (cancelled) return;
+        reconnectTimer = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+          connectStream();
+        }, reconnectDelay);
+      };
+    }
+
+    connectStream();
 
     return () => {
       cancelled = true;
-      source.close();
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      source?.close();
     };
   }, [open, secret, credential, applyLogs]);
 

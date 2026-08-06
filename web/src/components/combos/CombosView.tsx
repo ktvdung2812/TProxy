@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Badge, Button, Card, ConfirmDialog, EmptyState } from "../ui";
@@ -32,6 +33,7 @@ type ConfirmState = {
 };
 
 export function CombosView({ secret, combos, models, modelOptions, onMutated, onNotice, onError }: Props) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingCombo, setEditingCombo] = useState<ComboRecord | null>(null);
@@ -59,7 +61,7 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
     if (!preset) return;
     const form = presetToForm(preset, existingIds);
     if (!form) {
-      onError?.("Create at least one enabled virtual model before using this preset.");
+      onError?.(t("combos.noPresetError"));
       return;
     }
     setEditingCombo(null);
@@ -71,13 +73,15 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
     setSaving(true);
     try {
       await saveCombo(secret, form, !!editingCombo);
-      onNotice?.(`Combo "${form.display_name || form.id}" ${editingCombo ? "updated" : "created"}`);
+      onNotice?.(editingCombo
+        ? t("combos.comboUpdated", { name: form.display_name || form.id })
+        : t("combos.comboCreated", { name: form.display_name || form.id }));
       setShowFormModal(false);
       setEditingCombo(null);
       setFormSeed(null);
       onMutated?.();
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to save combo");
+      onError?.(error instanceof Error ? error.message : t("combos.failedSaveCombo"));
     } finally {
       setSaving(false);
     }
@@ -85,17 +89,17 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
 
   const handleDelete = (combo: ComboRecord) => {
     setConfirmState({
-      title: "Delete combo",
-      message: `Delete "${combo.display_name || combo.id}"? Clients using this combo ID will stop working immediately.`,
-      confirmText: "Delete",
+      title: t("combos.deleteCombo"),
+      message: t("combos.deleteComboMessage", { name: combo.display_name || combo.id }),
+      confirmText: t("common.delete"),
       onConfirm: () => {
         void (async () => {
           try {
             await deleteCombo(secret, combo.id);
-            onNotice?.(`Combo "${combo.display_name || combo.id}" deleted`);
+            onNotice?.(t("combos.comboDeleted", { name: combo.display_name || combo.id }));
             onMutated?.();
           } catch (error) {
-            onError?.(error instanceof Error ? error.message : "Failed to delete combo");
+            onError?.(error instanceof Error ? error.message : t("combos.failedDeleteCombo"));
           }
         })();
       },
@@ -106,49 +110,49 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
     <section className="section">
       <div className="section-head">
         <div>
-          <p className="eyebrow">Fallback surface</p>
-          <h2>Combos</h2>
-          <p>Group virtual models under one ID. tproxy tries each step in order when a route fails.</p>
+          <p className="eyebrow">{t("combos.eyebrow")}</p>
+          <h2>{t("combos.title")}</h2>
+          <p>{t("combos.description")}</p>
         </div>
         <div className="combos-head-actions">
-          <span className="meta">{combos.length} policies</span>
+          <span className="meta">{t("combos.policiesCount", { count: combos.length })}</span>
           <Button variant="primary" size="sm" icon="add" onClick={openCreate}>
-            Create combo
+            {t("combos.createCombo")}
           </Button>
         </div>
       </div>
 
       <Card className="combos-intro-card" pad="md">
         <div className="combos-intro-copy">
-          <h3>How combos route requests</h3>
+          <h3>{t("combos.howCombosRoute")}</h3>
           <ul>
             <li>
-              <strong>Fallback</strong> — tries models in list order until one succeeds.
+              <strong>{t("combos.fallbackLabel")}</strong> — {t("combos.fallbackDesc")}
             </li>
             <li>
-              <strong>Claude Code</strong> — use a combo ID as <code>ANTHROPIC_DEFAULT_SONNET_MODEL</code> with your tproxy base URL.
+              <strong>{t("combos.claudeCodeLabel")}</strong> — {t("combos.claudeCodeDesc")}
             </li>
             <li>
-              <strong>Cowork</strong> — add the combo ID to Cowork allowed models for third-party inference.
+              <strong>{t("combos.coworkLabel")}</strong> — {t("combos.coworkDesc")}
             </li>
           </ul>
         </div>
         <div className="combos-intro-links">
           <Link to="/cli-tools/claude" className="combos-client-link">
             <span className="material-symbols-outlined">terminal</span>
-            Claude Code setup
+            {t("combos.claudeCodeSetup")}
           </Link>
           <Link to="/cli-tools/cowork" className="combos-client-link">
             <span className="material-symbols-outlined">groups</span>
-            Cowork setup
+            {t("combos.coworkSetup")}
           </Link>
         </div>
       </Card>
 
       <div className="combos-presets">
         <div className="combos-presets-head">
-          <h3>Quick presets</h3>
-          <p>Start from a routing profile tuned for Claude Code, Cowork, or general clients.</p>
+          <h3>{t("combos.quickPresets")}</h3>
+          <p>{t("combos.quickPresetsDesc")}</p>
         </div>
         <div className="combos-presets-grid">
           {presets.map((preset) => (
@@ -166,7 +170,7 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
                         <code>{modelId}</code>
                       </span>
                     ))
-                  : "No virtual models available"}
+                  : t("combos.noVirtualModels")}
               </p>
               <Button
                 variant="outline"
@@ -175,7 +179,7 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
                 disabled={preset.modelIds.length === 0}
                 onClick={() => openPreset(preset.id)}
               >
-                Use preset
+                {t("combos.usePreset")}
               </Button>
             </Card>
           ))}
@@ -185,8 +189,8 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
       {combos.length === 0 ? (
         <EmptyState
           icon="layers"
-          text="No combos configured yet."
-          hint="Create a combo or apply a quick preset for Claude Code or Cowork."
+          text={t("combos.noCombosConfigured")}
+          hint={t("combos.noCombosHint")}
         />
       ) : (
         <div className="combos-list">
@@ -207,7 +211,7 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
                           type="button"
                           className="endpoint-row-copy small"
                           onClick={() => copy(combo.id, `combo-${combo.id}`)}
-                          aria-label="Copy combo ID"
+                          aria-label={t("combos.copyComboId")}
                         >
                           <span className="material-symbols-outlined">
                             {copied === `combo-${combo.id}` ? "check" : "content_copy"}
@@ -219,13 +223,13 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
                   <div className="combo-card-badges">
                     {combo.enabled ? (
                       <Badge variant="success" size="sm" dot>
-                        enabled
+                        {t("combos.enabledLabel")}
                       </Badge>
                     ) : (
-                      <Badge size="sm">paused</Badge>
+                      <Badge size="sm">{t("combos.pausedLabel")}</Badge>
                     )}
                     {client ? <Badge size="sm">{clientLabel(client as "claude-code" | "cowork" | "general")}</Badge> : null}
-                    <Badge size="sm">{(combo.items || []).length} steps</Badge>
+                    <Badge size="sm">{t("combos.stepsCount", { count: (combo.items || []).length })}</Badge>
                   </div>
                 </div>
 
@@ -245,10 +249,10 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
 
                 <div className="combo-card-actions">
                   <Button variant="outline" size="sm" icon="edit" onClick={() => openEdit(combo)}>
-                    Edit
+                    {t("combos.editLabel")}
                   </Button>
                   <Button variant="danger" size="sm" icon="delete" onClick={() => handleDelete(combo)}>
-                    Delete
+                    {t("combos.deleteLabel")}
                   </Button>
                 </div>
               </Card>
@@ -281,7 +285,7 @@ export function CombosView({ secret, combos, models, modelOptions, onMutated, on
         title={confirmState?.title || ""}
         message={confirmState?.message || ""}
         variant="danger"
-        confirmText={confirmState?.confirmText || "Confirm"}
+        confirmText={confirmState?.confirmText || t("common.confirm")}
         onClose={() => setConfirmState(null)}
         onConfirm={() => {
           confirmState?.onConfirm();

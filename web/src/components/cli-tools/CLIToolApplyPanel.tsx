@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { isAutoApplyTool, type CLITool } from "../../cli-tools/constants";
 import { isLocalDashboardHost } from "../../devDefaults";
@@ -23,12 +24,12 @@ type Props = {
   hideScript?: boolean;
 };
 
-function configBadge(status: CLIToolStatus | null): { label: string; tone: "success" | "warning" | "muted" } | null {
+function configBadge(status: CLIToolStatus | null, t: (key: string) => string): { label: string; tone: "success" | "warning" | "muted" } | null {
   if (!status?.installed) return null;
   if (status.has_tproxy || status.has_9router) {
-    return { label: "Connected", tone: "success" };
+    return { label: t("cliTools.connected"), tone: "success" };
   }
-  return { label: "Not configured", tone: "warning" };
+  return { label: t("cliTools.notConfigured"), tone: "warning" };
 }
 
 export function supportsAutoApply(toolId: string): boolean {
@@ -36,6 +37,7 @@ export function supportsAutoApply(toolId: string): boolean {
 }
 
 export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiKeyChange, hideScript = false }: Props) {
+  const { t } = useTranslation();
   const isLocal = isLocalDashboardHost();
   const canAutoApply = isLocal && supportsAutoApply(tool.id);
   const [status, setStatus] = useState<CLIToolStatus | null>(null);
@@ -62,7 +64,7 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
     void loadStatus();
   }, [loadStatus]);
 
-  const badge = configBadge(status);
+  const badge = configBadge(status, t);
   const manualConfigs = useMemo(
     () => buildManualConfigs(tool, baseUrl, apiKey, model),
     [tool, baseUrl, apiKey, model],
@@ -77,7 +79,7 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
         apiKey: apiKey.trim(),
         model,
       });
-      setMessage({ type: "success", text: "Configuration applied to local files." });
+      setMessage({ type: "success", text: t("cliTools.configApplied") });
       await loadStatus();
     } catch (error) {
       setMessage({ type: "error", text: String(error) });
@@ -111,8 +113,8 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
           <p className="cli-tool-apply-title">Configuration</p>
           <p className="cli-tool-apply-desc">
             {canAutoApply
-              ? "Apply tproxy settings directly to config files on this machine."
-              : "Auto-apply only works when the dashboard runs on localhost. Copy the config files below to your machine."}
+              ? t("cliTools.autoApplyDirect")
+              : t("cliTools.autoApplyHint")}
           </p>
         </div>
         {badge ? (
@@ -151,7 +153,7 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
         {canAutoApply ? (
           <>
             <Button variant="primary" size="sm" icon="check" disabled={applying || !model || !apiKey.trim()} onClick={() => void handleApply()}>
-              {applying ? "Applying…" : "Apply to local config"}
+              {applying ? t("cliTools.applying") : t("cliTools.applyToLocal")}
             </Button>
             <Button
               variant="outline"
@@ -160,7 +162,7 @@ export function CLIToolApplyPanel({ tool, secret, apiKey, model, baseUrl, onApiK
               disabled={resetting || !(status?.has_tproxy || status?.has_9router)}
               onClick={() => void handleReset()}
             >
-              {resetting ? "Resetting…" : "Reset"}
+              {resetting ? t("cliTools.resetting") : t("common.reset")}
             </Button>
           </>
         ) : null}

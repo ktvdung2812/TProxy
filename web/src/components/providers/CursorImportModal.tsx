@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { autoImportCursorTokens, importCursorTokens } from "./api";
 
@@ -12,9 +13,10 @@ type Props = {
 };
 
 export function CursorImportModal({ open, secret, providerId, onClose, onComplete, onError }: Props) {
+  const { t } = useTranslation();
   const [accessToken, setAccessToken] = useState("");
   const [machineId, setMachineId] = useState("");
-  const [label, setLabel] = useState("Cursor IDE");
+  const [label, setLabel] = useState(t("providers.cursorIDE"));
   const [detecting, setDetecting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [autoDetected, setAutoDetected] = useState(false);
@@ -35,10 +37,10 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
       } else if (result.windows_manual) {
         setWindowsManual(true);
       } else {
-        setErrorMsg(result.error || "Could not auto-detect Cursor tokens");
+        setErrorMsg(result.error || t("providers.cursorAutoDetectFailed"));
       }
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : "Auto-detect failed");
+      setErrorMsg(error instanceof Error ? error.message : t("providers.autoDetectFailed"));
     } finally {
       setDetecting(false);
     }
@@ -48,7 +50,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
     if (!open) return;
     setAccessToken("");
     setMachineId("");
-    setLabel("Cursor IDE");
+    setLabel(t("providers.cursorIDE"));
     setAutoDetected(false);
     setWindowsManual(false);
     setErrorMsg("");
@@ -57,7 +59,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
 
   const handleImport = async () => {
     if (!accessToken.trim() || !machineId.trim()) {
-      setErrorMsg("Access token and machine ID are required");
+      setErrorMsg(t("providers.cursorTokensRequired"));
       return;
     }
     setImporting(true);
@@ -65,14 +67,14 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
     try {
       await importCursorTokens(secret, {
         provider_id: providerId,
-        label: label.trim() || "Cursor IDE",
+        label: label.trim() || t("providers.cursorIDE"),
         access_token: accessToken.trim(),
         machine_id: machineId.trim(),
       });
       onComplete?.();
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Import failed";
+      const message = error instanceof Error ? error.message : t("providers.importFailed");
       setErrorMsg(message);
       onError?.(message);
     } finally {

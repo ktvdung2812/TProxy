@@ -91,7 +91,54 @@ func parseMessages(value any) []canonical.Message {
 		if !ok {
 			continue
 		}
-		result = append(result, canonical.Message{Role: stringValue(mapped["role"]), Content: mapped["content"], Name: stringValue(mapped["name"]), ToolCallID: stringValue(mapped["tool_call_id"]), ToolCalls: mapSlice(mapped["tool_calls"])})
+		itemType := stringValue(mapped["type"])
+		role := stringValue(mapped["role"])
+		// Normalize developer role to system for providers that don't support it.
+		// The Codex adapter will re-convert system→developer when needed.
+		if role == "developer" {
+			role = "system"
+		}
+		// Codex /responses function_call items: {type: "function_call", call_id, name, arguments}
+		// Map to OpenAI assistant message with tool_calls.
+		if role == "" && itemType == "function_call" && stringValue(mapped["call_id"]) != "" {
+			toolCall := map[string]any{
+				"id":   mapped["call_id"],
+				"type": "function",
+				"function": map[string]any{
+					"name":      mapped["name"],
+					"arguments": stringValue(mapped["arguments"]),
+				},
+			}
+			// /responses emits one item per parallel call, chat completions expects a
+			// single assistant message carrying all of them. Splitting them leaves an
+			// assistant tool_calls message followed by another assistant message, which
+			// upstreams reject ("insufficient tool messages following tool_calls").
+			if last := len(result) - 1; last >= 0 && result[last].Role == "assistant" {
+				result[last].ToolCalls = append(result[last].ToolCalls, toolCall)
+				continue
+			}
+			result = append(result, canonical.Message{
+				Role:      "assistant",
+				Content:   nil,
+				ToolCalls: []map[string]any{toolCall},
+			})
+			continue
+		}
+		// Codex /responses function_call_output items: {type: "function_call_output", call_id, output}
+		// Map to OpenAI tool message.
+		if role == "" && itemType == "function_call_output" && stringValue(mapped["call_id"]) != "" {
+			result = append(result, canonical.Message{
+				Role:       "tool",
+				Content:    stringValue(mapped["output"]),
+				ToolCallID: stringValue(mapped["call_id"]),
+			})
+			continue
+		}
+		// Skip Codex-specific items that have no OpenAI equivalent.
+		if role == "" && itemType != "" && itemType != "message" {
+			continue
+		}
+		result = append(result, canonical.Message{Role: role, Content: mapped["content"], Name: stringValue(mapped["name"]), ToolCallID: stringValue(mapped["tool_call_id"]), ToolCalls: mapSlice(mapped["tool_calls"])})
 	}
 	return result
 }

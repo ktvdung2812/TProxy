@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, Field, Input, Select } from "../ui";
 import type { CLITool, CLIToolGuideStep } from "../../cli-tools/constants";
-import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
 import { fetchResolvableApiKeySecrets } from "../apis/api";
 import { fetchAdminSettings } from "../settings/api";
 import { getStoredApiKeySecret, getApiKeySecretsVersion, storeApiKeySecret, subscribeApiKeySecrets } from "../../lib/apiKeySecrets";
@@ -53,6 +53,7 @@ type Props = {
 };
 
 export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
+  const { t } = useTranslation();
   const enabledKeys = useMemo(() => apiKeys.filter((key) => key.enabled !== false), [apiKeys]);
   const defaultKeyId = useMemo(() => {
     if (enabledKeys.length === 0) return "";
@@ -99,13 +100,6 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     if (selectedKeyId) return getStoredApiKeySecret(selectedKeyId) ?? "";
     return "";
   }, [apiKey, selectedKeyId, secretsVersion]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !isLocalDashboardHost()) return;
-    if (!getStoredApiKeySecret("local")) {
-      storeApiKeySecret("local", defaultApiKey());
-    }
-  }, []);
 
   useEffect(() => {
     if (!secret) return;
@@ -343,8 +337,8 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
                 size="sm"
                 className="btn-icon-only"
                 icon={copiedField === `step-${item.step}` ? "check" : "content_copy"}
-                aria-label={copiedField === `step-${item.step}` ? "Copied" : "Copy"}
-                title={copiedField === `step-${item.step}` ? "Copied" : "Copy"}
+                aria-label={copiedField === `step-${item.step}` ? t("common.copied") : t("common.copy")}
+                title={copiedField === `step-${item.step}` ? t("common.copied") : t("common.copy")}
                 onClick={() => void copyText(replaceVars(item.value ?? ""), `step-${item.step}`)}
               />
             ) : null}
@@ -366,8 +360,8 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
             size="sm"
             className="btn-icon-only"
             icon={copiedField === "codeblock" ? "check" : "content_copy"}
-            aria-label={copiedField === "codeblock" ? "Copied" : "Copy"}
-            title={copiedField === "codeblock" ? "Copied" : "Copy"}
+            aria-label={copiedField === "codeblock" ? t("common.copied") : t("common.copy")}
+            title={copiedField === "codeblock" ? t("common.copied") : t("common.copy")}
             onClick={() => void copyText(commandPreview, "codeblock")}
           />
         </div>
@@ -432,8 +426,8 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
             size="sm"
             className="btn-icon-only"
             icon={copiedField === "default-cmd" ? "check" : "content_copy"}
-            aria-label={copiedField === "default-cmd" ? "Copied" : "Copy"}
-            title={copiedField === "default-cmd" ? "Copied" : "Copy"}
+            aria-label={copiedField === "default-cmd" ? t("common.copied") : t("common.copy")}
+            title={copiedField === "default-cmd" ? t("common.copied") : t("common.copy")}
             onClick={() => void copyText(replaceVars(tool.defaultCommand ?? ""), "default-cmd")}
           />
         </div>
@@ -482,7 +476,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
                   size="sm"
                   className="btn-icon-only"
                   icon={copiedField === "mitm-domain" ? "check" : "content_copy"}
-                  aria-label={copiedField === "mitm-domain" ? "Copied" : "Copy domain"}
+                  aria-label={copiedField === "mitm-domain" ? t("common.copied") : t("cliTools.copyDomain")}
                   title={copiedField === "mitm-domain" ? "Copied" : "Copy domain"}
                   onClick={() => void copyText(tool.mitmDomain ?? "", "mitm-domain")}
                 />

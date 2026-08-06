@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { ApiKeyOption } from "../cli-tools/ApiKeySelect";
 import { useChatModels } from "../chat/useChatModels";
@@ -44,43 +45,45 @@ type Props = {
 
 type ClientTab = MappingClientTab;
 
-const TIERS = [
-  {
-    id: "default",
-    claudeLabel: "Default",
-    codexLabel: "Default",
-    claudeHint: "default",
-    codexHint: "Claude-only placeholder — not used by Codex CLI",
-  },
-  {
-    id: "fable",
-    claudeLabel: "Claude Fable",
-    codexLabel: "GPT Sol",
-    claudeHint: "claude-fable, fable",
-    codexHint: "gpt-sol",
-  },
-  {
-    id: "opus",
-    claudeLabel: "Claude Opus",
-    codexLabel: "GPT Terra",
-    claudeHint: "claude-opus, opus, opusplan",
-    codexHint: "gpt-terra",
-  },
-  {
-    id: "sonnet",
-    claudeLabel: "Claude Sonnet",
-    codexLabel: "Sonnet",
-    claudeHint: "claude-sonnet, sonnet",
-    codexHint: "Claude-only placeholder — not used by Codex CLI",
-  },
-  {
-    id: "haiku",
-    claudeLabel: "Claude Haiku",
-    codexLabel: "GPT Luna",
-    claudeHint: "claude-haiku, haiku",
-    codexHint: "gpt-luna",
-  },
-] as const;
+function buildTiers(t: (key: string) => string) {
+  return [
+    {
+      id: "default",
+      claudeLabel: t("mapping.default"),
+      codexLabel: t("mapping.default"),
+      claudeHint: "default",
+      codexHint: t("mapping.claudeOnly"),
+    },
+    {
+      id: "fable",
+      claudeLabel: t("mapping.claudeFable"),
+      codexLabel: "GPT Sol",
+      claudeHint: "claude-fable, fable",
+      codexHint: "gpt-sol",
+    },
+    {
+      id: "opus",
+      claudeLabel: t("mapping.claudeOpus"),
+      codexLabel: "GPT Terra",
+      claudeHint: "claude-opus, opus, opusplan",
+      codexHint: "gpt-terra",
+    },
+    {
+      id: "sonnet",
+      claudeLabel: t("mapping.claudeSonnet"),
+      codexLabel: t("mapping.sonnet"),
+      claudeHint: "claude-sonnet, sonnet",
+      codexHint: t("mapping.claudeOnly"),
+    },
+    {
+      id: "haiku",
+      claudeLabel: t("mapping.claudeHaiku"),
+      codexLabel: "GPT Luna",
+      claudeHint: "claude-haiku, haiku",
+      codexHint: "gpt-luna",
+    },
+  ] as const;
+}
 
 const CLAUDE_PLACEHOLDER_SET = new Set<string>(CLAUDE_MAPPING_PLACEHOLDER_NAMES);
 const CODEX_PLACEHOLDER_SET = new Set<string>(CODEX_MAPPING_PLACEHOLDER_NAMES);
@@ -133,6 +136,7 @@ export function MappingView({
 }: Props) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const activeTab = useMemo(() => parseMappingTab(location.hash), [location.hash]);
   const setActiveTab = useCallback(
     (tab: ClientTab) => {
@@ -212,7 +216,7 @@ export function MappingView({
         }
       }
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to load mapping");
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToLoad"));
     } finally {
       setLoading(false);
     }
@@ -228,13 +232,13 @@ export function MappingView({
       onNotice(
         count > 0
           ? `Loaded ${count} Cursor models (${cursorResponse.catalog_source || "catalog"})`
-          : "Cursor model catalog refreshed",
+          : t("mapping.cursorCatalogRefreshed"),
       );
       if (cursorResponse.discovery_error && count <= 20) {
         onError(cursorResponse.discovery_error);
       }
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to refresh Cursor models");
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToRefreshCursor"));
     } finally {
       setRefreshingCursorCatalog(false);
     }
@@ -293,10 +297,10 @@ export function MappingView({
       .sort((left, right) => (rank.get(left.name) ?? 0) - (rank.get(right.name) ?? 0));
   }, [activeTab, data?.placeholders, cursorData?.placeholders, isClaude, isCursor]);
 
-  const visibleTiers = useMemo(
-    () => (isClaude ? TIERS : TIERS.filter((tier) => tier.id !== "sonnet" && tier.id !== "default")),
-    [isClaude],
-  );
+  const visibleTiers = useMemo(() => {
+    const tiers = buildTiers(t);
+    return isClaude ? tiers : tiers.filter((tier) => tier.id !== "sonnet" && tier.id !== "default");
+  }, [isClaude, t]);
 
   const cursorCatalog = useMemo((): CursorCatalogModel[] => {
     const catalog = cursorData?.cursor_models || [];
@@ -341,9 +345,9 @@ export function MappingView({
         reasoning_effort_overrides: reasoningEffortOverrides,
       });
       setData(response);
-      onNotice("Routing map saved");
+      onNotice(t("mapping.routingMapSaved"));
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to save mapping");
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToSave"));
     } finally {
       setSaving(false);
     }
@@ -359,13 +363,13 @@ export function MappingView({
       if (pendingSource && pendingTarget) {
         merged[pendingSource] = pendingTarget;
       } else if (pendingSource || pendingTarget) {
-        throw new Error("Select both a Cursor model and a proxy model before saving");
+        throw new Error(t("mapping.selectBothForSave"));
       }
 
       const payload = buildCursorOverrideState(merged);
       const previouslySaved = Object.keys(buildCursorOverrideState(cursorData?.overrides)).length > 0;
       if (Object.keys(payload).length === 0 && !previouslySaved) {
-        throw new Error("Add at least one Cursor → proxy mapping before saving");
+        throw new Error(t("mapping.addAtLeastOne"));
       }
 
       const response = await saveCursorMapping(secret, { overrides: payload });
@@ -373,7 +377,7 @@ export function MappingView({
       if (Object.keys(saved).length === 0 && Object.keys(payload).length > 0) {
         // Keep local rows if the server unexpectedly returned an empty map.
         setCursorOverrides(payload);
-        throw new Error("Server accepted the request but returned no mappings — check model IDs and try again");
+        throw new Error(t("mapping.serverReturnedNoMappings"));
       }
       setCursorData(response);
       setCursorOverrides(saved);
@@ -381,11 +385,11 @@ export function MappingView({
       setAddCursorTarget("");
       onNotice(
         Object.keys(saved).length === 0
-          ? "Cleared all Cursor model mappings"
-          : `Saved ${Object.keys(saved).length} Cursor model mapping${Object.keys(saved).length === 1 ? "" : "s"}`,
+          ? t("mapping.clearedAllCursorMappings")
+          : t("mapping.savedCursorMappings", { count: Object.keys(saved).length }),
       );
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to save Cursor mapping");
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToSaveCursor"));
     } finally {
       setSaving(false);
     }
@@ -395,11 +399,11 @@ export function MappingView({
     const source = addCursorSource.trim();
     const target = addCursorTarget.trim();
     if (!source || !target) {
-      onError("Select both a Cursor model and a proxy model before adding");
+      onError(t("mapping.selectBothForAdd"));
       return;
     }
     if (cursorOverrides[source]?.trim()) {
-      onError(`Cursor model ${source} is already mapped — change or remove it first`);
+      onError(t("mapping.cursorAlreadyMapped", { source }));
       return;
     }
     setCursorOverrides((current) => ({ ...current, [source]: target }));
@@ -420,7 +424,7 @@ export function MappingView({
       <section className="section mapping-page">
         <div className="mapping-loading">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          Loading mapping…
+          {t("mapping.loading")}
         </div>
       </section>
     );
@@ -430,25 +434,15 @@ export function MappingView({
     <section className="section mapping-page">
       <div className="section-head">
         <div>
-          <p className="eyebrow">Protocol mapping</p>
-          <h2>Transparent model routing</h2>
+          <p className="eyebrow">{t("mapping.protocolMapping")}</p>
+          <h2>{t("mapping.transparentModelRouting")}</h2>
           <p>
             {isClaude ? (
-              <>
-                Route Claude Code without changing model names in the client. Placeholders like{" "}
-                <code>sonnet</code> or <code>fable</code> rewrite on <code>/v1/messages</code>.
-              </>
+              <span dangerouslySetInnerHTML={{ __html: t("mapping.claudeDescription") }} />
             ) : isCodex ? (
-              <>
-                Route Codex CLI without changing model names in the client. GPT codenames like{" "}
-                <code>gpt-sol</code> or <code>gpt-terra</code> rewrite on <code>/v1/chat/completions</code> and{" "}
-                <code>/v1/responses</code>.
-              </>
+              <span dangerouslySetInnerHTML={{ __html: t("mapping.codexDescription") }} />
             ) : (
-              <>
-                Map Cursor model IDs (e.g. <code>claude-4.5-sonnet</code>) to tproxy virtual models. Add only the pairs
-                you need — rewrites apply on <code>/v1/chat/completions</code>. Requires a public/tunnel URL.
-              </>
+              <span dangerouslySetInnerHTML={{ __html: t("mapping.cursorDescription") }} />
             )}
           </p>
         </div>

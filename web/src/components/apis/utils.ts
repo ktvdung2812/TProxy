@@ -1,5 +1,4 @@
 import type { ApiKeyFormData, ApiKeyRecord, ProxyEndpoint } from "./types";
-import { defaultApiKey, isLocalDashboardHost } from "../../devDefaults";
 import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
 
 export function normalizeBaseUrl(origin: string): string {
@@ -183,9 +182,6 @@ export function resolveExampleApiKeySecret(keyId: string, explicitSecret = ""): 
   if (keyId) {
     const stored = getStoredApiKeySecret(keyId);
     if (stored) return stored;
-    if (keyId === "local" && isLocalDashboardHost()) {
-      return defaultApiKey();
-    }
   }
   return "";
 }

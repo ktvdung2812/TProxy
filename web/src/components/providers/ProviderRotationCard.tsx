@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, Card } from "../ui";
 import {
   ROTATION_STRATEGIES,
@@ -26,6 +27,7 @@ export function ProviderRotationCard({
   onSaved,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<AccountRotationSettings | null>(null);
   const [strategyOverride, setStrategyOverride] = useState("");
   const [stickyOverride, setStickyOverride] = useState("");
@@ -45,7 +47,7 @@ export function ProviderRotationCard({
           : "",
       );
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to load rotation settings");
+      onError?.(error instanceof Error ? error.message : t("providers.failedLoadRotation"));
     } finally {
       setLoading(false);
     }
@@ -85,7 +87,7 @@ export function ProviderRotationCard({
       setSettings(saved);
       onSaved?.(`Rotation settings saved for ${providerName}`);
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to save rotation settings");
+      onError?.(error instanceof Error ? error.message : t("providers.failedSaveRotation"));
     } finally {
       setSaving(false);
     }
@@ -107,7 +109,7 @@ export function ProviderRotationCard({
       setStickyOverride("");
       onSaved?.(`Using global rotation defaults for ${providerName}`);
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to clear rotation override");
+      onError?.(error instanceof Error ? error.message : t("providers.failedClearRotation"));
     } finally {
       setSaving(false);
     }
@@ -117,7 +119,7 @@ export function ProviderRotationCard({
     <Card
       pad="md"
       className="section provider-rotation-card"
-      title="Account rotation"
+      title={t("settings.accountRotation")}
       icon="autorenew"
       action={
         effective.isOverride ? (

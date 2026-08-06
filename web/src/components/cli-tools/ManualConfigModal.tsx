@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
 
 export type ManualConfigEntry = {
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function ManualConfigModal({ open, onClose, title = "Manual configuration", configs }: Props) {
+  const { t } = useTranslation();
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const copyConfig = async (text: string, index: number) => {
@@ -39,7 +41,7 @@ export function ManualConfigModal({ open, onClose, title = "Manual configuration
                 icon={copiedIndex === index ? "check" : "content_copy"}
                 onClick={() => void copyConfig(config.content, index)}
               >
-                {copiedIndex === index ? "Copied" : "Copy"}
+                {copiedIndex === index ? t("common.copied") : t("common.copy")}
               </Button>
             </div>
             <pre className="manual-config-pre">

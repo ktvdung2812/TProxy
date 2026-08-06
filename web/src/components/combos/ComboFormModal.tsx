@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal, Select, Toggle } from "../ui";
 import { modelOptionGroupLabel } from "../../lib/modelOptions";
 import type { ModelOption } from "../../lib/modelOptions";
@@ -34,6 +35,7 @@ export function ComboFormModal({
   onClose,
   onSubmit,
 }: Props) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<ComboFormData>(emptyComboForm());
   const [idError, setIdError] = useState("");
 
@@ -56,15 +58,15 @@ export function ComboFormModal({
   const handleIdChange = (value: string) => {
     setForm((current) => ({ ...current, id: value }));
     if (!value.trim()) {
-      setIdError("Combo ID is required");
+      setIdError(t("combos.idRequired"));
       return;
     }
     if (!COMBO_ID_REGEX.test(value.trim())) {
-      setIdError("Only letters, numbers, -, _, and . allowed");
+      setIdError(t("combos.idAllowed"));
       return;
     }
     if (!editing && existingIds.includes(value.trim())) {
-      setIdError("This ID is already in use");
+      setIdError(t("combos.idInUse"));
       return;
     }
     setIdError("");
@@ -96,8 +98,8 @@ export function ComboFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Edit combo" : "Create combo"}
-      subtitle="Ordered fallback across virtual models. Earlier steps are tried first."
+      title={editing ? t("combos.editCombo") : t("combos.createCombo")}
+      subtitle={t("combos.comboSubtitle")}
       icon="layers"
       size="lg"
       footer={
@@ -111,7 +113,7 @@ export function ComboFormModal({
             disabled={saving || !!validationError || !!idError}
             onClick={() => onSubmit(form)}
           >
-            {saving ? "Saving…" : editing ? "Save changes" : "Create combo"}
+            {saving ? t("combos.saving") : editing ? t("combos.saveChanges") : t("combos.createCombo")}
           </Button>
         </>
       }
@@ -124,7 +126,7 @@ export function ComboFormModal({
         }}
       >
         <div className="combo-form-grid">
-          <Field label="Combo ID" hint="Used as the model name in Claude Code, Cowork, and API clients">
+          <Field label={t("combos.comboId")} hint={t("combos.comboIdHint")}>
             <Input
               value={form.id}
               onChange={(event) => handleIdChange(event.target.value)}
@@ -133,7 +135,7 @@ export function ComboFormModal({
             />
             {idError ? <p className="field-error">{idError}</p> : null}
           </Field>
-          <Field label="Display name">
+          <Field label={t("combos.displayName")}>
             <Input
               value={form.display_name}
               onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}

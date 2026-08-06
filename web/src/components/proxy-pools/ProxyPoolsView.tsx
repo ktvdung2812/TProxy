@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Badge,
   Button,
@@ -46,6 +47,7 @@ function normalizeFormData(pool?: ProxyPoolRow): FormData {
 }
 
 export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) {
+  const { t } = useTranslation();
   const [pools, setPools] = useState<ProxyPoolRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -71,7 +73,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       const result = await listProxyPools(secret);
       setPools(result.proxy_pools || []);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to load proxy pools");
+      onError(error instanceof Error ? error.message : t("proxyPools.errorLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
           ...(url ? { url } : {}),
           enabled: formData.enabled,
         });
-        onNotice("Proxy pool updated");
+        onNotice(t("proxyPools.noticeUpdated"));
       } else {
         await createProxyPool(secret, {
           id: formData.id.trim(),
@@ -129,13 +131,13 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
           url,
           enabled: formData.enabled,
         });
-        onNotice("Proxy pool created");
+        onNotice(t("proxyPools.noticeCreated"));
       }
       await load();
       onMutated?.();
       closeFormModal();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to save proxy pool");
+      onError(error instanceof Error ? error.message : t("proxyPools.errorSaveFailed"));
     } finally {
       setSaving(false);
     }
@@ -143,22 +145,22 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
 
   const handleDelete = (pool: ProxyPoolRow) => {
     setConfirmState({
-      title: "Delete proxy pool",
+      title: t("proxyPools.confirmDeleteTitle"),
       message:
         pool.usage_count > 0
-          ? `Delete "${pool.name}"? It is bound to ${pool.usage_count} provider or credential record(s).`
-          : `Delete proxy pool "${pool.name}"?`,
+          ? t("proxyPools.confirmDeleteMessage", { name: pool.name, count: pool.usage_count })
+          : t("proxyPools.confirmDeleteMessageSimple", { name: pool.name }),
       onConfirm: async () => {
         setConfirmState(null);
         try {
           await deleteProxyPool(secret, pool.id);
           setPools((prev) => prev.filter((item) => item.id !== pool.id));
-          onNotice("Proxy pool deleted");
+          onNotice(t("proxyPools.noticeDeleted"));
           onMutated?.();
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Failed to delete proxy pool";
+          const message = error instanceof Error ? error.message : t("proxyPools.errorDeleteFailed");
           if ((error as Error & { status?: number }).status === 409) {
-            onError(`Cannot delete: ${message}`);
+            onError(t("proxyPools.errorDeleteConflict", { message }));
           } else {
             onError(message);
           }
@@ -172,9 +174,9 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     try {
       const result = await testProxyPool(secret, poolId);
       await load();
-      onNotice(result.ok ? "Proxy test passed" : result.error || "Proxy test failed");
+      onNotice(result.ok ? t("proxyPools.noticeTestPassed") : result.error || t("proxyPools.noticeTestFailed"));
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to test proxy");
+      onError(error instanceof Error ? error.message : t("proxyPools.errorTestFailed"));
     } finally {
       setTestingId(null);
     }
@@ -188,7 +190,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       onMutated?.();
     } catch (error) {
       setPools((prev) => prev.map((item) => (item.id === pool.id ? { ...item, enabled: pool.enabled } : item)));
-      onError(error instanceof Error ? error.message : "Failed to update proxy pool");
+      onError(error instanceof Error ? error.message : t("proxyPools.errorUpdateFailed"));
     }
   };
 
@@ -215,7 +217,11 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       }
       await load();
       onMutated?.();
-      onNotice(`${enabled ? "Activated" : "Deactivated"} ${ok}${failed ? `, failed ${failed}` : ""}`);
+      if (enabled) {
+        onNotice(failed ? t("proxyPools.noticeActivatedWithFailed", { ok, failed }) : t("proxyPools.noticeActivated", { ok }));
+      } else {
+        onNotice(failed ? t("proxyPools.noticeDeactivatedWithFailed", { ok, failed }) : t("proxyPools.noticeDeactivated", { ok }));
+      }
     } finally {
       setBulkBusy(false);
     }
@@ -224,8 +230,8 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
   const bulkDelete = () => {
     if (selectedIds.length === 0) return;
     setConfirmState({
-      title: "Delete proxy pools",
-      message: `Delete ${selectedIds.length} proxy pool(s)?`,
+      title: t("proxyPools.confirmBulkDeleteTitle"),
+      message: t("proxyPools.confirmBulkDeleteMessage", { count: selectedIds.length }),
       onConfirm: async () => {
         setConfirmState(null);
         setBulkBusy(true);
@@ -245,7 +251,15 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
           await load();
           clearSelection();
           onMutated?.();
-          onNotice(`Deleted ${ok}${blocked ? `, ${blocked} bound` : ""}${failed ? `, ${failed} failed` : ""}`);
+          if (blocked && failed) {
+            onNotice(t("proxyPools.noticeBulkDeletedFull", { ok, blocked, failed }));
+          } else if (blocked) {
+            onNotice(t("proxyPools.noticeBulkDeletedBlocked", { ok, blocked }));
+          } else if (failed) {
+            onNotice(t("proxyPools.noticeBulkDeletedFailed", { ok, failed }));
+          } else {
+            onNotice(t("proxyPools.noticeBulkDeleted", { ok }));
+          }
         } finally {
           setBulkBusy(false);
         }
@@ -288,8 +302,8 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
 
     if (deadIds.length > 0) {
       setConfirmState({
-        title: "Disable dead proxies",
-        message: `Alive: ${alive}, dead: ${deadIds.length}.\n\nDisable ${deadIds.length} dead proxy pool(s)?`,
+        title: t("proxyPools.confirmDisableDeadTitle"),
+        message: t("proxyPools.confirmDisableDeadMessage", { alive, dead: deadIds.length }),
         onConfirm: async () => {
           setConfirmState(null);
           setBulkBusy(true);
@@ -303,14 +317,14 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
             }
             await load();
             onMutated?.();
-            onNotice(`Disabled ${deadIds.length} dead proxy pool(s)`);
+            onNotice(t("proxyPools.noticeDisabled", { count: deadIds.length }));
           } finally {
             setBulkBusy(false);
           }
         },
       });
     } else {
-      onNotice(`Health check done. Alive: ${alive}, dead: 0`);
+      onNotice(t("proxyPools.noticeHealthDone", { alive }));
     }
   };
 
@@ -321,7 +335,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       .filter(Boolean);
 
     if (lines.length === 0) {
-      onError("Paste at least one proxy line.");
+      onError(t("proxyPools.errorPasteOneLine"));
       return;
     }
 
@@ -333,12 +347,12 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         const parsed = parseProxyLine(line);
         if (parsed) parsedEntries.push({ ...parsed, lineNumber: index + 1 });
       } catch (error) {
-        invalidLines.push(`Line ${index + 1}: ${error instanceof Error ? error.message : "Invalid format"}`);
+        invalidLines.push(t("proxyPools.errorInvalidFormatLine", { line: index + 1, error: error instanceof Error ? error.message : t("proxyPools.errorInvalidFormatGeneric") }));
       }
     });
 
     if (invalidLines.length > 0) {
-      onError(`Invalid proxy format:\n${invalidLines.join("\n")}`);
+      onError(t("proxyPools.errorInvalidFormat", { lines: invalidLines.join("\n") }));
       return;
     }
 
@@ -374,9 +388,9 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       onMutated?.();
       setShowBatchImportModal(false);
       setBatchImportText("");
-      onNotice(`Batch import completed: created ${created}, skipped ${skipped}, failed ${failed}`);
+      onNotice(t("proxyPools.noticeBatchImportCompleted", { created, skipped, failed }));
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Batch import failed");
+      onError(error instanceof Error ? error.message : t("proxyPools.errorBatchImportFailed"));
     } finally {
       setImporting(false);
     }
@@ -389,7 +403,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       <section className="section proxy-pools-page">
         <div className="proxy-pools-loading">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          Loading proxy pools...
+          {t("proxyPools.loading")}
         </div>
       </section>
     );
@@ -399,16 +413,16 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     <section className="section proxy-pools-page">
       <div className="proxy-pools-toolbar">
         <div>
-          <p className="eyebrow">Network egress</p>
-          <h2>Proxy pools</h2>
-          <p>Encrypted egress pools bound to providers and credentials.</p>
+          <p className="eyebrow">{t("proxyPools.subtitle")}</p>
+          <h2>{t("proxyPools.title")}</h2>
+          <p>{t("proxyPools.description")}</p>
         </div>
         <div className="proxy-pools-toolbar-actions">
           <Button variant="secondary" size="sm" icon="upload" onClick={() => setShowBatchImportModal(true)}>
-            Batch import
+            {t("proxyPools.batchImport")}
           </Button>
           <Button size="sm" icon="add" onClick={openCreateModal}>
-            Add proxy pool
+            {t("proxyPools.addProxyPool")}
           </Button>
         </div>
       </div>
@@ -418,17 +432,17 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
           {pools.length > 0 ? (
             <label className="proxy-pools-select-all">
               <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
-              {allSelected ? "Unselect all" : "Select all"}
+              {allSelected ? t("proxyPools.unselectAll") : t("proxyPools.selectAll")}
             </label>
           ) : null}
-          <Badge variant="default">Total: {pools.length}</Badge>
-          <Badge variant="success">Active: {activeCount}</Badge>
+          <Badge variant="default">{t("proxyPools.total", { count: pools.length })}</Badge>
+          <Badge variant="success">{t("proxyPools.active", { count: activeCount })}</Badge>
         </div>
 
         {(selectedIds.length > 0 || healthChecking) && (
           <div className="proxy-pools-bulk-bar">
             <span className="material-symbols-outlined">checklist</span>
-            <span>{selectedIds.length > 0 ? `${selectedIds.length} selected` : "All pools"}</span>
+            <span>{selectedIds.length > 0 ? t("proxyPools.selected", { count: selectedIds.length }) : t("proxyPools.allPools")}</span>
             <div className="proxy-pools-bulk-actions">
               <Button
                 size="sm"
@@ -437,21 +451,21 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
                 disabled={healthChecking || bulkBusy || pools.length === 0}
                 loading={healthChecking}
               >
-                {healthChecking ? `Checking ${healthProgress.current}/${healthProgress.total}` : "Health check"}
+                {healthChecking ? t("proxyPools.checking", { current: healthProgress.current, total: healthProgress.total }) : t("proxyPools.healthCheck")}
               </Button>
               {selectedIds.length > 0 ? (
                 <>
                   <Button size="sm" variant="secondary" icon="toggle_on" onClick={() => void bulkSetEnabled(true)} disabled={bulkBusy || healthChecking}>
-                    Activate
+                    {t("proxyPools.activate")}
                   </Button>
                   <Button size="sm" variant="secondary" icon="toggle_off" onClick={() => void bulkSetEnabled(false)} disabled={bulkBusy || healthChecking}>
-                    Deactivate
+                    {t("proxyPools.deactivate")}
                   </Button>
                   <Button size="sm" variant="secondary" icon="delete" onClick={bulkDelete} disabled={bulkBusy || healthChecking}>
-                    Delete
+                    {t("proxyPools.delete")}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={clearSelection} disabled={bulkBusy || healthChecking}>
-                    Clear
+                    {t("proxyPools.clear")}
                   </Button>
                 </>
               ) : null}
@@ -460,7 +474,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         )}
 
         {pools.length === 0 ? (
-          <EmptyState icon="lan" text="No proxy pool entries yet." hint="Create a pool, then assign it to providers or credentials." />
+          <EmptyState icon="lan" text={t("proxyPools.emptyTitle")} hint={t("proxyPools.emptyHint")} />
         ) : (
           <div className="proxy-pools-list">
             {pools.map((pool) => (
@@ -474,16 +488,16 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
                   <div className="proxy-pools-row-body">
                     <div className="proxy-pools-row-title">
                       <strong>{pool.name || pool.id}</strong>
-                      <Badge variant={statusVariant(pool.status)} size="sm">{pool.status || "unknown"}</Badge>
+                      <Badge variant={statusVariant(pool.status)} size="sm">{pool.status || t("proxyPools.statusUnknown")}</Badge>
                       <Badge variant={pool.enabled ? "success" : "default"} size="sm">
-                        {pool.enabled ? "active" : "inactive"}
+                        {pool.enabled ? t("proxyPools.statusActive") : t("proxyPools.statusInactive")}
                       </Badge>
-                      <Badge variant="default" size="sm">{pool.usage_count || 0} bound</Badge>
+                      <Badge variant="default" size="sm">{t("proxyPools.bound", { count: pool.usage_count || 0 })}</Badge>
                     </div>
                     <p className="proxy-pools-row-url">{pool.url}</p>
                     <p className="proxy-pools-row-meta">
                       <code>{pool.id}</code>
-                      <span>Last tested: {formatDateTime(pool.last_tested_at)}</span>
+                      <span>{t("proxyPools.lastTested")} {formatDateTime(pool.last_tested_at)}</span>
                       {pool.last_error ? <span>{pool.last_error}</span> : null}
                     </p>
                   </div>
@@ -495,22 +509,22 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
                     className="proxy-pools-icon-btn"
                     onClick={() => void handleTest(pool.id)}
                     disabled={testingId === pool.id}
-                    title="Test proxy"
-                    aria-label="Test proxy"
+                    title={t("proxyPools.testProxy")}
+                    aria-label={t("proxyPools.testProxy")}
                   >
                     <span className={cn("material-symbols-outlined", testingId === pool.id && "animate-spin")}>
                       {testingId === pool.id ? "progress_activity" : "science"}
                     </span>
                   </button>
-                  <button type="button" className="proxy-pools-icon-btn" onClick={() => openEditModal(pool)} title="Edit" aria-label="Edit">
+                  <button type="button" className="proxy-pools-icon-btn" onClick={() => openEditModal(pool)} title={t("proxyPools.edit")} aria-label={t("proxyPools.edit")}>
                     <span className="material-symbols-outlined">edit</span>
                   </button>
                   <button
                     type="button"
                     className="proxy-pools-icon-btn danger"
                     onClick={() => handleDelete(pool)}
-                    title="Delete"
-                    aria-label="Delete"
+                    title={t("proxyPools.delete")}
+                    aria-label={t("proxyPools.delete")}
                   >
                     <span className="material-symbols-outlined">delete</span>
                   </button>
@@ -524,37 +538,37 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
       <Modal
         open={showFormModal}
         onClose={closeFormModal}
-        title={editingPool ? "Edit proxy pool" : "Add proxy pool"}
+        title={editingPool ? t("proxyPools.editProxyPool") : t("proxyPools.addProxyPoolTitle")}
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={closeFormModal} disabled={saving}>Cancel</Button>
+            <Button variant="secondary" onClick={closeFormModal} disabled={saving}>{t("proxyPools.cancel")}</Button>
             <Button
               onClick={() => void handleSave()}
               loading={saving}
               disabled={!formData.name.trim() || (!editingPool && (!formData.url.trim() || !formData.id.trim()))}
             >
-              Save
+              {t("proxyPools.save")}
             </Button>
           </>
         }
       >
         <div className="proxy-pools-form">
           {!editingPool ? (
-            <Field label="Pool ID" required hint="Stable identifier used in provider and credential bindings.">
+            <Field label={t("proxyPools.poolId")} required hint={t("proxyPools.poolIdHint")}>
               <Input
                 value={formData.id}
                 onChange={(event) => setFormData((prev) => ({ ...prev, id: event.target.value }))}
-                placeholder="office-proxy"
+                placeholder={t("proxyPools.poolIdPlaceholder")}
                 required
               />
             </Field>
           ) : (
-            <Field label="Pool ID">
+            <Field label={t("proxyPools.poolId")}>
               <Input value={formData.id} disabled />
             </Field>
           )}
-          <Field label="Name" required>
+          <Field label={t("proxyPools.name")} required>
             <Input
               value={formData.name}
               onChange={(event) => {
@@ -565,26 +579,26 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
                   id: !editingPool && !prev.id ? suggestPoolId(name) : prev.id,
                 }));
               }}
-              placeholder="Office proxy"
+              placeholder={t("proxyPools.namePlaceholder")}
               required
             />
           </Field>
           <Field
-            label="Proxy URL"
+            label={t("proxyPools.proxyUrl")}
             required={!editingPool}
-            hint={editingPool ? "Leave blank to keep the stored URL." : "http(s)://, socks5:// or direct"}
+            hint={editingPool ? t("proxyPools.proxyUrlHintEdit") : t("proxyPools.proxyUrlHintCreate")}
           >
             <Input
               type="password"
               value={formData.url}
               onChange={(event) => setFormData((prev) => ({ ...prev, url: event.target.value }))}
-              placeholder={editingPool ? "Leave blank to keep current URL" : "http://127.0.0.1:7897"}
+              placeholder={editingPool ? t("proxyPools.proxyUrlPlaceholderEdit") : t("proxyPools.proxyUrlPlaceholderCreate")}
             />
           </Field>
           <div className="proxy-pools-toggle-row">
             <div>
-              <strong>Active</strong>
-              <p>Inactive pools are ignored by runtime resolution.</p>
+              <strong>{t("proxyPools.activeField")}</strong>
+              <p>{t("proxyPools.activeFieldHint")}</p>
             </div>
             <Toggle
               checked={formData.enabled}
@@ -600,25 +614,25 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         onClose={() => {
           if (!importing) setShowBatchImportModal(false);
         }}
-        title="Batch import proxies"
+        title={t("proxyPools.batchImportTitle")}
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setShowBatchImportModal(false)} disabled={importing}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowBatchImportModal(false)} disabled={importing}>{t("proxyPools.cancel")}</Button>
             <Button onClick={() => void handleBatchImport()} loading={importing} disabled={!batchImportText.trim()}>
-              Import
+              {t("proxyPools.import")}
             </Button>
           </>
         }
       >
         <Field
-          label="Paste proxy list (one per line)"
-          hint="Supported formats: protocol://user:pass@host:port, host:port:user:pass"
+          label={t("proxyPools.pasteProxyList")}
+          hint={t("proxyPools.pasteProxyListHint")}
         >
           <Textarea
             value={batchImportText}
             onChange={(event) => setBatchImportText(event.target.value)}
-            placeholder={"http://user:pass@127.0.0.1:7897\n127.0.0.1:7897:user:pass"}
+            placeholder={t("proxyPools.pasteProxyPlaceholder")}
             rows={8}
           />
         </Field>
@@ -630,7 +644,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         onConfirm={() => confirmState?.onConfirm()}
         title={confirmState?.title || "Confirm"}
         message={confirmState?.message}
-        confirmText="Confirm"
+        confirmText={t("proxyPools.confirm")}
         variant="danger"
       />
     </section>
