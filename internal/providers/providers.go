@@ -642,6 +642,8 @@ func parseOpenAIStream(ctx context.Context, response *http.Response) <-chan cano
 			out <- canonical.Event{Type: canonical.EventError, Err: err}
 		} else if finishReason != "" {
 			out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finishReason}
+		} else if started {
+			out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: "stop"}
 		}
 	}()
 	return out
