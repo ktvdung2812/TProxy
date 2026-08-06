@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Badge, Button, Input, cn } from "../ui";
@@ -25,15 +26,9 @@ type Props = {
   providerError?: string;
   apiKey: string;
   onApiKeyChange: (value: string) => void;
+  onInvalidClientApiKey: () => void;
   onError: (message: string) => void;
 };
-
-const PRESET_PROMPTS = [
-  { label: "Explain simply", prompt: "Explain this concept in simple terms:" },
-  { label: "Code review", prompt: "Review this code and suggest improvements:" },
-  { label: "Debug help", prompt: "Help me debug this issue:" },
-  { label: "Summarize", prompt: "Summarize the following:" },
-];
 
 export function ChatView({
   models,
@@ -43,8 +38,19 @@ export function ChatView({
   providerError = "",
   apiKey,
   onApiKeyChange,
+  onInvalidClientApiKey,
   onError,
 }: Props) {
+  const { t } = useTranslation();
+  const presetPrompts = useMemo(
+    () => [
+      { label: t("chat.explainSimply"), prompt: t("chat.explainSimply") },
+      { label: t("chat.codeReview"), prompt: t("chat.codeReview") },
+      { label: t("chat.debugHelp"), prompt: t("chat.debugHelp") },
+      { label: t("chat.summarize"), prompt: t("chat.summarize") },
+    ],
+    [t],
+  );
   const { copied, copy } = useCopyToClipboard();
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = safeParse<ChatSession[]>(localStorage.getItem(STORAGE_KEYS.sessions), []);
@@ -70,6 +76,7 @@ export function ChatView({
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [chatError, setChatError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -95,8 +102,8 @@ export function ChatView({
       .map(([group, items]) => ({ group, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
       .sort((a, b) => {
         const order = (group: string) => {
-          if (group === "Virtual models") return 0;
-          if (group === "Combos") return 1;
+          if (group === "models") return 0;
+          if (group === "combos") return 1;
           return 2;
         };
         const diff = order(a.group) - order(b.group);
@@ -189,6 +196,12 @@ export function ChatView({
   }, [currentMessages, streamingText]);
 
   useEffect(() => {
+    if (!chatError) return;
+    const timer = window.setTimeout(() => setChatError(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [chatError]);
+
+  useEffect(() => {
     if (initializedRef.current || models.length === 0) return;
 
     const defaultModel = activeModelId && modelIndex.has(activeModelId)
@@ -208,7 +221,7 @@ export function ChatView({
 
     const session: ChatSession = {
       id: createId(),
-      title: "New chat",
+      title: t("chat.newChat"),
       modelId: defaultModel.id,
       modelName: defaultModel.name,
       createdAt: new Date().toISOString(),
@@ -228,7 +241,7 @@ export function ChatView({
 
   const ensureSessionForModel = (model: ChatModelOption): ChatSession => ({
     id: createId(),
-    title: "New chat",
+    title: t("chat.newChat"),
     modelId: model.id,
     modelName: model.name,
     createdAt: new Date().toISOString(),
@@ -327,8 +340,10 @@ export function ChatView({
   const sendMessage = async () => {
     const model = activeModel;
     if (!model || !apiKey.trim()) {
-      if (!apiKey.trim()) onError("API key required. Set your tproxy client API key in chat settings.");
-      return;
+      if (!apiKey.trim()) {
+        setChatError(t("chat.apiKeyRequired"));
+        return;
+      }
     }
 
     const userText = draft.trim();
@@ -368,7 +383,7 @@ export function ChatView({
       modelName: model.name,
       messages: nextMessages,
       updatedAt: new Date().toISOString(),
-      title: item.title === "New chat" ? makeSessionTitle(userText) : item.title,
+      title: item.title === t("chat.newChat") ? makeSessionTitle(userText) : item.title,
     } : item)));
     setDraft("");
     setAttachments([]);
@@ -418,17 +433,23 @@ export function ChatView({
       }));
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === "AbortError") return;
-      const errorText = cause instanceof Error ? cause.message : "Failed to send message";
+      const errorText = cause instanceof Error ? cause.message : t("chat.failedToSend");
+      const invalidClientApiKey = errorText.trim().toLowerCase() === "invalid client api key";
+      if (invalidClientApiKey) onInvalidClientApiKey();
       updateSession(sessionId, (currentSession) => ({
         ...currentSession,
         messages: currentSession.messages.map((message) => (
           message.id === assistantMessageId
-            ? { ...message, content: message.content || `Error: ${errorText}`, status: "error" }
+            ? {
+                ...message,
+                content: message.content || `Error: ${invalidClientApiKey ? t("chat.invalidApiKey") : errorText}`,
+                status: "error",
+              }
             : message
         )),
         updatedAt: new Date().toISOString(),
       }));
-      onError(errorText);
+      setChatError(invalidClientApiKey ? t("chat.invalidApiKey") : errorText);
     } finally {
       setIsSending(false);
       setStreamingMessageId("");
@@ -459,7 +480,7 @@ export function ChatView({
             type="button"
             className="chat-sidebar-toggle"
             onClick={() => setSidebarOpen((value) => !value)}
-            aria-label={sidebarOpen ? "Collapse history" : "Expand history"}
+            aria-label={sidebarOpen ? t("chat.collapseHistory") : t("chat.expandHistory")}
           >
             <span className="material-symbols-outlined">{sidebarOpen ? "left_panel_close" : "left_panel_open"}</span>
           </button>
@@ -477,7 +498,7 @@ export function ChatView({
                   <button type="button" className="chat-session-button" onClick={() => handleSelectSession(session.id)}>
                     <span className="chat-session-title">{session.title}</span>
                     <span className="chat-session-preview">
-                      {textValue(latestMessage?.content) || "Empty chat"}
+                      {textValue(latestMessage?.content) || t("chat.emptyChat")}
                     </span>
                     <span className="chat-session-time">{formatRelativeTime(session.updatedAt)}</span>
                   </button>
@@ -485,7 +506,7 @@ export function ChatView({
                     type="button"
                     className="chat-session-delete"
                     onClick={() => handleDeleteSession(session.id)}
-                    aria-label="Delete chat"
+                    aria-label={t("chat.deleteChat")}
                   >
                     <span className="material-symbols-outlined">delete</span>
                   </button>
@@ -497,6 +518,15 @@ export function ChatView({
       </aside>
 
       <div className="chat-main">
+        {chatError ? (
+          <div className="chat-error-banner">
+            <span className="material-symbols-outlined">error</span>
+            <span>{chatError}</span>
+            <button type="button" className="chat-error-dismiss" onClick={() => setChatError("")} aria-label={t("common.dismissError")}>
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        ) : null}
         <div className="chat-toolbar">
           <div ref={modelMenuRef} className="chat-model-picker">
             <button
@@ -507,7 +537,7 @@ export function ChatView({
             >
               <span className="material-symbols-outlined">smart_toy</span>
               <div className="chat-model-trigger-text">
-                <span className="chat-model-name">{activeModel?.name || "Select model"}</span>
+                <span className="chat-model-name">{activeModel?.name || t("chat.selectModel")}</span>
                 <span className="chat-model-id">{activeModel?.requestModel || activeModel?.id || "No models configured"}</span>
               </div>
               <span className="material-symbols-outlined">expand_more</span>
@@ -525,7 +555,7 @@ export function ChatView({
                       type="button"
                       className="chat-model-modal-close"
                       onClick={() => setModelMenuOpen(false)}
-                      aria-label="Close"
+                      aria-label={t("chat.close")}
                     >
                       <span className="material-symbols-outlined">close</span>
                     </button>
@@ -535,7 +565,7 @@ export function ChatView({
                     <Input
                       value={modelSearchQuery}
                       onChange={(event) => setModelSearchQuery(event.target.value)}
-                      placeholder="Search models…"
+                      placeholder={t("chat.searchModels")}
                       icon="search"
                     />
                   </div>
@@ -642,7 +672,7 @@ export function ChatView({
                 Chat with virtual models, combos, or any model discovered from your configured provider accounts.
               </p>
               <div className="chat-presets">
-                {PRESET_PROMPTS.map((preset) => (
+                {presetPrompts.map((preset) => (
                   <button
                     key={preset.label}
                     type="button"
@@ -663,9 +693,9 @@ export function ChatView({
                 const content = textValue(message.content) || (isAssistant ? streamingText : "");
 
                 return (
-                  <div key={message.id} className={cn("chat-message", isUser ? "is-user" : "is-assistant")}>
+                  <div key={message.id} className={cn("chat-message", isUser ? "is-user" : "is-assistant", message.status === "error" && "is-error")}>
                     <div className="chat-message-meta">
-                      <span>{isUser ? "You" : activeModel?.name || "Assistant"}</span>
+                      <span>{isUser ? t("chat.you") : activeModel?.name || t("chat.assistant")}</span>
                     </div>
 
                     {message.attachments?.length ? (
@@ -698,8 +728,8 @@ export function ChatView({
                           type="button"
                           className="chat-message-copy"
                           onClick={() => copy(content, message.id)}
-                          aria-label={copied === message.id ? "Copied" : "Copy message"}
-                          title={copied === message.id ? "Copied" : "Copy message"}
+                          aria-label={copied === message.id ? t("common.copied") : t("chat.copyMessage")}
+                          title={copied === message.id ? t("common.copied") : t("chat.copyMessage")}
                         >
                           <span className="material-symbols-outlined">
                             {copied === message.id ? "check" : "content_copy"}
@@ -721,7 +751,7 @@ export function ChatView({
               {attachments.map((attachment) => (
                 <div key={attachment.id} className="chat-composer-attachment">
                   <span>{attachment.name}</span>
-                  <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label="Remove attachment">
+                  <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={t("chat.removeAttachment")}>
                     <span className="material-symbols-outlined">close</span>
                   </button>
                 </div>

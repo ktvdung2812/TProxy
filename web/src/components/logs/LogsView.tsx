@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { RequestLog } from "../../hooks/useRequestLogStream";
 import { Badge, Card, Input, Select } from "../ui";
 import type { AuditEvent } from "./api";
@@ -18,6 +19,7 @@ type Props = {
 type StatusFilter = "all" | "2xx" | "3xx" | "4xx" | "5xx" | "other";
 
 export function LogsView({ logs, audit, streaming, onRefreshAudit }: Props) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("requests");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -83,10 +85,10 @@ export function LogsView({ logs, audit, streaming, onRefreshAudit }: Props) {
   return (
     <section className="section">
       <div className="logs-stats">
-        <StatCard icon="receipt_long" label="Total requests" value={String(stats.total)} hint={streaming ? "Live" : "Paused"} live={streaming} />
-        <StatCard icon="check_circle" label="Success rate" value={`${stats.successRate}%`} hint={`${stats.total - stats.errors} ok`} tone="success" />
-        <StatCard icon="error" label="Errors" value={String(stats.errors)} hint={stats.errors === 0 ? "No errors" : "4xx / 5xx"} tone={stats.errors > 0 ? "error" : undefined} />
-        <StatCard icon="timer" label="Latency p50 · p95" value={`${fmtLatency(stats.p50)} · ${fmtLatency(stats.p95)}`} hint="of recent" />
+        <StatCard icon="receipt_long" label={t("logs.totalRequests")} value={String(stats.total)} hint={streaming ? t("logs.live") : t("logs.paused")} live={streaming} />
+        <StatCard icon="check_circle" label={t("logs.successRate")} value={`${stats.successRate}%`} hint={`${stats.total - stats.errors} ok`} tone="success" />
+        <StatCard icon="error" label={t("logs.errors")} value={String(stats.errors)} hint={stats.errors === 0 ? t("logs.noErrors") : "4xx / 5xx"} tone={stats.errors > 0 ? "error" : undefined} />
+        <StatCard icon="timer" label={t("logs.latency")} value={`${fmtLatency(stats.p50)} · ${fmtLatency(stats.p95)}`} hint={t("logs.ofRecent")} />
       </div>
 
       <Card pad="none" className="logs-card">
@@ -115,16 +117,16 @@ export function LogsView({ logs, audit, streaming, onRefreshAudit }: Props) {
           <div className="logs-filter">
             <Input
               icon="search"
-              placeholder={tab === "requests" ? "Filter path, model, key…" : "Filter action, resource, actor…"}
+              placeholder={tab === "requests" ? t("logs.filterRequests") : t("logs.filterAudit")}
               value={query}
               onChange={(e) => setQuery((e.target as HTMLInputElement).value)}
-              aria-label="Filter logs"
+              aria-label={t("logs.filterLogs")}
             />
             {tab === "requests" ? (
               <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter((e.target as HTMLSelectElement).value as StatusFilter)}
-                aria-label="Filter by status"
+                aria-label={t("logs.filterByStatus")}
               >
                 <option value="all">All status</option>
                 <option value="2xx">2xx success</option>
@@ -176,6 +178,7 @@ function StatCard({
   tone?: "success" | "error" | "warning";
   live?: boolean;
 }) {
+  const { t } = useTranslation();
   const toneClass = tone ? ` logs-stat-${tone}` : "";
   return (
     <Card pad="md" elev className={`logs-stat${toneClass}`}>
@@ -183,7 +186,7 @@ function StatCard({
         <span className="logs-stat-icon">
           <span className="material-symbols-outlined">{icon}</span>
         </span>
-        {live ? <span className="logs-live" title="Live streaming">●</span> : null}
+        {live ? <span className="logs-live" title={t("logs.liveStreaming")}>●</span> : null}
       </div>
       <span className="logs-stat-label">{label}</span>
       <strong className="logs-stat-value">{value}</strong>

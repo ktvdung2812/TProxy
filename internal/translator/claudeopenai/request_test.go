@@ -184,3 +184,34 @@ func TestOpenAIToClaudeRequestImage(t *testing.T) {
 		t.Fatalf("image source = %#v", source)
 	}
 }
+
+// A tool_use with no matching tool_result (aborted turn) needs a stand-in tool
+// message, and inserting it must not drop any of the messages that follow.
+func TestClaudeToOpenAIRequestFillsMissingToolResults(t *testing.T) {
+	body := map[string]any{
+		"messages": []any{
+			map[string]any{"role": "user", "content": "run"},
+			map[string]any{"role": "assistant", "content": []any{
+				map[string]any{"type": "tool_use", "id": "call_1", "name": "shell", "input": map[string]any{"a": 1}},
+				map[string]any{"type": "tool_use", "id": "call_2", "name": "shell", "input": map[string]any{"a": 2}},
+			}},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "call_1", "content": "ok1"},
+			}},
+			map[string]any{"role": "user", "content": "hi"},
+		},
+	}
+	out := claudeopenai.ClaudeToOpenAIRequest("gpt-5.4", body, false)
+	messages, _ := out["messages"].([]any)
+	if len(messages) != 5 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	placeholder, _ := messages[3].(map[string]any)
+	if placeholder["role"] != "tool" || placeholder["tool_call_id"] != "call_2" {
+		t.Fatalf("placeholder = %#v", messages[3])
+	}
+	last, _ := messages[4].(map[string]any)
+	if last["role"] != "user" || last["content"] != "hi" {
+		t.Fatalf("trailing message = %#v", messages[4])
+	}
+}

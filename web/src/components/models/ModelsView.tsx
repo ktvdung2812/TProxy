@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input } from "../ui";
 import { deleteModel, saveModel } from "./api";
 import { ModelSelectModal } from "./ModelSelectModal";
@@ -49,6 +50,7 @@ export function ModelsView({
   onNotice,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const [showSelectModal, setShowSelectModal] = useState(false);
   const [showPriorityModal, setShowPriorityModal] = useState(false);
   const [priorityModel, setPriorityModel] = useState<ModelRecord | null>(null);
@@ -114,7 +116,7 @@ export function ModelsView({
       setPriorityModel(createdModel);
       setShowPriorityModal(true);
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to create model");
+      onError?.(error instanceof Error ? error.message : t("models.failedCreate"));
     } finally {
       setSaving(false);
     }
@@ -132,6 +134,7 @@ export function ModelsView({
       modelName: entry.name,
       capabilities: entry.capabilities,
       existingIds,
+      credentialCounts,
     });
     void handleCreateModel(form);
   };
@@ -148,7 +151,7 @@ export function ModelsView({
       setPriorityModel(null);
       onMutated?.();
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to save provider priority");
+      onError?.(error instanceof Error ? error.message : t("models.failedSavePriority"));
     } finally {
       setSaving(false);
     }
@@ -156,7 +159,7 @@ export function ModelsView({
 
   const handleDelete = (model: ModelRecord) => {
     setConfirmState({
-      title: "Delete model",
+      title: t("models.deleteModel"),
       message: `Delete "${model.DisplayName || model.ID}"? Clients using this model ID will stop working immediately.`,
       confirmText: "Delete",
       onConfirm: () => {
@@ -166,7 +169,7 @@ export function ModelsView({
             onNotice?.(`Model "${model.DisplayName || model.ID}" deleted`);
             onMutated?.();
           } catch (error) {
-            onError?.(error instanceof Error ? error.message : "Failed to delete model");
+            onError?.(error instanceof Error ? error.message : t("models.failedDelete"));
           }
         })();
       },
@@ -205,8 +208,8 @@ export function ModelsView({
           icon="search"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search configured or provider models…"
-          aria-label="Search models"
+          placeholder={t("models.searchModels")}
+          aria-label={t("models.searchModels")}
         />
       </div>
 
@@ -237,7 +240,7 @@ export function ModelsView({
                       accountCount: credentialCounts[route.ProviderID] ?? 0,
                     };
                   })
-                : buildModelCardRoutes(model, savedRoutes, providers, modelsByProvider).map((route) => ({
+                : buildModelCardRoutes(model, savedRoutes, providers, modelsByProvider, credentialCounts).map((route) => ({
                     ...route,
                     accountCount: credentialCounts[route.provider] ?? 0,
                   }));
@@ -270,7 +273,7 @@ export function ModelsView({
                   <div className="route-list">
                     {visibleRoutes.length === 0 ? (
                       <p className="model-route-empty">
-                        {loadingDiscovery ? "Discovering compatible providers…" : "No provider routes yet"}
+                        {loadingDiscovery ? t("models.discoveringProviders") : t("models.noProviderRoutes")}
                       </p>
                     ) : null}
                     {visibleRoutes.map((route) => (
@@ -304,8 +307,8 @@ export function ModelsView({
                       size="sm"
                       icon="delete"
                       className="btn-icon-only"
-                      aria-label="Delete model"
-                      title="Delete model"
+                      aria-label={t("models.deleteModel")}
+                      title={t("models.deleteModel")}
                       onClick={() => handleDelete(model)}
                     />
                   </div>
@@ -411,6 +414,7 @@ export function ModelsView({
         models={models}
         routesByModel={routesByModel}
         existingIds={existingIds}
+        credentialCounts={credentialCounts}
         saving={saving}
         onClose={() => setShowSelectModal(false)}
         onSubmit={(form) => void handleCreateModel(form)}

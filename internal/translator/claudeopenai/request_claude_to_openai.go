@@ -38,7 +38,7 @@ func ClaudeToOpenAIRequest(model string, body map[string]any, stream bool) map[s
 			messages = append(messages, converted)
 		}
 	}
-	fixMissingToolResponsesOpenAI(messages)
+	messages = fixMissingToolResponsesOpenAI(messages)
 	result["messages"] = messages
 
 	if tools := sliceValue(body["tools"]); len(tools) > 0 {
@@ -265,8 +265,13 @@ func claudeImageToOpenAI(block map[string]any) map[string]any {
 	}
 }
 
-func fixMissingToolResponsesOpenAI(messages []any) {
+// fixMissingToolResponsesOpenAI inserts a placeholder tool message for every
+// tool_call the client never answered, and returns the repaired list. Callers must
+// use the returned slice: inserting grows the list past the caller's length.
+func fixMissingToolResponsesOpenAI(messages []any) []any {
+	result := make([]any, 0, len(messages))
 	for i := 0; i < len(messages); i++ {
+		result = append(result, messages[i])
 		msg := mapValue(messages[i])
 		if msg == nil || stringValue(msg["role"]) != "assistant" {
 			continue
@@ -280,32 +285,27 @@ func fixMissingToolResponsesOpenAI(messages []any) {
 			ids = append(ids, stringValue(mapValue(call)["id"]))
 		}
 		responded := map[string]bool{}
-		insertAt := i + 1
 		for j := i + 1; j < len(messages); j++ {
 			next := mapValue(messages[j])
 			if next == nil || stringValue(next["role"]) != "tool" {
 				break
 			}
 			responded[stringValue(next["tool_call_id"])] = true
-			insertAt = j + 1
+			result = append(result, messages[j])
+			i = j
 		}
-		missing := make([]any, 0)
 		for _, id := range ids {
 			if id == "" || responded[id] {
 				continue
 			}
-			missing = append(missing, map[string]any{
+			result = append(result, map[string]any{
 				"role":         "tool",
 				"tool_call_id": id,
 				"content":      "[No response received]",
 			})
 		}
-		if len(missing) == 0 {
-			continue
-		}
-		messages = append(messages[:insertAt], append(missing, messages[insertAt:]...)...)
-		i = insertAt + len(missing) - 1
 	}
+	return result
 }
 
 func claudeThinkingBudgetToEffort(budget int) string {

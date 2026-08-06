@@ -1,8 +1,18 @@
+import { getStoredApiKeySecret } from "./lib/apiKeySecrets";
+
 /** Official local-dev management secret — must match TPROXY_MANAGEMENT_SECRET in .env.example */
 export const DEV_MANAGEMENT_SECRET = "tproxy-local-management-secret";
 
-/** Official local-dev client API key — must match TPROXY_API_KEY in .env.example */
-export const DEV_API_KEY = "tproxy-local-dev-key";
+/**
+ * A historical dashboard fallback. It must never be sent automatically: a
+ * running gateway may use a different client-key store than .env.example.
+ */
+const LEGACY_DEV_API_KEY = "tproxy-local-dev-key";
+
+type ApiKeyOption = {
+  id: string;
+  enabled: boolean;
+};
 
 export function isLocalDashboardHost(): boolean {
   if (typeof window === "undefined") return false;
@@ -15,25 +25,27 @@ export function defaultManagementSecret(): string {
   return isLocalDashboardHost() ? DEV_MANAGEMENT_SECRET : "";
 }
 
-/** Default client API key for chat on loopback during local development. */
-export function defaultApiKey(): string {
-  return isLocalDashboardHost() ? DEV_API_KEY : "";
-}
-
 /**
  * Resolve the chat playground client API key.
- * Prefer a stored key unless it is blank or accidentally set to the management secret.
+ *
+ * Client keys are installation-specific. Prefer a manually saved client key,
+ * then a secret saved for an enabled API-key record. Never substitute an
+ * example key or the dashboard management secret.
  */
-export function resolveChatApiKey(): string {
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("tproxy-api-key") || "" : "";
-  const fallback = defaultApiKey();
-  const management = defaultManagementSecret();
-  if (stored && stored !== management) return stored;
-  if (fallback) {
-    if (typeof localStorage !== "undefined" && stored === management) {
-      localStorage.setItem("tproxy-api-key", fallback);
-    }
-    return fallback;
+export function resolveChatApiKey(apiKeys: ApiKeyOption[], managementSecret = ""): string {
+  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("tproxy-api-key")?.trim() || "" : "";
+  const disallowed = new Set([managementSecret.trim(), DEV_MANAGEMENT_SECRET, LEGACY_DEV_API_KEY]);
+
+  if (stored && !disallowed.has(stored)) return stored;
+
+  if (stored && typeof localStorage !== "undefined") {
+    localStorage.removeItem("tproxy-api-key");
   }
-  return stored;
+
+  for (const apiKey of apiKeys) {
+    if (!apiKey.enabled) continue;
+    const savedSecret = getStoredApiKeySecret(apiKey.id);
+    if (savedSecret && !disallowed.has(savedSecret)) return savedSecret;
+  }
+  return "";
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, Select } from "../ui";
 import { fetchTokenSaverSettings, updateTokenSaverSettings, type CompressionMode } from "./api";
 
@@ -19,6 +20,7 @@ const COMPRESSION_MODES: Array<{ id: CompressionMode; label: string; hint: strin
 ];
 
 export function TokenSaverView({ secret, onError, onNotice }: Props) {
+  const { t } = useTranslation();
   const [rtkEnabled, setRtkEnabled] = useState(true);
   const [compressionMode, setCompressionMode] = useState<CompressionMode>("stacked");
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,7 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
       const mode = (data.compression_mode || "stacked") as CompressionMode;
       setCompressionMode(COMPRESSION_MODES.some((item) => item.id === mode) ? mode : "stacked");
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to load token saver settings");
+      onError(error instanceof Error ? error.message : t("tokenSaver.failedLoad"));
     } finally {
       setLoading(false);
     }
@@ -51,7 +53,7 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
       setRtkEnabled(nextEnabled);
       onNotice?.(`Compression mode set to ${nextMode}`);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update compression mode");
+      onError(error instanceof Error ? error.message : t("tokenSaver.failedUpdate"));
     } finally {
       setSaving(false);
     }
@@ -60,9 +62,9 @@ export function TokenSaverView({ secret, onError, onNotice }: Props) {
   const copyInstall = async (command: string) => {
     try {
       await navigator.clipboard.writeText(command);
-      onNotice?.("Copied to clipboard");
+      onNotice?.(t("common.copied"));
     } catch {
-      onError("Could not copy command");
+      onError(t("tokenSaver.copyFailed"));
     }
   };
 

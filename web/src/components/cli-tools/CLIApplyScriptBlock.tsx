@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../ui";
 import { applyScriptAvailable, buildApplyScript, type ApplyScriptShell } from "./applyScripts";
 import type { ManualConfigEntry } from "./ManualConfigModal";
@@ -14,6 +15,7 @@ const SHELLS: { id: ApplyScriptShell; label: string }[] = [
 ];
 
 export function CLIApplyScriptBlock({ configs, disabled = false }: Props) {
+  const { t } = useTranslation();
   const [shell, setShell] = useState<ApplyScriptShell>("bash");
   const [copied, setCopied] = useState(false);
 
@@ -39,9 +41,9 @@ export function CLIApplyScriptBlock({ configs, disabled = false }: Props) {
     <div className="cli-tool-apply-script">
       <div className="cli-tool-apply-script-head">
         <div>
-          <p className="cli-tool-apply-script-title">One-shot command</p>
+          <p className="cli-tool-apply-script-title">{t("cliTools.oneShotCommand")}</p>
           <p className="cli-tool-apply-script-desc">
-            Copy and paste into your terminal to run immediately.
+            {t("cliTools.oneShotCommandDesc")}
           </p>
         </div>
         <div className="cli-tool-apply-script-tabs usage-segmented">
@@ -61,8 +63,8 @@ export function CLIApplyScriptBlock({ configs, disabled = false }: Props) {
       {!available ? (
         <p className="cli-tool-hint">
           {shell === "bash"
-            ? "This tool uses Windows-only paths. Switch to the PowerShell tab."
-            : "No script available for the current configuration."}
+            ? t("cliTools.windowsOnlyHint")
+            : t("cliTools.noScriptAvailable")}
         </p>
       ) : (
         <div className="cli-tool-codeblock">
@@ -73,8 +75,8 @@ export function CLIApplyScriptBlock({ configs, disabled = false }: Props) {
               size="sm"
               className="btn-icon-only"
               icon={copied ? "check" : "content_copy"}
-              aria-label={copied ? "Copied" : "Copy"}
-              title={copied ? "Copied" : "Copy"}
+              aria-label={copied ? t("common.copied") : t("common.copy")}
+              title={copied ? t("common.copied") : t("common.copy")}
               disabled={disabled || !script}
               onClick={() => void copyScript()}
             />

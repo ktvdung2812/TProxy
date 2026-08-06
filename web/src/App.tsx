@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { MatrixRain } from "./components/MatrixRain";
+import { LanguageToggle } from "./components/LanguageToggle";
 import { useViewportWidth } from "./hooks/useViewportWidth";
 import { Header } from "./components/Header";
 import {
@@ -146,13 +148,15 @@ function usd(value: number) {
 }
 
 function statusBadge(status?: string, enabled = true) {
-  if (!enabled) return <Badge variant="default">disabled</Badge>;
-  if (status === "healthy") return <Badge variant="success" dot>healthy</Badge>;
+  const { t } = useTranslation();
+  if (!enabled) return <Badge variant="default">{t("common.disabled")}</Badge>;
+  if (status === "healthy") return <Badge variant="success" dot>{t("common.healthy")}</Badge>;
   if (status && status !== "unknown") return <Badge variant="warning" dot>{status}</Badge>;
-  return <Badge variant="default">unknown</Badge>;
+  return <Badge variant="default">{t("common.unknown")}</Badge>;
 }
 
 function App() {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const activeRoute = matchRoute(location.pathname);
@@ -169,7 +173,7 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const viewportWidth = useViewportWidth();
   const [providerSearch, setProviderSearch] = useState("");
-  const [apiKey, setApiKey] = useState(() => resolveChatApiKey());
+  const [apiKey, setApiKey] = useState("");
 
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [gatewayOnline, setGatewayOnline] = useState(true);
@@ -232,21 +236,30 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    setApiKey(resolveChatApiKey(snapshot.api_keys || [], secret));
+  }, [snapshot.api_keys, secret]);
+
+  const loadTokenRef = useRef(0);
+
   const load = useCallback(async () => {
     if (authState !== "authenticated" || !secret) return;
+    const token = ++loadTokenRef.current;
     setLoading(true);
     setError("");
     try {
       const health = await fetch("/healthz");
+      if (loadTokenRef.current !== token) return;
       setGatewayOnline(health.ok);
 
       const response = await fetch("/api/admin/snapshot", { headers: authHeaders });
       const data = await response.json();
+      if (loadTokenRef.current !== token) return;
       if (!response.ok) {
         const code = data?.error?.code;
         if (code === "invalid_management_secret") {
           logout();
-          throw new Error("Phiên đăng nhập hết hạn hoặc secret không hợp lệ.");
+          throw new Error(t("auth.sessionExpired"));
         }
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
@@ -254,9 +267,10 @@ function App() {
       setStoredManagementSecret(secret);
       void refreshAudit();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load tproxy state");
+      if (loadTokenRef.current !== token) return;
+      setError(cause instanceof Error ? cause.message : t("common.loadStateFailed"));
     } finally {
-      setLoading(false);
+      if (loadTokenRef.current === token) setLoading(false);
     }
   }, [authHeaders, authState, logout, secret]);
 
@@ -295,12 +309,12 @@ function App() {
   }, [secret]);
 
   const checkProvider = async (id: string) => {
-    try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/health`, "POST"); setNotice(result.ok ? `${id} is healthy` : `${id} health check failed`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Provider health check failed"); }
+    try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/health`, "POST"); setNotice(result.ok ? t("providers.healthOk", { id }) : t("providers.healthFailed", { id })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed")); }
   };
   const checkAllProviders = async () => {
     const ids = (snapshot.providers || []).map((provider) => provider.ID);
     if (ids.length === 0) {
-      setError("No providers configured");
+      setError(t("providers.noProvidersConfigured"));
       return;
     }
     setHealthCheckAllBusy(true);
@@ -316,20 +330,20 @@ function App() {
           failed++;
         }
       }
-      setNotice(`Health check finished: ${ok} healthy, ${failed} failed`);
+      setNotice(t("providers.healthCheckFinished", { ok, failed }));
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Health check failed");
+      setError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
     } finally {
       setHealthCheckAllBusy(false);
     }
   };
   const discoverProvider = async (id: string) => {
-    try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/models`, "GET"); setDiscovered((current) => ({ ...current, [id]: result.data || [] })); setNotice(`Discovered ${result.data?.length || 0} models from ${id}`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Model discovery failed"); }
+    try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/models`, "GET"); setDiscovered((current) => ({ ...current, [id]: result.data || [] })); setNotice(t("providers.modelsDiscovered", { count: result.data?.length || 0, id })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("providers.modelDiscoveryFailed")); }
   };
   const remove = async (path: string, label: string) => {
-    if (!window.confirm(`Delete ${label}?`)) return;
-    try { await adminRequest(path, "DELETE"); setNotice(`${label} deleted`); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Delete failed"); }
+    if (!window.confirm(t("common.deleteConfirm", { label }))) return;
+    try { await adminRequest(path, "DELETE"); setNotice(t("common.deleted", { label })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("common.deleteFailed")); }
   };
 
   const activeCredentials = useMemo(
@@ -371,12 +385,15 @@ function App() {
     }
   };
 
-  const sidebarCollapseLabel = isNarrowSidebar ? "Mở rộng menu" : "Thu nhỏ menu";
+  const sidebarCollapseLabel = isNarrowSidebar ? t("nav.expandMenu") : t("nav.collapseMenu");
 
   if (authState === "checking") {
     return (
       <div className="app-shell app-shell-auth">
         <MatrixRain />
+        <div className="auth-language-toggle">
+          <LanguageToggle />
+        </div>
         <AuthLoadingView />
       </div>
     );
@@ -386,6 +403,9 @@ function App() {
     return (
       <div className="app-shell app-shell-auth">
         <MatrixRain />
+        <div className="auth-language-toggle">
+          <LanguageToggle />
+        </div>
         <LoginView onLogin={login} />
       </div>
     );
@@ -398,7 +418,7 @@ function App() {
         <button
           type="button"
           className="sidebar-backdrop"
-          aria-label="Đóng menu"
+          aria-label={t("nav.collapseMenu")}
           onClick={() => setMobileNavOpen(false)}
         />
       ) : null}
@@ -417,8 +437,8 @@ function App() {
       <main className="main-area">
         <div className="landing-grid" aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: -1 }} />
         <Header
-          title={activeRoute.title}
-          description={activeRoute.description}
+          title={t(activeRoute.i18nKey + "_page_title")}
+          description={t(activeRoute.i18nKey + "_page_desc")}
           icon={activeRoute.icon}
           onRefresh={load}
           loading={loading}
@@ -428,11 +448,11 @@ function App() {
             activeRoute.id === "providers" ? (
               <Input
                 icon="search"
-                placeholder="Search providers..."
+                placeholder={t("common.searchProviders")}
                 value={providerSearch}
                 onChange={(e) => setProviderSearch(e.target.value)}
                 style={{ width: 220 }}
-                aria-label="Search providers"
+                aria-label={t("common.searchProviders")}
               />
             ) : undefined
           }
@@ -440,11 +460,11 @@ function App() {
 
         <div className={cn("main-scroll custom-scrollbar", activeRoute.id === "chat" && "is-chat-page")}>
           <div className={cn("main-inner", activeRoute.id === "chat" && "chat-page-inner")}>
-            {error && (
+            {error && activeRoute.id !== "chat" && (
               <div className="banner banner-error">
                 <span className="material-symbols-outlined">error</span>
                 <span>{error}</span>
-                <button type="button" className="banner-dismiss" aria-label="Đóng thông báo lỗi" onClick={() => setError("")}>
+                <button type="button" className="banner-dismiss" aria-label={t("common.dismissError")} onClick={() => setError("")}>
                   <span className="material-symbols-outlined">close</span>
                 </button>
               </div>
@@ -453,7 +473,7 @@ function App() {
               <div className="banner banner-notice">
                 <span className="material-symbols-outlined">check_circle</span>
                 <span>{notice}</span>
-                <button type="button" className="banner-dismiss" aria-label="Đóng thông báo" onClick={() => setNotice("")}>
+                <button type="button" className="banner-dismiss" aria-label={t("common.dismiss")} onClick={() => setNotice("")}>
                   <span className="material-symbols-outlined">close</span>
                 </button>
               </div>
@@ -544,6 +564,14 @@ function App() {
       else localStorage.removeItem("tproxy-api-key");
     };
 
+    const handleInvalidClientApiKey = () => {
+      // A user may have rotated or deleted the key since this browser last
+      // used it. Drop only the generic chat cache, then prefer a secret saved
+      // for an enabled API-key record. Never fall back to a management secret.
+      localStorage.removeItem("tproxy-api-key");
+      setApiKey(resolveChatApiKey(snapshot.api_keys || [], secret));
+    };
+
     return (
       <ChatView
         models={chatModels}
@@ -553,6 +581,7 @@ function App() {
         providerError={providerError}
         apiKey={apiKey}
         onApiKeyChange={handleApiKeyChange}
+        onInvalidClientApiKey={handleInvalidClientApiKey}
         onError={setError}
       />
     );
@@ -590,17 +619,17 @@ function App() {
       <section className="section">
         <div className="section-head">
           <div>
-            <p className="eyebrow">AI gateway</p>
-            <h2>Overview</h2>
-            <p>Live snapshot of traffic, savings, credentials, and API keys.</p>
+            <p className="eyebrow">{t("overview.subtitle")}</p>
+            <h2>{t("overview.title")}</h2>
+            <p>{t("overview.description")}</p>
           </div>
         </div>
         <div className="metrics">
-          <Metric icon="bolt" label="Requests" value={compactNumber(snapshot.usage?.requests)} hint="all recorded attempts" />
-          <Metric icon="error" label="Error attempts" value={compactNumber(snapshot.usage?.errors)} hint="retry and fallback included" variant="warning" />
-          <Metric icon="savings" label="Tokens saved" value={compactNumber(snapshot.usage?.tokens_saved || 0)} hint="RTK tool output compression" variant="success" />
-          <Metric icon="payments" label="Estimated cost" value={usd(snapshot.usage?.estimated_cost_usd || 0)} hint="models.dev pricing" />
-          <Metric icon="key" label="Active credentials" value={String(activeCredentials)} hint="available account records" />
+          <Metric icon="bolt" label={t("overview.requests")} value={compactNumber(snapshot.usage?.requests)} hint={t("overview.requestsHint")} />
+          <Metric icon="error" label={t("overview.errorAttempts")} value={compactNumber(snapshot.usage?.errors)} hint={t("overview.errorAttemptsHint")} variant="warning" />
+          <Metric icon="savings" label={t("overview.tokensSaved")} value={compactNumber(snapshot.usage?.tokens_saved || 0)} hint={t("overview.tokensSavedHint")} variant="success" />
+          <Metric icon="payments" label={t("overview.estimatedCost")} value={usd(snapshot.usage?.estimated_cost_usd || 0)} hint={t("overview.estimatedCostHint")} />
+          <Metric icon="key" label={t("overview.activeCredentials")} value={String(activeCredentials)} hint={t("overview.activeCredentialsHint")} />
         </div>
         <OverviewApiKeysCard
           secret={secret}
@@ -702,10 +731,15 @@ function App() {
       return counts;
     }, [snapshot.credentials]);
 
+    const knownProviderIDs = useMemo(
+      () => new Set((snapshot.providers || []).map((provider) => provider.ID)),
+      [snapshot.providers],
+    );
+
     const modelRoutes = useMemo(() => {
       const mapped: Record<string, { ID: string; ProviderID: string; UpstreamModel: string; Priority: number; Weight?: number; Enabled: boolean }[]> = {};
       for (const [modelId, routes] of Object.entries(snapshot.routes || {})) {
-        mapped[modelId] = (routes || []).map((route) => ({
+        mapped[modelId] = (routes || []).filter((route) => knownProviderIDs.has(route.ProviderID)).map((route) => ({
           ID: route.ID,
           ProviderID: route.ProviderID,
           UpstreamModel: route.UpstreamModel,
@@ -715,7 +749,7 @@ function App() {
         }));
       }
       return mapped;
-    }, [snapshot.routes]);
+    }, [knownProviderIDs, snapshot.routes]);
 
     return (
       <ModelsView

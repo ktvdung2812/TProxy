@@ -37,6 +37,21 @@ func TestNormalizeOpenAIToolChoiceFunctionNameOnly(t *testing.T) {
 	}
 }
 
+func TestClinePassNormalizesGenericModelIDsToProviderNamespace(t *testing.T) {
+	cases := map[string]string{
+		"deepseek/deepseek-v4-pro": "cline-pass/deepseek-v4-pro",
+		"deepseek-v4-flash":        "cline-pass/deepseek-v4-flash",
+		"cline-pass/kimi-k2.6":     "cline-pass/kimi-k2.6",
+		"":                         "",
+	}
+	for input, want := range cases {
+		body := sanitizeOpenAIUpstreamBody(store.Provider{ID: "clinepass", Type: "clinepass"}, map[string]any{"model": input}, false)
+		if got := stringValue(body["model"]); got != want {
+			t.Fatalf("model %q normalized to %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestUnwrapOpenAIChatCompletionClineEnvelope(t *testing.T) {
 	raw := map[string]any{
 		"success": true,

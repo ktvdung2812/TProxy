@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
 import { storeApiKeySecretsFrom9routerBackup } from "../../lib/apiKeySecrets";
 import { import9routerBackup, importCliproxyAuth } from "./api";
@@ -39,6 +40,7 @@ const SOURCES: Array<{
 ];
 
 export function ImportModal({ open, secret, onClose, onNotice, onError, onMutated }: Props) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ImportSource>("9router");
   const [importing, setImporting] = useState(false);
@@ -99,7 +101,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
         onError?.(result.warnings.join("\n"));
       }
       if (!result.ok) {
-        onError?.(result.errors?.join("\n") || "Import failed");
+        onError?.(result.errors?.join("\n") || t("import.failed"));
         return;
       }
       onNotice?.(
@@ -115,7 +117,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
         onClose();
       }
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to import file");
+      onError?.(error instanceof Error ? error.message : t("import.failedFile"));
     } finally {
       setBusy(false);
       setPendingDryRun(false);
@@ -134,8 +136,8 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
     <Modal
       open={open}
       onClose={onClose}
-      title="Import data"
-      subtitle="Migrate credentials and routing from 9router or CLIProxyAPI"
+      title={t("import.title")}
+      subtitle={t("import.subtitle")}
       icon="upload"
       size="md"
       className="import-modal"
@@ -151,7 +153,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
             disabled={busy}
             onClick={() => openFilePicker(true)}
           >
-            {previewing ? "Previewing…" : "Preview"}
+            {previewing ? t("import.previewing") : t("import.preview")}
           </Button>
           <Button
             variant="primary"
@@ -160,7 +162,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
             disabled={busy}
             onClick={() => openFilePicker(false)}
           >
-            {importing ? "Importing…" : "Import"}
+            {importing ? t("import.importing") : t("import.import")}
           </Button>
         </>
       }

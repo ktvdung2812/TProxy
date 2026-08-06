@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Select, Toggle } from "../ui";
 import { CooldownTimer } from "./CooldownTimer";
 import { CredentialModelsModal } from "./CredentialModelsModal";
@@ -118,6 +119,7 @@ export function ProviderDetail({
     () => catalogWithPreset(provider.Type, provider.ID, presets),
     [provider.Type, provider.ID, presets],
   );
+  const { t } = useTranslation();
   const connectionProfile = useMemo(
     () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
     [catalog, presets, provider.ID],
@@ -299,7 +301,7 @@ export function ProviderDetail({
       onNotice(result.ok ? `${provider.ID}: ${summary}` : `${provider.ID}: ${summary}${result.last_error ? ` — ${result.last_error}` : ""}`);
       onMutated();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Health check failed");
+      onError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
     } finally {
       setHealthBusy(false);
     }
@@ -307,24 +309,24 @@ export function ProviderDetail({
 
   const handleDiscover = () => {
     setDiscoverNonce((value) => value + 1);
-    onNotice(`Refreshing models for ${provider.ID}`);
+    onNotice(t("providers.refreshingModels", { id: provider.ID }));
   };
 
   const handleDeleteProvider = async () => {
     setConfirmDeleteProvider(false);
     try {
       await deleteProvider(secret, provider.ID);
-      onNotice(`Provider ${provider.ID} deleted`);
+      onNotice(t("providers.providerDeleted", { id: provider.ID }));
       onMutated();
       onBack();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Delete failed");
+      onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
     }
   };
 
   const handleConnectionMethod = (method: ConnectionMethod) => {
     if (!method.available) {
-      onError(method.unavailableReason || "This connection method is not available yet.");
+      onError(method.unavailableReason || t("providers.connectionMethodUnavailable"));
       return;
     }
     switch (method.kind) {
@@ -365,10 +367,10 @@ export function ProviderDetail({
     try {
       await deleteCredential(secret, cred.id);
       setSelectedCredentialIds((current) => current.filter((id) => id !== cred.id));
-      onNotice(`Credential ${cred.id} deleted`);
+      onNotice(t("providers.credentialDeleted", { id: cred.id }));
       onMutated();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Delete failed");
+      onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
     }
   };
 

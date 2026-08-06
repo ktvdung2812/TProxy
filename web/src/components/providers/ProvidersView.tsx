@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../ui";
 import { ImportDataCard } from "../import/ImportDataCard";
 import { ImportModal } from "../import/ImportModal";
@@ -43,6 +44,7 @@ export function ProvidersView({
   onNotice,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const [addPreset, setAddPreset] = useState<string | undefined>();
   const [showAdd, setShowAdd] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Provider | null>(null);
@@ -132,7 +134,7 @@ export function ProvidersView({
 
   const handleConnectCatalog = async (catalog: ProviderTypeInfo, method: ConnectionMethod) => {
     if (!method.available) {
-      onError(method.unavailableReason || "This connection method is not available yet.");
+      onError(method.unavailableReason || t("providers.methodUnavailable"));
       return;
     }
     setConnectBusy(true);
@@ -169,7 +171,7 @@ export function ProvidersView({
         }
       }
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to prepare provider");
+      onError(cause instanceof Error ? cause.message : t("providers.failedPrepare"));
     } finally {
       setConnectBusy(false);
     }
@@ -212,7 +214,7 @@ export function ProvidersView({
       URL.revokeObjectURL(url);
       onNotice("OAuth auth bundle exported");
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Auth export failed");
+      onError(cause instanceof Error ? cause.message : t("providers.authExportFailed"));
     } finally {
       setAuthBusy(false);
     }
@@ -227,7 +229,7 @@ export function ProvidersView({
       onNotice("OAuth auth bundle imported");
       onMutated();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Auth import failed");
+      onError(cause instanceof Error ? cause.message : t("providers.authImportFailed"));
     } finally {
       setAuthBusy(false);
     }
@@ -242,7 +244,7 @@ export function ProvidersView({
       onNotice(`Provider ${target.ID} deleted`);
       onMutated();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Delete failed");
+      onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
     }
   };
 

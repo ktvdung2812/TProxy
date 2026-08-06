@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { checkCredentialHealth, saveCredential, type ProxyPoolOption } from "./api";
 import type { Credential } from "./types";
@@ -23,6 +24,7 @@ type Props = {
  * the closest equivalent and refreshes credential status as a side effect.
  */
 export function EditConnectionModal({ open, providerId, credential, proxyPools, secret, onClose, onSaved }: Props) {
+  const { t } = useTranslation();
   const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
   const [priority, setPriority] = useState(0);
@@ -64,10 +66,10 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
     try {
       const result = await checkCredentialHealth(secret, credential.id);
       setTestResult(result.ok ? "ok" : "error");
-      setTestMessage(result.ok ? `Connection ${result.status || "healthy"}` : result.last_error || result.error || "Health check failed");
+      setTestMessage(result.ok ? `Connection ${result.status || "healthy"}` : result.last_error || result.error || t("providers.healthCheckFailed"));
     } catch (cause) {
       setTestResult("error");
-      setTestMessage(cause instanceof Error ? cause.message : "Health check failed");
+      setTestMessage(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
     } finally {
       setTesting(false);
     }
@@ -95,7 +97,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
       onSaved?.();
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to save credential");
+      setError(cause instanceof Error ? cause.message : t("providers.failedSaveCredential"));
     } finally {
       setSaving(false);
     }
@@ -110,7 +112,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
       open={open}
       onClose={onClose}
       title={`Edit ${credential.label || credential.id}`}
-      subtitle={isOAuth ? "OAuth credential — secret is managed by the token refresh flow." : "Leave secret blank to keep the current value."}
+      subtitle={isOAuth ? t("providers.oauthCredentialHint") : t("providers.leaveSecretBlank")}
       icon="edit"
       size="md"
     >

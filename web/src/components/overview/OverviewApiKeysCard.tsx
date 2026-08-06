@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useApiKeySecrets } from "../../hooks/useApiKeySecrets";
@@ -35,6 +36,7 @@ function compact(value: number) {
 }
 
 export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Props) {
+  const { t } = useTranslation();
   useApiKeySecrets();
   const { copied, copy } = useCopyToClipboard();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
@@ -52,7 +54,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
       }
       setUsageById(mapped);
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to load API key usage");
+      onError?.(error instanceof Error ? error.message : t("apis.failedLoadUsage"));
     } finally {
       setLoadingUsage(false);
     }
@@ -69,7 +71,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
       onMutated?.();
       await loadUsage();
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Failed to update API key");
+      onError?.(error instanceof Error ? error.message : t("apis.failedUpdateKey"));
     } finally {
       setTogglingId(null);
     }
@@ -77,7 +79,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
 
   const handleRevoke = (key: ApiKeyRecord) => {
     setConfirmState({
-      title: "Revoke API key",
+      title: t("apis.revokeKey"),
       message: `Revoke "${key.name || key.id}"? Clients using this key will lose access immediately.`,
       confirmText: "Revoke",
       onConfirm: () => {
@@ -87,7 +89,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
             onMutated?.();
             await loadUsage();
           } catch (error) {
-            onError?.(error instanceof Error ? error.message : "Failed to revoke API key");
+            onError?.(error instanceof Error ? error.message : t("apis.failedRevokeKey"));
           }
         })();
       },
@@ -114,7 +116,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
       </div>
 
       {apiKeys.length === 0 ? (
-        <EmptyState icon="api" text="No API keys yet." hint="Create a key to authenticate clients." />
+        <EmptyState icon="api" text={t("overview.noApiKeys")} hint={t("apis.createKeyHint")} />
       ) : (
         <div className="overview-api-keys-list">
           {apiKeys.map((key) => {
@@ -124,7 +126,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
             const models = key.models?.length ? key.models.join(", ") : "*";
             const storedSecret = getStoredApiKeySecret(key.id);
             const usageText = loadingUsage
-              ? "Loading usage…"
+              ? t("apis.loadingUsage")
               : `${compact(requests)} requests today · ${usd(spent)}`;
 
             return (
@@ -141,7 +143,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
                               type="button"
                               className="endpoint-row-copy small"
                               onClick={() => copy(storedSecret, `secret_${key.id}`)}
-                              aria-label="Copy API key"
+                              aria-label={t("apis.copySecret")}
                             >
                               <span className="material-symbols-outlined">
                                 {copied === `secret_${key.id}` ? "check" : "content_copy"}

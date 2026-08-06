@@ -446,7 +446,7 @@ amp --model "{{model}}"
       { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
     ],
     defaultModels: [
-      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", alias: "deepseek-v4-pro" },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", alias: "deepseek/deepseek-v4-pro" },
       { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", alias: "deepseek-v4-flash" },
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
     ],
@@ -456,7 +456,9 @@ amp --model "{{model}}"
     ],
     codeBlock: {
       language: "toml",
-      code: `[providers.openai]
+      code: `provider = "openai"
+
+[providers.openai]
 base_url = "{{baseUrl}}"
 api_key = "{{apiKey}}"
 model = "{{model}}"`,

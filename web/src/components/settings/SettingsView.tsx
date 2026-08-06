@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Badge, Button, Card, Input, Select, Toggle } from "../ui";
 import {
@@ -27,14 +28,16 @@ type Props = {
   onPasswordChanged?: (newPassword: string) => void;
 };
 
-const RETENTION_ROWS: Array<{ key: keyof AdminSettings["retention"]; label: string }> = [
-  { key: "usage_events", label: "Usage events" },
-  { key: "request_logs", label: "Request logs" },
-  { key: "audit_events", label: "Audit events" },
-  { key: "media_jobs", label: "Media jobs" },
-  { key: "oauth_sessions", label: "OAuth sessions" },
-  { key: "cleanup_interval", label: "Cleanup interval" },
-];
+function buildRetentionRows(t: (key: string) => string): Array<{ key: keyof AdminSettings["retention"]; label: string }> {
+  return [
+    { key: "usage_events", label: t("settings.retention.usageEvents") },
+    { key: "request_logs", label: t("settings.retention.requestLogs") },
+    { key: "audit_events", label: t("settings.retention.auditEvents") },
+    { key: "media_jobs", label: t("settings.retention.mediaJobs") },
+    { key: "oauth_sessions", label: t("settings.retention.oauthSessions") },
+    { key: "cleanup_interval", label: t("settings.retention.cleanupInterval") },
+  ];
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -46,6 +49,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordChanged }: Props) {
+  const { t } = useTranslation();
+  const RETENTION_ROWS = useMemo(() => buildRetentionRows(t), [t]);
   const importRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -79,7 +84,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       setAllowLanManagement(Boolean(adminSettings.allow_lan_management));
       setPublicBaseUrl(adminSettings.public_base_url || "");
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to load settings");
+      onError(error instanceof Error ? error.message : t("settings.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -93,7 +98,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
     if (!rotation) return;
     const sticky = Number(stickyLimit);
     if (!Number.isFinite(sticky) || sticky < 1) {
-      onError("Sticky round-robin limit must be at least 1");
+      onError(t("settings.stickyLimitMin"));
       return;
     }
     setSavingRotation(true);
@@ -104,9 +109,9 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
         provider_strategies: rotation.provider_strategies,
       });
       setRotation(saved);
-      onNotice?.("Account rotation settings saved");
+      onNotice?.(t("settings.rotationSaved"));
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to save rotation settings");
+      onError(error instanceof Error ? error.message : t("settings.rotationSaveFailed"));
     } finally {
       setSavingRotation(false);
     }
@@ -116,9 +121,9 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
     setSavingRotation(true);
     try {
       await resetAccountRotationState(secret);
-      onNotice?.("Rotation runtime state reset");
+      onNotice?.(t("settings.rotationReset"));
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to reset rotation state");
+      onError(error instanceof Error ? error.message : t("settings.rotationResetFailed"));
     } finally {
       setSavingRotation(false);
     }
@@ -128,11 +133,11 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
     setReloading(true);
     try {
       const result = await reloadConfig(secret);
-      onNotice?.(result.config_path ? `Reloaded ${result.config_path}` : "Configuration reloaded");
+      onNotice?.(result.config_path ? `Reloaded ${result.config_path}` : t("settings.configReloaded"));
       onMutated?.();
       await load();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to reload configuration");
+      onError(error instanceof Error ? error.message : t("settings.reloadFailed"));
     } finally {
       setReloading(false);
     }
@@ -145,7 +150,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       downloadBlob(blob, filename);
       onNotice?.(`Exported ${filename}`);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to export configuration");
+      onError(error instanceof Error ? error.message : t("settings.exportFailed"));
     } finally {
       setExporting(null);
     }
@@ -160,7 +165,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       onMutated?.();
       await load();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to import configuration");
+      onError(error instanceof Error ? error.message : t("settings.importFailed"));
     } finally {
       setImporting(false);
       if (importRef.current) importRef.current.value = "";
@@ -215,7 +220,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       const result = await saveGatewaySettings(secret, { public_base_url: publicBaseUrl.trim() });
       setPublicBaseUrl(result.public_base_url || "");
       setSettings((current) => (current ? { ...current, public_base_url: result.public_base_url || "" } : current));
-      onNotice?.("Public base URL saved");
+      onNotice?.(t("settings.publicBaseUrlSaved"));
     } catch (error) {
       onError(error instanceof Error ? error.message : "Không lưu được public base URL");
     } finally {
@@ -283,18 +288,18 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
         <div className="settings-card-head">
           <div className="settings-title-row">
             <span className="material-symbols-outlined">sync_alt</span>
-            <h2>Account rotation</h2>
+            <h2>{t("settings.accountRotation")}</h2>
             {overrideCount > 0 && (
-              <Badge variant="neutral" size="sm">{overrideCount} provider override{overrideCount === 1 ? "" : "s"}</Badge>
+              <Badge variant="neutral" size="sm">{overrideCount} {t("settings.providerOverride", { count: overrideCount })}</Badge>
             )}
           </div>
           <p className="settings-desc">
-            Global fallback strategy when multiple credentials are available. Per-provider overrides can be configured on each provider detail page.
+            {t("settings.accountRotationDesc")}
           </p>
         </div>
         <div className="settings-form-grid">
           <label className="settings-field">
-            <span>Default strategy</span>
+            <span>{t("settings.defaultStrategy")}</span>
             <Select value={strategy} disabled={loading || savingRotation} onChange={(event) => setStrategy(event.target.value)}>
               {GLOBAL_ROTATION_STRATEGIES.map((item) => (
                 <option key={item.id} value={item.id}>{item.label}</option>
@@ -302,7 +307,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             </Select>
           </label>
           <label className="settings-field">
-            <span>Sticky round-robin limit</span>
+            <span>{t("settings.stickyLimit")}</span>
             <Input
               type="number"
               min={1}
@@ -313,14 +318,14 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
           </label>
         </div>
         <p className="settings-hint">
-          Active: {rotationStrategyLabel(strategy)} · sticky {stickyLimit} request{stickyLimit === "1" ? "" : "s"}
+          Active: {rotationStrategyLabel(strategy)} · sticky {stickyLimit} {t("settings.request", { count: parseInt(stickyLimit) })}
         </p>
         <div className="settings-actions">
           <Button variant="primary" size="sm" disabled={loading || savingRotation} onClick={() => void saveRotation()}>
-            Save rotation
+            {t("settings.saveRotation")}
           </Button>
           <Button variant="outline" size="sm" disabled={loading || savingRotation} onClick={() => void resetRotation()}>
-            Reset runtime state
+            {t("settings.resetRuntimeState")}
           </Button>
         </div>
       </Card>
@@ -328,10 +333,10 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       <Card pad="md" className="settings-card">
         <div className="settings-title-row">
           <span className="material-symbols-outlined">schedule</span>
-          <h2>Data retention</h2>
-          <Badge variant="neutral" size="sm">config.yaml</Badge>
+          <h2>{t("settings.dataRetention")}</h2>
+          <Badge variant="neutral" size="sm">{t("settings.configYaml")}</Badge>
         </div>
-        <p className="settings-desc">Read from the active server configuration. Edit config.yaml and reload to change these values.</p>
+        <p className="settings-desc">{t("settings.dataRetentionDesc")}</p>
         <div className="settings-kv-table">
           {RETENTION_ROWS.map((row) => (
             <div key={row.key} className="settings-kv-row">
@@ -345,7 +350,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       <Card pad="md" className="settings-card">
         <div className="settings-title-row">
           <span className="material-symbols-outlined">shield</span>
-          <h2>Gateway</h2>
+          <h2>{t("settings.gateway")}</h2>
         </div>
         <div className="settings-kv-table">
           <div className="settings-kv-row">
@@ -355,7 +360,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
                 checked={allowLanManagement}
                 disabled={loading || savingLanAccess}
                 onChange={(event) => void toggleLanAccess(event.target.checked)}
-                aria-label="Cho phép truy cập dashboard qua LAN"
+                aria-label={t("settings.allowLanAccess")}
               />
               <Badge variant={allowLanManagement ? "success" : "neutral"} size="sm">
                 {allowLanManagement ? "Đã bật" : "Tắt"}
@@ -388,24 +393,24 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             Dùng cho CLI Tools như Cursor — endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel, reverse proxy). Ví dụ: <code>https://abc.trycloudflare.com</code>
           </p>
           <div className="settings-kv-row">
-            <span>Remote management</span>
+            <span>{t("settings.remoteManagement")}</span>
             <Badge variant={settings?.allow_remote_management ? "success" : "neutral"} size="sm">
-              {settings?.allow_remote_management ? "Allowed" : "Local only"}
+              {settings?.allow_remote_management ? t("settings.allowed") : t("settings.localOnly")}
             </Badge>
           </div>
           <div className="settings-kv-row">
-            <span>Payload capture</span>
+            <span>{t("settings.payloadCapture")}</span>
             <Badge variant={settings?.payload_capture ? "warning" : "neutral"} size="sm">
-              {settings?.payload_capture ? "Enabled" : "Disabled"}
+              {settings?.payload_capture ? t("common.enabled") : t("common.disabled")}
             </Badge>
           </div>
           <div className="settings-kv-row">
-            <span>Token saver (RTK)</span>
+            <span>{t("settings.tokenSaverRTK")}</span>
             <div className="settings-inline">
               <Badge variant={settings?.token_saver?.rtk_enabled !== false ? "success" : "neutral"} size="sm">
-                {settings?.token_saver?.rtk_enabled !== false ? "Enabled" : "Disabled"}
+                {settings?.token_saver?.rtk_enabled !== false ? t("common.enabled") : t("common.disabled")}
               </Badge>
-              <Link className="settings-link" to="/token-saver">Configure</Link>
+              <Link className="settings-link" to="/token-saver">{t("settings.configure")}</Link>
             </div>
           </div>
         </div>
@@ -414,10 +419,10 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
       <Card pad="md" className="settings-card">
         <div className="settings-title-row">
           <span className="material-symbols-outlined">backup</span>
-          <h2>Configuration</h2>
+          <h2>{t("settings.configuration")}</h2>
         </div>
         <p className="settings-desc">
-          Export or import routing configuration. Reload reapplies the on-disk config file without restarting the process.
+          {t("settings.configurationDesc")}
         </p>
         <div className="settings-actions">
           <Button
@@ -427,7 +432,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             disabled={exporting !== null || importing}
             onClick={() => void handleExport("json")}
           >
-            {exporting === "json" ? "Exporting…" : "Export JSON"}
+            {exporting === "json" ? t("settings.exporting") : t("settings.exportJSON")}
           </Button>
           <Button
             variant="outline"
@@ -436,7 +441,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             disabled={exporting !== null || importing}
             onClick={() => void handleExport("yaml")}
           >
-            {exporting === "yaml" ? "Exporting…" : "Export YAML"}
+            {exporting === "yaml" ? t("settings.exporting") : t("settings.exportYAML")}
           </Button>
           <Button
             variant="outline"
@@ -445,10 +450,10 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             disabled={importing || exporting !== null}
             onClick={() => importRef.current?.click()}
           >
-            {importing ? "Importing…" : "Import file"}
+            {importing ? t("settings.importing") : t("settings.importFile")}
           </Button>
           <Button variant="primary" size="sm" icon="restart_alt" disabled={reloading} onClick={() => void handleReload()}>
-            {reloading ? "Reloading…" : "Reload config"}
+            {reloading ? t("settings.reloading") : t("settings.reloadConfig")}
           </Button>
         </div>
         <input

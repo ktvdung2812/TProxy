@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { deleteCredential, saveCredential } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
@@ -99,6 +100,7 @@ function getCodexResetCreditCount(quota?: CredentialQuota) {
 }
 
 export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Props) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [quotaById, setQuotaById] = useState<Record<string, CredentialQuota>>({});
@@ -243,7 +245,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         }
         return false;
       } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "Failed to fetch quota";
+        const message = cause instanceof Error ? cause.message : t("quota.failedToFetch");
         setErrors((current) => ({ ...current, [credentialId]: message }));
         return false;
       } finally {
@@ -277,7 +279,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         onMutated?.();
       }
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to refresh quota");
+      onError(cause instanceof Error ? cause.message : t("quota.failedToRefresh"));
     } finally {
       refreshingRef.current = false;
       setRefreshingAll(false);
@@ -336,14 +338,14 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
       });
       onMutated?.();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to update account");
+      onError(cause instanceof Error ? cause.message : t("quota.failedToUpdate"));
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleDelete = async (credential: CredentialRow) => {
-    if (!window.confirm("Delete this connection?")) return;
+    if (!window.confirm(t("quota.deleteConnectionConfirm"))) return;
     setDeletingId(credential.id);
     try {
       await deleteCredential(secret, credential.id);
@@ -354,7 +356,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
       });
       onMutated?.();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Delete failed");
+      onError(cause instanceof Error ? cause.message : t("quota.deleteFailed"));
     } finally {
       setDeletingId(null);
     }
@@ -413,7 +415,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         if (changed) onMutated?.();
       });
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Failed to reset Codex limit");
+      onError(cause instanceof Error ? cause.message : t("quota.failedToResetCodex"));
     } finally {
       setResettingLimitId(null);
     }
@@ -425,7 +427,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   );
 
   const selectedProviderLabel =
-    providerFilter === "all" ? "All providers" : getProviderTypeInfo(providerFilter).name;
+    providerFilter === "all" ? t("quota.allProviders") : getProviderTypeInfo(providerFilter).name;
 
   if (eligible.length === 0) {
     return (
@@ -442,7 +444,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   return (
     <section className="quota-tracker-page">
       <div className="quota-tracker-controls">
-        <div className="quota-tracker-stats" aria-label="Account statistics">
+        <div className="quota-tracker-stats" aria-label={t("quota.accountStatistics")}>
           <span className="quota-tracker-stat quota-tracker-stat-on">
             <span className="quota-tracker-stat-dot" aria-hidden="true" />
             <strong>{accountStats.enabled}</strong> on
@@ -499,7 +501,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             </button>
             {providerMenuOpen ? (
               <>
-                <button type="button" className="quota-tracker-backdrop" aria-label="Close provider filter" onClick={() => setProviderMenuOpen(false)} />
+                <button type="button" className="quota-tracker-backdrop" aria-label={t("quota.closeProviderFilter")} onClick={() => setProviderMenuOpen(false)} />
                 <div className="quota-tracker-menu">
                   <button
                     type="button"
@@ -544,7 +546,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             className="quota-tracker-select"
             value={accountFilter}
             onChange={(event) => updateQuotaFilters({ status: event.target.value as AccountFilter })}
-            aria-label="Filter accounts by status"
+            aria-label={t("quota.filterByStatus")}
           >
             {ACCOUNT_FILTER_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -605,7 +607,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             className="quota-tracker-chip"
             disabled={refreshingAll}
             onClick={() => void refreshAll()}
-            aria-label="Refresh all"
+            aria-label={t("quota.refreshAll")}
           >
             <span className={cn("material-symbols-outlined", refreshingAll && "animate-spin")}>refresh</span>
           </button>
@@ -724,8 +726,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           className="quota-tracker-icon-btn"
                           disabled={busy || rowBusy}
                           onClick={() => setResetCreditsCredential(credential)}
-                          aria-label="View Codex reset credit expiry"
-                          title="View Codex reset credit expiry"
+                          aria-label={t("quota.viewResetExpiry")}
+                          title={t("quota.viewResetExpiry")}
                         >
                           <span className="material-symbols-outlined">schedule</span>
                         </button>
@@ -740,8 +742,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           if (changed) onMutated?.();
                         });
                       }}
-                      aria-label="Refresh quota"
-                      title="Refresh quota"
+                      aria-label={t("quota.refreshQuota")}
+                      title={t("quota.refreshQuota")}
                     >
                       <span className={cn("material-symbols-outlined", busy && "animate-spin")}>refresh</span>
                     </button>
@@ -750,8 +752,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                       className="quota-tracker-icon-btn"
                       disabled={rowBusy}
                       onClick={() => navigate(`/providers/${encodeURIComponent(credential.providerId)}`)}
-                      aria-label="Edit connection"
-                      title="Edit connection"
+                      aria-label={t("quota.editConnection")}
+                      title={t("quota.editConnection")}
                     >
                       <span className="material-symbols-outlined">edit</span>
                     </button>
@@ -760,8 +762,8 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                       className="quota-tracker-icon-btn quota-tracker-icon-btn-danger"
                       disabled={rowBusy}
                       onClick={() => void handleDelete(credential)}
-                      aria-label="Delete connection"
-                      title="Delete connection"
+                      aria-label={t("quota.deleteConnection")}
+                      title={t("quota.deleteConnection")}
                     >
                       <span className={cn("material-symbols-outlined", deletingId === credential.id && "animate-pulse")}>delete</span>
                     </button>
@@ -816,14 +818,14 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
 
       <ConfirmDialog
         open={Boolean(resetConfirmCredential)}
-        title="Reset Codex limit?"
+        title={t("quota.resetCodexConfirm")}
         message={
           resetConfirmCredential
             ? `Use 1 Codex reset credit for ${getConnectionLabel(resetConfirmCredential) || resetConfirmCredential.email || "this account"}. This cannot be undone. Remaining credits: ${getCodexResetCreditCount(quotaById[resetConfirmCredential.id])}.`
             : ""
         }
-        confirmText="Reset limit"
-        cancelText="Cancel"
+        confirmText={t("quota.resetLimit")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onClose={() => {
           if (!resettingLimitId) setResetConfirmCredential(null);

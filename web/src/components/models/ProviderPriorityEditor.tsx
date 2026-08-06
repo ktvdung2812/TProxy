@@ -70,7 +70,7 @@ export function ProviderPriorityEditor({
 
     setItems((current) => {
       const base = current.length > 0 ? current : sortRouteForms(routes);
-      const synced = syncRoutesForUpstreamModel(base, providers, modelsByProvider, canonicalUpstream);
+      const synced = syncRoutesForUpstreamModel(base, providers, modelsByProvider, canonicalUpstream, credentialCounts);
       return routeFormsEqual(base, synced) ? base : synced;
     });
   }, [active, canonicalUpstream, loadingModels, model, modelsByProvider, providers, routes]);

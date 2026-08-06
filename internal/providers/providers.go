@@ -503,7 +503,13 @@ func buildOpenAIBody(request canonical.Request) map[string]any {
 		body["stream"] = request.Stream
 		return body
 	}
-	body := map[string]any{"model": request.UpstreamModel, "messages": request.Messages, "stream": request.Stream}
+	messages := request.Messages
+	// /responses carries the system prompt in "instructions", which has no place in a
+	// chat.completions body; without this the upstream runs with no system prompt.
+	if system := claudeopenai.SystemInstructionsText(request.System); system != "" {
+		messages = append([]canonical.Message{{Role: "system", Content: system}}, messages...)
+	}
+	body := map[string]any{"model": request.UpstreamModel, "messages": messages, "stream": request.Stream}
 	if len(request.Tools) > 0 {
 		body["tools"] = request.Tools
 	}

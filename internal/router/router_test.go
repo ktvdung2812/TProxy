@@ -807,6 +807,52 @@ func TestRouteConditionsFilterBeforeDispatch(t *testing.T) {
 	}
 }
 
+func TestDisabledRouteIsExcludedFromSelections(t *testing.T) {
+	var disabledCalls atomic.Int32
+	disabled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		disabledCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer disabled.Close()
+
+	enabled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"enabled","model":"enabled-upstream","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer enabled.Close()
+
+	disabledRoute := false
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{ID: "disabled", Type: "openai-compatible", BaseURL: disabled.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "disabled-credential", AuthType: "none"}}},
+			{ID: "enabled", Type: "openai-compatible", BaseURL: enabled.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "enabled-credential", AuthType: "none"}}},
+		},
+		Models: []config.PublicModelConfig{{ID: "route-state-model", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "disabled-route", Provider: "disabled", UpstreamModel: "disabled-upstream", Priority: 100, Enabled: &disabledRoute},
+			{ID: "enabled-route", Provider: "enabled", UpstreamModel: "enabled-upstream", Priority: 10},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "route-state-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "disabled-route",
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Route.ID != "enabled-route" {
+		t.Fatalf("selected route=%q, want enabled-route", result.Selection.Route.ID)
+	}
+	if disabledCalls.Load() != 0 {
+		t.Fatalf("disabled route received %d requests", disabledCalls.Load())
+	}
+}
+
 func TestComboFallsBackAcrossOrderedPublicModelsAndRewritesComboID(t *testing.T) {
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)

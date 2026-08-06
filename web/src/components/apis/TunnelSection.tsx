@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button, ConfirmDialog, Input, Modal, Toggle } from "../ui";
 import { SecurityWarning } from "./SecurityWarning";
@@ -91,6 +92,7 @@ function PowerButton({ title, onClick }: { title: string; onClick: () => void })
 }
 
 export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const [tunnel, setTunnel] = useState<CloudflareTunnelStatus | null>(null);
   const [tailscale, setTailscale] = useState<TailscaleTunnelStatus | null>(null);
@@ -129,7 +131,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         tsMissRef.current = 0;
       }
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to load tunnel status");
+      onError(error instanceof Error ? error.message : t("apis.tunnel.failedLoadStatus"));
     } finally {
       setLoading(false);
     }
@@ -224,13 +226,13 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const handleEnableTunnel = async () => {
     if (apiKeyCount === 0) {
       setShowEnableModal(false);
-      setTunnelStatusMessage("Create at least one API key before enabling the tunnel.");
+      setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
       return;
     }
     setShowEnableModal(false);
     setTunnelLoading(true);
     setTunnelStatusMessage(null);
-    setTunnelProgress("Creating tunnel...");
+    setTunnelProgress(t("apis.tunnel.creating"));
     let polling = true;
     void (async () => {
       while (polling) {
@@ -248,14 +250,14 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     try {
       const result = await enableTunnel(secret);
       if (!result.success) {
-        setTunnelStatusMessage(result.error || "Failed to enable tunnel");
+        setTunnelStatusMessage(result.error || t("apis.tunnel.failedEnable"));
         return;
       }
       await waitForTunnel(result.publicUrl, result.tunnelUrl);
-      onNotice("Tunnel enabled");
+      onNotice(t("apis.tunnel.enabled"));
       await syncStatus();
     } catch (error) {
-      setTunnelStatusMessage(error instanceof Error ? error.message : "Failed to enable tunnel");
+      setTunnelStatusMessage(error instanceof Error ? error.message : t("apis.tunnel.failedEnable"));
     } finally {
       polling = false;
       setTunnelLoading(false);
@@ -270,10 +272,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       setShowDisableModal(false);
       setClientTunnelReachable(false);
       tunnelEverReachableRef.current = false;
-      onNotice("Tunnel disabled");
+      onNotice(t("apis.tunnel.disabled"));
       await syncStatus();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to disable tunnel");
+      onError(error instanceof Error ? error.message : t("apis.tunnel.failedDisable"));
     } finally {
       setTunnelLoading(false);
     }
@@ -282,13 +284,13 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const handleConnectTailscale = async () => {
     setShowTsModal(false);
     setTsLoading(true);
-    setTsProgress("Connecting...");
+    setTsProgress(t("apis.tunnel.connecting"));
     setTsAuthUrl("");
     try {
       const result = await enableTailscale(secret);
       if (result.needsLogin && result.authUrl) {
         setTsAuthUrl(result.authUrl);
-        setTsProgress("Login required — open the Tailscale login page");
+        setTsProgress(t("apis.tunnel.loginRequired"));
         for (let i = 0; i < 40; i++) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
           const check = await checkTailscale(secret);
@@ -297,32 +299,32 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
             const retry = await enableTailscale(secret);
             if (retry.success && retry.tunnelUrl) {
               await pingHealth(retry.tunnelUrl);
-              onNotice("Tailscale funnel enabled");
+              onNotice(t("apis.tunnel.tailscaleEnabled"));
               await syncStatus();
               return;
             }
           }
         }
-        setTsStatusMessage("Login timed out. Please try again.");
+        setTsStatusMessage(t("apis.tunnel.loginTimedOut"));
         return;
       }
       if (result.funnelNotEnabled && result.enableUrl) {
         setTsAuthUrl(result.enableUrl);
-        setTsProgress("Enable Funnel in Tailscale admin");
-        setTsStatusMessage("Funnel is not enabled on your tailnet.");
+        setTsProgress(t("apis.tunnel.enableFunnelAdmin"));
+        setTsStatusMessage(t("apis.tunnel.funnelNotEnabled"));
         return;
       }
       if (!result.success) {
-        setTsStatusMessage(result.error || "Failed to connect Tailscale");
+        setTsStatusMessage(result.error || t("apis.tunnel.failedConnectTailscale"));
         return;
       }
       if (result.tunnelUrl) {
         await pingHealth(result.tunnelUrl);
       }
-      onNotice("Tailscale funnel enabled");
+      onNotice(t("apis.tunnel.tailscaleEnabled"));
       await syncStatus();
     } catch (error) {
-      setTsStatusMessage(error instanceof Error ? error.message : "Failed to connect Tailscale");
+      setTsStatusMessage(error instanceof Error ? error.message : t("apis.tunnel.failedConnectTailscale"));
     } finally {
       setTsLoading(false);
       setTsProgress("");
@@ -340,7 +342,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       }
       await handleConnectTailscale();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Tailscale check failed");
+      onError(error instanceof Error ? error.message : t("apis.tunnel.tailscaleCheckFailed"));
     }
   };
 
@@ -350,10 +352,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       await disableTailscale(secret);
       setShowDisableTsModal(false);
       setClientTsReachable(false);
-      onNotice("Tailscale disabled");
+      onNotice(t("apis.tunnel.tailscaleDisabled"));
       await syncStatus();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to disable Tailscale");
+      onError(error instanceof Error ? error.message : t("apis.tunnel.failedDisableTailscale"));
     } finally {
       setTsLoading(false);
     }
@@ -364,7 +366,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       const result = await saveTunnelDashboardAccess(secret, value);
       setTunnelDashboardAccess(result.tunnel_dashboard_access);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Failed to update tunnel dashboard access");
+      onError(error instanceof Error ? error.message : t("apis.tunnel.failedDashboardAccess"));
     }
   };
 
@@ -372,23 +374,23 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (loading) {
       return (
         <EndpointTunnelRow
-          label="Tunnel"
+          label={t("apis.tunnel.tunnel")}
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
-          statusText="Checking..."
+          statusText={t("apis.tunnel.checking")}
         />
       );
     }
     if (tunnelLoading) {
       return (
         <EndpointTunnelRow
-          label="Tunnel"
+          label={t("apis.tunnel.tunnel")}
           active
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
-          statusText={tunnelProgress || "Creating tunnel..."}
+          statusText={tunnelProgress || t("apis.tunnel.creating")}
           statusTone="muted"
         />
       );
@@ -396,7 +398,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (tunnelStatusMessage) {
       return (
         <EndpointTunnelRow
-          label="Tunnel"
+          label={t("apis.tunnel.tunnel")}
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
@@ -409,7 +411,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (!tunnelEnabled) {
       return (
         <EndpointTunnelRow
-          label="Tunnel"
+          label={t("apis.tunnel.tunnel")}
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
@@ -418,7 +420,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
               size="sm"
               onClick={() => {
                 if (apiKeyCount === 0) {
-                  setTunnelStatusMessage("Create at least one API key before enabling the tunnel.");
+                  setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
                   return;
                 }
                 setShowEnableModal(true);
@@ -433,29 +435,29 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (tunnelHealthy) {
       return (
         <EndpointTunnelRow
-          label="Tunnel"
+          label={t("apis.tunnel.tunnel")}
           active
           url={normalizeBaseUrl(tunnelPublicUrl)}
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
-          trailing={<PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />}
+          trailing={<PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />}
         />
       );
     }
     return (
       <EndpointTunnelRow
-        label="Tunnel"
+        label={t("apis.tunnel.tunnel")}
         active
         copyId="tunnel_url"
         copied={copied}
         onCopy={copy}
-        statusText={tunnelEverReachableRef.current ? "Tunnel reconnecting..." : "Tunnel checking..."}
+        statusText={tunnelEverReachableRef.current ? t("apis.tunnel.tunnelReconnecting") : t("apis.tunnel.tunnelChecking")}
         statusTone="warn"
         trailing={
           <>
             <Button size="sm" variant="outline" onClick={() => setShowEnableModal(true)}>Reconnect</Button>
-            <PowerButton title="Disable tunnel" onClick={() => setShowDisableModal(true)} />
+            <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
           </>
         }
       />
@@ -466,23 +468,23 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (loading) {
       return (
         <EndpointTunnelRow
-          label="Tailscale"
+          label={t("apis.tunnel.tailscale")}
           copyId="ts_url"
           copied={copied}
           onCopy={copy}
-          statusText="Checking..."
+          statusText={t("apis.tunnel.checking")}
         />
       );
     }
     if (tsLoading) {
       return (
         <EndpointTunnelRow
-          label="Tailscale"
+          label={t("apis.tunnel.tailscale")}
           active
           copyId="ts_url"
           copied={copied}
           onCopy={copy}
-          statusText={tsProgress || "Connecting..."}
+          statusText={tsProgress || t("apis.tunnel.connecting")}
           statusTone="muted"
           trailing={
             tsAuthUrl ? (
@@ -497,7 +499,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (tsStatusMessage) {
       return (
         <EndpointTunnelRow
-          label="Tailscale"
+          label={t("apis.tunnel.tailscale")}
           copyId="ts_url"
           copied={copied}
           onCopy={copy}
@@ -510,7 +512,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (!tsEnabled) {
       return (
         <EndpointTunnelRow
-          label="Tailscale"
+          label={t("apis.tunnel.tailscale")}
           copyId="ts_url"
           copied={copied}
           onCopy={copy}
@@ -521,26 +523,26 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     if (tsHealthy) {
       return (
         <EndpointTunnelRow
-          label="Tailscale"
+          label={t("apis.tunnel.tailscale")}
           active
           url={normalizeBaseUrl(tsUrl)}
           copyId="ts_url"
           copied={copied}
           onCopy={copy}
-          trailing={<PowerButton title="Disable Tailscale" onClick={() => setShowDisableTsModal(true)} />}
+          trailing={<PowerButton title={t("apis.tunnel.disableTailscale")} onClick={() => setShowDisableTsModal(true)} />}
         />
       );
     }
     return (
       <EndpointTunnelRow
-        label="Tailscale"
+        label={t("apis.tunnel.tailscale")}
         active
         copyId="ts_url"
         copied={copied}
         onCopy={copy}
-        statusText="Tailscale reconnecting..."
+        statusText={t("apis.tunnel.tailscaleReconnecting")}
         statusTone="warn"
-        trailing={<PowerButton title="Disable Tailscale" onClick={() => setShowDisableTsModal(true)} />}
+        trailing={<PowerButton title={t("apis.tunnel.disableTailscale")} onClick={() => setShowDisableTsModal(true)} />}
       />
     );
   };
@@ -552,7 +554,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
       {(tunnelEnabled || tsEnabled) && apiKeyCount === 0 ? (
         <div className="apis-card-warning">
-          <SecurityWarning message="Tunnel is active but no API keys exist. Create a key so remote clients can authenticate." />
+          <SecurityWarning message={t("apis.tunnel.activeNoKeys")} />
         </div>
       ) : null}
 
@@ -566,7 +568,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         </div>
       ) : null}
 
-      <Modal open={showEnableModal} title="Enable Cloudflare Tunnel" onClose={() => setShowEnableModal(false)}>
+      <Modal open={showEnableModal} title={t("apis.tunnel.enableCloudflareTitle")} onClose={() => setShowEnableModal(false)}>
         <p className="modal-copy">
           Expose tproxy with a direct Cloudflare Quick Tunnel. Cloudflare assigns a temporary <code>*.trycloudflare.com</code> URL,
           which changes whenever the tunnel reconnects. Requires outbound port 7844; setup may take 10–30 seconds.
@@ -579,23 +581,23 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
       <ConfirmDialog
         open={showDisableModal}
-        title="Disable tunnel"
-        message="Remote access via the Cloudflare tunnel will stop working."
-        confirmText="Disable"
+        title={t("apis.tunnel.disableTunnel")}
+        message={t("apis.tunnel.disableTunnelConfirm")}
+        confirmText={t("common.disable")}
         variant="danger"
         onConfirm={() => void handleDisableTunnel()}
         onClose={() => setShowDisableModal(false)}
       />
 
-      <Modal open={showTsModal} title="Tailscale Funnel" onClose={() => setShowTsModal(false)}>
+      <Modal open={showTsModal} title={t("apis.tunnel.tailscaleFunnelTitle")} onClose={() => setShowTsModal(false)}>
         <p className="modal-copy">
           {tsInstalled === false
-            ? "Install Tailscale first (e.g. brew install tailscale), then click Connect."
-            : "Connect Tailscale and start Funnel on this machine."}
+            ? t("apis.tunnel.installTailscale")
+            : t("apis.tunnel.connectTailscale")}
         </p>
         <div className="modal-actions">
           <Button onClick={() => void (tsInstalled === false ? openTailscale() : handleConnectTailscale())}>
-            {tsInstalled === false ? "Retry check" : "Connect"}
+            {tsInstalled === false ? t("apis.tunnel.retryCheck") : "Connect"}
           </Button>
           <Button variant="ghost" onClick={() => setShowTsModal(false)}>Cancel</Button>
         </div>
@@ -603,9 +605,9 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
       <ConfirmDialog
         open={showDisableTsModal}
-        title="Disable Tailscale"
-        message="Tailscale Funnel will be stopped."
-        confirmText="Disable"
+        title={t("apis.tunnel.disableTailscale")}
+        message={t("apis.tunnel.disableTailscaleConfirm")}
+        confirmText={t("common.disable")}
         variant="danger"
         onConfirm={() => void handleDisableTailscale()}
         onClose={() => setShowDisableTsModal(false)}

@@ -1240,6 +1240,9 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 	modelCooldownLimited := false
 	now := time.Now()
 	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
 		if !routeMatches(route, request) {
 			continue
 		}

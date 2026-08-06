@@ -191,6 +191,39 @@ func TestAdminCanCreateVirtualModelWithoutExposingSecrets(t *testing.T) {
 	}
 }
 
+func TestAdminCanDisableAllProviderRoutes(t *testing.T) {
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{
+			ID: "mock", Type: "openai-compatible", Name: "Mock", BaseURL: "http://127.0.0.1", Enabled: true,
+			Credentials: []config.CredentialConfig{{ID: "mock-credential", AuthType: "none"}},
+		}},
+		Models: []config.PublicModelConfig{{
+			ID: "td-routes", DisplayName: "TD Routes", Enabled: true,
+			Routes: []config.RouteTargetConfig{{ID: "route", Provider: "mock", UpstreamModel: "upstream", Priority: 100}},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+	body := `{"id":"td-routes","display_name":"TD Routes","enabled":true,"rewrite_response_model":true,"capabilities":["text"],"routes":[{"id":"route","provider":"mock","upstream_model":"upstream","priority":100,"enabled":false}]}`
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/models", bytes.NewBufferString(body))
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(request)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	routes, err := dataStore.Routes(context.Background(), "td-routes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].Enabled {
+		t.Fatalf("routes=%+v, want one disabled route", routes)
+	}
+}
+
 func TestRemoteManagementRequiresSecret(t *testing.T) {
 	cfg := &config.Config{Server: config.ServerConfig{AllowRemoteManagement: true}}
 	dataStore := apiTestStore(t, cfg)

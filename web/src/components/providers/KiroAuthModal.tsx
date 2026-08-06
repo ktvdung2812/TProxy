@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import {
   autoImportKiroTokens,
@@ -34,6 +35,7 @@ export function KiroAuthModal({
   onComplete,
   onError,
 }: Props) {
+  const { t } = useTranslation();
   const [method, setMethod] = useState<Method>(null);
   const [idcStartUrl, setIdcStartUrl] = useState("");
   const [idcRegion, setIdcRegion] = useState("us-east-1");
@@ -91,10 +93,10 @@ export function KiroAuthModal({
           });
         }
       } else {
-        setErrorMsg(result.error || "Could not auto-detect Kiro token");
+        setErrorMsg(result.error || t("providers.kiroAutoDetectFailed"));
       }
     } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : "Auto-detect failed");
+      setErrorMsg(error instanceof Error ? error.message : t("providers.autoDetectFailed"));
     } finally {
       setAutoDetecting(false);
     }
@@ -107,7 +109,7 @@ export function KiroAuthModal({
 
   const handleImportToken = async () => {
     if (!refreshToken.trim()) {
-      setErrorMsg("Please enter a refresh token");
+      setErrorMsg(t("providers.enterRefreshToken"));
       return;
     }
     setBusy(true);
@@ -125,7 +127,7 @@ export function KiroAuthModal({
       onComplete?.();
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Import failed";
+      const message = error instanceof Error ? error.message : t("providers.importFailed");
       setErrorMsg(message);
       onError?.(message);
     } finally {
@@ -135,7 +137,7 @@ export function KiroAuthModal({
 
   const handleImportCLIProxy = async () => {
     if (!cliProxyJson.trim()) {
-      setErrorMsg("Please paste CLIProxyAPI auth JSON");
+      setErrorMsg(t("providers.pasteCLIProxyAPI"));
       return;
     }
     setBusy(true);

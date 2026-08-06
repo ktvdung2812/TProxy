@@ -23,6 +23,13 @@ func dashboardHandler() http.Handler {
 			return
 		}
 		if info, err := fs.Stat(root, path); err != nil || info.IsDir() {
+			// Only extensionless paths are client-side routes. Returning the SPA
+			// shell for a missing asset makes browsers try to parse HTML as JSON
+			// (notably for manifest.webmanifest) and hides deployment mistakes.
+			if strings.Contains(path, ".") {
+				http.NotFound(w, r)
+				return
+			}
 			serveDashboardIndex(w, root)
 			return
 		}

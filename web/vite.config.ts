@@ -27,6 +27,13 @@ export default defineConfig({
       port: publicPort,
       clientPort: publicPort,
       path: "/dashboard/",
+      // Prevent full-page reload when HMR fails; show overlay instead.
+      overlay: true,
+    },
+    // Exclude non-frontend files from the file watcher to reduce
+    // unnecessary HMR events that can trigger full-page reloads.
+    watch: {
+      ignored: ["**/../internal/**", "**/../cmd/**", "**/../tunnel/**", "**/../deploy/**", "**/../.git/**", "**/../tproxy.db*"],
     },
     proxy: {
       "/api": { target: backend, changeOrigin: true },

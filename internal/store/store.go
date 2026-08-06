@@ -1233,7 +1233,10 @@ func (s *Store) ResolveUpstreamModel(ctx context.Context, requested string) (*Pu
 }
 
 func (s *Store) Routes(ctx context.Context, publicModelID string) ([]RouteTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,public_model_id,provider_id,upstream_model,priority,weight,enabled,conditions_json FROM route_targets WHERE public_model_id=? AND enabled=1 ORDER BY priority DESC,id`, publicModelID)
+	// Return both enabled and disabled routes so the dashboard can preserve a
+	// route's enabled state when a model is edited. Ignore orphaned routes whose
+	// provider was removed; runtime selection and admin writes cannot use them.
+	rows, err := s.db.QueryContext(ctx, `SELECT rt.id,rt.public_model_id,rt.provider_id,rt.upstream_model,rt.priority,rt.weight,rt.enabled,rt.conditions_json FROM route_targets rt INNER JOIN providers p ON p.id=rt.provider_id WHERE rt.public_model_id=? ORDER BY rt.priority DESC,rt.id`, publicModelID)
 	if err != nil {
 		return nil, err
 	}

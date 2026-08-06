@@ -12,6 +12,7 @@ type Props = {
   models: ModelRecord[];
   routesByModel: Record<string, RouteRecord[]>;
   existingIds: string[];
+  credentialCounts?: Record<string, number>;
   saving: boolean;
   onClose: () => void;
   onSubmit: (form: ModelFormData) => void;
@@ -39,6 +40,7 @@ export function ModelSelectModal({
   models,
   routesByModel,
   existingIds,
+  credentialCounts,
   saving,
   onClose,
   onSubmit,
@@ -172,8 +174,9 @@ export function ModelSelectModal({
       modelName: selectedItem.model.name,
       capabilities: selectedItem.model.capabilities,
       existingIds,
+      credentialCounts,
     });
-  }, [existingIds, selectedItem]);
+  }, [existingIds, credentialCounts, selectedItem]);
 
   const canSubmit = !!previewForm && !loadingModels;
   const totalSupported = selectableModels.length;

@@ -12,5 +12,11 @@
 .config.dev.yaml
 models.dev.json
 models.dev-catalog.json
+models.dev.json.new
+models.dev-catalog.json.new
 /deploy/bin/
 /tunnel/
+*.bak
+*.bak-shm
+*.bak-wal
+*.png

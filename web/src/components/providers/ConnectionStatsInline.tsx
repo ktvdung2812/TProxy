@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "../ui";
 import { getProviderStats, type Credential } from "./types";
 
@@ -8,6 +9,7 @@ type Props = {
 
 /** Active / error account counts for the Connections card header. */
 export function ConnectionStatsInline({ credentials }: Props) {
+  const { t } = useTranslation();
   const [, setTick] = useState(0);
   useEffect(() => {
     const interval = window.setInterval(() => setTick((value) => value + 1), 30000);
@@ -23,16 +25,16 @@ export function ConnectionStatsInline({ credentials }: Props) {
   return (
     <span className="connection-stats-inline">
       <Badge variant={stats.active > 0 ? "success" : "default"} size="sm" dot={stats.active > 0}>
-        {stats.active} active
+        {stats.active} {t("providers.activeBadge")}
       </Badge>
       {stats.disabled > 0 ? (
         <Badge variant="neutral" size="sm">
-          {stats.disabled} disabled
+          {stats.disabled} {t("providers.disabledBadge")}
         </Badge>
       ) : null}
       {stats.error > 0 ? (
         <Badge variant="error" size="sm" dot>
-          {stats.error} error
+          {stats.error} {t("providers.errorBadge")}
         </Badge>
       ) : null}
     </span>

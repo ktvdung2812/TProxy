@@ -1185,6 +1185,72 @@ func TestCredentialUpdatesRejectMissingRows(t *testing.T) {
 	}
 }
 
+func TestSnapshotIncludesDisabledRouteTargets(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "routes.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	disabled := false
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{
+			ID: "provider", Type: "openai-compatible", Enabled: true,
+			Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}},
+		}},
+		Models: []config.PublicModelConfig{{
+			ID: "model", Enabled: true,
+			Routes: []config.RouteTargetConfig{
+				{ID: "enabled-route", Provider: "provider", UpstreamModel: "enabled", Priority: 100},
+				{ID: "disabled-route", Provider: "provider", UpstreamModel: "disabled", Priority: 10, Enabled: &disabled},
+			},
+		}},
+	}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := dataStore.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := snapshot.Routes["model"]
+	if len(routes) != 2 {
+		t.Fatalf("routes=%+v, want both enabled and disabled routes", routes)
+	}
+	foundDisabled := false
+	for _, route := range routes {
+		if route.ID == "disabled-route" {
+			foundDisabled = true
+			if route.Enabled {
+				t.Fatalf("disabled route was reported as enabled: %+v", route)
+			}
+		}
+	}
+	if !foundDisabled {
+		t.Fatalf("disabled route was not returned: %+v", routes)
+	}
+
+	if _, err = dataStore.db.Exec(`PRAGMA foreign_keys=OFF; DELETE FROM providers WHERE id=?`, "provider"); err != nil {
+		t.Fatal(err)
+	}
+	routes, err = dataStore.Routes(context.Background(), "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("orphaned routes=%+v, want none", routes)
+	}
+}
+
 func boolPtr(value bool) *bool { return &value }
 
 func containsBytes(haystack, needle []byte) bool {

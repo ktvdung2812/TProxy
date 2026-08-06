@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Button, Card } from "../ui";
 
 type Props = {
@@ -5,18 +6,19 @@ type Props = {
 };
 
 export function ImportDataCard({ onOpen }: Props) {
+  const { t } = useTranslation();
+
   return (
     <Card className="import-data-card" pad="md">
       <div className="import-data-card-inner">
         <div>
-          <h3>Import data</h3>
+          <h3>{t("import.cardTitle")}</h3>
           <p>
-            Migrate from <code>9router-backup-*.json</code> or CLIProxyAPI auth files such as{" "}
-            <code>codex-*.json</code>.
+            {t("import.cardDesc")}
           </p>
         </div>
         <Button variant="primary" size="sm" icon="upload" onClick={onOpen}>
-          Import…
+          {t("import.cardButton")}
         </Button>
       </div>
     </Card>

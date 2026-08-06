@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Input } from "../ui";
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function EndpointRow({ label, url, copyId, copied, onCopy, highlight = false, actions, onHelpClick }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="endpoint-row">
       <span className={highlight ? "endpoint-row-badge active" : "endpoint-row-badge"}>{label}</span>
@@ -30,7 +32,7 @@ export function EndpointRow({ label, url, copyId, copied, onCopy, highlight = fa
           className="endpoint-row-help"
           onClick={onHelpClick}
           aria-label={`${label} firewall help`}
-          title="How to open this port"
+          title={t("apis.lan.howToOpen")}
         >
           <span className="material-symbols-outlined">help</span>
         </button>
