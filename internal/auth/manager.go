@@ -25,6 +25,24 @@ import (
 const (
 	defaultSessionTTL    = 10 * time.Minute
 	defaultRefreshWindow = 2 * time.Minute
+
+	// Token freshness policy. expires_at alone is not enough: several providers
+	// silently invalidate a refresh token that has not been exercised for a few
+	// days, and some issue access tokens with no expiry at all, which used to mean
+	// they were never refreshed. So every OAuth credential is rotated on a clock of
+	// its own.
+	//
+	//   defaultMaxTokenAge  — the background loop refreshes once a token reaches
+	//                         this age, giving a full day of slack before the ceiling.
+	//   defaultHardMaxTokenAge — absolute ceiling. If the gateway was off, offline,
+	//                         or refreshes kept failing, the request path refreshes
+	//                         before the credential is used.
+	defaultMaxTokenAge     = 48 * time.Hour
+	defaultHardMaxTokenAge = 72 * time.Hour
+
+	// Retry spacing for an age-based refresh that failed, so a provider outage
+	// cannot turn the 30s background tick into a hot retry loop.
+	ageRefreshRetryInterval = 15 * time.Minute
 )
 
 const oauthCallbackSuccessHTML = `<!doctype html>
@@ -81,6 +99,11 @@ type CredentialStatus struct {
 	Status       string     `json:"status"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	TokenType    string     `json:"token_type,omitempty"`
+	// Freshness of the stored token, independent of ExpiresAt: when it was last
+	// rotated and when the age policy will rotate it next.
+	RefreshedAt   *time.Time `json:"refreshed_at,omitempty"`
+	NextRefreshAt *time.Time `json:"next_refresh_at,omitempty"`
+	MaxRefreshAt  *time.Time `json:"max_refresh_at,omitempty"`
 }
 
 type Error struct {
@@ -146,21 +169,21 @@ type session struct {
 	explicitCredential bool
 	label              string
 	email              string
-	mode           string
-	state          string
-	verifier       string
-	redirectURL    string
-	deviceCode     string
-	deviceUserCode string
-	deviceMeta     map[string]string
-	interval       time.Duration
-	expiresAt      time.Time
-	status         string
-	consumedAt     time.Time
-	errorCode      string
-	cancel         chan struct{}
-	cancelClosed   bool
-	callbackServer *http.Server
+	mode               string
+	state              string
+	verifier           string
+	redirectURL        string
+	deviceCode         string
+	deviceUserCode     string
+	deviceMeta         map[string]string
+	interval           time.Duration
+	expiresAt          time.Time
+	status             string
+	consumedAt         time.Time
+	errorCode          string
+	cancel             chan struct{}
+	cancelClosed       bool
+	callbackServer     *http.Server
 }
 
 type refreshCall struct {
@@ -185,6 +208,9 @@ type Manager struct {
 	refresh   map[string]*refreshCall
 	discovery map[string]discoveryEntry
 	now       func() time.Time
+	// ageRefreshAttempt throttles age-based rotation per credential so a failing
+	// provider is retried on a slow cadence rather than every background tick.
+	ageRefreshAttempt map[string]time.Time
 
 	backgroundOnce sync.Once
 	backgroundWG   sync.WaitGroup
@@ -194,7 +220,7 @@ type Manager struct {
 func NewManager(dataStore *store.Store, client *http.Client) *Manager {
 	client = oauthHTTPClient(client)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{store: dataStore, client: client, rootCtx: ctx, cancel: cancel, sessions: make(map[string]*session), refresh: make(map[string]*refreshCall), discovery: make(map[string]discoveryEntry), now: time.Now, prewarm: NewPrewarmManager()}
+	return &Manager{store: dataStore, client: client, rootCtx: ctx, cancel: cancel, sessions: make(map[string]*session), refresh: make(map[string]*refreshCall), discovery: make(map[string]discoveryEntry), ageRefreshAttempt: make(map[string]time.Time), now: time.Now, prewarm: NewPrewarmManager()}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -918,6 +944,16 @@ func (m *Manager) CredentialStatus(ctx context.Context, credentialID string) (Cr
 					}
 				}
 			}
+			// Only meaningful when a rotation is actually possible.
+			if credential.OAuthToken != nil && credential.OAuthToken.RefreshToken != "" {
+				if refreshedAt, known := tokenRefreshedAt(credential); known {
+					next := refreshedAt.Add(maxTokenAge(provider.OAuth))
+					max := refreshedAt.Add(hardMaxTokenAge(provider.OAuth))
+					result.RefreshedAt = &refreshedAt
+					result.NextRefreshAt = &next
+					result.MaxRefreshAt = &max
+				}
+			}
 			return result, nil
 		}
 	}
@@ -950,7 +986,12 @@ func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Prov
 		return credential, &Error{code: "authorization_required", permanent: true}
 	}
 	window := refreshWindow(provider.OAuth)
-	if !force && (token.ExpiresAt.IsZero() || token.ExpiresAt.After(m.now().Add(window))) {
+	expiryOK := token.ExpiresAt.IsZero() || token.ExpiresAt.After(m.now().Add(window))
+	// Even a token that has not expired must be rotated once it passes the hard
+	// age ceiling, so a credential can never sit on the same access token
+	// indefinitely just because the provider reported a distant (or no) expiry.
+	stale := tokenOlderThan(credential, hardMaxTokenAge(provider.OAuth), m.now())
+	if !force && expiryOK && !stale {
 		credential.Secret = token.AccessToken
 		credential.TokenType = token.TokenType
 		credential.OAuthToken = token
@@ -1069,15 +1110,52 @@ func (m *Manager) refreshExpiring(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	now := m.now()
 	for _, item := range items {
-		if item.Credential.OAuthToken == nil || item.Credential.OAuthToken.ExpiresAt.IsZero() {
+		if item.Credential.OAuthToken == nil {
 			continue
 		}
-		if item.Credential.OAuthToken.ExpiresAt.After(m.now().Add(refreshWindow(item.Provider.OAuth))) {
+		token := item.Credential.OAuthToken
+		expiring := !token.ExpiresAt.IsZero() &&
+			!token.ExpiresAt.After(now.Add(refreshWindow(item.Provider.OAuth)))
+		// Age-based rotation covers the two cases expiry cannot: a token with no
+		// expires_at at all, and one whose expiry is far enough out that the
+		// provider would drop the refresh token for inactivity first.
+		aged := tokenOlderThan(item.Credential, maxTokenAge(item.Provider.OAuth), now)
+		if !expiring && !aged {
 			continue
 		}
-		_, _ = m.EnsureValid(ctx, item.Provider, item.Credential, false)
+		if !expiring && aged {
+			// A credential in cooldown just failed; retrying it every tick would
+			// hammer the provider. Expiry-driven refreshes stay unthrottled because
+			// they are already bounded by the token lifetime.
+			if item.Credential.CooldownUntil.After(now) {
+				continue
+			}
+			if !m.ageRefreshDue(item.Credential.ID, now) {
+				continue
+			}
+		}
+		// Age-driven rotations must be forced: EnsureValid judges staleness against
+		// the hard ceiling, so at the softer background threshold it would decline
+		// and the token would only ever rotate at 72h.
+		_, _ = m.EnsureValid(ctx, item.Provider, item.Credential, !expiring && aged)
 	}
+}
+
+// ageRefreshDue throttles repeated age-based refresh attempts for one credential
+// and records this attempt when it allows one through.
+func (m *Manager) ageRefreshDue(credentialID string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ageRefreshAttempt == nil {
+		m.ageRefreshAttempt = make(map[string]time.Time)
+	}
+	if last, ok := m.ageRefreshAttempt[credentialID]; ok && now.Sub(last) < ageRefreshRetryInterval {
+		return false
+	}
+	m.ageRefreshAttempt[credentialID] = now
+	return true
 }
 
 type deviceCodeResponse struct {
@@ -1577,6 +1655,71 @@ func refreshWindow(cfg *config.OAuthConfig) time.Duration {
 		}
 	}
 	return defaultRefreshWindow
+}
+
+func positiveDuration(raw string, fallback time.Duration) time.Duration {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// maxTokenAge is the age at which the background loop rotates a token.
+func maxTokenAge(cfg *config.OAuthConfig) time.Duration {
+	if cfg == nil {
+		return defaultMaxTokenAge
+	}
+	return positiveDuration(cfg.MaxTokenAge, defaultMaxTokenAge)
+}
+
+// hardMaxTokenAge is the ceiling enforced before a credential is used. It can
+// never be below maxTokenAge, otherwise the request path would refresh ahead of
+// the background loop on every single call.
+func hardMaxTokenAge(cfg *config.OAuthConfig) time.Duration {
+	soft := maxTokenAge(cfg)
+	hard := defaultHardMaxTokenAge
+	if cfg != nil {
+		hard = positiveDuration(cfg.HardMaxTokenAge, defaultHardMaxTokenAge)
+	}
+	if hard < soft {
+		return soft
+	}
+	return hard
+}
+
+// tokenRefreshedAt reports when the credential's token was last written. Both
+// UpdateOAuthToken and the login save stamp last_validated_at, so it doubles as
+// "last successful refresh". A credential that predates the column falls back to
+// its creation time; when neither is known the token is treated as due, which is
+// the safe direction — a redundant refresh costs one request, a skipped one can
+// cost the credential.
+func tokenRefreshedAt(credential store.Credential) (time.Time, bool) {
+	if !credential.LastValidated.IsZero() {
+		return credential.LastValidated, true
+	}
+	if !credential.CreatedAt.IsZero() {
+		return credential.CreatedAt, true
+	}
+	return time.Time{}, false
+}
+
+// tokenOlderThan reports whether the credential has gone unrefreshed for at
+// least limit. Credentials without a refresh token are always false: rotating is
+// impossible, and reporting them as stale would mark healthy long-lived
+// credentials as needing re-authorization.
+func tokenOlderThan(credential store.Credential, limit time.Duration, now time.Time) bool {
+	if credential.OAuthToken == nil || credential.OAuthToken.RefreshToken == "" {
+		return false
+	}
+	refreshedAt, known := tokenRefreshedAt(credential)
+	if !known {
+		return true
+	}
+	return now.Sub(refreshedAt) >= limit
 }
 
 func (m *Manager) saveOAuthCredentialFromLogin(ctx context.Context, item *session, providerID, label, email string, token store.OAuthToken) error {

@@ -105,6 +105,13 @@ providers:
     #   scopes: [profile, inference]
     #   redirect-url: http://127.0.0.1:28120/api/admin/oauth/callback
     #   refresh-safety-window: 2m
+    #   # Token freshness. Independent of expires_at, so credentials whose token
+    #   # never expires (or expires far in the future) still get rotated before the
+    #   # provider drops an unused refresh token.
+    #   #   max-token-age      background rotation kicks in at this age (default 48h)
+    #   #   hard-max-token-age ceiling enforced before use (default 72h)
+    #   max-token-age: 48h
+    #   hard-max-token-age: 72h
     #   extra-auth-params: {}
     #   extra-token-params: {}
     credentials:
