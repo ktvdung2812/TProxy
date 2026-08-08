@@ -215,6 +215,14 @@ type OAuthConfig struct {
 	ExtraTokenParams          map[string]string `yaml:"extra-token-params" json:"extra_token_params"`
 	ExtraRefreshParams        map[string]string `yaml:"extra-refresh-params" json:"extra_refresh_params"`
 	RefreshSafetyWindow       string            `yaml:"refresh-safety-window" json:"refresh_safety_window"`
+	// MaxTokenAge is how long an access token may go without being refreshed
+	// before the background loop proactively rotates it, regardless of the
+	// expires_at the provider reported. Providers commonly invalidate a refresh
+	// token that has sat unused, so a long-lived access token is not a reason to
+	// stop refreshing. HardMaxTokenAge is the ceiling enforced on the request
+	// path: past it a refresh happens before the credential is used at all.
+	MaxTokenAge     string `yaml:"max-token-age" json:"max_token_age"`
+	HardMaxTokenAge string `yaml:"hard-max-token-age" json:"hard_max_token_age"`
 }
 
 type CredentialConfig struct {
