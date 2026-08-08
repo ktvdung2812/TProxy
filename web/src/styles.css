@@ -1454,6 +1454,47 @@ button:disabled,
 .cli-tool-apply-title { margin: 0; font-weight: 600; font-size: 14px; }
 .cli-tool-apply-desc { margin: 4px 0 0; font-size: 12px; color: var(--color-text-muted); }
 .cli-tool-apply-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cli-tool-install-guide {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-surface-muted, transparent);
+}
+.cli-tool-install-guide pre {
+  margin: 0;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.cli-tool-model-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cli-tool-model-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.cli-tool-plugin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cli-tool-plugin-row code { font-size: 11px; color: var(--color-text-muted); }
+.cli-tool-claude-options {
+  display: grid;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-subtle);
+}
 .cli-tool-apply-script {
   display: grid;
   gap: 10px;
@@ -2151,7 +2192,7 @@ button:disabled,
 .priority-manager-head,
 .priority-manager-row {
   display: grid;
-  grid-template-columns: 72px minmax(160px, 1.2fr) 120px 72px auto;
+  grid-template-columns: 72px minmax(160px, 1.2fr) minmax(150px, 0.85fr) 72px auto;
   gap: 10px;
   align-items: center;
 }
@@ -2216,7 +2257,41 @@ button:disabled,
 
 .priority-manager-health {
   display: flex;
-  justify-content: flex-start;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.priority-manager-row.is-failed-over {
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-danger) 7%, transparent);
+}
+
+/* An auto-disabled provider is still enabled in the saved chain, so it must not
+   be dimmed like a manually disabled route. */
+.priority-manager-row.is-failed-over:not(.is-disabled) {
+  opacity: 1;
+}
+
+.priority-manager-reset-btn {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, var(--color-border-subtle));
+  background: var(--color-surface-1);
+  color: var(--color-danger);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.priority-manager-reset-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface-1));
+}
+
+.priority-manager-reset-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .priority-manager-enabled {

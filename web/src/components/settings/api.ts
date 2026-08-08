@@ -13,6 +13,7 @@ export type AdminSettings = {
   allow_remote_management: boolean;
   allow_lan_management: boolean;
   public_base_url?: string;
+  cc_filter_naming?: boolean;
   server_host: string;
   server_port: number;
   restart_required?: boolean;
@@ -93,7 +94,10 @@ export function changeDashboardPassword(secret: string, currentPassword: string,
   });
 }
 
-export function saveGatewaySettings(secret: string, payload: { allow_lan_management?: boolean; public_base_url?: string }) {
+export function saveGatewaySettings(
+  secret: string,
+  payload: { allow_lan_management?: boolean; public_base_url?: string; cc_filter_naming?: boolean },
+) {
   return adminFetch<{
     ok: boolean;
     allow_lan_management: boolean;

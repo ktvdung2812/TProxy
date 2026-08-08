@@ -80,7 +80,11 @@ func (s *Service) runDeferredStartup(ctx context.Context) {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("TPROXY_SKIP_TUNNEL_AUTO")), "1") {
 		return
 	}
-	settings, err := s.settings.LoadSettings(ctx)
+	// This runs once, a few seconds after boot, and it is the only thing that
+	// auto-resumes a tunnel the user left enabled. A database still busy with
+	// migrations must not cost them the tunnel until the next manual enable, so
+	// retry before giving up.
+	settings, err := s.loadSettingsWithRetry(ctx, startupSettingsAttempts)
 	if err != nil {
 		log.Printf("[tunnel] startup settings load failed: %v", err)
 		return
@@ -98,6 +102,43 @@ func (s *Service) runDeferredStartup(ctx context.Context) {
 	if settings.Enabled || settings.TailscaleEnabled {
 		s.configureMonitoring(true)
 	}
+}
+
+// storedTunnelReachable probes the public URL we last recorded. It is the only
+// health signal available for a connector this process did not spawn.
+func (s *Service) storedTunnelReachable(ctx context.Context, settings SettingsSnapshot) bool {
+	candidates := []string{}
+	if state, _ := LoadState(s.layout.StateFile); state != nil && state.TunnelURL != "" {
+		candidates = append(candidates, state.TunnelURL)
+	}
+	if settings.TunnelURL != "" {
+		candidates = append(candidates, settings.TunnelURL)
+	}
+	for _, candidate := range candidates {
+		if url := CloudflareQuickTunnelURL(candidate); url != "" && ProbeURLAlive(ctx, url) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) loadSettingsWithRetry(ctx context.Context, attempts int) (SettingsSnapshot, error) {
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		settings, err := s.settings.LoadSettings(ctx)
+		if err == nil {
+			return settings, nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return SettingsSnapshot{}, ctx.Err()
+		case <-s.backgroundStop:
+			return SettingsSnapshot{}, lastErr
+		case <-time.After(startupRetryDelaySec * time.Second):
+		}
+	}
+	return SettingsSnapshot{}, lastErr
 }
 
 func (s *Service) ConfigureMonitoringFromSettings(ctx context.Context) {
@@ -143,6 +184,14 @@ func (s *Service) safeRestartTunnel(ctx context.Context, reason string) {
 		return
 	}
 	if running {
+		// A connector inherited from a previous tproxy run still serves traffic, but
+		// we no longer read its logs so IsConnected stays false. Recreating it would
+		// hand out a brand-new quick-tunnel URL and break every client already
+		// configured with the old one — so adopt it while its URL answers.
+		if !s.cloudflared.OwnsProcess() && s.storedTunnelReachable(ctx, settings) {
+			log.Printf("[tunnel] adopting healthy cloudflared from a previous run (%s)", reason)
+			return
+		}
 		log.Printf("[tunnel] cloudflared has no active Cloudflare connection; restarting (%s)", reason)
 	}
 
@@ -189,22 +238,10 @@ func (s *Service) safeRestartTailscale(ctx context.Context, reason string) {
 	s.tailscaleMu.Unlock()
 
 	probe := s.tailscale.Status()
-	if reason != "startup" && probe.Running {
-		return
-	}
-	if reason == "startup" && probe.LoggedIn && probe.Running {
-		return
-	}
-
-	if probe.LoggedIn && port > 0 {
-		s.tailscale.StopFunnel()
-		if url, _, _, err := s.tailscale.StartFunnel(port); err == nil && url != "" {
-			_ = s.settings.SaveTailscale(ctx, true, url)
-			s.tailscaleMu.Lock()
-			s.tailscaleLastRestartAt = time.Now()
-			s.tailscaleMu.Unlock()
-			log.Printf("[tailscale] funnel re-established")
-		}
+	// Running now means "a Funnel is actually serving", so a healthy funnel is
+	// the only reason to skip. Previously Running mirrored LoggedIn, which made
+	// every watchdog tick return here and left a dropped funnel down forever.
+	if probe.Running {
 		return
 	}
 
@@ -216,6 +253,31 @@ func (s *Service) safeRestartTailscale(ctx context.Context, reason string) {
 		return
 	}
 	s.tailscaleMu.Unlock()
+
+	// Still logged in: the funnel alone dropped, so re-arming it is enough and
+	// avoids a full re-login round trip.
+	if probe.LoggedIn && port > 0 {
+		log.Printf("[tailscale] funnel is down while tailscaled is logged in; re-establishing (%s)", reason)
+		s.tailscale.StopFunnel()
+		url, _, _, startErr := s.tailscale.StartFunnel(port)
+		if startErr == nil && url != "" {
+			_ = s.settings.SaveTailscale(ctx, true, url)
+			_ = s.settings.OnPublicURL(ctx, strings.TrimRight(url, "/"))
+			s.tailscaleMu.Lock()
+			s.tailscaleLastRestartAt = time.Now()
+			s.tailscaleMu.Unlock()
+			log.Printf("[tailscale] funnel re-established")
+			return
+		}
+		// Record the attempt so a hard failure cannot spin every watchdog tick.
+		s.tailscaleMu.Lock()
+		s.tailscaleLastRestartAt = time.Now()
+		s.tailscaleMu.Unlock()
+		if startErr != nil {
+			log.Printf("[tailscale] funnel re-establish failed: %v", startErr)
+		}
+		return
+	}
 
 	if !CheckInternet() {
 		return

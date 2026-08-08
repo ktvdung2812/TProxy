@@ -294,28 +294,42 @@ export function syncRoutesForUpstreamModel(
     if (!providerSupportsUpstreamModel(modelsByProvider, route.provider, canonical)) {
       return route;
     }
-    const accountCount = credentialCounts?.[route.provider] ?? 0;
     return {
       ...route,
       upstream_model: resolveProviderUpstreamModel(modelsByProvider, route.provider, canonical),
-      enabled: accountCount > 0 ? route.enabled : false,
+      // An account-less provider keeps its saved enabled flag: it is hidden from
+      // the chain and skipped by the router, and it should serve again as soon as
+      // an account is added back rather than silently staying off.
+      enabled: route.enabled,
     };
   });
 
   for (const provider of supporting) {
     if (byProvider.has(provider.id)) continue;
-    const accountCount = credentialCounts?.[provider.id] ?? 1;
+    // A provider with no accounts cannot serve a request, so it never joins the
+    // chain on its own. Existing routes are kept (see hasUsableAccounts) so the
+    // saved priority survives an account being removed and added back.
+    if ((credentialCounts?.[provider.id] ?? 1) <= 0) continue;
     merged.push(
       emptyRoute(
         provider.id,
         defaultRoutePriority(merged.length),
         resolveProviderUpstreamModel(modelsByProvider, provider.id, canonical),
-        accountCount > 0,
+        true,
       ),
     );
   }
 
   return reorderRoutePriorities(merged);
+}
+
+/**
+ * A route is only shown in the Provider Priority Manager when its provider has
+ * at least one account. Routes for account-less providers stay in the saved
+ * chain but are hidden, because the router skips them anyway.
+ */
+export function hasUsableAccounts(route: RouteFormData, credentialCounts: Record<string, number>): boolean {
+  return (credentialCounts[route.provider] ?? 0) > 0;
 }
 
 export function routeFormsEqual(left: RouteFormData[], right: RouteFormData[]): boolean {

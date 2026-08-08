@@ -7,6 +7,7 @@ type Props = {
   baseUrl: string;
   lanUrl: string;
   tunnelUrl: string;
+  tailscaleUrl?: string;
   allowLan: boolean;
   lanIPs: string[];
   selectedLanIP: string;
@@ -21,6 +22,7 @@ export function CliBaseUrlPicker({
   baseUrl,
   lanUrl,
   tunnelUrl,
+  tailscaleUrl = "",
   allowLan,
   lanIPs,
   selectedLanIP,
@@ -31,6 +33,7 @@ export function CliBaseUrlPicker({
 }: Props) {
   const { t } = useTranslation();
   const tunnelAvailable = Boolean(tunnelUrl);
+  const tailscaleAvailable = Boolean(tailscaleUrl);
   const lanAvailable = allowLan && lanIPs.length > 0 && Boolean(lanUrl);
 
   return (
@@ -56,6 +59,15 @@ export function CliBaseUrlPicker({
           onClick={() => onKindChange("tunnel")}
         >
           {t("cliTools.tunnel")}
+        </button>
+        <button
+          type="button"
+          className={kind === "tailscale" ? "active" : ""}
+          disabled={!tailscaleAvailable}
+          title={tailscaleAvailable ? tailscaleUrl : t("cliTools.enableTailscaleHint")}
+          onClick={() => onKindChange("tailscale")}
+        >
+          {t("cliTools.tailscale")}
         </button>
       </div>
 
@@ -89,6 +101,9 @@ export function CliBaseUrlPicker({
       ) : null}
       {kind === "tunnel" && !tunnelAvailable ? (
         <p className="cli-tool-hint">{t("cliTools.setPublicUrlHint")}</p>
+      ) : null}
+      {kind === "tailscale" && !tailscaleAvailable ? (
+        <p className="cli-tool-hint">{t("cliTools.enableTailscaleHint")}</p>
       ) : null}
     </div>
   );

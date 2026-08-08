@@ -19,20 +19,28 @@ type TailscaleProbe struct {
 }
 
 type TailscaleEnableResult struct {
-	Success           bool   `json:"success"`
-	TunnelURL         string `json:"tunnelUrl,omitempty"`
-	NeedsLogin        bool   `json:"needsLogin,omitempty"`
-	AuthURL           string `json:"authUrl,omitempty"`
-	FunnelNotEnabled  bool   `json:"funnelNotEnabled,omitempty"`
-	EnableURL         string `json:"enableUrl,omitempty"`
-	Error             string `json:"error,omitempty"`
+	Success          bool   `json:"success"`
+	TunnelURL        string `json:"tunnelUrl,omitempty"`
+	NeedsLogin       bool   `json:"needsLogin,omitempty"`
+	AuthURL          string `json:"authUrl,omitempty"`
+	FunnelNotEnabled bool   `json:"funnelNotEnabled,omitempty"`
+	EnableURL        string `json:"enableUrl,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
-type Tailscale struct{}
+type Tailscale struct {
+	// binary/run are injectable so the status logic can be tested without a
+	// tailscale install.
+	binary string
+	run    func(name string, args ...string) ([]byte, error)
+}
 
 func NewTailscale() *Tailscale { return &Tailscale{} }
 
 func (t *Tailscale) Binary() string {
+	if t.binary != "" {
+		return t.binary
+	}
 	path, err := exec.LookPath("tailscale")
 	if err != nil {
 		return ""
@@ -40,29 +48,55 @@ func (t *Tailscale) Binary() string {
 	return path
 }
 
+func (t *Tailscale) exec(name string, args ...string) ([]byte, error) {
+	if t.run != nil {
+		return t.run(name, args...)
+	}
+	return exec.Command(name, args...).Output()
+}
+
 func (t *Tailscale) Installed() bool {
 	return t.Binary() != ""
 }
 
+// Status reports login state and, separately, whether a Funnel is actually
+// serving. The two are not the same: `tailscale funnel reset`, a tailnet policy
+// change or a machine wake can drop the Funnel while tailscaled stays logged in.
+// Treating "logged in" as "running" made the watchdog skip every repair.
 func (t *Tailscale) Status() TailscaleProbe {
 	status := TailscaleProbe{Installed: t.Installed()}
 	if !status.Installed {
 		return status
 	}
 	status.LoggedIn = t.loggedIn()
-	status.Running = status.LoggedIn
 	if url := t.funnelURL(); url != "" {
 		status.URL = url
 	}
+	if !status.LoggedIn {
+		return status
+	}
+	active, known := t.funnelActive()
+	if !known {
+		// Older tailscale builds have no machine-readable serve status. Fall back
+		// to the previous behaviour rather than declaring the funnel dead and
+		// restarting it on every watchdog tick.
+		status.Running = status.LoggedIn
+		return status
+	}
+	status.Running = active
 	return status
 }
 
-func (t *Tailscale) loggedIn() bool {
+func (t *Tailscale) statusJSON() ([]byte, error) {
 	bin := t.Binary()
 	if bin == "" {
-		return false
+		return nil, fmt.Errorf("tailscale not installed")
 	}
-	out, err := exec.Command(bin, "status", "--json").Output()
+	return t.exec(bin, "status", "--json")
+}
+
+func (t *Tailscale) loggedIn() bool {
+	out, err := t.statusJSON()
 	if err != nil {
 		return false
 	}
@@ -75,12 +109,34 @@ func (t *Tailscale) loggedIn() bool {
 	return strings.EqualFold(payload.BackendState, "Running")
 }
 
-func (t *Tailscale) funnelURL() string {
+// funnelActive reports whether any Funnel target is currently allowed. The
+// second return value is false when serve status could not be read at all, so
+// callers can distinguish "no funnel" from "cannot tell".
+func (t *Tailscale) funnelActive() (active bool, known bool) {
 	bin := t.Binary()
 	if bin == "" {
-		return ""
+		return false, false
 	}
-	out, err := exec.Command(bin, "status", "--json").Output()
+	out, err := t.exec(bin, "serve", "status", "--json")
+	if err != nil {
+		return false, false
+	}
+	var payload struct {
+		AllowFunnel map[string]bool `json:"AllowFunnel"`
+	}
+	if json.Unmarshal(out, &payload) != nil {
+		return false, false
+	}
+	for _, allowed := range payload.AllowFunnel {
+		if allowed {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+func (t *Tailscale) funnelURL() string {
+	out, err := t.statusJSON()
 	if err != nil {
 		return ""
 	}
@@ -139,11 +195,7 @@ func (t *Tailscale) StartLogin(hostname string) (authURL string, alreadyLoggedIn
 }
 
 func (t *Tailscale) authURLFromStatus() string {
-	bin := t.Binary()
-	if bin == "" {
-		return ""
-	}
-	out, err := exec.Command(bin, "status", "--json").Output()
+	out, err := t.statusJSON()
 	if err != nil {
 		return ""
 	}
@@ -168,7 +220,7 @@ func (t *Tailscale) StartFunnel(port int) (tunnelURL string, funnelNotEnabled bo
 	if bin == "" {
 		return "", false, "", fmt.Errorf("tailscale not installed")
 	}
-	_ = exec.Command(bin, "funnel", "--bg", "reset").Run()
+	_, _ = t.exec(bin, "funnel", "--bg", "reset")
 	cmd := exec.Command(bin, "funnel", "--bg", fmt.Sprintf("%d", port))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -194,7 +246,7 @@ func (t *Tailscale) StopFunnel() {
 	if bin == "" {
 		return
 	}
-	_ = exec.Command(bin, "funnel", "--bg", "reset").Run()
+	_, _ = t.exec(bin, "funnel", "--bg", "reset")
 }
 
 func (t *Tailscale) Enable(ctx context.Context, port int, hostname string) TailscaleEnableResult {

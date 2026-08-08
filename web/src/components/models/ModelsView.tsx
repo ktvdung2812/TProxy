@@ -244,9 +244,13 @@ export function ModelsView({
                     ...route,
                     accountCount: credentialCounts[route.provider] ?? 0,
                   }));
-              const visibleRoutes = displayRoutes.slice(0, 4);
-              const hiddenRouteCount = displayRoutes.length - visibleRoutes.length;
-              const suggestedCount = displayRoutes.filter((route) => !route.saved).length;
+              // Providers with no accounts cannot serve this model, so they are
+              // left out of the chain summary just as they are in the Provider
+              // Priority Manager.
+              const routableRoutes = displayRoutes.filter((route) => route.accountCount > 0);
+              const visibleRoutes = routableRoutes.slice(0, 4);
+              const hiddenRouteCount = routableRoutes.length - visibleRoutes.length;
+              const suggestedCount = routableRoutes.filter((route) => !route.saved).length;
               return (
                 <Card key={model.ID} pad="md" className="model-card">
                   <div className="model-title">

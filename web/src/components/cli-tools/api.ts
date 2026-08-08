@@ -1,3 +1,13 @@
+export type CoworkPlugin = {
+  name: string;
+  title?: string;
+  url: string;
+  transport?: string;
+  oauth?: boolean;
+  toolNames?: string[];
+  custom?: boolean;
+};
+
 export type CLIToolStatus = {
   installed: boolean;
   has_tproxy: boolean;
@@ -5,6 +15,13 @@ export type CLIToolStatus = {
   settings_path?: string;
   config_path?: string;
   message?: string;
+  /** Endpoint the tool is currently pointed at — empty when unconfigured. */
+  endpoint?: string;
+  model?: string;
+  models?: string[];
+  /** Cowork only: managed MCP catalog and the entries currently written. */
+  plugins?: CoworkPlugin[];
+  active_plugins?: string[];
 };
 
 export type CLIToolApplyRequest = {
@@ -12,7 +29,11 @@ export type CLIToolApplyRequest = {
   apiKey: string;
   model: string;
   models?: string[];
+  subagentModel?: string;
   env?: Record<string, string>;
+  /** Cowork only: managed MCP servers to write (empty array = write none). */
+  plugins?: CoworkPlugin[];
+  customPlugins?: CoworkPlugin[];
 };
 
 function authHeaders(secret: string): Record<string, string> {

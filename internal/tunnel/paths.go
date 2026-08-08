@@ -7,11 +7,11 @@ import (
 
 // DataLayout resolves on-disk paths for tunnel state and binaries.
 type DataLayout struct {
-	Root          string
-	BinDir        string
-	Cloudflared   string
-	TunnelDir     string
-	StateFile     string
+	Root           string
+	BinDir         string
+	Cloudflared    string
+	TunnelDir      string
+	StateFile      string
 	CloudflaredPID string
 }
 

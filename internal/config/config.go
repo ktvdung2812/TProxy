@@ -57,11 +57,44 @@ type RoutingConfig struct {
 	SessionAffinityTTL    string                            `yaml:"session-affinity-ttl" json:"session_affinity_ttl"`
 	Cooldown              CooldownConfig                    `yaml:"cooldown" json:"cooldown"`
 	Prewarm               PrewarmConfig                     `yaml:"prewarm" json:"prewarm"`
+	Failover              FailoverConfig                    `yaml:"failover" json:"failover"`
 }
 
 type ProviderRotationConfig struct {
 	Strategy              string `yaml:"strategy" json:"strategy,omitempty"`
 	StickyRoundRobinLimit int    `yaml:"sticky-round-robin-limit" json:"sticky_round_robin_limit,omitempty"`
+}
+
+// FailoverConfig controls when a failing provider is pulled out of a model's
+// priority chain so traffic moves on to the next provider.
+type FailoverConfig struct {
+	// Enabled defaults to true when omitted.
+	Enabled *bool `yaml:"enabled" json:"enabled,omitempty"`
+	// FailureThreshold is the number of consecutive failed attempts against a
+	// provider (for one model) before it is skipped. Defaults to 3.
+	FailureThreshold int `yaml:"failure-threshold" json:"failure_threshold,omitempty"`
+	// DegradedThreshold flags a provider as unhealthy before it is skipped.
+	DegradedThreshold int `yaml:"degraded-threshold" json:"degraded_threshold,omitempty"`
+	// ResetTimeout is how long a skipped provider waits before a probe request.
+	// Defaults to 5m.
+	ResetTimeout string `yaml:"reset-timeout" json:"reset_timeout,omitempty"`
+	// MaxResetTimeout caps the exponential backoff applied to repeat offenders.
+	// Defaults to 30m.
+	MaxResetTimeout string `yaml:"max-reset-timeout" json:"max_reset_timeout,omitempty"`
+	// CountAccountErrors includes 429/401/403 in the failure count. Off by
+	// default because accounts have their own cooldown and refresh handling.
+	CountAccountErrors bool `yaml:"count-account-errors" json:"count_account_errors,omitempty"`
+	// Providers overrides the policy for individual providers.
+	Providers map[string]ProviderFailoverConfig `yaml:"providers" json:"providers,omitempty"`
+}
+
+func (f FailoverConfig) IsEnabled() bool { return f.Enabled == nil || *f.Enabled }
+
+type ProviderFailoverConfig struct {
+	FailureThreshold  int    `yaml:"failure-threshold" json:"failure_threshold,omitempty"`
+	DegradedThreshold int    `yaml:"degraded-threshold" json:"degraded_threshold,omitempty"`
+	ResetTimeout      string `yaml:"reset-timeout" json:"reset_timeout,omitempty"`
+	MaxResetTimeout   string `yaml:"max-reset-timeout" json:"max_reset_timeout,omitempty"`
 }
 
 type CooldownConfig struct {
@@ -167,7 +200,7 @@ type OAuthConfig struct {
 	DeviceVerificationURL     string            `yaml:"device-verification-url" json:"device_verification_url"`
 	DeviceExchangeRedirectURL string            `yaml:"device-exchange-redirect-url" json:"device_exchange_redirect_url"`
 	DeviceFlow                string            `yaml:"device-flow" json:"device_flow"`
-	DevicePKCE                  bool              `yaml:"device-pkce" json:"device_pkce"`
+	DevicePKCE                bool              `yaml:"device-pkce" json:"device_pkce"`
 	DeviceRequestFormat       string            `yaml:"device-request-format" json:"device_request_format"`
 	ClientID                  string            `yaml:"client-id,omitempty" json:"client_id,omitempty"`
 	ClientIDEnv               string            `yaml:"client-id-env" json:"client_id_env"`

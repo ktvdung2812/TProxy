@@ -33,10 +33,10 @@ func (s *Server) adminCursorOAuthAutoImport(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"found":         true,
-		"access_token":  result.Tokens.AccessToken,
-		"machine_id":    result.Tokens.MachineID,
-		"db_path":       result.Tokens.DBPath,
+		"found":        true,
+		"access_token": result.Tokens.AccessToken,
+		"machine_id":   result.Tokens.MachineID,
+		"db_path":      result.Tokens.DBPath,
 	})
 }
 

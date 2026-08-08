@@ -264,6 +264,59 @@ func (r *Router) ConfigureRouting(cfg config.RoutingConfig) {
 	r.cooldowns = CooldownSettingsFromConfig(cfg.Cooldown)
 	r.cooldown = r.cooldowns.Fallback
 	r.mu.Unlock()
+	r.configureFailover(cfg.Failover)
+}
+
+// configureFailover applies the provider failover policy to the circuit breaker
+// registry. Without this the registry ran on zero-value thresholds and never
+// actually pulled a failing provider out of the priority chain.
+func (r *Router) configureFailover(cfg config.FailoverConfig) {
+	breakers := r.CircuitBreakers()
+	breakers.SetEnabled(cfg.IsEnabled())
+	breakers.SetCountAccountErrors(cfg.CountAccountErrors)
+	defaults := resilience.DefaultConfig()
+	breakers.SetDefaultConfig(resilience.Config{
+		DegradedThreshold: cfg.DegradedThreshold,
+		FailureThreshold:  cfg.FailureThreshold,
+		ResetTimeout:      durationOr(cfg.ResetTimeout, defaults.ResetTimeout),
+		MaxResetTimeout:   durationOr(cfg.MaxResetTimeout, defaults.MaxResetTimeout),
+	})
+	for providerID, providerCfg := range cfg.Providers {
+		breakers.Configure(providerID, resilience.Config{
+			DegradedThreshold: providerCfg.DegradedThreshold,
+			FailureThreshold:  providerCfg.FailureThreshold,
+			ResetTimeout:      durationOr(providerCfg.ResetTimeout, durationOr(cfg.ResetTimeout, defaults.ResetTimeout)),
+			MaxResetTimeout:   durationOr(providerCfg.MaxResetTimeout, durationOr(cfg.MaxResetTimeout, defaults.MaxResetTimeout)),
+		})
+	}
+}
+
+// breakerAllows reports whether the provider is still eligible to serve this
+// model. A provider that tripped mid-request is skipped for the rest of the
+// chain walk, so traffic moves straight on to the next priority.
+func (r *Router) breakerAllows(modelID, providerID string) bool {
+	if r.circuitBreakers == nil {
+		return true
+	}
+	return r.circuitBreakers.CanExecute(modelID, providerID)
+}
+
+func (r *Router) recordProviderSuccess(modelID, providerID string) {
+	if r.circuitBreakers == nil {
+		return
+	}
+	r.circuitBreakers.RecordSuccess(modelID, providerID)
+}
+
+func (r *Router) recordProviderFailure(modelID, providerID string, status int, err error) {
+	if r.circuitBreakers == nil {
+		return
+	}
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+	r.circuitBreakers.RecordFailure(modelID, providerID, status, reason)
 }
 
 func (r *Router) SyncAccountRotationSettings(ctx context.Context) error {
@@ -589,6 +642,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		selection.Attempt = index + 1
 		request.PublicModelID = model.ID
 		request.UpstreamModel = selection.Route.UpstreamModel
+		if !r.breakerAllows(model.ID, selection.Provider.ID) {
+			continue
+		}
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
@@ -619,9 +675,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if errExecute == nil {
 			r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
 			r.clearSuccessfulCooldown(ctx, selection)
-			if r.circuitBreakers != nil {
-				r.circuitBreakers.RecordSuccess(selection.Provider.ID)
-			}
+			r.recordProviderSuccess(model.ID, selection.Provider.ID)
 			if r.arena != nil {
 				r.arena.RecordOutcome(selection.Credential, true)
 			}
@@ -639,9 +693,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if fallback {
 			r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 		}
-		if r.circuitBreakers != nil {
-			r.circuitBreakers.RecordFailure(selection.Provider.ID, status)
-		}
+		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
 		if r.arena != nil {
 			r.arena.RecordOutcome(selection.Credential, false)
 		}
@@ -671,6 +723,9 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		request.PublicModelID = model.ID
 		request.UpstreamModel = selection.Route.UpstreamModel
 		request.Stream = true
+		if !r.breakerAllows(model.ID, selection.Provider.ID) {
+			continue
+		}
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
@@ -716,6 +771,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			if fallback {
 				r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 			}
+			r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
 			if disableFallback(request) {
 				return nil, errExecute
 			}
@@ -813,6 +869,9 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 	var lastErr error
 	for index, selection := range selections {
 		selection.Attempt = index + 1
+		if !r.breakerAllows(model.ID, selection.Provider.ID) {
+			continue
+		}
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
@@ -857,11 +916,13 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 				raw.Body = rewriteResponseModel(raw.Body, model.ID)
 			}
 			r.clearSuccessfulCooldown(ctx, selection)
+			r.recordProviderSuccess(model.ID, selection.Provider.ID)
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			return &RawResult{Selection: selection, Response: raw}, nil
 		}
 		lastErr = errProxy
 		status, code := providers.Status(errProxy), providers.Code(errProxy)
+		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errProxy)
 		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 		if status == 0 && !options.RetryNetworkErrors {
 			if options.DisableFallback {
@@ -1111,8 +1172,14 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 				}
 			}
 		}
-		if status == 200 {
+		switch {
+		case status == 200:
 			r.clearSuccessfulCooldown(context.Background(), selection)
+			r.recordProviderSuccess(model.ID, selection.Provider.ID)
+		case status == 499:
+			// Client hung up. Not the provider's fault, so leave its circuit alone.
+		default:
+			r.recordProviderFailure(model.ID, selection.Provider.ID, status, fmt.Errorf("%s", errorCode))
 		}
 		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
 	}()
@@ -1238,6 +1305,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 	var selections []Selection
 	policyLimited := false
 	modelCooldownLimited := false
+	failoverSkipped := false
 	now := time.Now()
 	for _, route := range routes {
 		if !route.Enabled {
@@ -1250,7 +1318,8 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" || provider.Status == "auth_required" || provider.Status == "cooldown" {
 			continue
 		}
-		if r.circuitBreakers != nil && !r.circuitBreakers.CanExecute(provider.ID) {
+		if !r.breakerAllows(model.ID, provider.ID) {
+			failoverSkipped = true
 			continue
 		}
 		if pin := pinnedProvider(request); pin != "" && !providerMatchesPin(*provider, pin) {
@@ -1305,6 +1374,13 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 				Status:  http.StatusTooManyRequests,
 				Code:    "upstream_rate_limited",
 				Message: fmt.Sprintf("all credentials are temporarily rate-limited for %s; retry shortly or use another model", model.ID),
+			}
+		}
+		if failoverSkipped {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "all_providers_failed_over",
+				Message: fmt.Sprintf("every provider in the priority chain for %s has been disabled by repeated failures; they will be probed again automatically", model.ID),
 			}
 		}
 		return nil, fmt.Errorf("no_available_credential: %s", model.ID)

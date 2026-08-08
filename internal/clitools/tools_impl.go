@@ -21,8 +21,9 @@ func claudeStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	env := asMap(settings["env"])
-	configured := endpointLooksLikeProxy(asString(env["ANTHROPIC_BASE_URL"]))
-	return statusFromInstalled("claude", path, configured), nil
+	endpoint := asString(env["ANTHROPIC_BASE_URL"])
+	configured := endpointLooksLikeProxy(endpoint)
+	return statusFromInstalled("claude", path, configured).with(endpoint, asString(env["ANTHROPIC_MODEL"])), nil
 }
 
 func claudeApply(req ApplyRequest) error {
@@ -32,11 +33,6 @@ func claudeApply(req ApplyRequest) error {
 		return err
 	}
 	env := asMap(settings["env"])
-	if req.Env != nil {
-		for key, value := range req.Env {
-			env[key] = value
-		}
-	}
 	if req.BaseURL != "" {
 		env["ANTHROPIC_BASE_URL"] = normalizeBaseURL(req.BaseURL, true)
 	}
@@ -44,7 +40,12 @@ func claudeApply(req ApplyRequest) error {
 		env["ANTHROPIC_API_KEY"] = req.APIKey
 	}
 	primary := normalizeClaudePrimaryModel(strings.TrimSpace(req.Model))
-	applyClaudeCodeClientEnv(env, primary)
+	applyClaudeCodeClientEnv(env, primary, normalizeClaudePrimaryModel(subagentOf(req, primary)))
+	// req.Env is applied last so the dashboard can override individual tier slots
+	// (ANTHROPIC_DEFAULT_SONNET_MODEL, …) on top of the generated defaults.
+	for key, value := range req.Env {
+		env[key] = value
+	}
 	settings["env"] = env
 	settings["hasCompletedOnboarding"] = true
 	return writeJSONFile(path, settings)
@@ -59,13 +60,16 @@ func normalizeClaudePrimaryModel(model string) string {
 	}
 }
 
-func applyClaudeCodeClientEnv(env map[string]any, primary string) {
+func applyClaudeCodeClientEnv(env map[string]any, primary string, subagent string) {
+	if subagent == "" {
+		subagent = primary
+	}
 	env["ANTHROPIC_MODEL"] = primary
 	env["ANTHROPIC_DEFAULT_FABLE_MODEL"] = "fable"
 	env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "opus"
 	env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "sonnet"
 	env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "haiku"
-	env["CLAUDE_CODE_SUBAGENT_MODEL"] = primary
+	env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent
 	env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1048576"
 	env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = "1048576"
 }
@@ -103,7 +107,17 @@ func codexStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	configured := strings.Contains(string(raw), providerKey) || strings.Contains(string(raw), legacyProviderKey)
-	return statusFromInstalled("codex", path, configured), nil
+	parsed := map[string]any{}
+	_ = toml.Unmarshal(raw, &parsed)
+	endpoint := ""
+	if providers := asMap(parsed["model_providers"]); providers != nil {
+		entry := asMap(providers[providerKey])
+		if len(entry) == 0 {
+			entry = asMap(providers[legacyProviderKey])
+		}
+		endpoint = asString(entry["base_url"])
+	}
+	return statusFromInstalled("codex", path, configured).with(endpoint, asString(parsed["model"])), nil
 }
 
 func codexApply(req ApplyRequest) error {
@@ -118,8 +132,8 @@ func codexApply(req ApplyRequest) error {
 		existing = string(raw)
 	}
 	updates := map[string]any{
-		"model":           model,
-		"model_provider":  providerKey,
+		"model":          model,
+		"model_provider": providerKey,
 		"model_providers": map[string]any{
 			providerKey: map[string]any{
 				"name":     "TProxy",
@@ -128,7 +142,7 @@ func codexApply(req ApplyRequest) error {
 			},
 		},
 		"agents": map[string]any{
-			"subagent": map[string]any{"model": model},
+			"subagent": map[string]any{"model": subagentOf(req, model)},
 		},
 	}
 	merged, err := mergeTomlMap(existing, updates)
@@ -189,9 +203,15 @@ func openclawStatus() (StatusResult, error) {
 	}
 	models := asMap(settings["models"])
 	providers := asMap(models["providers"])
-	_, hasTproxy := providers[providerKey]
+	entry, hasTproxy := providers[providerKey]
+	if !hasTproxy {
+		entry = providers[legacyProviderKey]
+	}
 	_, hasLegacy := providers[legacyProviderKey]
-	return statusFromInstalled("openclaw", path, hasTproxy || hasLegacy), nil
+	provider := asMap(entry)
+	primary := asString(asMap(asMap(asMap(settings["agents"])["defaults"])["model"])["primary"])
+	return statusFromInstalled("openclaw", path, hasTproxy || hasLegacy).
+		with(asString(provider["baseUrl"]), strings.TrimPrefix(primary, providerKey+"/")), nil
 }
 
 func openclawApply(req ApplyRequest) error {
@@ -213,13 +233,15 @@ func openclawApply(req ApplyRequest) error {
 		modelRoot["providers"] = map[string]any{}
 	}
 	providers := asMap(modelRoot["providers"])
+	modelEntries := make([]any, 0, len(models))
+	for _, item := range models {
+		modelEntries = append(modelEntries, map[string]any{"id": item, "name": filepath.Base(item)})
+	}
 	providers[providerKey] = map[string]any{
 		"baseUrl": normalizeBaseURL(req.BaseURL, true),
 		"apiKey":  req.APIKey,
 		"api":     "openai-completions",
-		"models": []any{
-			map[string]any{"id": model, "name": filepath.Base(model)},
-		},
+		"models":  modelEntries,
 	}
 	modelRoot["providers"] = providers
 	settings["models"] = modelRoot
@@ -261,9 +283,17 @@ func opencodeStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	providers := asMap(config["provider"])
-	_, hasTproxy := providers[providerKey]
+	entry, hasTproxy := providers[providerKey]
+	if !hasTproxy {
+		entry = providers[legacyProviderKey]
+	}
 	_, hasLegacy := providers[legacyProviderKey]
-	return statusFromInstalled("opencode", path, hasTproxy || hasLegacy), nil
+	endpoint := asString(asMap(asMap(entry)["options"])["baseURL"])
+	active := asString(config["model"])
+	if idx := strings.Index(active, "/"); idx >= 0 {
+		active = active[idx+1:]
+	}
+	return statusFromInstalled("opencode", path, hasTproxy || hasLegacy).with(endpoint, active), nil
 }
 
 func opencodeApply(req ApplyRequest) error {
@@ -280,7 +310,10 @@ func opencodeApply(req ApplyRequest) error {
 		config["provider"] = map[string]any{}
 	}
 	providers := asMap(config["provider"])
-	modelMap := map[string]any{}
+	// Preserve models added by earlier applies instead of replacing the whole map,
+	// so re-applying with one model does not drop the others.
+	existing := asMap(providers[providerKey])
+	modelMap := asMap(existing["models"])
 	for _, model := range models {
 		modelMap[model] = map[string]any{
 			"name": model,
@@ -290,16 +323,23 @@ func opencodeApply(req ApplyRequest) error {
 			},
 		}
 	}
-	providers[providerKey] = map[string]any{
-		"npm": "@ai-sdk/openai-compatible",
-		"options": map[string]any{
-			"baseURL": normalizeBaseURL(req.BaseURL, true),
-			"apiKey":  req.APIKey,
-		},
-		"models": modelMap,
-	}
+	options := asMap(existing["options"])
+	options["baseURL"] = normalizeBaseURL(req.BaseURL, true)
+	options["apiKey"] = req.APIKey
+	existing["npm"] = "@ai-sdk/openai-compatible"
+	existing["options"] = options
+	existing["models"] = modelMap
+	providers[providerKey] = existing
 	config["provider"] = providers
 	config["model"] = providerKey + "/" + models[0]
+
+	agents := asMap(config["agent"])
+	agents["explorer"] = map[string]any{
+		"description": "Fast explorer subagent for codebase exploration",
+		"mode":        "subagent",
+		"model":       providerKey + "/" + subagentOf(req, models[0]),
+	}
+	config["agent"] = agents
 	return writeJSONFile(path, config)
 }
 
@@ -316,6 +356,17 @@ func opencodeReset() error {
 	if strings.HasPrefix(asString(config["model"]), providerKey+"/") || strings.HasPrefix(asString(config["model"]), legacyProviderKey+"/") {
 		delete(config, "model")
 	}
+	if agents := asMap(config["agent"]); len(agents) > 0 {
+		explorerModel := asString(asMap(agents["explorer"])["model"])
+		if strings.HasPrefix(explorerModel, providerKey+"/") || strings.HasPrefix(explorerModel, legacyProviderKey+"/") {
+			delete(agents, "explorer")
+		}
+		if len(agents) == 0 {
+			delete(config, "agent")
+		} else {
+			config["agent"] = agents
+		}
+	}
 	return writeJSONFile(path, config)
 }
 
@@ -328,8 +379,9 @@ func clineStatus() (StatusResult, error) {
 	if err != nil {
 		return StatusResult{}, err
 	}
-	configured := endpointLooksLikeProxy(asString(state["openAiBaseUrl"]))
-	return statusFromInstalled("cline", path, configured), nil
+	endpoint := asString(state["openAiBaseUrl"])
+	configured := endpointLooksLikeProxy(endpoint)
+	return statusFromInstalled("cline", path, configured).with(endpoint, asString(state["openAiModelId"])), nil
 }
 
 func clineApply(req ApplyRequest) error {
@@ -390,15 +442,18 @@ func droidStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	configured := false
+	endpoint, model := "", ""
 	for _, item := range asSlice(settings["customModels"]) {
 		entry := asMap(item)
 		id := asString(entry["id"])
 		if strings.HasPrefix(id, "custom:tproxy") || strings.HasPrefix(id, "custom:9Router") {
 			configured = true
+			endpoint = asString(entry["baseUrl"])
+			model = asString(entry["model"])
 			break
 		}
 	}
-	return statusFromInstalled("droid", path, configured), nil
+	return statusFromInstalled("droid", path, configured).with(endpoint, model), nil
 }
 
 func droidApply(req ApplyRequest) error {
@@ -422,15 +477,15 @@ func droidApply(req ApplyRequest) error {
 	baseURL := normalizeBaseURL(req.BaseURL, true)
 	for i, model := range models {
 		custom = append([]any{map[string]any{
-			"model":             model,
-			"id":                fmt.Sprintf("custom:tproxy-%d", i),
-			"index":             i,
-			"baseUrl":           baseURL,
-			"apiKey":            req.APIKey,
-			"displayName":       model,
-			"maxOutputTokens":   131072,
-			"noImageSupport":    false,
-			"provider":          "openai",
+			"model":           model,
+			"id":              fmt.Sprintf("custom:tproxy-%d", i),
+			"index":           i,
+			"baseUrl":         baseURL,
+			"apiKey":          req.APIKey,
+			"displayName":     model,
+			"maxOutputTokens": 131072,
+			"noImageSupport":  false,
+			"provider":        "openai",
 		}}, custom...)
 	}
 	settings["customModels"] = custom
@@ -468,14 +523,15 @@ func kiloStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	entry := asMap(auth["openai-compatible"])
-	if entry == nil {
+	if len(entry) == 0 {
 		entry = asMap(auth[legacyProviderKey])
 	}
-	configured := endpointLooksLikeProxy(asString(entry["baseUrl"]))
-	if configured {
-		configured = configured || endpointLooksLikeProxy(asString(entry["baseURL"]))
+	endpoint := asString(entry["baseUrl"])
+	if endpoint == "" {
+		endpoint = asString(entry["baseURL"])
 	}
-	return statusFromInstalled("kilo", path, configured), nil
+	configured := endpointLooksLikeProxy(endpoint)
+	return statusFromInstalled("kilo", path, configured).with(endpoint, asString(entry["model"])), nil
 }
 
 func kiloApply(req ApplyRequest) error {
@@ -515,7 +571,11 @@ func deepseekStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	configured := strings.Contains(string(raw), `provider = "openai"`)
-	return statusFromInstalled("deepseek", path, configured), nil
+	parsed := map[string]any{}
+	_ = toml.Unmarshal(raw, &parsed)
+	openai := asMap(asMap(parsed["providers"])["openai"])
+	return statusFromInstalled("deepseek", path, configured).
+		with(asString(openai["base_url"]), asString(openai["model"])), nil
 }
 
 func deepseekApply(req ApplyRequest) error {
@@ -558,7 +618,24 @@ func copilotStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	configured := strings.Contains(string(raw), `"name": "TProxy"`) || strings.Contains(string(raw), `"name": "9Router"`)
-	return statusFromInstalled("", path, configured), nil
+	endpoint, model := "", ""
+	var parsed []any
+	if stripped := trailingCommaRE.ReplaceAllString(string(raw), "$1"); stripped != "" {
+		_ = json.Unmarshal([]byte(stripped), &parsed)
+	}
+	for _, item := range parsed {
+		entry := asMap(item)
+		if name := asString(entry["name"]); name != "TProxy" && name != "9Router" {
+			continue
+		}
+		if first := asSlice(entry["models"]); len(first) > 0 {
+			modelEntry := asMap(first[0])
+			endpoint = asString(modelEntry["url"])
+			model = asString(modelEntry["id"])
+		}
+		break
+	}
+	return statusFromInstalled("", path, configured).with(endpoint, model), nil
 }
 
 func copilotApply(req ApplyRequest) error {
@@ -628,8 +705,24 @@ func hermesStatus() (StatusResult, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return StatusResult{}, err
 	}
-	configured := strings.Contains(string(raw), `provider: "custom"`) && endpointLooksLikeProxy(string(raw))
-	return statusFromInstalled("hermes", path, configured), nil
+	endpoint := firstYAMLValue(string(raw), "base_url")
+	configured := strings.Contains(string(raw), `provider: "custom"`) && endpointLooksLikeProxy(endpoint)
+	return statusFromInstalled("hermes", path, configured).
+		with(endpoint, firstYAMLValue(string(raw), "default")), nil
+}
+
+// firstYAMLValue pulls a scalar out of Hermes' small config.yaml without pulling in
+// a YAML dependency — the file only ever holds a flat model block.
+func firstYAMLValue(raw, key string) string {
+	re, err := regexp.Compile(fmt.Sprintf(`(?m)^[ \t]*%s:[ \t]*"?([^"\r\n]+?)"?[ \t]*$`, regexp.QuoteMeta(key)))
+	if err != nil {
+		return ""
+	}
+	match := re.FindStringSubmatch(raw)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
 }
 
 func hermesApply(req ApplyRequest) error {
@@ -685,7 +778,14 @@ func jcodeStatus() (StatusResult, error) {
 		return StatusResult{}, err
 	}
 	configured := strings.Contains(string(raw), providerKey) || strings.Contains(string(raw), legacyProviderKey)
-	return statusFromInstalled("jcode", path, configured), nil
+	parsed := map[string]any{}
+	_ = toml.Unmarshal(raw, &parsed)
+	entry := asMap(asMap(parsed["providers"])[providerKey])
+	if len(entry) == 0 {
+		entry = asMap(asMap(parsed["providers"])[legacyProviderKey])
+	}
+	return statusFromInstalled("jcode", path, configured).
+		with(asString(entry["base_url"]), asString(entry["model"])), nil
 }
 
 func jcodeApply(req ApplyRequest) error {

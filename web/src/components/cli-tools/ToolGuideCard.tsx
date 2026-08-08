@@ -13,8 +13,10 @@ import {
 } from "../../lib/publicBaseUrl";
 import {
   buildCliLanBaseUrl,
+  buildCliTailscaleBaseUrl,
   buildCliTunnelBaseUrl,
   defaultCliBaseUrlKind,
+  knownCliBaseUrls,
   readStoredCliBaseUrlKind,
   readStoredCliLanIP,
   resolveCliBaseUrlForKind,
@@ -23,6 +25,7 @@ import {
   type CliBaseUrlKind,
   type CliGatewaySettings,
 } from "../../lib/cliBaseUrl";
+import { fetchTunnelStatus } from "../apis/tunnelApi";
 import { ApiKeySelect, type ApiKeyOption } from "./ApiKeySelect";
 import { CliBaseUrlPicker } from "./CliBaseUrlPicker";
 import { CLIToolApplyPanel } from "./CLIToolApplyPanel";
@@ -84,6 +87,14 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
     () => buildCliTunnelBaseUrl(gatewaySettings.publicBaseUrl || publicUrlOverride),
     [gatewaySettings.publicBaseUrl, publicUrlOverride],
   );
+  const tailscaleUrl = useMemo(
+    () => buildCliTailscaleBaseUrl(gatewaySettings.tailscaleUrl || ""),
+    [gatewaySettings.tailscaleUrl],
+  );
+  const knownBaseUrls = useMemo(
+    () => knownCliBaseUrls(gatewaySettings, publicUrlOverride),
+    [gatewaySettings, publicUrlOverride],
+  );
   const baseUrl = useMemo(
     () =>
       resolveCliBaseUrlForKind(baseUrlKind, {
@@ -113,7 +124,9 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
           lanIPs: settings.lan_ips || [],
           publicBaseUrl: settings.public_base_url || "",
         };
-        setGatewaySettings(nextSettings);
+        // Keep the Tailscale URL resolved by the tunnel effect; it is not part of
+        // gateway settings and the two effects race.
+        setGatewaySettings((prev) => ({ ...nextSettings, tailscaleUrl: prev.tailscaleUrl }));
         setBaseUrlKind(() => {
           const stored = readStoredCliBaseUrlKind();
           if (stored === "tunnel" && !buildCliTunnelBaseUrl(nextSettings.publicBaseUrl || publicUrlOverride)) {
@@ -122,6 +135,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
           if (stored === "lan" && (!nextSettings.allowLan || nextSettings.lanIPs.length === 0)) {
             return "local";
           }
+          // "tailscale" is validated by the tunnel effect once its status arrives.
           if (stored) return stored;
           return defaultCliBaseUrlKind(nextSettings, publicUrlOverride);
         });
@@ -133,6 +147,27 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
       cancelled = true;
     };
   }, [secret, publicUrlOverride]);
+
+  // Tailscale Funnel lives on the tunnel endpoint, not in gateway settings.
+  useEffect(() => {
+    if (!secret) return;
+    let cancelled = false;
+    void fetchTunnelStatus(secret)
+      .then((status) => {
+        if (cancelled) return;
+        const url = status.tailscale?.running ? status.tailscale?.tunnelUrl ?? "" : "";
+        setGatewaySettings((prev) => (prev.tailscaleUrl === url ? prev : { ...prev, tailscaleUrl: url }));
+        if (!url) {
+          setBaseUrlKind((prev) => (prev === "tailscale" ? "local" : prev));
+        }
+      })
+      .catch(() => {
+        /* tunnel endpoint may be unavailable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
 
   useEffect(() => {
     if (!secret) return;
@@ -196,6 +231,7 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
       baseUrl={baseUrl}
       lanUrl={lanUrl}
       tunnelUrl={tunnelUrl}
+      tailscaleUrl={tailscaleUrl}
       allowLan={gatewaySettings.allowLan}
       lanIPs={gatewaySettings.lanIPs}
       selectedLanIP={effectiveLanIP}
@@ -405,6 +441,8 @@ export function ToolGuideCard({ tool, models, apiKeys, secret }: Props) {
       apiKey={resolvedApiKey}
       model={model}
       baseUrl={baseUrl}
+      knownBaseUrls={knownBaseUrls}
+      modelOptions={models}
       onApiKeyChange={setApiKey}
       hideScript
     />

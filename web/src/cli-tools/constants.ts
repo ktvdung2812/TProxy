@@ -45,12 +45,14 @@ export const AUTO_APPLY_TOOL_IDS = [
   "openclaw",
   "opencode",
   "cline",
+  "cowork",
   "droid",
   "kilo",
   "deepseek-tui",
   "hermes",
   "grok-build",
   "jcode",
+  "copilot",
 ] as const;
 
 export type AutoApplyToolId = (typeof AUTO_APPLY_TOOL_IDS)[number];
@@ -550,6 +552,37 @@ api_key = "{{apiKey}}"`,
   },
 };
 
+/**
+ * GitHub Copilot via BYOK: tproxy writes a provider entry into VS Code's
+ * chatLanguageModels.json. This is the supported path — Copilot MITM interception
+ * is out of scope, so it is not listed under MITM_TOOLS.
+ */
+CLI_TOOLS.copilot = {
+  id: "copilot",
+  name: "GitHub Copilot (BYOK)",
+  icon: "code",
+  color: "#1F6FEB",
+  description: "GitHub Copilot Chat with a custom model provider",
+  configType: "custom",
+  settingsFile: "~/.config/Code/User/chatLanguageModels.json",
+  notes: [
+    {
+      type: "info",
+      text: "Adds tproxy as a BYOK provider in VS Code. Restart VS Code, then pick the model from the Copilot Chat model picker.",
+    },
+    {
+      type: "warning",
+      text: "Config path: Linux ~/.config/Code/User/chatLanguageModels.json • Windows %APPDATA%\\Code\\User\\chatLanguageModels.json",
+    },
+  ],
+  guideSteps: [
+    { step: 1, title: "Install Copilot Chat", desc: "Install the GitHub Copilot Chat extension in VS Code.", column: "commands" },
+    { step: 2, title: "API Key", type: "apiKeySelector", column: "config" },
+    { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true, column: "config" },
+    { step: 4, title: "Model", type: "modelSelector", column: "config" },
+  ],
+};
+
 /** MITM IDE tools — same set as 9router MITM_TOOLS */
 export const MITM_TOOLS: Record<string, CLITool> = {
   antigravity: {
@@ -570,25 +603,6 @@ export const MITM_TOOLS: Record<string, CLITool> = {
     ],
     notes: [
       { type: "warning", text: "MITM proxy is not yet available in tproxy. Model mappings below show the slots Antigravity expects once MITM ships." },
-    ],
-  },
-  copilot: {
-    id: "copilot",
-    name: "GitHub Copilot",
-    icon: "code",
-    color: "#1F6FEB",
-    description: "GitHub Copilot IDE with MITM",
-    configType: "mitm",
-    mitmDomain: "api.individual.githubcopilot.com",
-    defaultModels: [
-      { id: "gpt-5-mini", name: "GPT-5 mini", alias: "gpt-5-mini" },
-      { id: "gpt-5.4-nano", name: "GPT-5.4 nano", alias: "gpt-5.4-nano" },
-      { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
-      { id: "gpt-4o", name: "GPT-4o", alias: "gpt-4o" },
-      { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
-    ],
-    notes: [
-      { type: "warning", text: "MITM proxy is not yet available in tproxy. Copilot CLI defaults to gpt-5-mini — map that slot to a tproxy model when MITM is enabled." },
     ],
   },
   kiro: {

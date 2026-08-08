@@ -20,6 +20,7 @@ func (s *Server) loadGatewaySettings(ctx context.Context) {
 		return
 	}
 	s.allowLanMgmt = settings.AllowLANManagement
+	s.ccFilterNaming.Store(settings.CCFilterNaming)
 }
 
 func (s *Server) managementClientAllowed(r *http.Request) bool {
@@ -48,12 +49,13 @@ func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			AllowLANManagement *bool   `json:"allow_lan_management"`
 			PublicBaseURL      *string `json:"public_base_url"`
+			CCFilterNaming     *bool   `json:"cc_filter_naming"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), useClientRequestID(r))
 			return
 		}
-		if payload.AllowLANManagement == nil && payload.PublicBaseURL == nil {
+		if payload.AllowLANManagement == nil && payload.PublicBaseURL == nil && payload.CCFilterNaming == nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "at least one gateway setting is required", useClientRequestID(r))
 			return
 		}
@@ -67,11 +69,15 @@ func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {
 		if payload.PublicBaseURL != nil {
 			settings.PublicBaseURL = strings.TrimSpace(*payload.PublicBaseURL)
 		}
+		if payload.CCFilterNaming != nil {
+			settings.CCFilterNaming = *payload.CCFilterNaming
+		}
 		if err := s.store.SaveGatewaySettings(r.Context(), settings); err != nil {
 			writeError(w, http.StatusInternalServerError, "gateway_settings_failed", err.Error(), useClientRequestID(r))
 			return
 		}
 		s.allowLanMgmt = settings.AllowLANManagement
+		s.ccFilterNaming.Store(settings.CCFilterNaming)
 		response := gatewaySettingsPayload(s, settings)
 		response["ok"] = true
 		writeJSON(w, http.StatusOK, response)
@@ -100,6 +106,7 @@ func gatewaySettingsPayload(s *Server, settings store.GatewaySettings) map[strin
 	payload := map[string]any{
 		"allow_lan_management": settings.AllowLANManagement,
 		"public_base_url":      settings.PublicBaseURL,
+		"cc_filter_naming":     settings.CCFilterNaming,
 		"server_host":          s.cfg.Server.Host,
 		"server_port":          s.clientFacingPort(),
 		"restart_required":     settings.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
