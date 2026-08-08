@@ -50,7 +50,22 @@ func grokStatus() (StatusResult, error) {
 		Has9Router:   configured,
 		SettingsPath: path,
 		ConfigPath:   path,
+		Endpoint:     grokScalar(string(raw), "base_url"),
+		Model:        grokScalar(string(raw), "model"),
 	}, nil
+}
+
+// grokScalar reads a quoted key from the [model.tproxy] section of ~/.grok/config.toml.
+func grokScalar(raw, key string) string {
+	re, err := regexp.Compile(`(?m)^[ \t]*` + regexp.QuoteMeta(key) + `[ \t]*=[ \t]*"([^"]*)"`)
+	if err != nil {
+		return ""
+	}
+	match := re.FindStringSubmatch(raw)
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func grokHasProxyConfig(toml string) bool {
@@ -146,7 +161,7 @@ func grokParseModelsDefault(toml string) string {
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, `default = "`) && strings.HasSuffix(trimmed, `"`) {
-			return trimmed[len(`default = "`): len(trimmed)-1]
+			return trimmed[len(`default = "`) : len(trimmed)-1]
 		}
 	}
 	return ""

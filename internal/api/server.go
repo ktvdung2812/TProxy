@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tproxy/tproxy/internal/auth"
@@ -61,6 +62,7 @@ type Server struct {
 	managementSecret string
 	allowRemoteMgmt  bool
 	allowLanMgmt     bool
+	ccFilterNaming   atomic.Bool
 	configPath       string
 	limiter          *requestLimiter
 	liveUsage        *LiveUsageTracker
@@ -433,6 +435,13 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	request := parseClaude(body, requestID)
 	s.applyMappingIngress(r, &request)
 	attachIngressMetadata(r, &request)
+	// Answer Claude Code's housekeeping turns locally before any provider is picked.
+	if claudeCLIRequest(r) {
+		if text, ok := detectClaudeBypass(request, s.ccFilterNaming.Load()); ok {
+			writeClaudeBypass(w, r, request, text)
+			return
+		}
+	}
 	s.execute(w, r, request, renderModeClaude)
 }
 
@@ -1501,6 +1510,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminAccountRotation(w, r)
 	case "/api/admin/rotation/reset":
 		s.adminAccountRotationReset(w, r)
+	case "/api/admin/failover":
+		s.adminFailover(w, r)
+	case "/api/admin/failover/reset":
+		s.adminFailoverReset(w, r)
 	case "/api/admin/settings":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
@@ -2556,7 +2569,7 @@ func (s *Server) adminQuotaCredentialUsage(w http.ResponseWriter, r *http.Reques
 		usage = map[string]store.CredentialUsageSummary{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"period":      period,
+		"period":        period,
 		"by_credential": usage,
 	})
 }

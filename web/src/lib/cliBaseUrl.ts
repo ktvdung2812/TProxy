@@ -1,16 +1,18 @@
 import { buildHostBaseUrl, buildLocalGatewayBaseUrl, normalizeBaseUrl } from "../components/apis/utils";
 import { normalizeCliBaseUrl, normalizePublicOrigin } from "./publicBaseUrl";
 
-export type CliBaseUrlKind = "local" | "lan" | "tunnel";
+export type CliBaseUrlKind = "local" | "lan" | "tunnel" | "tailscale";
 
 const KIND_STORAGE_KEY = "tproxy.cli-base-url-kind";
 const LAN_IP_STORAGE_KEY = "tproxy.cli-lan-ip";
+
+const CLI_BASE_URL_KINDS: CliBaseUrlKind[] = ["local", "lan", "tunnel", "tailscale"];
 
 export function readStoredCliBaseUrlKind(): CliBaseUrlKind | null {
   if (typeof window === "undefined") return null;
   try {
     const stored = localStorage.getItem(KIND_STORAGE_KEY);
-    if (stored === "local" || stored === "lan" || stored === "tunnel") return stored;
+    if (stored && (CLI_BASE_URL_KINDS as string[]).includes(stored)) return stored as CliBaseUrlKind;
   } catch {
     /* ignore */
   }
@@ -51,6 +53,8 @@ export type CliGatewaySettings = {
   allowLan: boolean;
   lanIPs: string[];
   publicBaseUrl: string;
+  /** Tailscale Funnel URL reported by /api/admin/tunnel/status, when running. */
+  tailscaleUrl?: string;
 };
 
 export function buildCliLocalBaseUrl(serverPort: number): string {
@@ -63,6 +67,11 @@ export function buildCliLanBaseUrl(ip: string, serverPort: number): string {
 
 export function buildCliTunnelBaseUrl(publicBaseUrl: string): string {
   const origin = normalizePublicOrigin(publicBaseUrl);
+  return origin ? normalizeCliBaseUrl(origin) : "";
+}
+
+export function buildCliTailscaleBaseUrl(tailscaleUrl: string): string {
+  const origin = normalizePublicOrigin(tailscaleUrl || "");
   return origin ? normalizeCliBaseUrl(origin) : "";
 }
 
@@ -86,6 +95,12 @@ export function resolveCliBaseUrlForKind(
     return buildCliLocalBaseUrl(settings.serverPort);
   }
 
+  if (kind === "tailscale") {
+    const tailscale = buildCliTailscaleBaseUrl(settings.tailscaleUrl || "");
+    if (tailscale) return tailscale;
+    return buildCliLocalBaseUrl(settings.serverPort);
+  }
+
   const tunnelOrigin =
     normalizePublicOrigin(settings.publicBaseUrl || "") || normalizePublicOrigin(publicUrlOverride);
   if (tunnelOrigin) return normalizeCliBaseUrl(tunnelOrigin);
@@ -100,6 +115,18 @@ export function resolveCliBaseUrlForKind(
 export function defaultCliBaseUrlKind(settings: CliGatewaySettings, publicUrlOverride = ""): CliBaseUrlKind {
   const tunnel = buildCliTunnelBaseUrl(settings.publicBaseUrl || publicUrlOverride);
   if (tunnel) return "tunnel";
+  if (buildCliTailscaleBaseUrl(settings.tailscaleUrl || "")) return "tailscale";
   if (settings.allowLan && settings.lanIPs.length > 0) return "lan";
   return "local";
+}
+
+/** All base URLs the dashboard can hand out — used to tell "connected to us" from "connected elsewhere". */
+export function knownCliBaseUrls(settings: CliGatewaySettings, publicUrlOverride = ""): string[] {
+  const urls = [
+    buildCliLocalBaseUrl(settings.serverPort),
+    buildCliTunnelBaseUrl(settings.publicBaseUrl || publicUrlOverride),
+    buildCliTailscaleBaseUrl(settings.tailscaleUrl || ""),
+    ...settings.lanIPs.map((ip) => buildCliLanBaseUrl(ip, settings.serverPort)),
+  ];
+  return urls.filter(Boolean);
 }

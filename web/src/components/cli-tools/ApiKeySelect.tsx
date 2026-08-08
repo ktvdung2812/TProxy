@@ -22,6 +22,9 @@ type Props = {
   missingSecretMessage?: string;
 };
 
+/** Sentinel id for the "type a key by hand" option. */
+const CUSTOM_KEY_ID = "__custom__";
+
 function resolveSelectedId(secret: string, enabledKeys: ApiKeyOption[]): string {
   if (enabledKeys.length === 0) return "";
   if (secret) {
@@ -44,26 +47,36 @@ export function ApiKeySelect({
 }: Props) {
   const enabledKeys = useMemo(() => apiKeys.filter((key) => key.enabled !== false), [apiKeys]);
   const [selectedId, setSelectedId] = useState(() => resolveSelectedId(value, enabledKeys));
+  // Once the user picks "Custom…", stop snapping the selection back to a saved key.
+  const [customMode, setCustomMode] = useState(false);
 
   useEffect(() => {
-    if (enabledKeys.length === 0) return;
+    if (customMode || enabledKeys.length === 0) return;
     const nextId = resolveSelectedId(value, enabledKeys);
     setSelectedId(nextId);
     onSelectedIdChange?.(nextId);
     const stored = getStoredApiKeySecret(nextId);
     if (stored && stored !== value) onChange(stored);
-  }, [enabledKeys, onChange, onSelectedIdChange, value]);
+  }, [customMode, enabledKeys, onChange, onSelectedIdChange, value]);
 
   useEffect(() => {
-    if (value || enabledKeys.length === 0) return;
+    if (customMode || value || enabledKeys.length === 0) return;
     const nextId = resolveSelectedId("", enabledKeys);
     setSelectedId(nextId);
     onSelectedIdChange?.(nextId);
     const stored = getStoredApiKeySecret(nextId);
     if (stored) onChange(stored);
-  }, [enabledKeys, onChange, onSelectedIdChange, value]);
+  }, [customMode, enabledKeys, onChange, onSelectedIdChange, value]);
 
   const handleSelect = (id: string) => {
+    if (id === CUSTOM_KEY_ID) {
+      setCustomMode(true);
+      setSelectedId(CUSTOM_KEY_ID);
+      onSelectedIdChange?.("");
+      onChange("");
+      return;
+    }
+    setCustomMode(false);
     setSelectedId(id);
     onSelectedIdChange?.(id);
     const stored = getStoredApiKeySecret(id) ?? "";
@@ -72,17 +85,18 @@ export function ApiKeySelect({
 
   const handleSecretChange = (next: string) => {
     onChange(next);
-    if (selectedId && next.trim()) {
+    // A hand-typed key belongs to no stored id, so never persist it under one.
+    if (!customMode && selectedId && next.trim()) {
       storeApiKeySecret(selectedId, next.trim());
     }
   };
 
   const selectedKey = enabledKeys.find((key) => key.id === selectedId);
-  const hasSecret = selectedId ? !!getStoredApiKeySecret(selectedId) : false;
+  const hasSecret = !customMode && selectedId ? !!getStoredApiKeySecret(selectedId) : false;
 
   const stackClass = embedded ? "api-key-select-embedded" : "cli-tool-field-stack";
 
-  if (enabledKeys.length === 0) {
+  if (enabledKeys.length === 0 && !customMode) {
     return (
       <div className={stackClass}>
         <p className="cli-tool-hint">
@@ -92,6 +106,15 @@ export function ApiKeySelect({
             </>
           )}
         </p>
+        <Field label="Custom key">
+          <Input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="tp_..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </Field>
       </div>
     );
   }
@@ -103,13 +126,24 @@ export function ApiKeySelect({
           {key.name && key.name !== key.id ? `${key.name} (${key.id})` : key.id}
         </option>
       ))}
+      <option value={CUSTOM_KEY_ID}>Custom…</option>
     </Select>
   );
 
   return (
     <div className={stackClass}>
       {embedded ? select : <Field label="Select key">{select}</Field>}
-      {showSecretField ? (
+      {customMode ? (
+        <Field label="Custom key" hint="Not saved in this browser — used for this apply only.">
+          <Input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="tp_..."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </Field>
+      ) : showSecretField ? (
         <Field
           label="API key value"
           hint={

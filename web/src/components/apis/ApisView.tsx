@@ -306,7 +306,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               ? lanIPs.map((ip) => (
                   <EndpointRow
                     key={ip}
-                    label={t("apis.lan")}
+                    label={t("apis.lan.label")}
                     url={buildHostBaseUrl(ip, serverPort)}
                     copyId={`lan_url_${ip}`}
                     copied={copied}
@@ -317,7 +317,7 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                 ))
               : (
                   <EndpointRow
-                    label={t("apis.lan")}
+                    label={t("apis.lan.label")}
                     url={t("apis.noLanIp")}
                     copyId="lan_url_empty"
                     copied={copied}

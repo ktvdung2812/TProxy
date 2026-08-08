@@ -264,7 +264,37 @@ func (c *Cloudflared) IsRunning() bool {
 	if runtime.GOOS == "windows" {
 		return true
 	}
-	return process.Signal(syscall.Signal(0)) == nil
+	if process.Signal(syscall.Signal(0)) != nil {
+		return false
+	}
+	// The pid file survives crashes and reboots, and the OS recycles pids. Without
+	// this check a stale file makes an unrelated process look like our connector —
+	// and Kill would then terminate it.
+	return processIsCloudflared(pid)
+}
+
+// processIsCloudflared reports whether pid currently belongs to a cloudflared
+// process. On platforms where the command name cannot be read it returns true so
+// that behaviour degrades to the previous pid-only check rather than never
+// cleaning up a real connector.
+func processIsCloudflared(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		// `ps` failed outright (not "no such process", which yields empty output
+		// with a non-zero status on some systems) — do not guess.
+		return len(bytes.TrimSpace(out)) > 0 && strings.Contains(string(out), "cloudflared")
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		return false
+	}
+	return strings.Contains(filepath.Base(name), "cloudflared")
 }
 
 // IsConnected reports whether the cloudflared process that this service
@@ -275,6 +305,16 @@ func (c *Cloudflared) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.process != nil && len(c.connections) > 0
+}
+
+// OwnsProcess reports whether the running connector is a child of this process.
+// After a tproxy restart the connector survives but its logs are gone, so
+// IsConnected can never become true for it — callers must fall back to probing
+// the public URL instead of assuming the tunnel is dead.
+func (c *Cloudflared) OwnsProcess() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.process != nil
 }
 
 func (c *Cloudflared) resetConnectionsLocked() {
@@ -334,7 +374,7 @@ func (c *Cloudflared) Kill(localPort int) {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
-	if pid, err := loadPID(c.layout.CloudflaredPID); err == nil && pid > 0 {
+	if pid, err := loadPID(c.layout.CloudflaredPID); err == nil && pid > 0 && processIsCloudflared(pid) {
 		if process, err := os.FindProcess(pid); err == nil && process != nil {
 			_ = process.Kill()
 		}
@@ -366,6 +406,14 @@ func (c *Cloudflared) finishProcess(cmd *exec.Cmd) (handler func(), wasCurrent b
 	return c.onUnexpectedExit, true
 }
 
+// cloudflaredPortPattern matches only the command line this service spawns
+// (`--url http://127.0.0.1:<port>`). The previous pattern matched any cloudflared
+// mentioning the port anywhere, so it could kill a named tunnel the user runs
+// themselves.
+func cloudflaredPortPattern(port int) string {
+	return fmt.Sprintf(`cloudflared.*--url[= ]http://127\.0\.0\.1:%d([^0-9]|$)`, port)
+}
+
 func killCloudflaredByPort(port int) {
 	if port <= 0 {
 		return
@@ -373,8 +421,7 @@ func killCloudflaredByPort(port int) {
 	if runtime.GOOS == "windows" {
 		return
 	}
-	pattern := fmt.Sprintf("cloudflared.*:%d([^0-9]|$)", port)
-	_ = exec.Command("pkill", "-f", pattern).Run()
+	_ = exec.Command("pkill", "-f", cloudflaredPortPattern(port)).Run()
 }
 
 func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURLUpdate func(string)) (string, error) {

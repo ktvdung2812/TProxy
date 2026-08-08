@@ -13,10 +13,10 @@ const proxyRouteContext contextKey = "proxy-route"
 
 var (
 	geminiNativeActions = map[string]bool{
-		"generateContent":         true,
-		"streamGenerateContent":   true,
-		"loadCodeAssist":          true,
-		"countTokens":             true,
+		"generateContent":       true,
+		"streamGenerateContent": true,
+		"loadCodeAssist":        true,
+		"countTokens":           true,
 	}
 	knownProviderRoutePrefixes = []string{
 		"openai",

@@ -30,6 +30,25 @@ routing:
   #     strategy: round-robin
   #     sticky-round-robin-limit: 5
 
+  # Automatic provider failover for the Provider Priority Manager chain. After
+  # failure-threshold consecutive failures against a provider (counted per model)
+  # it is skipped and traffic moves to the next provider in the chain. It is
+  # probed again after reset-timeout, with the wait doubling on repeat trips up
+  # to max-reset-timeout.
+  failover:
+    enabled: true
+    failure-threshold: 3
+    reset-timeout: 5m
+    max-reset-timeout: 30m
+    # 429/401/403 are per-account problems handled by account cooldown and token
+    # refresh, so they do not count against the provider by default.
+    # count-account-errors: false
+    # Per-provider overrides (optional):
+    # providers:
+    #   openrouter:
+    #     failure-threshold: 2
+    #     reset-timeout: 10m
+
 retention:
   usage-events: 2160h
   request-logs: 720h

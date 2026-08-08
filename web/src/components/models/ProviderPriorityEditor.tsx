@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge, Button, Select, Toggle } from "../ui";
+import type { FailoverState } from "./failoverApi";
 import type { ModelRecord, ProviderOption, RouteFormData } from "./types";
+import { useProviderFailover } from "./useProviderFailover";
 import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 import {
   accountHealthLabel,
   accountHealthVariant,
+  hasUsableAccounts,
   providersForUpstreamModel,
   reorderRoutePriorities,
   resolveCanonicalUpstreamModel,
@@ -15,6 +18,40 @@ import {
   syncRoutesForUpstreamModel,
   validatePriorityRoutes,
 } from "./utils";
+
+function formatRetryIn(seconds: number) {
+  if (seconds <= 0) return "any moment";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.round(minutes / 60)}h`;
+}
+
+function failoverBadge(state: FailoverState | undefined) {
+  if (!state) return null;
+  if (state.state === "open") {
+    return {
+      variant: "error" as const,
+      label: `auto-disabled · retry in ${formatRetryIn(state.retry_in_seconds)}`,
+      title: `Disabled after ${state.failures} failed attempt${state.failures === 1 ? "" : "s"}${
+        state.last_status ? ` (last status ${state.last_status})` : ""
+      }${state.last_error ? `: ${state.last_error}` : ""}`,
+    };
+  }
+  if (state.state === "half_open") {
+    return { variant: "warning" as const, label: "probing", title: "Next request is a probe; success puts this provider back in rotation." };
+  }
+  if (state.failures > 0) {
+    return {
+      variant: "warning" as const,
+      label: `${state.failures}/${state.threshold} failures`,
+      title: `${state.threshold - state.failures} more consecutive failure${
+        state.threshold - state.failures === 1 ? "" : "s"
+      } will take this provider out of the chain.`,
+    };
+  }
+  return null;
+}
 
 type Props = {
   active: boolean;
@@ -27,14 +64,6 @@ type Props = {
   onNavigateAway?: () => void;
   onRegisterSave?: (actions: { canSave: boolean; save: () => void } | null) => void;
 };
-
-function moveItem<T>(items: T[], from: number, to: number) {
-  if (to < 0 || to >= items.length) return items;
-  const next = [...items];
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
-  return next;
-}
 
 export function ProviderPriorityEditor({
   active,
@@ -49,11 +78,13 @@ export function ProviderPriorityEditor({
 }: Props) {
   const navigate = useNavigate();
   const [items, setItems] = useState<RouteFormData[]>([]);
+  const [resettingProvider, setResettingProvider] = useState<string | null>(null);
   const { modelsByProvider, loading: loadingModels, error: modelsError } = useProviderModelDiscovery(
     secret,
     providers,
     active,
   );
+  const { failoverByProvider, failoverError, resetFailover } = useProviderFailover(secret, model?.ID, active);
 
   useEffect(() => {
     if (!active) return;
@@ -86,7 +117,14 @@ export function ProviderPriorityEditor({
   );
 
   const validationError = validatePriorityRoutes(items);
-  const enabledItems = items.filter((item) => item.enabled);
+  // Providers with no accounts stay in the saved chain but are hidden here and
+  // skipped by the router, so they never occupy a visible priority slot.
+  const visibleItems = useMemo(
+    () => items.filter((item) => hasUsableAccounts(item, credentialCounts)),
+    [items, credentialCounts],
+  );
+  const hiddenCount = items.length - visibleItems.length;
+  const enabledItems = visibleItems.filter((item) => item.enabled);
   const primaryProvider = enabledItems[0]?.provider || "";
 
   useEffect(() => {
@@ -141,8 +179,28 @@ export function ProviderPriorityEditor({
     setItems((current) => reorderRoutePriorities(current.filter((_, routeIndex) => routeIndex !== index)));
   };
 
-  const moveRoute = (index: number, direction: -1 | 1) => {
-    setItems((current) => reorderRoutePriorities(moveItem(current, index, index + direction)));
+  // Moves are expressed against the visible rows, then applied to the real list
+  // so hidden account-less routes keep their saved position.
+  const moveRoute = (visiblePosition: number, direction: -1 | 1) => {
+    const target = visiblePosition + direction;
+    if (target < 0 || target >= visibleItems.length) return;
+    const from = items.indexOf(visibleItems[visiblePosition]);
+    const to = items.indexOf(visibleItems[target]);
+    if (from < 0 || to < 0) return;
+    setItems((current) => {
+      const next = [...current];
+      [next[from], next[to]] = [next[to], next[from]];
+      return reorderRoutePriorities(next);
+    });
+  };
+
+  const onResetFailover = async (providerId: string) => {
+    setResettingProvider(providerId);
+    try {
+      await resetFailover(providerId);
+    } finally {
+      setResettingProvider(null);
+    }
   };
 
   if (!model) {
@@ -157,6 +215,17 @@ export function ProviderPriorityEditor({
           <strong>P1</strong> first, then fall back down the chain. Disable providers you do not want, or keep only one
           enabled route to pin a single provider.
         </p>
+        <p>
+          A provider that keeps failing is taken out of this chain automatically and traffic moves to the next one. It is
+          probed again after a short backoff, or immediately if you re-enable it here. Providers with no accounts are
+          hidden because they cannot serve a request.
+        </p>
+        {hiddenCount > 0 ? (
+          <p className="priority-manager-primary">
+            {hiddenCount} provider{hiddenCount === 1 ? "" : "s"} hidden — no accounts configured. Their saved priority is
+            kept and they return to the chain once an account is added.
+          </p>
+        ) : null}
         {canonicalUpstream ? (
           <p className="priority-manager-primary">
             Upstream model: <code>{canonicalUpstream}</code>
@@ -199,21 +268,37 @@ export function ProviderPriorityEditor({
         <div className="priority-manager-empty">
           <p>Discovering providers that support upstream model "{canonicalUpstream}"…</p>
         </div>
+      ) : visibleItems.length === 0 ? (
+        <div className="priority-manager-empty">
+          <p>
+            Every provider mapped to this model has 0 accounts, so none of them can serve a request. Add an account to a
+            provider and it rejoins the chain at its saved priority.
+          </p>
+          <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
+            Open Providers
+          </Button>
+        </div>
       ) : (
         <div className="priority-manager-table" role="table" aria-label="Provider priority routes">
           <div className="priority-manager-head" role="row">
             <span>Order</span>
             <span>Provider</span>
-            <span>Accounts</span>
+            <span>Accounts &amp; health</span>
             <span>Enabled</span>
             <span aria-hidden />
           </div>
-          {items.map((route, index) => {
+          {visibleItems.map((route, visiblePosition) => {
+            const index = items.indexOf(route);
             const enabledPosition = route.enabled ? enabledItems.findIndex((item) => item === route) + 1 : 0;
             const accountCount = credentialCounts[route.provider] ?? 0;
+            const failover = failoverByProvider[route.provider];
+            const badge = failoverBadge(failover);
+            const trippedOut = failover?.state === "open";
             return (
               <div
-                className={`priority-manager-row${route.enabled ? "" : " is-disabled"}`}
+                className={`priority-manager-row${route.enabled ? "" : " is-disabled"}${
+                  trippedOut ? " is-failed-over" : ""
+                }`}
                 key={`${route.id || route.provider}-${index}`}
                 role="row"
               >
@@ -240,6 +325,21 @@ export function ProviderPriorityEditor({
                   <Badge variant={accountHealthVariant(accountCount)} size="sm" dot>
                     {accountHealthLabel(accountCount)}
                   </Badge>
+                  {badge ? (
+                    <Badge variant={badge.variant} size="sm" dot title={badge.title}>
+                      {badge.label}
+                    </Badge>
+                  ) : null}
+                  {trippedOut ? (
+                    <button
+                      type="button"
+                      className="priority-manager-reset-btn"
+                      disabled={resettingProvider === route.provider}
+                      onClick={() => void onResetFailover(route.provider)}
+                    >
+                      {resettingProvider === route.provider ? "Re-enabling…" : "Re-enable now"}
+                    </button>
+                  ) : null}
                 </div>
                 <div className="priority-manager-enabled" role="cell">
                   <Toggle
@@ -252,8 +352,8 @@ export function ProviderPriorityEditor({
                   <button
                     type="button"
                     className="priority-manager-icon-btn"
-                    disabled={index === 0}
-                    onClick={() => moveRoute(index, -1)}
+                    disabled={visiblePosition === 0}
+                    onClick={() => moveRoute(visiblePosition, -1)}
                     aria-label="Move provider up"
                   >
                     <span className="material-symbols-outlined">arrow_upward</span>
@@ -261,8 +361,8 @@ export function ProviderPriorityEditor({
                   <button
                     type="button"
                     className="priority-manager-icon-btn"
-                    disabled={index === items.length - 1}
-                    onClick={() => moveRoute(index, 1)}
+                    disabled={visiblePosition === visibleItems.length - 1}
+                    onClick={() => moveRoute(visiblePosition, 1)}
                     aria-label="Move provider down"
                   >
                     <span className="material-symbols-outlined">arrow_downward</span>
@@ -289,6 +389,7 @@ export function ProviderPriorityEditor({
       </div>
 
       {modelsError ? <p className="field-error">{modelsError}</p> : null}
+      {failoverError ? <p className="field-error">{failoverError}</p> : null}
       {validationError ? <p className="field-error">{validationError}</p> : null}
     </div>
   );

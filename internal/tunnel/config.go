@@ -14,6 +14,10 @@ const (
 	networkCheckSec     = 5
 	restartCooldownSec  = 120
 	networkSettleSec    = 3
+	// A tunnel left enabled must survive a slow database at boot, so the startup
+	// settings load is retried instead of silently disabling auto-resume.
+	startupSettingsAttempts = 5
+	startupRetryDelaySec    = 3
 )
 
 // CloudflareQuickTunnelURL returns the canonical public origin emitted by

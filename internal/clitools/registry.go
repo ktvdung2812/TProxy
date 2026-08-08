@@ -95,6 +95,13 @@ func init() {
 		apply:      grokApply,
 		reset:      grokReset,
 	})
+	register("cowork", toolHandler{
+		binary:     "",
+		configPath: coworkConfigPath,
+		status:     coworkStatus,
+		apply:      coworkApply,
+		reset:      coworkReset,
+	})
 	register("jcode", toolHandler{
 		binary:     "jcode",
 		configPath: jcodeConfigPath,
@@ -212,4 +219,13 @@ func statusFromInstalled(binary string, configPath string, configured bool) Stat
 		SettingsPath: configPath,
 		ConfigPath:   configPath,
 	}
+}
+
+// with attaches the endpoint/model the tool is currently pointed at. The dashboard
+// compares Endpoint against the base URLs it knows about (local, LAN, tunnel,
+// Tailscale) to distinguish "connected to us" from "connected elsewhere".
+func (s StatusResult) with(endpoint, model string) StatusResult {
+	s.Endpoint = strings.TrimSpace(endpoint)
+	s.Model = strings.TrimSpace(model)
+	return s
 }

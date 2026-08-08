@@ -98,10 +98,10 @@ func (s *Server) adminGetClaudeMapping(w http.ResponseWriter, r *http.Request) {
 		},
 		"reasoning_effort_overrides": reasoningEffortMap(reasoningEffort),
 		"effective_reasoning_effort": resolver.EffectiveReasoningEffortMapping(),
-		"effective":            effective,
-		"effective_resolved":   resolver.EffectiveResolvedMapping(),
-		"placeholders":         placeholders,
-		"content_mapping":          contentMappingSummary(),
+		"effective":                  effective,
+		"effective_resolved":         resolver.EffectiveResolvedMapping(),
+		"placeholders":               placeholders,
+		"content_mapping":            contentMappingSummary(),
 	})
 }
 

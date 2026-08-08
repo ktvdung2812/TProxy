@@ -30,6 +30,12 @@ func main() {
 		}
 		return
 	}
+	if ran, err := maybeRunSetup(os.Args[1:]); ran {
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
