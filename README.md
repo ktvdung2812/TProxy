@@ -412,14 +412,15 @@ curl http://127.0.0.1:28120/v1/models \
   -H "Authorization: Bearer $TPROXY_API_KEY"
 ```
 
-### npm install (wrapper)
+### npm install
 
 ```bash
 npm install -g @ktvdung1606/tproxy
 tproxy --config config.yaml
 ```
 
-See [Option E — npm global wrapper](#option-e--npm-global-wrapper) and [`npm/README.md`](npm/README.md) for details.
+The npm package includes native gateway binaries for macOS, Linux, and Windows;
+Go is not required on the machine running the command. See [`npm/README.md`](npm/README.md) for details.
 
 ---
 
