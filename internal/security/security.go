@@ -3,6 +3,7 @@ package security
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -14,11 +15,68 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 type Encryptor struct {
 	aead cipher.AEAD
+}
+
+const (
+	passwordHashAlgorithm  = "pbkdf2-sha256"
+	passwordHashIterations = 600000
+	passwordHashLength     = 32
+	passwordHashSaltLength = 16
+)
+
+// HashPassword derives a slow, salted verifier for a human-managed password.
+// The returned value contains the parameters needed for future verification;
+// it never contains the password itself.
+func HashPassword(password string) (string, error) {
+	if strings.TrimSpace(password) == "" {
+		return "", errors.New("password required")
+	}
+	salt := make([]byte, passwordHashSaltLength)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return "", err
+	}
+	derived, err := pbkdf2.Key(sha256.New, password, salt, passwordHashIterations, passwordHashLength)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join([]string{
+		passwordHashAlgorithm,
+		strconv.Itoa(passwordHashIterations),
+		base64.RawURLEncoding.EncodeToString(salt),
+		base64.RawURLEncoding.EncodeToString(derived),
+	}, "$"), nil
+}
+
+// VerifyPassword checks a value against a HashPassword result. Malformed
+// verifiers fail closed as a non-match.
+func VerifyPassword(password, encoded string) (bool, error) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 4 || parts[0] != passwordHashAlgorithm {
+		return false, nil
+	}
+	iterations, err := strconv.Atoi(parts[1])
+	if err != nil || iterations < 100000 || iterations > 5000000 {
+		return false, nil
+	}
+	salt, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(salt) < 16 || len(salt) > 64 {
+		return false, nil
+	}
+	expected, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil || len(expected) != passwordHashLength {
+		return false, nil
+	}
+	derived, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(expected))
+	if err != nil {
+		return false, err
+	}
+	return subtle.ConstantTimeCompare(derived, expected) == 1, nil
 }
 
 func NewEncryptor(secret string) (*Encryptor, error) {

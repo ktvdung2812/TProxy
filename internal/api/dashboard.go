@@ -17,6 +17,13 @@ func dashboardHandler() http.Handler {
 	}
 	files := http.FileServer(http.FS(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The dashboard is an authenticated control surface. Prevent it from
+		// being embedded by an attacker and keep browser MIME/referrer handling
+		// from widening the exposure of management responses.
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		path := strings.TrimPrefix(r.URL.Path, "/dashboard/")
 		if path == "" || path == "/" || path == "index.html" {
 			serveDashboardIndex(w, root)

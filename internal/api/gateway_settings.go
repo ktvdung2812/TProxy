@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,9 @@ func (s *Server) loadGatewaySettings(ctx context.Context) {
 }
 
 func (s *Server) managementClientAllowed(r *http.Request) bool {
+	if s.managementRequestViaTunnel(r) {
+		return s.tunnelDashboardAccessAllowed(r)
+	}
 	if security.IsLoopback(r) {
 		return true
 	}
@@ -34,6 +38,57 @@ func (s *Server) managementClientAllowed(r *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+func (s *Server) isLocalManagementRequest(r *http.Request) bool {
+	return security.IsLoopback(r) && !s.managementRequestViaTunnel(r)
+}
+
+// managementRequestViaTunnel identifies requests addressed to a tunnel URL
+// that TProxy persisted when it created a Cloudflare or Tailscale connector.
+// Host matching is local provenance: an internet client cannot change the
+// request's Host after the connector has selected the configured public URL.
+func (s *Server) managementRequestViaTunnel(r *http.Request) bool {
+	if r == nil || strings.TrimSpace(r.Host) == "" {
+		return false
+	}
+	settings, err := s.store.TunnelSettings(r.Context())
+	if err != nil {
+		return false
+	}
+	requestURL, parseErr := url.Parse("//" + strings.TrimSpace(r.Host))
+	if parseErr != nil {
+		return false
+	}
+	requestHost := strings.ToLower(strings.TrimSuffix(requestURL.Hostname(), "."))
+	if requestHost == "" {
+		return false
+	}
+	for _, raw := range []string{settings.TunnelURL, settings.TailscaleURL} {
+		parsed, parseErr := url.Parse(strings.TrimSpace(raw))
+		if parseErr == nil && strings.EqualFold(requestHost, strings.TrimSuffix(parsed.Hostname(), ".")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) tunnelDashboardAccessAllowed(r *http.Request) bool {
+	if !s.managementRequestViaTunnel(r) {
+		return true
+	}
+	settings, err := s.store.TunnelSettings(r.Context())
+	return err == nil && settings.TunnelDashboardAccess
+}
+
+func (s *Server) tunnelDashboard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.tunnelDashboardAccessAllowed(r) {
+			writeError(w, http.StatusForbidden, "tunnel_dashboard_disabled", "dashboard access through the tunnel is disabled", useClientRequestID(r))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {

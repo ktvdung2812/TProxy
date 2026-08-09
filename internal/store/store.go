@@ -44,28 +44,28 @@ type OAuthToken struct {
 }
 
 type Credential struct {
-	ID            string
-	ProviderID    string
-	AuthType      string
-	Status        string
-	Label         string
-	Email         string
-	Secret        string
-	TokenType     string
-	OAuthToken    *OAuthToken
-	Metadata      map[string]any
-	ProxyPoolIDs  []string
-	ProxyURL      string
-	Priority      int
-	Weight        int
-	Enabled       bool
-	CooldownUntil         time.Time
-	LastErrorCode         string
-	LastError             string
-	LastValidated         time.Time
-	LastUsedAt            time.Time
-	ConsecutiveUseCount   int
-	CreatedAt             time.Time
+	ID                  string
+	ProviderID          string
+	AuthType            string
+	Status              string
+	Label               string
+	Email               string
+	Secret              string
+	TokenType           string
+	OAuthToken          *OAuthToken
+	Metadata            map[string]any
+	ProxyPoolIDs        []string
+	ProxyURL            string
+	Priority            int
+	Weight              int
+	Enabled             bool
+	CooldownUntil       time.Time
+	LastErrorCode       string
+	LastError           string
+	LastValidated       time.Time
+	LastUsedAt          time.Time
+	ConsecutiveUseCount int
+	CreatedAt           time.Time
 }
 
 type ProxyPool struct {
@@ -229,6 +229,9 @@ func OpenSQLite(path string, encryptor *security.Encryptor) (*Store, error) {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create sqlite directory: %w", err)
 		}
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return nil, fmt.Errorf("protect sqlite directory: %w", err)
+		}
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -238,6 +241,12 @@ func OpenSQLite(path string, encryptor *security.Encryptor) (*Store, error) {
 	if _, err = db.Exec(`PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure sqlite: %w", err)
+	}
+	for _, filePath := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(filePath, 0o600); err != nil && !os.IsNotExist(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("protect sqlite file %s: %w", filePath, err)
+		}
 	}
 	store := &Store{db: db, encryptor: encryptor, path: path}
 	if err = store.Migrate(context.Background()); err != nil {
@@ -1822,8 +1831,8 @@ func (s *Store) MigrateClaudeOAuthConfigs(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	type claudeRow struct {
-		id          string
-		rawConfig   string
+		id        string
+		rawConfig string
 	}
 	pending := make([]claudeRow, 0, 4)
 	for rows.Next() {
@@ -2382,14 +2391,14 @@ type ProxyPoolSummary struct {
 	UsageCount   int        `json:"usage_count"`
 }
 type CredentialSummary struct {
-	ID            string     `json:"id"`
-	Label         string     `json:"label"`
-	Email         string     `json:"email,omitempty"`
-	AuthType      string     `json:"auth_type"`
-	Status        string     `json:"status"`
-	Priority      int        `json:"priority"`
-	Weight        int        `json:"weight"`
-	Enabled       bool       `json:"enabled"`
+	ID                  string     `json:"id"`
+	Label               string     `json:"label"`
+	Email               string     `json:"email,omitempty"`
+	AuthType            string     `json:"auth_type"`
+	Status              string     `json:"status"`
+	Priority            int        `json:"priority"`
+	Weight              int        `json:"weight"`
+	Enabled             bool       `json:"enabled"`
 	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
 	LastErrorCode       string     `json:"last_error_code,omitempty"`
 	LastError           string     `json:"last_error,omitempty"`

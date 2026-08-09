@@ -55,14 +55,16 @@ type requestLogState struct {
 }
 
 type Server struct {
-	cfg              *config.Config
-	store            *store.Store
-	router           *router.Router
-	auth             *auth.Manager
-	managementSecret string
-	allowRemoteMgmt  bool
-	allowLanMgmt     bool
-	ccFilterNaming   atomic.Bool
+	cfg                     *config.Config
+	store                   *store.Store
+	router                  *router.Router
+	auth                    *auth.Manager
+	managementSecret        string
+	managementSecretFromEnv bool
+	dashboardPasswordAuth   bool
+	allowRemoteMgmt         bool
+	allowLanMgmt            bool
+	ccFilterNaming          atomic.Bool
 	// Idle-connection keepalives; zero disables them.
 	streamKeepalive    time.Duration
 	nonStreamKeepalive time.Duration
@@ -160,8 +162,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
 	mux.Handle("/mcp", s.clientAuth(mcpBridgeHandler(s)))
-	mux.Handle("/dashboard/", s.dashboard())
-	mux.Handle("/assets/", s.dashboard())
+	mux.Handle("/dashboard/", s.tunnelDashboard(s.dashboard()))
+	mux.Handle("/assets/", s.tunnelDashboard(s.dashboard()))
 	// OAuth providers cannot attach the management bearer when redirecting the
 	// browser. This exact callback route relies on opaque, single-use state; the
 	// rest of the admin subtree remains behind management authentication.
@@ -297,11 +299,28 @@ func (s *Server) managementAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "management_remote_disabled", "remote management is disabled", useClientRequestID(r))
 			return
 		}
-		if !security.IsLoopback(r) && s.managementSecret == "" {
+		if s.managementRequestViaTunnel(r) && !s.managementSecretFromEnv {
+			writeError(w, http.StatusServiceUnavailable, "tunnel_management_secret_required", "tunnel management requires TPROXY_MANAGEMENT_SECRET", useClientRequestID(r))
+			return
+		}
+		// The bootstrap dashboard password protects only the loopback UI. Every
+		// non-loopback management surface must have an operator-provided secret;
+		// otherwise a newly installed, publicly reachable service would accept a
+		// known default password.
+		if !security.IsLoopback(r) && !s.managementSecretFromEnv {
 			writeError(w, http.StatusServiceUnavailable, "management_secret_required", "remote management requires a management secret", useClientRequestID(r))
 			return
 		}
-		if s.managementSecret != "" && !security.ConstantTimeEqual(managementToken(r), s.managementSecret) {
+		token := managementToken(r)
+		matched := s.managementSecret != "" && security.ConstantTimeEqual(token, s.managementSecret)
+		// An environment-managed secret is the sole credential on remote paths;
+		// never let the local bootstrap password become a remote fallback. Keep
+		// the local dashboard password usable for loopback administration even
+		// when an operator also configured a remote secret.
+		if !matched && s.dashboardPasswordAuth && s.isLocalManagementRequest(r) {
+			matched, _ = s.store.VerifyDashboardPassword(r.Context(), token)
+		}
+		if !matched {
 			writeError(w, http.StatusUnauthorized, "invalid_management_secret", "invalid management secret", useClientRequestID(r))
 			return
 		}
@@ -3090,8 +3109,15 @@ func oauthCallbackValues(r *http.Request) (state, code, providerError string) {
 func corsMiddleware(next http.Handler) http.Handler {
 	allowedHeaders := "Authorization, Content-Type, X-Api-Key, X-Request-ID, X-Model, Idempotency-Key, X-TProxy-Token-Saver"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/admin/") {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" {
+			if !trustedCORSOrigin(origin) {
+				writeError(w, http.StatusForbidden, "cors_origin_denied", "cross-origin browser access is not allowed", useClientRequestID(r))
+				return
+			} else if !strings.HasPrefix(r.URL.Path, "/api/admin/") {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
+			}
 		}
 		w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -3101,6 +3127,18 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func trustedCORSOrigin(origin string) bool {
+	if origin == "vscode-file://vscode-app" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 type statusWriter struct {

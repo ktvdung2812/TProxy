@@ -96,7 +96,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const { copied, copy } = useCopyToClipboard();
   const [tunnel, setTunnel] = useState<CloudflareTunnelStatus | null>(null);
   const [tailscale, setTailscale] = useState<TailscaleTunnelStatus | null>(null);
-  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(true);
+  // Fail closed while the server setting is unavailable. The API also defaults
+  // to false, so a transient dashboard request must never advertise access as
+  // enabled or encourage an unsafe toggle.
+  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tunnelLoading, setTunnelLoading] = useState(false);
   const [tsLoading, setTsLoading] = useState(false);
@@ -150,9 +153,11 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         if (response.ok) {
           const data = await response.json();
           setTunnelDashboardAccess(data.tunnel_dashboard_access !== false);
+        } else {
+          setTunnelDashboardAccess(false);
         }
       } catch {
-        // ignore
+        setTunnelDashboardAccess(false);
       }
     })();
   }, [secret]);

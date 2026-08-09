@@ -13,9 +13,10 @@ Linux (x64 and ARM64), and Windows (x64 and ARM64). Node.js 18 or newer is requi
 
 ## First login
 
-On the first gateway start, the dashboard password is initialized to `123123`.
-Change it immediately in **Settings**. This default is used only when no dashboard
-password has been saved and `TPROXY_MANAGEMENT_SECRET` is not set.
+On the first gateway start, the local dashboard password is initialized to
+`123123` and stored as a salted verifier. Change it immediately in **Settings**.
+For any dashboard access outside loopback, configure a strong
+`TPROXY_MANAGEMENT_SECRET` instead.
 
 ## Automated releases
 

@@ -233,14 +233,18 @@ func TestRemoteManagementRequiresSecret(t *testing.T) {
 	request.RemoteAddr = "203.0.113.10:1234"
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "invalid_management_secret") {
+	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), "management_secret_required") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestLANManagementAllowsPrivateNetworkWithPassword(t *testing.T) {
+func TestLANManagementRequiresEnvironmentSecret(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Server: config.ServerConfig{AllowRemoteManagement: false}}
+	t.Setenv("TPROXY_TEST_LAN_MANAGEMENT_SECRET", "lan-management-secret")
+	cfg := &config.Config{
+		Server:   config.ServerConfig{AllowRemoteManagement: false},
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_TEST_LAN_MANAGEMENT_SECRET"},
+	}
 	dataStore := apiTestStore(t, cfg)
 	if err := dataStore.SaveGatewaySettings(ctx, store.GatewaySettings{AllowLANManagement: true}); err != nil {
 		t.Fatal(err)
@@ -259,13 +263,116 @@ func TestLANManagementAllowsPrivateNetworkWithPassword(t *testing.T) {
 		t.Fatalf("public status=%d body=%s", deniedRecorder.Code, deniedRecorder.Body.String())
 	}
 
+	bootstrapPassword := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	bootstrapPassword.RemoteAddr = "192.168.1.50:1234"
+	bootstrapPassword.Header.Set("Authorization", "Bearer "+testDashboardPassword)
+	bootstrapPasswordRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(bootstrapPasswordRecorder, bootstrapPassword)
+	if bootstrapPasswordRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("lan accepted dashboard password: status=%d body=%s", bootstrapPasswordRecorder.Code, bootstrapPasswordRecorder.Body.String())
+	}
+
 	allowed := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	allowed.RemoteAddr = "192.168.1.50:1234"
-	allowed.Header.Set("Authorization", "Bearer "+testDashboardPassword)
+	allowed.Header.Set("Authorization", "Bearer lan-management-secret")
 	allowedRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(allowedRecorder, allowed)
 	if allowedRecorder.Code != http.StatusOK {
 		t.Fatalf("lan status=%d body=%s", allowedRecorder.Code, allowedRecorder.Body.String())
+	}
+}
+
+func TestLoopbackDashboardPasswordRemainsUsableWithEnvironmentSecret(t *testing.T) {
+	t.Setenv("TPROXY_LOOPBACK_MANAGEMENT_SECRET", "remote-only-secret")
+	cfg := &config.Config{Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_LOOPBACK_MANAGEMENT_SECRET"}}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(request)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("loopback dashboard password status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	remote := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	remote.RemoteAddr = "192.168.1.50:1234"
+	withDefaultManagementAuth(remote)
+	remoteRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(remoteRecorder, remote)
+	if remoteRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("remote accepted local dashboard password: status=%d body=%s", remoteRecorder.Code, remoteRecorder.Body.String())
+	}
+}
+
+func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_TEST_TUNNEL_MANAGEMENT_SECRET"}}
+	dataStore := apiTestStore(t, cfg)
+	if err := dataStore.SaveTunnelSettings(ctx, store.TunnelSettings{
+		Enabled:               true,
+		TunnelURL:             "https://example.trycloudflare.com",
+		TunnelDashboardAccess: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+
+	dashboard := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/dashboard/", nil)
+	dashboard.RemoteAddr = "127.0.0.1:1234"
+	dashboardRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(dashboardRecorder, dashboard)
+	if dashboardRecorder.Code != http.StatusForbidden || !strings.Contains(dashboardRecorder.Body.String(), "tunnel_dashboard_disabled") {
+		t.Fatalf("disabled tunnel dashboard status=%d body=%s", dashboardRecorder.Code, dashboardRecorder.Body.String())
+	}
+
+	disabled := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	disabled.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(disabled)
+	disabledRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(disabledRecorder, disabled)
+	if disabledRecorder.Code != http.StatusForbidden || !strings.Contains(disabledRecorder.Body.String(), "management_remote_disabled") {
+		t.Fatalf("disabled tunnel status=%d body=%s", disabledRecorder.Code, disabledRecorder.Body.String())
+	}
+
+	if err := dataStore.SaveTunnelSettings(ctx, store.TunnelSettings{
+		Enabled:               true,
+		TunnelURL:             "https://example.trycloudflare.com",
+		TunnelDashboardAccess: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requiresEnvSecret := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	requiresEnvSecret.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(requiresEnvSecret)
+	requiresEnvSecretRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(requiresEnvSecretRecorder, requiresEnvSecret)
+	if requiresEnvSecretRecorder.Code != http.StatusServiceUnavailable || !strings.Contains(requiresEnvSecretRecorder.Body.String(), "tunnel_management_secret_required") {
+		t.Fatalf("tunnel without env secret status=%d body=%s", requiresEnvSecretRecorder.Code, requiresEnvSecretRecorder.Body.String())
+	}
+
+	t.Setenv("TPROXY_TEST_TUNNEL_MANAGEMENT_SECRET", "tunnel-only-secret")
+	server = NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	withDefaultManagementAuth(requiresEnvSecret)
+	legacyPasswordRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(legacyPasswordRecorder, requiresEnvSecret)
+	if legacyPasswordRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("tunnel accepted bootstrap password with env secret: %d body=%s", legacyPasswordRecorder.Code, legacyPasswordRecorder.Body.String())
+	}
+
+	withEnvSecret := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	withEnvSecret.RemoteAddr = "127.0.0.1:1234"
+	withEnvSecret.Header.Set("Authorization", "Bearer tunnel-only-secret")
+	withEnvSecretRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(withEnvSecretRecorder, withEnvSecret)
+	if withEnvSecretRecorder.Code != http.StatusOK {
+		t.Fatalf("tunnel with env secret status=%d body=%s", withEnvSecretRecorder.Code, withEnvSecretRecorder.Body.String())
 	}
 }
 
@@ -1408,6 +1515,20 @@ func TestCORSPreflightAllowsClientAPIKeyHeader(t *testing.T) {
 	allowed := response.Header().Get("Access-Control-Allow-Headers")
 	if !strings.Contains(strings.ToLower(allowed), "x-api-key") {
 		t.Fatalf("allowed headers = %q", allowed)
+	}
+}
+
+func TestCORSPreflightRejectsUntrustedOrigin(t *testing.T) {
+	cfg := &config.Config{Server: config.ServerConfig{AllowLocalWithoutKey: true}}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+	request := httptest.NewRequest(http.MethodOptions, "/v1/models", nil)
+	request.Header.Set("Origin", "https://attacker.example")
+	request.Header.Set("Access-Control-Request-Method", "GET")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "cors_origin_denied") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
