@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const net = require("node:net");
 const http = require("node:http");
+const { findNativeTarget, nativeBinaryFileName, nativeTargets } = require("../lib/native-platforms");
 
 const packageRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(packageRoot, "..");
@@ -50,22 +51,37 @@ function withDefaultConfig(args) {
 }
 
 function resolveBinary() {
-  const candidates = [
-    path.join(repoRoot, "bin", "tproxy"),
-    path.join(packageRoot, "bin", "tproxy"),
-    path.join(packageRoot, "bin", "tproxy.exe"),
-    path.join(repoRoot, "bin", "tproxy.exe"),
-  ];
-  for (const candidate of candidates) {
+  const override = process.env.TPROXY_BINARY;
+  if (override) {
+    const candidate = path.resolve(override);
+    if (!fs.existsSync(candidate)) {
+      throw new Error(`TPROXY_BINARY does not exist: ${candidate}`);
+    }
+    return candidate;
+  }
+
+  const target = findNativeTarget();
+  if (target) {
+    const candidate = path.join(packageRoot, "bin", "native", nativeBinaryFileName(target));
     if (fs.existsSync(candidate)) return candidate;
   }
-  // PATH lookup
-  const pathEnv = process.env.PATH || "";
-  for (const dir of pathEnv.split(path.delimiter)) {
-    const candidate = path.join(dir, process.platform === "win32" ? "tproxy.exe" : "tproxy");
-    if (fs.existsSync(candidate)) return candidate;
+
+  // This makes the launcher usable from a source checkout before packaging.
+  const localBinary = path.join(repoRoot, "bin", process.platform === "win32" ? "tproxy.exe" : "tproxy");
+  if (fs.existsSync(path.join(repoRoot, "cmd", "tproxy")) && fs.existsSync(localBinary)) {
+    return localBinary;
   }
+
   return null;
+}
+
+function nativeBinaryUnavailableError() {
+  const supported = nativeTargets.map((target) => `${target.platform}-${target.arch}`).join(", ");
+  return new Error(
+    `No bundled tproxy binary is available for ${process.platform}-${process.arch}. ` +
+      `Reinstall @ktvdung1606/tproxy or set TPROXY_BINARY to a trusted binary path. ` +
+      `Supported platforms: ${supported}.`,
+  );
 }
 
 function readPortFromConfig(configPath) {
@@ -190,7 +206,10 @@ function spawnGateway(binary, args, { detached = false } = {}) {
       windowsHide: true,
     });
   }
-  // Dev fallback: go run from repo
+  if (!fs.existsSync(path.join(repoRoot, "cmd", "tproxy"))) {
+    throw nativeBinaryUnavailableError();
+  }
+  // Development fallback from a source checkout.
   return spawn("go", ["run", "./cmd/tproxy", ...args], {
     cwd: repoRoot,
     stdio: detached ? "ignore" : "inherit",
@@ -242,7 +261,7 @@ async function runTrayMode(rawArgs) {
     child.on("error", (err) => {
       console.error(`❌ Failed to start tproxy: ${err.message}`);
       if (!binary) {
-        console.error("   Build the binary with: (cd tproxy && go build -o bin/tproxy ./cmd/tproxy)");
+        console.error("   Reinstall @ktvdung1606/tproxy or set TPROXY_BINARY to a trusted binary path.");
       }
       process.exit(1);
     });
@@ -341,7 +360,7 @@ async function main() {
   child.on("error", (err) => {
     console.error(`❌ Failed to start tproxy: ${err.message}`);
     if (!binary) {
-      console.error("   Build the binary with: (cd tproxy && go build -o bin/tproxy ./cmd/tproxy)");
+      console.error("   Reinstall @ktvdung1606/tproxy or set TPROXY_BINARY to a trusted binary path.");
     }
     process.exit(1);
   });
