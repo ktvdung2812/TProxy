@@ -238,3 +238,21 @@ combos:
 		t.Fatalf("reloaded models = %+v", reloaded.Models)
 	}
 }
+
+// The example config is the documentation for every knob, so it must keep
+// parsing and the new retry/cooldown/streaming blocks must actually bind.
+func TestExampleConfigBindsRetryCooldownAndStreaming(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "config.example.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Routing.Retry.Backoff != "500ms" {
+		t.Errorf("retry.backoff = %q", cfg.Routing.Retry.Backoff)
+	}
+	if cfg.Routing.Cooldown.Disabled {
+		t.Error("cooldown must stay enabled by default in the example")
+	}
+	if cfg.Streaming.KeepaliveInterval != "" || cfg.Streaming.NonStreamKeepaliveInterval != "" {
+		t.Error("keepalives must be opt-in in the example config")
+	}
+}

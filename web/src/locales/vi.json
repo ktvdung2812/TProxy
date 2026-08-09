@@ -26,6 +26,7 @@
     "usage": "Sử dụng",
     "tokenSaver": "Token Saver",
     "quotaTracker": "Quota Tracker",
+    "freeTiers": "Free tiers",
     "apis": "APIs",
     "chat": "Chat",
     "cliTools": "CLI Tools",
@@ -59,6 +60,8 @@
     "tokenSaver_page_desc": "Pipeline nén RTK + Caveman và cài đặt CLI hook.",
     "quotaTracker_page_title": "Quota Tracker",
     "quotaTracker_page_desc": "Theo dõi và quản lý giới hạn quota API.",
+    "freeTiers_page_title": "Danh mục free tier",
+    "freeTiers_page_desc": "Xem các preset provider miễn phí và trạng thái cấu hình của chúng.",
     "apis_page_title": "API Endpoint",
     "apis_page_desc": "URL gateway, client API key và xác thực.",
     "chat_page_title": "Chat",
@@ -123,7 +126,8 @@
     "estimatedCost": "Chi phí ước tính",
     "estimatedCostHint": "giá models.dev",
     "activeCredentials": "Credential đang hoạt động",
-    "activeCredentialsHint": "bản ghi account khả dụng"
+    "activeCredentialsHint": "bản ghi account khả dụng",
+    "noApiKeys": "Chưa có API key"
   },
   "providers": {
     "healthOk": "{{id}} khỏe mạnh",

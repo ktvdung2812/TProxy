@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
-import { MatrixRain } from "./components/MatrixRain";
 import { LanguageToggle } from "./components/LanguageToggle";
 import { useViewportWidth } from "./hooks/useViewportWidth";
 import { Header } from "./components/Header";
@@ -390,7 +389,6 @@ function App() {
   if (authState === "checking") {
     return (
       <div className="app-shell app-shell-auth">
-        <MatrixRain />
         <div className="auth-language-toggle">
           <LanguageToggle />
         </div>
@@ -402,7 +400,6 @@ function App() {
   if (authState === "unauthenticated") {
     return (
       <div className="app-shell app-shell-auth">
-        <MatrixRain />
         <div className="auth-language-toggle">
           <LanguageToggle />
         </div>
@@ -413,7 +410,6 @@ function App() {
 
   return (
     <div className="app-shell">
-      <MatrixRain />
       {isMobileSidebar && mobileNavOpen ? (
         <button
           type="button"
@@ -435,7 +431,6 @@ function App() {
       </div>
 
       <main className="main-area">
-        <div className="landing-grid" aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: -1 }} />
         <Header
           title={t(activeRoute.i18nKey + "_page_title")}
           description={t(activeRoute.i18nKey + "_page_desc")}

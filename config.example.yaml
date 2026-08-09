@@ -49,6 +49,39 @@ routing:
     #     failure-threshold: 2
     #     reset-timeout: 10m
 
+  # Cooldown behaviour after a credential fails.
+  cooldown:
+    # Turn off every account/model cooldown. Use when one account is the only
+    # credential and a blackout window is worse than retrying a failing upstream.
+    disabled: false
+    # Backoff for retryable upstream failures (408/500/502/503/504).
+    # "off" disables it while auth (401/402/403) and quota (429) cooldowns stay.
+    # An explicit status-5xx entry still wins over this shorthand.
+    transient: ""
+
+  # Bounds the work one client request may do before the caller sees an error.
+  retry:
+    # Extra tries against the SAME credential for a transient upstream failure
+    # (403/408/500/502/503/504). 0 (default) keeps the legacy no-retry behaviour.
+    attempts: 0
+    # Cap on how many different credentials one request may walk through.
+    # 0 (default) tries every candidate.
+    max-credentials: 0
+    # Wait this long for a credential whose cooldown is about to end instead of
+    # skipping it. Empty (default) never waits.
+    max-wait: ""
+    # Pause between same-credential attempts. Default 500ms.
+    backoff: 500ms
+
+# Keep idle connections alive. Proxies and load balancers often drop a
+# connection that sends nothing for 30-60s, which looks like a truncated stream.
+streaming:
+  # Emit an SSE comment when a stream has been silent this long. Empty disables.
+  keepalive-interval: ""
+  # Emit newlines while a non-streaming request waits on the upstream. JSON
+  # ignores leading whitespace, so the response stays valid. Empty disables.
+  nonstream-keepalive-interval: ""
+
 retention:
   usage-events: 2160h
   request-logs: 720h

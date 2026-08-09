@@ -20,6 +20,7 @@ type Config struct {
 	Security      SecurityConfig      `yaml:"security"`
 	Routing       RoutingConfig       `yaml:"routing"`
 	Retention     RetentionConfig     `yaml:"retention"`
+	Streaming     StreamingConfig     `yaml:"streaming" json:"streaming"`
 	Limits        LimitPolicy         `yaml:"limits" json:"limits"`
 	Teams         []TeamPolicyConfig  `yaml:"teams" json:"teams"`
 	ProxyPools    []ProxyPoolConfig   `yaml:"proxy-pools"`
@@ -28,6 +29,19 @@ type Config struct {
 	Models        []PublicModelConfig `yaml:"models"`
 	Combos        []ComboConfig       `yaml:"combos"`
 	ClaudeAliases ClaudeAliasConfig   `yaml:"claude-aliases" json:"claude_aliases"`
+}
+
+// StreamingConfig keeps idle connections alive. Load balancers and corporate
+// proxies commonly drop a connection that sends nothing for 30-60s, which shows
+// up as a truncated stream long before the model was actually done.
+type StreamingConfig struct {
+	// KeepaliveInterval emits an SSE comment line when a stream has been silent
+	// for this long. Empty or 0 disables it.
+	KeepaliveInterval string `yaml:"keepalive-interval" json:"keepalive_interval,omitempty"`
+	// NonStreamKeepaliveInterval emits newlines while a non-streaming request is
+	// still waiting on the upstream. JSON ignores leading whitespace, so the
+	// response stays valid for every client.
+	NonStreamKeepaliveInterval string `yaml:"nonstream-keepalive-interval" json:"nonstream_keepalive_interval,omitempty"`
 }
 
 type ClaudeAliasConfig struct {
@@ -58,6 +72,25 @@ type RoutingConfig struct {
 	Cooldown              CooldownConfig                    `yaml:"cooldown" json:"cooldown"`
 	Prewarm               PrewarmConfig                     `yaml:"prewarm" json:"prewarm"`
 	Failover              FailoverConfig                    `yaml:"failover" json:"failover"`
+	Retry                 RetryConfig                       `yaml:"retry" json:"retry"`
+}
+
+// RetryConfig bounds how hard a single client request is retried before the
+// caller sees an error. Without limits a request can walk every credential of
+// every provider, which turns one slow upstream into a very long request.
+type RetryConfig struct {
+	// Attempts is how many times one credential is re-tried for a transient
+	// upstream status (408/500/502/503/504 and 403) before moving on. 0 disables
+	// same-credential retries, which is the behaviour tproxy had before.
+	Attempts int `yaml:"attempts" json:"attempts,omitempty"`
+	// MaxCredentials caps how many different credentials one request may try.
+	// 0 keeps the legacy behaviour of trying every candidate.
+	MaxCredentials int `yaml:"max-credentials" json:"max_credentials,omitempty"`
+	// MaxWait is how long a request may wait for a credential whose cooldown is
+	// about to end, instead of skipping it. Empty or 0 disables waiting.
+	MaxWait string `yaml:"max-wait" json:"max_wait,omitempty"`
+	// Backoff is the pause between same-credential attempts. Defaults to 500ms.
+	Backoff string `yaml:"backoff" json:"backoff,omitempty"`
 }
 
 type ProviderRotationConfig struct {
@@ -98,6 +131,14 @@ type ProviderFailoverConfig struct {
 }
 
 type CooldownConfig struct {
+	// Disabled turns off every account/model cooldown. Useful when a single
+	// account is the only credential and a blackout window is worse than
+	// hammering a failing upstream.
+	Disabled bool `yaml:"disabled" json:"disabled,omitempty"`
+	// Transient overrides the backoff for retryable upstream failures
+	// (408/500/502/503/504). "off" (or a negative duration) disables it while
+	// leaving auth and quota cooldowns in place.
+	Transient     string `yaml:"transient" json:"transient,omitempty"`
 	Default       string `yaml:"default" json:"default"`
 	Max           string `yaml:"max" json:"max"`
 	BackoffBase   string `yaml:"backoff-base" json:"backoff_base"`

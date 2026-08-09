@@ -26,6 +26,7 @@
     "usage": "Usage",
     "tokenSaver": "Token Saver",
     "quotaTracker": "Quota Tracker",
+    "freeTiers": "Free tiers",
     "apis": "APIs",
     "chat": "Chat",
     "cliTools": "CLI Tools",
@@ -59,6 +60,8 @@
     "tokenSaver_page_desc": "RTK + Caveman compression pipeline and CLI hook setup.",
     "quotaTracker_page_title": "Quota Tracker",
     "quotaTracker_page_desc": "Track and manage your API quota limits.",
+    "freeTiers_page_title": "Free-tier catalog",
+    "freeTiers_page_desc": "Browse zero-cost provider presets and their configuration status.",
     "apis_page_title": "API Endpoint",
     "apis_page_desc": "Gateway URL, client API keys, and authentication.",
     "chat_page_title": "Chat",
@@ -123,7 +126,8 @@
     "estimatedCost": "Estimated cost",
     "estimatedCostHint": "models.dev pricing",
     "activeCredentials": "Active credentials",
-    "activeCredentialsHint": "available account records"
+    "activeCredentialsHint": "available account records",
+    "noApiKeys": "No API keys yet"
   },
   "providers": {
     "healthOk": "{{id}} is healthy",

@@ -61,9 +61,9 @@ func (r *Router) orderCredentials(ctx context.Context, providerID, routeKey stri
 }
 
 type rotationTouch struct {
-	ID                    string
-	ConsecutiveUseCount   int
-	LastUsedAt            time.Time
+	ID                  string
+	ConsecutiveUseCount int
+	LastUsedAt          time.Time
 }
 
 func stickyRoundRobinOrder(credentials []store.Credential, stickyLimit int, now time.Time) ([]store.Credential, *rotationTouch) {

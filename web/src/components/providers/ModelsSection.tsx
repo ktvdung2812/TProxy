@@ -219,7 +219,6 @@ export function ModelsSection({
                 <tr>
                   <th>Model</th>
                   <th>Capabilities</th>
-                  <th>Accounts</th>
                   <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
@@ -252,15 +251,6 @@ export function ModelsSection({
                             <Badge key={cap} variant="default" size="sm">{cap}</Badge>
                           ))}
                         </div>
-                      </td>
-                      <td>
-                        {(model.credential_ids?.length ?? 0) > 0 ? (
-                          <Badge variant="info" size="sm">
-                            {model.credential_ids!.length}
-                          </Badge>
-                        ) : (
-                          "—"
-                        )}
                       </td>
                       <td>
                         <div className="model-table-actions">

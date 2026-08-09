@@ -43,6 +43,11 @@ const (
 	// Retry spacing for an age-based refresh that failed, so a provider outage
 	// cannot turn the 30s background tick into a hot retry loop.
 	ageRefreshRetryInterval = 15 * time.Minute
+
+	// Each refresh is a network round trip. Running them one at a time makes a
+	// sweep of many due credentials outlast the tick interval, so refreshes are
+	// spread over a small worker pool.
+	defaultRefreshWorkers = 16
 )
 
 const oauthCallbackSuccessHTML = `<!doctype html>
@@ -211,6 +216,8 @@ type Manager struct {
 	// ageRefreshAttempt throttles age-based rotation per credential so a failing
 	// provider is retried on a slow cadence rather than every background tick.
 	ageRefreshAttempt map[string]time.Time
+	// refreshWorkerCount overrides the background refresh concurrency; 0 = default.
+	refreshWorkerCount int
 
 	backgroundOnce sync.Once
 	backgroundWG   sync.WaitGroup
@@ -1111,6 +1118,7 @@ func (m *Manager) refreshExpiring(ctx context.Context) {
 		return
 	}
 	now := m.now()
+	due := make([]refreshJob, 0, len(items))
 	for _, item := range items {
 		if item.Credential.OAuthToken == nil {
 			continue
@@ -1136,11 +1144,76 @@ func (m *Manager) refreshExpiring(ctx context.Context) {
 				continue
 			}
 		}
-		// Age-driven rotations must be forced: EnsureValid judges staleness against
-		// the hard ceiling, so at the softer background threshold it would decline
-		// and the token would only ever rotate at 72h.
-		_, _ = m.EnsureValid(ctx, item.Provider, item.Credential, !expiring && aged)
+		due = append(due, refreshJob{item: item, force: !expiring && aged})
 	}
+	m.runRefreshJobs(ctx, due)
+}
+
+type refreshJob struct {
+	item store.ProviderCredential
+	// force is set for age-driven rotations: EnsureValid judges staleness against
+	// the hard ceiling, so at the softer background threshold it would decline and
+	// the token would only ever rotate at 72h.
+	force bool
+}
+
+// runRefreshJobs spreads the due refreshes over a bounded worker pool. Doing
+// them one at a time made a sweep of many credentials outlast the tick interval,
+// which delayed every refresh behind the slowest provider.
+func (m *Manager) runRefreshJobs(ctx context.Context, jobs []refreshJob) {
+	if len(jobs) == 0 {
+		return
+	}
+	workers := m.refreshWorkers()
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	queue := make(chan refreshJob)
+	var wait sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for job := range queue {
+				_, _ = m.EnsureValid(ctx, job.item.Provider, job.item.Credential, job.force)
+			}
+		}()
+	}
+	for _, job := range jobs {
+		select {
+		case <-ctx.Done():
+			close(queue)
+			wait.Wait()
+			return
+		case queue <- job:
+		}
+	}
+	close(queue)
+	wait.Wait()
+}
+
+func (m *Manager) refreshWorkers() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.refreshWorkerCount > 0 {
+		return m.refreshWorkerCount
+	}
+	return defaultRefreshWorkers
+}
+
+// SetRefreshWorkers overrides the background refresh concurrency. Values below
+// one fall back to the default.
+func (m *Manager) SetRefreshWorkers(count int) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if count < 1 {
+		m.refreshWorkerCount = 0
+		return
+	}
+	m.refreshWorkerCount = count
 }
 
 // ageRefreshDue throttles repeated age-based refresh attempts for one credential
