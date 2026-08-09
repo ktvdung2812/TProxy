@@ -2,15 +2,14 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"strings"
 )
 
 const AppSettingDashboardAuth = "dashboard_auth"
 
-// DefaultDashboardPassword is kept for legacy tests only.
+// DefaultDashboardPassword is created for a new local installation. Users must
+// change it before enabling management access outside loopback.
 const DefaultDashboardPassword = "123123"
 
 func (s *Store) DashboardPassword(ctx context.Context) (string, error) {
@@ -33,22 +32,11 @@ func (s *Store) EnsureDashboardPassword(ctx context.Context) (password string, g
 		pwd, loadErr := s.DashboardPassword(ctx)
 		return pwd, false, loadErr
 	}
-	pwd, err := generateDashboardPassword()
-	if err != nil {
-		return "", false, err
-	}
+	pwd := DefaultDashboardPassword
 	if err := s.SaveDashboardPassword(ctx, pwd); err != nil {
 		return "", false, err
 	}
 	return pwd, true, nil
-}
-
-func generateDashboardPassword() (string, error) {
-	buf := make([]byte, 18)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func (s *Store) DashboardPasswordSaved(ctx context.Context) (bool, error) {

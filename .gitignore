@@ -1,4 +1,5 @@
 /bin/
+/npm/bin/native/
 /tproxy
 /*.db
 *.db-shm
