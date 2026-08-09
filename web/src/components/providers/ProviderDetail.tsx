@@ -124,9 +124,17 @@ export function ProviderDetail({
     () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
     [catalog, presets, provider.ID],
   );
+  const [credentialRefreshOverrides, setCredentialRefreshOverrides] = useState<Record<string, { status?: string; last_validated_at?: string }>>({});
+  const displayedCredentials = useMemo(
+    () => credentials.map((credential) => {
+      const override = credentialRefreshOverrides[credential.id];
+      return override ? { ...credential, ...override } : credential;
+    }),
+    [credentials, credentialRefreshOverrides],
+  );
   const sortedCredentials = useMemo(
-    () => [...credentials].sort(compareCredentialsByCreatedAt),
-    [credentials],
+    () => [...displayedCredentials].sort(compareCredentialsByCreatedAt),
+    [displayedCredentials],
   );
   const credentialAccountNumbers = useMemo(
     () => buildCredentialAccountNumbers(credentials),
@@ -229,6 +237,10 @@ export function ProviderDetail({
 
   useEffect(() => {
     const available = new Set(credentials.map((credential) => credential.id));
+    setCredentialRefreshOverrides((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
     setSelectedCredentialIds((current) => {
       const next = current.filter((id) => available.has(id));
       return next.length === current.length ? current : next;
@@ -246,6 +258,13 @@ export function ProviderDetail({
   const allFilteredSelected =
     filteredCredentials.length > 0 && selectedInView.length === filteredCredentials.length;
   const someFilteredSelected = selectedInView.length > 0 && !allFilteredSelected;
+
+  const handleCredentialRefreshed = (credentialId: string, status?: string) => {
+    setCredentialRefreshOverrides((current) => ({
+      ...current,
+      [credentialId]: { status: status || "healthy", last_validated_at: new Date().toISOString() },
+    }));
+  };
 
   const toggleCredentialSelected = (credentialId: string, selected: boolean) => {
     setSelectedCredentialIds((current) => {
@@ -472,9 +491,12 @@ export function ProviderDetail({
         action={
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <ModelAvailabilityBadge credentials={credentials} />
-            {credentials.length === 0 ? (
-              <ProviderConnectionActions profile={connectionProfile} onMethod={handleConnectionMethod} />
-            ) : null}
+            <ProviderConnectionActions
+              profile={connectionProfile}
+              onMethod={handleConnectionMethod}
+              placement="footer"
+              hideImports
+            />
           </div>
         }
       >
@@ -482,17 +504,10 @@ export function ProviderDetail({
           <EmptyState
             icon="key_off"
             text="No connections yet."
-            hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, cookie, or import."}
+            hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, or cookie."}
           />
         ) : (
           <>
-            <div className="connections-add-bar connections-add-bar--top">
-              <ProviderConnectionActions
-                profile={connectionProfile}
-                onMethod={handleConnectionMethod}
-                placement="footer"
-              />
-            </div>
             <div className="connections-toolbar">
               <Input
                 icon="search"
@@ -593,6 +608,7 @@ export function ProviderDetail({
                   onReAuth={(c) => setReAuthCredential(c)}
                   onShowModels={(c) => setModelsCredential(c)}
                   onMutated={onMutated}
+                  onCredentialRefreshed={handleCredentialRefreshed}
                   onNotice={onNotice}
                   onError={onError}
                 />
@@ -758,6 +774,7 @@ function ConnectionRow({
   supportsOAuth,
   onDeleted,
   onMutated,
+  onCredentialRefreshed,
   onEdit,
   onReAuth,
   onShowModels,
@@ -778,6 +795,7 @@ function ConnectionRow({
   onReAuth: (credential: Credential) => void;
   onShowModels: (credential: Credential) => void;
   onMutated: () => void;
+  onCredentialRefreshed?: (credentialId: string, status?: string) => void;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 }) {
@@ -871,9 +889,13 @@ function ConnectionRow({
   const handleRefresh = async () => {
     setBusy(true);
     try {
-      await refreshCredential(secret, credential.id);
+      const result = await refreshCredential(secret, credential.id);
+      if (onCredentialRefreshed) {
+        onCredentialRefreshed(credential.id, result.status?.status);
+      } else {
+        onMutated();
+      }
       onNotice(`Token refreshed for ${credential.id}`);
-      onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Token refresh failed");
     } finally {

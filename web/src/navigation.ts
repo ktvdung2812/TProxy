@@ -94,6 +94,12 @@ export const NAV_SECTIONS: NavSection[] = [
         i18nKey: "nav.quotaTracker",
         icon: "data_usage",
       },
+      {
+        id: "free-tiers",
+        path: "/free-tiers",
+        i18nKey: "nav.freeTiers",
+        icon: "savings",
+      },
     ],
   },
   {

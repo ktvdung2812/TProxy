@@ -14,20 +14,12 @@ type SidebarProps = {
   secret?: string;
 };
 
-/** Vibrancy sidebar with macOS traffic lights, gradient brand logo, grouped nav, status. */
+/** Primary dashboard navigation with grouped routes and gateway status. */
 export function Sidebar({ onClose, online = true, collapsed = false, onToggleCollapse, collapseLabel, onLogout, secret = "" }: SidebarProps) {
   const { t } = useTranslation();
   return (
-    <aside className={cn("sidebar bg-vibrancy", collapsed && "is-collapsed")}>
+    <aside className={cn("sidebar", collapsed && "is-collapsed")}>
       <div className="sidebar-header">
-        {!collapsed && (
-          <div className="traffic-lights" style={{ marginBottom: 18 }}>
-            <span className="traffic-light red" />
-            <span className="traffic-light yellow" />
-            <span className="traffic-light green" />
-          </div>
-        )}
-
         <div className="sidebar-brand-row">
           <NavLink className="sidebar-brand" to="/" onClick={() => onClose?.()} title="tproxy control center">
             <span className="brand-mark">
@@ -36,7 +28,6 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
             {!collapsed && (
               <span className="sidebar-brand-text">
                 <span className="brand-name">tproxy</span>
-                <br />
                 <span className="brand-sub">{t("nav.controlCenter")}</span>
               </span>
             )}

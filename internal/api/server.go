@@ -63,15 +63,18 @@ type Server struct {
 	allowRemoteMgmt  bool
 	allowLanMgmt     bool
 	ccFilterNaming   atomic.Bool
-	configPath       string
-	limiter          *requestLimiter
-	liveUsage        *LiveUsageTracker
-	liveLogs         *LiveRequestLogBuffer
-	claudeAliases    *bridge.Resolver
-	cursorAliases    *bridge.CursorResolver
-	tunnel           *tunnel.Service
-	backgroundCancel context.CancelFunc
-	backgroundWG     sync.WaitGroup
+	// Idle-connection keepalives; zero disables them.
+	streamKeepalive    time.Duration
+	nonStreamKeepalive time.Duration
+	configPath         string
+	limiter            *requestLimiter
+	liveUsage          *LiveUsageTracker
+	liveLogs           *LiveRequestLogBuffer
+	claudeAliases      *bridge.Resolver
+	cursorAliases      *bridge.CursorResolver
+	tunnel             *tunnel.Service
+	backgroundCancel   context.CancelFunc
+	backgroundWG       sync.WaitGroup
 }
 
 func NewServer(cfg *config.Config, dataStore *store.Store, requestRouter *router.Router) *Server {
@@ -84,6 +87,8 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 	}
 	requestRouter.SetCredentialRefresher(authManager)
 	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	server.streamKeepalive = parsePositiveDuration(cfg.Streaming.KeepaliveInterval)
+	server.nonStreamKeepalive = parsePositiveDuration(cfg.Streaming.NonStreamKeepaliveInterval)
 	server.loadManagementSecret(context.Background())
 	server.loadGatewaySettings(context.Background())
 	_ = requestRouter.SyncAccountRotationSettings(context.Background())
@@ -1104,6 +1109,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			state.CredentialID = stream.Selection.Credential.ID
 			state.Attempt = stream.Selection.Attempt
 		}
+		streamWriter, stopKeepalive := newKeepaliveWriter(w, s.streamKeepalive)
+		defer stopKeepalive()
+		w = streamWriter
 		switch mode {
 		case renderModeClaude:
 			writeClaudeStream(w, r, stream.Events, request.RequestID, clientFacingModel(request, model.ID))
@@ -1116,7 +1124,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		}
 		return
 	}
+	stopNonStreamKeepalive := startNonStreamKeepalive(w, s.nonStreamKeepalive)
 	result, errExecute := s.router.Execute(r.Context(), *model, request)
+	stopNonStreamKeepalive()
 	if errExecute != nil {
 		if selectionProvider := liveProviderFromContext(r); selectionProvider != "" {
 			s.liveUsage.RecordError(selectionProvider)

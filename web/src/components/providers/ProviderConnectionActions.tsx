@@ -8,6 +8,8 @@ type Props = {
   size?: "sm" | "md";
   /** empty = first-time connect (prominent); footer = provider already has accounts */
   placement?: "empty" | "footer";
+  /** Hide backup/token-file import actions on provider detail pages. */
+  hideImports?: boolean;
 };
 
 function methodLabel(method: ConnectionMethod, placement: "empty" | "footer"): string {
@@ -37,10 +39,14 @@ export function ProviderConnectionActions({
   busy,
   size = "sm",
   placement = "empty",
+  hideImports = false,
 }: Props) {
+  const methods = hideImports
+    ? profile.methods.filter((method) => method.kind !== "import_9router" && method.kind !== "import_cliproxy")
+    : profile.methods;
   const cursorPrimary =
-    profile.methods.some((method) => method.kind === "import_cursor") &&
-    !profile.methods.some(
+    methods.some((method) => method.kind === "import_cursor") &&
+    !methods.some(
       (method) =>
         method.kind === "oauth" ||
         method.kind === "api_key" ||
@@ -49,12 +55,12 @@ export function ProviderConnectionActions({
         method.kind === "none",
     );
 
-  const primary = profile.methods.filter((method) => {
+  const primary = methods.filter((method) => {
     if (method.kind === "import_9router" || method.kind === "import_cliproxy") return false;
     if (method.kind === "import_cursor" && !cursorPrimary) return false;
     return true;
   });
-  const secondary = profile.methods.filter(
+  const secondary = methods.filter(
     (method) =>
       method.kind === "import_9router" ||
       method.kind === "import_cliproxy" ||

@@ -39,6 +39,7 @@ type Router struct {
 	discoveryInflight     map[string]*discoveryFlight
 	cooldown              time.Duration
 	cooldowns             CooldownSettings
+	retry                 RetrySettings
 	allowUpstream         bool
 	strategy              string
 	stickyRoundRobinLimit int
@@ -263,6 +264,7 @@ func (r *Router) ConfigureRouting(cfg config.RoutingConfig) {
 	r.sessionTTL = ttl
 	r.cooldowns = CooldownSettingsFromConfig(cfg.Cooldown)
 	r.cooldown = r.cooldowns.Fallback
+	r.retry = RetrySettingsFromConfig(cfg.Retry)
 	r.mu.Unlock()
 	r.configureFailover(cfg.Failover)
 }
@@ -638,13 +640,19 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		return nil, err
 	}
 	var lastErr error
+	retry := r.retrySettings()
+	credentialsTried := 0
 	for index, selection := range selections {
+		if !retry.allowCredentialAttempt(credentialsTried) {
+			break
+		}
 		selection.Attempt = index + 1
 		request.PublicModelID = model.ID
 		request.UpstreamModel = selection.Route.UpstreamModel
 		if !r.breakerAllows(model.ID, selection.Provider.ID) {
 			continue
 		}
+		credentialsTried++
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
@@ -671,6 +679,14 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			} else if refreshErr != nil {
 				errExecute = asCredentialError(refreshErr)
 			}
+		}
+		// Re-send to the same credential for a transient upstream failure before
+		// giving up on it; a 502 blip should not cost the account a cooldown.
+		for attempt := 0; retry.shouldRetrySameCredential(attempt, errExecute); attempt++ {
+			if !retry.sleepBackoff(ctx) {
+				break
+			}
+			response, errExecute = adapter.Execute(ctx, selection.Provider, selection.Credential, request)
 		}
 		if errExecute == nil {
 			r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
@@ -718,7 +734,12 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		return nil, err
 	}
 	var lastErr error
+	retry := r.retrySettings()
+	credentialsTried := 0
 	for index, selection := range selections {
+		if !retry.allowCredentialAttempt(credentialsTried) {
+			break
+		}
 		selection.Attempt = index + 1
 		request.PublicModelID = model.ID
 		request.UpstreamModel = selection.Route.UpstreamModel
@@ -726,6 +747,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		if !r.breakerAllows(model.ID, selection.Provider.ID) {
 			continue
 		}
+		credentialsTried++
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
@@ -762,6 +784,15 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			}
 		}
 		errExecute = validateStreamResult(events, errExecute)
+		// Streams have not emitted anything yet at this point, so re-dialling the
+		// same credential after a transient failure is safe.
+		for attempt := 0; retry.shouldRetrySameCredential(attempt, errExecute); attempt++ {
+			if !retry.sleepBackoff(ctx) {
+				break
+			}
+			events, errExecute = adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, request)
+			errExecute = validateStreamResult(events, errExecute)
+		}
 		if errExecute != nil {
 			r.releaseProviderStream(selection.Provider)
 			lastErr = errExecute
@@ -1794,11 +1825,20 @@ func (r *Router) clearSuccessfulCooldown(ctx context.Context, selection Selectio
 	_ = r.store.ClearModelCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel)
 }
 
+func (r *Router) retrySettings() RetrySettings {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.retry
+}
+
 func (r *Router) setCredentialCooldown(ctx context.Context, credentialID, upstreamModel string, err error) {
 	if credentialID == "" || err == nil {
 		return
 	}
 	status := providers.Status(err)
+	if r.cooldowns.SkipCooldown(status) {
+		return
+	}
 	count := 0
 	if upstreamModel != "" {
 		count = r.store.ModelCooldownCount(ctx, credentialID, upstreamModel)
@@ -1817,12 +1857,28 @@ func (r *Router) filterModelCooldowns(ctx context.Context, credentials []store.C
 	if upstreamModel == "" {
 		return credentials
 	}
+	retry := r.retrySettings()
 	filtered := make([]store.Credential, 0, len(credentials))
+	var waitable []store.Credential
+	var waitUntil time.Time
 	for _, credential := range credentials {
 		until, err := r.store.ModelCooldownUntil(ctx, credential.ID, upstreamModel, now)
 		if err != nil || until.IsZero() {
 			filtered = append(filtered, credential)
+			continue
 		}
+		// Remember credentials whose cooldown ends within the wait budget: if every
+		// candidate is benched, waiting a moment for the best one beats failing or
+		// falling through to a worse provider.
+		if retry.MaxWait > 0 && until.Sub(now) <= retry.MaxWait {
+			waitable = append(waitable, credential)
+			if waitUntil.IsZero() || until.Before(waitUntil) {
+				waitUntil = until
+			}
+		}
+	}
+	if len(filtered) == 0 && len(waitable) > 0 && retry.waitForCooldown(ctx, waitUntil, now) {
+		return waitable
 	}
 	return filtered
 }

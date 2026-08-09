@@ -241,3 +241,66 @@ func TestCredentialStatusReportsRefreshSchedule(t *testing.T) {
 		t.Errorf("max refresh offset = %v, want %v", got, defaultHardMaxTokenAge)
 	}
 }
+
+// Refreshes must run concurrently: a sequential sweep of many due credentials
+// outlasts the background tick and delays every rotation behind the slowest one.
+func TestRefreshSweepRunsConcurrently(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	var inFlight atomic.Int32
+	var peak atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := inFlight.Add(1)
+		for {
+			seen := peak.Load()
+			if current <= seen || peak.CompareAndSwap(seen, current) {
+				break
+			}
+		}
+		time.Sleep(60 * time.Millisecond)
+		inFlight.Add(-1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"rotated","refresh_token":"r2","expires_in":2592000}`))
+	}))
+	defer server.Close()
+
+	dataStore, _ := newAuthStore(t, oauthConfig(server.URL))
+	ctx := context.Background()
+	for i := 0; i < 6; i++ {
+		token := store.OAuthToken{AccessToken: "a", RefreshToken: "r", TokenType: "Bearer"}
+		label := "acct-" + string(rune('a'+i))
+		if err := dataStore.SaveOAuthCredential(ctx, "oauth-provider", label, "", label+"@example.com", token); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	manager := NewManager(dataStore, server.Client())
+	defer manager.Close()
+	manager.now = func() time.Time { return time.Now().Add(defaultMaxTokenAge + time.Minute) }
+
+	start := time.Now()
+	manager.refreshExpiring(ctx)
+	elapsed := time.Since(start)
+
+	if peak.Load() < 2 {
+		t.Errorf("peak concurrency = %d, want the sweep to overlap refreshes", peak.Load())
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("sweep took %v, expected it to be parallel", elapsed)
+	}
+}
+
+func TestRefreshWorkersOverride(t *testing.T) {
+	manager := NewManager(nil, nil)
+	defer manager.Close()
+	if got := manager.refreshWorkers(); got != defaultRefreshWorkers {
+		t.Errorf("default workers = %d, want %d", got, defaultRefreshWorkers)
+	}
+	manager.SetRefreshWorkers(3)
+	if got := manager.refreshWorkers(); got != 3 {
+		t.Errorf("workers = %d, want 3", got)
+	}
+	manager.SetRefreshWorkers(0)
+	if got := manager.refreshWorkers(); got != defaultRefreshWorkers {
+		t.Errorf("workers = %d, want fallback to default", got)
+	}
+}

@@ -51,7 +51,7 @@ export function Header({
   }, [menuOpen]);
 
   return (
-    <header className="app-header">
+    <header className={cn("app-header", extra ? "app-header-with-extra" : false)}>
       <div className="header-title">
         {onOpenNav ? (
           <IconButton icon="menu" label={t("nav.expandMenu")} className="header-menu-btn" onClick={onOpenNav} />
@@ -66,10 +66,10 @@ export function Header({
       </div>
 
       <div className="header-actions">
-        {extra}
+        {extra ? <div className="header-extra">{extra}</div> : null}
         {onRefresh && (
-          <Button variant="secondary" size="md" icon={loading ? "" : "refresh"} loading={loading} onClick={onRefresh}>
-            {loading ? t("common.loading") : t("common.refresh")}
+          <Button className="header-refresh" variant="secondary" size="md" icon={loading ? "" : "refresh"} loading={loading} onClick={onRefresh}>
+            <span className="header-refresh-label">{loading ? t("common.loading") : t("common.refresh")}</span>
           </Button>
         )}
         <a
@@ -102,8 +102,12 @@ export function Header({
             />
           </svg>
         </a>
-        <ThemeToggle />
-        <LanguageToggle />
+        <div className="header-theme-toggle">
+          <ThemeToggle />
+        </div>
+        <div className="header-language-toggle">
+          <LanguageToggle />
+        </div>
         <div className="header-menu" ref={menuRef}>
           <IconButton
             icon="more_vert"
