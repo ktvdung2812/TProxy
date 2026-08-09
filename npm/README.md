@@ -17,13 +17,6 @@ On the first gateway start, the dashboard password is initialized to `123123`.
 Change it immediately in **Settings**. This default is used only when no dashboard
 password has been saved and `TPROXY_MANAGEMENT_SECRET` is not set.
 
-## Automated releases
-
-Pushing a version tag such as `v0.1.14` runs the GitHub Actions release workflow.
-It verifies that the tag matches `package.json`, cross-compiles the bundled
-binaries, and publishes to npm. Add an npm granular token with publish access as
-the repository Actions secret named `NPM_TOKEN` before creating the tag.
-
 ## Usage
 
 ```bash
