@@ -1,6 +1,6 @@
 {
   "name": "@ktvdung1606/tproxy",
-  "version": "0.1.10",
+  "version": "0.1.14",
   "description": "npm wrapper for the tproxy AI gateway binary — includes system tray and auto-start",
   "license": "MIT",
   "repository": {
@@ -19,7 +19,8 @@
     "config.default.yaml"
   ],
   "scripts": {
-    "postinstall": "node -e \"try{require('./lib/trayRuntime').ensureTrayRuntime({silent:true})}catch(e){}\""
+    "build:native": "node scripts/build-native.mjs",
+    "prepack": "npm run build:native"
   },
   "engines": {
     "node": ">=18"

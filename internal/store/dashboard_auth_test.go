@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/tproxy/tproxy/internal/security"
@@ -34,8 +33,12 @@ func TestDashboardPasswordDefaultsAndPersist(t *testing.T) {
 	}
 
 	pwd, generated, err := dataStore.EnsureDashboardPassword(ctx)
-	if err != nil || !generated || strings.TrimSpace(pwd) == "" {
+	if err != nil || !generated || pwd != DefaultDashboardPassword {
 		t.Fatalf("EnsureDashboardPassword() = (%q, %v, %v)", pwd, generated, err)
+	}
+	reused, generated, err := dataStore.EnsureDashboardPassword(ctx)
+	if err != nil || generated || reused != DefaultDashboardPassword {
+		t.Fatalf("second EnsureDashboardPassword() = (%q, %v, %v)", reused, generated, err)
 	}
 
 	if err := dataStore.SaveDashboardPassword(ctx, "new-secret"); err != nil {
