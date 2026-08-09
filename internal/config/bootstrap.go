@@ -43,15 +43,24 @@ func BootstrapConfig(path string) error {
 	if path == "" {
 		return fmt.Errorf("config path is required")
 	}
-	if _, err := os.Stat(path); err == nil {
+	if info, err := os.Stat(path); err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("config path is a directory")
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("protect config %s: %w", path, err)
+		}
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat config %s: %w", path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
-	if err := os.WriteFile(path, defaultConfigYAML, 0o644); err != nil {
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("protect config directory: %w", err)
+	}
+	if err := os.WriteFile(path, defaultConfigYAML, 0o600); err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
 	}
 	return nil

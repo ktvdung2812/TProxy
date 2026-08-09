@@ -42,15 +42,6 @@ func oauthHTTPClient(client *http.Client) *http.Client {
 	return &cloned
 }
 
-func providerAllowsStatelessCallback(providerType string) bool {
-	switch providerType {
-	case "cline", "clinepass", "kimchi":
-		return true
-	default:
-		return false
-	}
-}
-
 func looksLikeHTMLResponse(data []byte) bool {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {

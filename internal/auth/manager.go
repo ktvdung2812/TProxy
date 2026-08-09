@@ -709,7 +709,11 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	state = strings.TrimSpace(state)
 	code = strings.TrimSpace(code)
 	sessionID = strings.TrimSpace(sessionID)
-	if code == "" {
+	// A browser callback must carry either the opaque OAuth state/nonce or the
+	// explicit session capability. Never infer a session from "the only pending
+	// browser flow": an attacker can race or consume that flow without proving
+	// they initiated it.
+	if code == "" || (state == "" && sessionID == "") {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
 	}
 	var item *session
@@ -720,9 +724,6 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	}
 	if item == nil && state != "" {
 		item = m.sessionForState(state)
-	}
-	if item == nil {
-		item = m.sessionForSinglePendingStatelessBrowser()
 	}
 	if item == nil {
 		return SessionStatus{}, &Error{code: "invalid_state", permanent: true}
@@ -835,32 +836,6 @@ func (m *Manager) sessionForState(state string) *session {
 		if candidateState != "" && security.ConstantTimeEqual(candidateState, state) {
 			return candidate
 		}
-	}
-	return nil
-}
-
-func (m *Manager) sessionForSinglePendingStatelessBrowser() *session {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var found *session
-	matches := 0
-	for _, candidate := range m.sessions {
-		candidate.mu.Lock()
-		pending := candidate.status == "pending" && candidate.mode == "browser" && !m.now().After(candidate.expiresAt)
-		providerID := candidate.providerID
-		candidate.mu.Unlock()
-		if !pending {
-			continue
-		}
-		provider, err := m.store.Provider(m.rootCtx, providerID)
-		if err != nil || !providerAllowsStatelessCallback(provider.Type) {
-			continue
-		}
-		matches++
-		found = candidate
-	}
-	if matches == 1 {
-		return found
 	}
 	return nil
 }
