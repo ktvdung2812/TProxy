@@ -38,7 +38,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          package_version="$(node -p 'require(\"./npm/package.json\").version')"
+          package_version="$(node -p 'require("./npm/package.json").version')"
           expected_tag="v${package_version}"
           test "$RELEASE_TAG" = "$expected_tag"
 
