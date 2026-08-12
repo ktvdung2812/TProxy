@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,48 @@ import (
 	"github.com/tproxy/tproxy/internal/security"
 	_ "modernc.org/sqlite"
 )
+
+func TestOpenSQLiteRepairsPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file mode assertions are not applicable on Windows")
+	}
+	directory := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "tproxy.db")
+	dataStore, err := OpenSQLite(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for filePath, want := range map[string]os.FileMode{directory: 0o700, path: 0o600} {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != want {
+			t.Fatalf("mode for %s = %v; want %04o", filePath, info.Mode().Perm(), want)
+		}
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err = OpenSQLite(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("reopened database mode = %v; want repaired 0600", info.Mode().Perm())
+	}
+}
 
 func TestSQLiteMigrationsUpgradeLegacySchemaAndTrackVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")

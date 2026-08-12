@@ -124,9 +124,5 @@ func topologyClientKeyFromPath(suffix string) (string, error) {
 }
 
 func managementToken(r *http.Request) string {
-	token := security.BearerToken(r)
-	if token == "" {
-		token = strings.TrimSpace(r.URL.Query().Get("token"))
-	}
-	return token
+	return security.BearerToken(r)
 }

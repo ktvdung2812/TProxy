@@ -83,7 +83,7 @@ Route targets may declare `pricing.input_per_million`, `pricing.output_per_milli
 
 ## Management routes
 
-Management access is local-only by default. If `TPROXY_MANAGEMENT_SECRET` is configured, pass it as a bearer token. For local development the official default is `tproxy-local-management-secret` (see `.env.example`).
+Management access is local-only by default. A new local install creates the dashboard password `123123` in SQLite as a salted verifier; change it before enabling LAN access. Any management access outside loopback (LAN, remote, or tunnel) requires a strong `TPROXY_MANAGEMENT_SECRET`, sent only as a bearer token. The repository contains no usable default management secret.
 
 ```http
 GET  /api/admin/snapshot

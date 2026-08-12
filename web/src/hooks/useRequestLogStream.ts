@@ -32,50 +32,69 @@ export function useRequestLogStream(
   useEffect(() => {
     if (!enabled) return undefined;
 
-    let source: EventSource | null = null;
+    let controller: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = 1000;
     let cancelled = false;
 
-    function connect() {
-      if (cancelled) return;
-
-      const params = new URLSearchParams({ limit: "50" });
-      if (secret) params.set("token", secret);
-      const url = `/api/admin/logs/stream?${params.toString()}`;
-      source = new EventSource(url);
-
-      source.onopen = () => {
-        reconnectDelay = 1000; // reset on successful connection
-      };
-
-      source.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as { data?: RequestLog[] };
-          onUpdateRef.current((data.data || []) as RequestLog[]);
-        } catch {
-          // Ignore malformed SSE payloads.
-        }
-      };
-
-      source.onerror = () => {
-        source?.close();
-        source = null;
-        if (cancelled) return;
-        // Exponential backoff reconnection, capped at MAX_RECONNECT_DELAY_MS.
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
-          connect();
-        }, reconnectDelay);
-      };
+    function scheduleReconnect() {
+      if (cancelled || reconnectTimer !== null) return;
+      // Exponential backoff reconnection, capped at MAX_RECONNECT_DELAY_MS.
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+        void connect();
+      }, reconnectDelay);
     }
 
-    connect();
+    async function connect() {
+      if (cancelled) return;
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const response = await fetch("/api/admin/logs/stream?limit=50", {
+          headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+        reconnectDelay = 1000;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() || "";
+          for (const frame of frames) {
+            const dataLine = frame.split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (!dataLine) continue;
+            try {
+              const data = JSON.parse(dataLine) as { data?: RequestLog[]; recentRequests?: RequestLog[] };
+              onUpdateRef.current((data.data || data.recentRequests || []) as RequestLog[]);
+            } catch {
+              // Ignore malformed SSE payloads.
+            }
+          }
+        }
+      } catch {
+        if (cancelled || controller.signal.aborted) return;
+        scheduleReconnect();
+        return;
+      }
+      if (!cancelled) scheduleReconnect();
+    }
+
+    void connect();
 
     return () => {
       cancelled = true;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      source?.close();
+      controller?.abort();
     };
   }, [secret, enabled]);
 }

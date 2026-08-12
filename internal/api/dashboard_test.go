@@ -36,4 +36,7 @@ func TestDashboardServesManifestAsJSON(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(recorder.Body.String()), "{") {
 		t.Fatalf("manifest body is not JSON: %q", recorder.Body.String())
 	}
+	if recorder.Header().Get("X-Frame-Options") != "DENY" || recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("security headers missing: frame=%q content-type=%q", recorder.Header().Get("X-Frame-Options"), recorder.Header().Get("X-Content-Type-Options"))
+	}
 }

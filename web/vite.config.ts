@@ -22,11 +22,15 @@ export default defineConfig({
     // The direct Cloudflare quick-tunnel hostname is forwarded as Host.
     allowedHosts: [".trycloudflare.com", "localhost", "127.0.0.1"],
     hmr: {
-      protocol: "ws",
-      host: "localhost",
+      // "localhost" resolves to ::1 first on macOS while the dev server binds a
+      // single IPv4 address, so the HMR socket is refused even though the page
+      // itself loads. Point the client at the address actually bound; when the
+      // server listens on every interface, let it derive the host from the page.
+      // `path` is intentionally unset: Vite joins it onto `base`, so setting it
+      // to "/dashboard/" produced the /dashboard/dashboard/ socket URL.
+      host: devBindHost === "0.0.0.0" ? undefined : devBindHost,
       port: publicPort,
       clientPort: publicPort,
-      path: "/dashboard/",
       // Prevent full-page reload when HMR fails; show overlay instead.
       overlay: true,
     },
