@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +26,29 @@ import (
 )
 
 const minBinarySize = 1024 * 1024
+
+const (
+	cloudflaredVersionEnv    = "TPROXY_CLOUDFLARED_VERSION"
+	cloudflaredURLEnv        = "TPROXY_CLOUDFLARED_URL"
+	cloudflaredSHA256Env     = "TPROXY_CLOUDFLARED_SHA256"
+	cloudflaredPinnedVersion = "2026.7.3"
+)
+
+var cloudflaredPinnedSHA256 = map[string]string{
+	"darwin/amd64":  "70d1c8684fa6d14b5843787ec8d1ea8e18b23650e424f4ea43d849a506487c3b",
+	"darwin/arm64":  "90c5a4f914d705fd70c135dba6d80b1791d254b08d6d4136301941f88330dd09",
+	"linux/amd64":   "9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17",
+	"linux/arm64":   "65259e652a7bea08bf5df603233ab22b8bf3116af8df9f9206209af6a1b955c0",
+	"windows/amd64": "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841",
+}
+
+var cloudflaredPinnedBinarySHA256 = map[string]string{
+	"darwin/amd64":  "e88fe5874d42a94f49a7ea59cabc3722d2962d0449232b0f3b1a426a712e275c",
+	"darwin/arm64":  "f35c50089cd25f77a4cb5a2152036bc26db15aa31fbe11f7995d2e42a4ed6257",
+	"linux/amd64":   "9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17",
+	"linux/arm64":   "65259e652a7bea08bf5df603233ab22b8bf3116af8df9f9206209af6a1b955c0",
+	"windows/amd64": "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841",
+}
 
 var quickTunnelURLPattern = regexp.MustCompile(`https://([a-z0-9-]+)\.trycloudflare\.com`)
 var cloudflaredConnectionIndexPattern = regexp.MustCompile(`\bconnIndex=([0-9]+)\b`)
@@ -104,12 +130,67 @@ func cloudflaredDownloadURL() (string, bool, error) {
 			"amd64": {archive: false, name: "cloudflared-linux-amd64"},
 			"arm64": {archive: false, name: "cloudflared-linux-arm64"},
 		},
+		"windows": {
+			"amd64": {archive: false, name: "cloudflared-windows-amd64.exe"},
+		},
 	}
 	entry, ok := table[platform][arch]
 	if !ok {
 		return "", false, fmt.Errorf("unsupported platform %s/%s", platform, arch)
 	}
-	return "https://github.com/cloudflare/cloudflared/releases/latest/download/" + entry.name, entry.archive, nil
+	// Auto-downloading an executable is only safe when both its immutable
+	// location and its expected digest are supplied by the operator. A mutable
+	// `releases/latest` URL must never be an executable trust root.
+	if rawURL := strings.TrimSpace(os.Getenv(cloudflaredURLEnv)); rawURL != "" {
+		parsed, err := url.Parse(rawURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return "", false, fmt.Errorf("%s must be an absolute HTTPS URL", cloudflaredURLEnv)
+		}
+		return parsed.String(), entry.archive, nil
+	}
+	version := strings.TrimSpace(os.Getenv(cloudflaredVersionEnv))
+	if version == "" {
+		version = cloudflaredPinnedVersion
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(version) {
+		return "", false, fmt.Errorf("%s must be an immutable cloudflared release version", cloudflaredVersionEnv)
+	}
+	if strings.EqualFold(version, "latest") {
+		return "", false, fmt.Errorf("%s must not use the mutable latest release", cloudflaredVersionEnv)
+	}
+	return "https://github.com/cloudflare/cloudflared/releases/download/" + version + "/" + entry.name, entry.archive, nil
+}
+
+func cloudflaredExpectedSHA256() (string, error) {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(cloudflaredSHA256Env)))
+	if value == "" && strings.TrimSpace(os.Getenv(cloudflaredVersionEnv)) == "" && strings.TrimSpace(os.Getenv(cloudflaredURLEnv)) == "" {
+		value = cloudflaredPinnedSHA256[runtime.GOOS+"/"+runtime.GOARCH]
+	}
+	if value == "" {
+		return "", fmt.Errorf("set %s to the 64-character SHA-256 digest for the selected cloudflared asset", cloudflaredSHA256Env)
+	}
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != sha256.Size {
+		return "", fmt.Errorf("set %s to the 64-character SHA-256 digest for the selected cloudflared asset", cloudflaredSHA256Env)
+	}
+	return value, nil
+}
+
+func verifySHA256(path, expected string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if actual != expected {
+		return fmt.Errorf("cloudflared download checksum mismatch")
+	}
+	return nil
 }
 
 func isValidBinary(path string) bool {
@@ -145,18 +226,29 @@ func (c *Cloudflared) Ensure(ctx context.Context) (string, error) {
 	}
 	c.mu.Unlock()
 
-	if err := os.MkdirAll(c.layout.BinDir, 0o755); err != nil {
+	if err := os.MkdirAll(c.layout.BinDir, 0o700); err != nil {
 		return "", err
 	}
-	if isValidBinary(c.layout.Cloudflared) {
-		_ = os.Chmod(c.layout.Cloudflared, 0o755)
-		return c.layout.Cloudflared, nil
+	if err := os.Chmod(c.layout.BinDir, 0o700); err != nil {
+		return "", err
 	}
-	_ = os.Remove(c.layout.Cloudflared)
-
 	url, isArchive, err := cloudflaredDownloadURL()
 	if err != nil {
 		return "", err
+	}
+	expectedSHA256, err := cloudflaredExpectedSHA256()
+	if err != nil {
+		return "", err
+	}
+	if isValidBinary(c.layout.Cloudflared) {
+		// A pre-existing executable is trusted only when it matches the pinned
+		// release's binary digest. Custom URLs/versions must be re-downloaded.
+		if expectedBinary := cloudflaredPinnedBinarySHA256[runtime.GOOS+"/"+runtime.GOARCH]; expectedBinary != "" && strings.TrimSpace(os.Getenv(cloudflaredVersionEnv)) == "" && strings.TrimSpace(os.Getenv(cloudflaredURLEnv)) == "" {
+			if verifySHA256(c.layout.Cloudflared, expectedBinary) == nil {
+				_ = os.Chmod(c.layout.Cloudflared, 0o755)
+				return c.layout.Cloudflared, nil
+			}
+		}
 	}
 
 	c.mu.Lock()
@@ -182,7 +274,7 @@ func (c *Cloudflared) Ensure(ctx context.Context) (string, error) {
 	}
 
 	tmpPath := c.layout.Cloudflared + ".tmp"
-	file, err := os.Create(tmpPath)
+	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", err
 	}
@@ -195,23 +287,52 @@ func (c *Cloudflared) Ensure(ctx context.Context) (string, error) {
 		_ = os.Remove(tmpPath)
 		return "", err
 	}
+	if err := verifySHA256(tmpPath, expectedSHA256); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
 
+	installPath := c.layout.Cloudflared + ".extract.tmp"
+	_ = os.Remove(installPath)
 	if isArchive {
-		if err := extractCloudflaredFromTgz(tmpPath, c.layout.Cloudflared); err != nil {
+		if err := extractCloudflaredFromTgz(tmpPath, installPath); err != nil {
 			_ = os.Remove(tmpPath)
+			_ = os.Remove(installPath)
 			return "", err
 		}
 		_ = os.Remove(tmpPath)
-	} else if err := os.Rename(tmpPath, c.layout.Cloudflared); err != nil {
+	} else if err := os.Rename(tmpPath, installPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", err
 	}
-	if err := os.Chmod(c.layout.Cloudflared, 0o755); err != nil {
+	if isArchive {
+		expectedBinary := cloudflaredPinnedBinarySHA256[runtime.GOOS+"/"+runtime.GOARCH]
+		if expectedBinary != "" && strings.TrimSpace(os.Getenv(cloudflaredVersionEnv)) == "" && strings.TrimSpace(os.Getenv(cloudflaredURLEnv)) == "" {
+			if err := verifySHA256(installPath, expectedBinary); err != nil {
+				_ = os.Remove(installPath)
+				return "", err
+			}
+		}
+	}
+	if !isValidBinary(installPath) {
+		_ = os.Remove(installPath)
+		return "", fmt.Errorf("downloaded cloudflared binary is invalid")
+	}
+	if err := os.Chmod(installPath, 0o755); err != nil {
+		_ = os.Remove(installPath)
 		return "", err
 	}
-	if !isValidBinary(c.layout.Cloudflared) {
-		_ = os.Remove(c.layout.Cloudflared)
-		return "", fmt.Errorf("downloaded cloudflared binary is invalid")
+	// Unix rename replaces atomically; Windows refuses to replace an existing
+	// file, so remove only after the new artifact has passed all verification.
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(c.layout.Cloudflared); err != nil && !os.IsNotExist(err) {
+			_ = os.Remove(installPath)
+			return "", err
+		}
+	}
+	if err := os.Rename(installPath, c.layout.Cloudflared); err != nil {
+		_ = os.Remove(installPath)
+		return "", err
 	}
 	return c.layout.Cloudflared, nil
 }
@@ -239,7 +360,10 @@ func extractCloudflaredFromTgz(archivePath, dest string) error {
 		if header.Typeflag != tar.TypeReg || header.Name != "cloudflared" {
 			continue
 		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+		if header.Size < minBinarySize || header.Size > 256<<20 {
+			return fmt.Errorf("cloudflared archive contains an invalid binary size")
+		}
+		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return err
 		}

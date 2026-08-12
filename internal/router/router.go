@@ -962,6 +962,11 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			return nil, &providers.ProviderError{Status: http.StatusBadGateway, Code: "ambiguous_upstream_failure", Message: "upstream connection failed after dispatch; request was not retried without an idempotency key", Err: errProxy}
 		}
 		fallback := shouldFallbackStatus(status)
+		// A caller supplied an idempotency key, so retrying another provider is
+		// safe even when the transport failed before an HTTP status was received.
+		if status == 0 && options.RetryNetworkErrors {
+			fallback = true
+		}
 		if fallback {
 			r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errProxy)
 		}

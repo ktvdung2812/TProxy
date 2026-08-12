@@ -35,6 +35,22 @@ func TestEncryptRoundTripAndAPIKeyHash(t *testing.T) {
 	}
 }
 
+func TestPasswordHashRoundTripAndNoPlaintext(t *testing.T) {
+	hashed, err := HashPassword("correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(hashed, "correct horse battery staple") {
+		t.Fatal("password was embedded in verifier")
+	}
+	if ok, err := VerifyPassword("correct horse battery staple", hashed); err != nil || !ok {
+		t.Fatalf("VerifyPassword(correct) = (%v, %v)", ok, err)
+	}
+	if ok, err := VerifyPassword("wrong", hashed); err != nil || ok {
+		t.Fatalf("VerifyPassword(wrong) = (%v, %v)", ok, err)
+	}
+}
+
 func TestRedactTextRemovesCredentialMaterial(t *testing.T) {
 	input := `authorization: Bearer abc123 refresh_token="refresh-secret" api_key=key-secret token=generic-secret`
 	output := RedactText(input)

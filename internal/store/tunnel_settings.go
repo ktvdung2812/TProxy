@@ -16,7 +16,9 @@ type TunnelSettings struct {
 }
 
 func DefaultTunnelSettings() TunnelSettings {
-	return TunnelSettings{TunnelDashboardAccess: true}
+	// Public connectors must not expose the dashboard until the operator
+	// explicitly enables it and configures a dedicated management secret.
+	return TunnelSettings{TunnelDashboardAccess: false}
 }
 
 func (s *Store) TunnelSettings(ctx context.Context) (TunnelSettings, error) {

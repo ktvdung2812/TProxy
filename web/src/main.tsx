@@ -19,8 +19,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>,
 );
 
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/dashboard/sw.js").catch(() => undefined);
-  });
+if ("serviceWorker" in navigator) {
+  if (import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      void navigator.serviceWorker.register("/dashboard/sw.js").catch(() => undefined);
+    });
+  } else {
+    // A worker registered by a production build keeps serving its cached bundle
+    // on the same origin as the dev server, which hides every local edit.
+    void navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .catch(() => undefined);
+  }
 }

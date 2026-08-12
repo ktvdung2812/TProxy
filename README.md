@@ -177,7 +177,8 @@ After starting tproxy, open the dashboard:
 http://127.0.0.1:28120/dashboard/
 ```
 
-Default login password: `123123` (change it under **Settings**).
+Default local login password: `123123` (stored as a salted verifier; change it
+under **Settings** before enabling LAN, remote, or tunnel access).
 
 | Section | Pages |
 |---------|-------|
@@ -262,7 +263,9 @@ Load secrets before starting:
 source .env.run
 ```
 
-> **Dashboard login:** default password is `123123`. Change it under **Settings** after the first login.
+> **Dashboard login:** the first local login uses `123123`, stored as a salted
+> verifier. Change it under **Settings** before exposing the dashboard. Any
+> management access outside loopback requires `TPROXY_MANAGEMENT_SECRET`.
 
 ---
 
@@ -400,7 +403,7 @@ go run ./cmd/tproxy --print-master-key   # add to .env.run as TPROXY_MASTER_KEY
 npm install && npm run dev
 ```
 
-Open http://127.0.0.1:28120/dashboard/ (password: `123123`).
+Open http://127.0.0.1:28120/dashboard/ (first local password: `123123`).
 
 ### Smoke test
 
@@ -463,7 +466,7 @@ models: []      # public model definitions
 |----------|---------|
 | `TPROXY_MASTER_KEY` | Encrypts provider secrets in SQLite (required before storing credentials) |
 | `TPROXY_API_KEY` | Client API key for `/v1/*` requests |
-| `TPROXY_MANAGEMENT_SECRET` | Dashboard and `/api/admin/*` authentication |
+| `TPROXY_MANAGEMENT_SECRET` | Required for LAN, remote, and tunnel dashboard / `/api/admin/*` authentication |
 
 For a minimal first boot, copy `internal/config/default.yaml` or run without `config.yaml` — the database starts empty and you configure everything from the dashboard.
 
@@ -544,10 +547,11 @@ Electron desktop shell (optional): `cd electron && npm install && npm start` —
 
 - Provider credentials and proxy pool URLs are **encrypted at rest** with `TPROXY_MASTER_KEY`.
 - Client API keys are **hashed**; only a one-time plaintext is shown on creation.
-- Management API and dashboard require `TPROXY_MANAGEMENT_SECRET` (default dashboard password is stored hashed in SQLite).
+- The local dashboard password is stored as a salted verifier; LAN, remote, and tunnel management require `TPROXY_MANAGEMENT_SECRET`.
 - OAuth tokens use encrypted envelopes with refresh deduplication and redacted admin responses.
 - Request logging supports correlation IDs with sensitive field redaction.
 - `allow-local-without-key` and `allow-remote-management` are **opt-in** — keep them disabled unless you understand the exposure.
+- Browser CORS is limited to loopback origins and the VS Code local webview; use a same-origin or server-side integration for public web apps.
 - The development dashboard never embeds `.env.run` credentials in browser assets. Keep Vite bound to loopback (the default); set `TPROXY_DEV_BIND_HOST=0.0.0.0` only when you intentionally need LAN access.
 
 ---

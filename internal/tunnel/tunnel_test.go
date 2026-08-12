@@ -38,6 +38,62 @@ func TestCloudflareQuickTunnelURL(t *testing.T) {
 	}
 }
 
+func TestCloudflaredDownloadIsPinnedAndChecksummedByDefault(t *testing.T) {
+	t.Setenv(cloudflaredVersionEnv, "")
+	t.Setenv(cloudflaredURLEnv, "")
+	t.Setenv(cloudflaredSHA256Env, "")
+	url, _, err := cloudflaredDownloadURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(url, "/latest/") || !strings.Contains(url, "/"+cloudflaredPinnedVersion+"/") {
+		t.Fatalf("cloudflared URL = %q, want pinned release", url)
+	}
+	if _, err := cloudflaredExpectedSHA256(); err != nil {
+		t.Fatalf("default pinned checksum unavailable: %v", err)
+	}
+}
+
+func TestCloudflaredCustomArtifactRequiresChecksum(t *testing.T) {
+	t.Setenv(cloudflaredVersionEnv, "2026.7.2")
+	t.Setenv(cloudflaredURLEnv, "")
+	t.Setenv(cloudflaredSHA256Env, "")
+	if _, err := cloudflaredExpectedSHA256(); err == nil {
+		t.Fatal("custom cloudflared version must require an explicit checksum")
+	}
+	t.Setenv(cloudflaredVersionEnv, "latest")
+	if _, _, err := cloudflaredDownloadURL(); err == nil {
+		t.Fatal("mutable latest cloudflared release was accepted")
+	}
+}
+
+func TestCloudflaredDownloadRequiresImmutablePinAndChecksum(t *testing.T) {
+	t.Setenv(cloudflaredVersionEnv, "")
+	t.Setenv(cloudflaredURLEnv, "")
+	t.Setenv(cloudflaredSHA256Env, "")
+	if url, _, err := cloudflaredDownloadURL(); err != nil || !strings.Contains(url, "/releases/download/"+cloudflaredPinnedVersion+"/") {
+		t.Fatalf("default pinned download URL = %q, %v", url, err)
+	}
+	if _, err := cloudflaredExpectedSHA256(); err != nil {
+		t.Fatalf("default pinned checksum rejected: %v", err)
+	}
+
+	t.Setenv(cloudflaredVersionEnv, "2026.1.2")
+	url, _, err := cloudflaredDownloadURL()
+	if err != nil || !strings.Contains(url, "/releases/download/2026.1.2/") {
+		t.Fatalf("versioned download URL = %q, %v", url, err)
+	}
+	t.Setenv(cloudflaredSHA256Env, strings.Repeat("a", 64))
+	if _, err := cloudflaredExpectedSHA256(); err != nil {
+		t.Fatalf("valid checksum rejected: %v", err)
+	}
+
+	t.Setenv(cloudflaredURLEnv, "http://example.com/cloudflared")
+	if _, _, err := cloudflaredDownloadURL(); err == nil {
+		t.Fatal("non-HTTPS download URL was accepted")
+	}
+}
+
 func TestQuickTunnelReadinessRequiresURLAndConnection(t *testing.T) {
 	state := &quickTunnelReadiness{}
 	if url, registered := state.snapshot(); url != "" || registered {

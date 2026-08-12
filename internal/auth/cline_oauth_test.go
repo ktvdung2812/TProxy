@@ -138,7 +138,7 @@ func TestClineOAuthCompleteCallbackSavesCredential(t *testing.T) {
 	}
 }
 
-func TestClineOAuthStatelessCompleteCallback(t *testing.T) {
+func TestClineOAuthCallbackRequiresStateWithoutSessionID(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{
 		"accessToken":  "stateless-access",
 		"refreshToken": "stateless-refresh",
@@ -152,7 +152,7 @@ func TestClineOAuthStatelessCompleteCallback(t *testing.T) {
 	manager := NewManager(dataStore, http.DefaultClient)
 	defer manager.Close()
 
-	_, err := manager.StartAuthorization(context.Background(), StartRequest{
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{
 		ProviderID:   "cline",
 		CredentialID: "cline-account",
 		Mode:         "browser",
@@ -162,12 +162,12 @@ func TestClineOAuthStatelessCompleteCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := manager.CompleteCallback(context.Background(), "", code, "")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := manager.CompleteCallback(context.Background(), "", code, ""); Code(err) != "invalid_state" {
+		t.Fatalf("missing state error code = %q, want invalid_state", Code(err))
 	}
-	if status.Status != "complete" {
-		t.Fatalf("status = %+v", status)
+	status, err := manager.SessionStatus(started.SessionID)
+	if err != nil || status.Status != "pending" {
+		t.Fatalf("missing-state callback mutated session: status=%+v err=%v", status, err)
 	}
 }
 
