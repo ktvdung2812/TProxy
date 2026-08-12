@@ -108,7 +108,7 @@ export function QuotaAccountDetailModal({
   useEffect(() => {
     if (!open || !credential) return;
     let cancelled = false;
-    let source: EventSource | null = null;
+    let controller: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = 1000;
 
@@ -127,43 +127,67 @@ export function QuotaAccountDetailModal({
         if (!cancelled) setLogsLoading(false);
       });
 
-    function connectStream() {
-      if (cancelled) return;
-
-      const params = new URLSearchParams({ limit: "100", credential_id: credential!.id });
-      if (secret) params.set("token", secret);
-      source = new EventSource(`/api/admin/logs/stream?${params.toString()}`);
-
-      source.onopen = () => {
-        reconnectDelay = 1000;
-      };
-
-      source.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as { data?: RequestLog[] };
-          applyLogs(payload.data || []);
-        } catch {
-          // Ignore malformed SSE payloads.
-        }
-      };
-
-      source.onerror = () => {
-        source?.close();
-        source = null;
-        if (cancelled) return;
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
-          connectStream();
-        }, reconnectDelay);
-      };
+    function scheduleReconnect() {
+      if (cancelled || reconnectTimer !== null) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+        void connectStream();
+      }, reconnectDelay);
     }
 
-    connectStream();
+    async function connectStream() {
+      if (cancelled) return;
+      controller?.abort();
+      controller = new AbortController();
+      const params = new URLSearchParams({ limit: "100", credential_id: credential!.id });
+      try {
+        // Management routes only accept a bearer credential, so the stream is
+        // read through fetch; EventSource cannot set an Authorization header.
+        const response = await fetch(`/api/admin/logs/stream?${params.toString()}`, {
+          headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+        reconnectDelay = 1000;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() || "";
+          for (const frame of frames) {
+            const dataLine = frame
+              .split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+            if (!dataLine) continue;
+            try {
+              const payload = JSON.parse(dataLine) as { data?: RequestLog[] };
+              applyLogs(payload.data || []);
+            } catch {
+              // Ignore malformed SSE payloads.
+            }
+          }
+        }
+      } catch {
+        if (cancelled || controller.signal.aborted) return;
+        scheduleReconnect();
+        return;
+      }
+      if (!cancelled) scheduleReconnect();
+    }
+
+    void connectStream();
 
     return () => {
       cancelled = true;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      source?.close();
+      controller?.abort();
     };
   }, [open, secret, credential, applyLogs]);
 

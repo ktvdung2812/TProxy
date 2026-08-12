@@ -21,56 +21,72 @@ export function useUsageStream(
   useEffect(() => {
     if (!enabled) return undefined;
 
-    let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = 1000;
     let cancelled = false;
+    let controller: AbortController | null = null;
 
-    function connect() {
+    function scheduleReconnect() {
       if (cancelled) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+        connect();
+      }, reconnectDelay);
+    }
 
-      const params = new URLSearchParams();
-      if (secret) params.set("token", secret);
-      const suffix = params.toString();
-      const url = `/api/admin/usage/stream${suffix ? `?${suffix}` : ""}`;
-      source = new EventSource(url);
+    function applyEvent(event: string) {
+      const data = event
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n");
+      if (!data) return;
 
-      source.onopen = () => {
-        reconnectDelay = 1000; // reset on successful connection
-      };
+      try {
+        const update = JSON.parse(data) as UsageLiveUpdate;
+        const next = {
+          activeRequests: update.activeRequests || [],
+          recentRequests: update.recentRequests || [],
+          errorProvider: update.errorProvider || "",
+        };
+        if (lastSnapshotRef.current && sameUsageLiveSnapshot(lastSnapshotRef.current, next)) return;
+        lastSnapshotRef.current = next;
+        onUpdateRef.current(next);
+      } catch {
+        // Ignore malformed SSE payloads; the next complete event can still be used.
+      }
+    }
 
-      source.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as UsageLiveUpdate;
-          const next = {
-            activeRequests: data.activeRequests || [],
-            recentRequests: data.recentRequests || [],
-            errorProvider: data.errorProvider || "",
-          };
-          if (lastSnapshotRef.current && sameUsageLiveSnapshot(lastSnapshotRef.current, next)) {
-            return;
+    async function connect() {
+      if (cancelled) return;
+      controller = new AbortController();
+      try {
+        const response = await fetch("/api/admin/usage/stream", {
+          headers: secret ? { Authorization: `Bearer ${secret}` } : undefined,
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error(`usage stream failed: ${response.status}`);
+
+        reconnectDelay = 1000;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = "";
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+          let separator = pending.indexOf("\n\n");
+          while (separator >= 0) {
+            applyEvent(pending.slice(0, separator));
+            pending = pending.slice(separator + 2);
+            separator = pending.indexOf("\n\n");
           }
-          lastSnapshotRef.current = next;
-          onUpdateRef.current({
-            activeRequests: next.activeRequests,
-            recentRequests: next.recentRequests,
-            errorProvider: next.errorProvider,
-          });
-        } catch {
-          // Ignore malformed SSE payloads.
         }
-      };
-
-      source.onerror = () => {
-        source?.close();
-        source = null;
-        if (cancelled) return;
-        // Exponential backoff reconnection, capped at MAX_RECONNECT_DELAY_MS.
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
-          connect();
-        }, reconnectDelay);
-      };
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) scheduleReconnect();
+        return;
+      }
+      scheduleReconnect();
     }
 
     connect();
@@ -79,7 +95,7 @@ export function useUsageStream(
       cancelled = true;
       lastSnapshotRef.current = null;
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-      source?.close();
+      controller?.abort();
     };
   }, [secret, enabled]);
 }
