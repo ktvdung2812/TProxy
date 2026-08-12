@@ -21,6 +21,15 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
+func TestManagementTokenReadsUsageStreamBearerCredential(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/usage/stream", nil)
+	request.Header.Set("Authorization", "Bearer management-test-secret")
+
+	if got := managementToken(request); got != "management-test-secret" {
+		t.Fatalf("management token = %q", got)
+	}
+}
+
 func TestChatAliasAndAPIKeyAuthentication(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
