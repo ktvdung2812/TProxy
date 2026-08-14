@@ -195,12 +195,14 @@ providers:
   #     # own system prompt is kept either way.
   #     claude_agent_prompt: "off"
   #     # Dial Anthropic with the Claude Code TLS handshake instead of Go's, so
-  #     # the transport agrees with the headers above. This pins the connection
-  #     # to HTTP/1.1 (the handshake offers no h2) and replaces the TLS stack,
-  #     # so it is off by default. OAuth credentials only; API keys are always
-  #     # dialled normally. An https:// proxy cannot carry it and silently
+  #     # the transport agrees with the headers above. On by default: without
+  #     # it the handshake contradicts those headers and the account is billed
+  #     # as a third-party app. The connection is pinned to HTTP/1.1, since the
+  #     # imitated client offers no h2. OAuth credentials only; API keys are
+  #     # always dialled normally, and an https:// proxy cannot carry it and
   #     # falls back to an ordinary connection.
-  #     claude_tls_fingerprint: "off"
+  #     # Set to "off" to dial normally.
+  #     claude_tls_fingerprint: "on"
   #   credentials:
   #     - id: claude-account
   #       label: Claude subscription
