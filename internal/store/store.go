@@ -298,13 +298,10 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 			return rollback(fmt.Errorf("seed provider %s: %w", providerCfg.ID, err))
 		}
 		for _, credentialCfg := range providerCfg.Credentials {
-			if !seedCredentialEligible(providerCfg, credentialCfg) {
+			if !seedCredentialEligible(credentialCfg) {
 				continue
 			}
-			secret := credentialCfg.Secret
-			if secret == "" {
-				secret = config.Env(credentialCfg.SecretEnv)
-			}
+			secret := seedCredentialSecret(credentialCfg)
 			ciphertext := ""
 			if secret != "" {
 				ciphertext, err = s.encryptor.Encrypt(secret)
@@ -318,7 +315,7 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 			}
 			if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status,created_at)
 VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`,
-				credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), credentialStatus(credentialCfg.AuthType), now); err != nil {
+				credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), seedCredentialStatus(credentialCfg, secret), now); err != nil {
 				return rollback(fmt.Errorf("seed credential %s: %w", credentialCfg.ID, err))
 			}
 		}
@@ -1932,24 +1929,46 @@ func credentialStatus(authType string) string {
 	return "unknown"
 }
 
-func seedCredentialEligible(providerCfg config.ProviderConfig, credentialCfg config.CredentialConfig) bool {
-	if !providerCfg.Enabled || !credentialCfg.IsEnabled() {
-		return false
-	}
-	secret := credentialCfg.Secret
-	if secret == "" && credentialCfg.SecretEnv != "" {
-		secret = config.Env(credentialCfg.SecretEnv)
-	}
+// seedCredentialEligible reports whether a configured credential carries enough
+// material to be worth a row. The enabled flags of the provider and credential
+// are deliberately not consulted: both are persisted on their own rows and
+// enforced at selection time, so gating the insert on them would make a config
+// export/import round-trip silently drop every credential of a disabled
+// provider.
+func seedCredentialEligible(credentialCfg config.CredentialConfig) bool {
 	switch strings.ToLower(strings.TrimSpace(credentialCfg.AuthType)) {
 	case "none":
 		return true
 	case "oauth":
-		return false
-	case "api_key", "service_account":
-		return secret != ""
+		// OAuth tokens are attached later by the enrolment wizard, so the row
+		// has to exist first — it is what the wizard and the dashboard bind to.
+		// Refusing to seed it also loses the credential on every config import,
+		// because export writes oauth credentials back out.
+		return true
 	default:
-		return secret != ""
+		return seedCredentialSecret(credentialCfg) != ""
 	}
+}
+
+func seedCredentialSecret(credentialCfg config.CredentialConfig) string {
+	if credentialCfg.Secret != "" {
+		return credentialCfg.Secret
+	}
+	if credentialCfg.SecretEnv != "" {
+		return config.Env(credentialCfg.SecretEnv)
+	}
+	return ""
+}
+
+// seedCredentialStatus keeps an OAuth credential out of the routing pool until
+// a token is actually present. EligibleCredentials skips "auth_required", so a
+// freshly imported credential waits for the wizard instead of burning a request
+// attempt on an empty token.
+func seedCredentialStatus(credentialCfg config.CredentialConfig, secret string) string {
+	if strings.EqualFold(strings.TrimSpace(credentialCfg.AuthType), "oauth") && secret == "" {
+		return "auth_required"
+	}
+	return credentialStatus(credentialCfg.AuthType)
 }
 
 func decodeProviderConfig(raw string, provider *Provider) {
@@ -2011,36 +2030,6 @@ func (s *Store) AddUsage(ctx context.Context, event UsageEvent) error {
 	return err
 }
 
-func (s *Store) AddRequestLog(ctx context.Context, item RequestLog) error {
-	if item.CreatedAt.IsZero() {
-		item.CreatedAt = time.Now().UTC()
-	}
-	metadata, _ := json.Marshal(redactPersistedMetadata(item.Metadata))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs(request_id,client_api_key_id,method,path,protocol,public_model_id,provider_id,credential_id,attempt,status,latency_ms,error_code,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.RequestID, item.ClientAPIKeyID, item.Method, item.Path, item.Protocol, item.PublicModelID, item.ProviderID, item.CredentialID, item.Attempt, item.Status, item.LatencyMS, item.ErrorCode, string(metadata), item.CreatedAt.UTC().Format(time.RFC3339Nano))
-	return err
-}
-
-func (s *Store) RecentRequestLogs(ctx context.Context, limit int) ([]RequestLog, error) {
-	limit = boundedLimit(limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,client_api_key_id,method,path,protocol,public_model_id,provider_id,credential_id,attempt,status,latency_ms,error_code,metadata_json,created_at FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []RequestLog
-	for rows.Next() {
-		var item RequestLog
-		var metadata, created string
-		if err := rows.Scan(&item.RequestID, &item.ClientAPIKeyID, &item.Method, &item.Path, &item.Protocol, &item.PublicModelID, &item.ProviderID, &item.CredentialID, &item.Attempt, &item.Status, &item.LatencyMS, &item.ErrorCode, &metadata, &created); err != nil {
-			return nil, err
-		}
-		_ = json.Unmarshal([]byte(metadata), &item.Metadata)
-		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
 func (s *Store) AddAuditEvent(ctx context.Context, item AuditEvent) error {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now().UTC()
@@ -2050,6 +2039,12 @@ func (s *Store) AddAuditEvent(ctx context.Context, item AuditEvent) error {
 	return err
 }
 
+// RecordConfigVersion stores a digest of the effective configuration. Callers
+// fire it after any admin mutation, but most of those leave the configuration
+// untouched, so an unconditional insert produces overwhelmingly duplicate rows
+// (a production database held 335,952 rows across only 919 distinct digests).
+// Skipping the write when the digest is unchanged keeps the table a history of
+// actual changes instead of a request counter.
 func (s *Store) RecordConfigVersion(ctx context.Context, source string, cfg *config.Config) error {
 	if cfg == nil {
 		return errors.New("configuration is required")
@@ -2063,6 +2058,16 @@ func (s *Store) RecordConfigVersion(ctx context.Context, source string, cfg *con
 		return err
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	var latest string
+	switch err = s.db.QueryRowContext(ctx, `SELECT digest FROM config_versions ORDER BY id DESC LIMIT 1`).Scan(&latest); {
+	case err == nil:
+		if latest == digest {
+			return nil
+		}
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO config_versions(source,digest,created_at) VALUES(?,?,?)`, source, digest, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
@@ -2166,14 +2171,6 @@ func (s *Store) PruneMediaJobs(ctx context.Context, before time.Time) (int64, er
 
 func (s *Store) PruneUsage(ctx context.Context, before time.Time) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM usage_events WHERE created_at < ?`, before.UTC().Format(time.RFC3339Nano))
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-func (s *Store) PruneRequestLogs(ctx context.Context, before time.Time) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM request_logs WHERE created_at < ?`, before.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, err
 	}
@@ -2685,10 +2682,10 @@ func redactSnapshotHeaders(input map[string]string) map[string]string {
 	return result
 }
 
-// redactPersistedMetadata applies the same secret boundary to request and
-// audit records that is used for management snapshots. Logs are a durable
-// store, so callers must not be able to bypass redaction by writing directly
-// through Store.AddRequestLog/AddAuditEvent.
+// redactPersistedMetadata applies the same secret boundary to persisted
+// records that is used for management snapshots. Audit events are durable, so
+// callers must not be able to bypass redaction by writing directly through
+// Store.AddAuditEvent.
 func redactPersistedMetadata(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return map[string]any{}

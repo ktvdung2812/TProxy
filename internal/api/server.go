@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tproxy/tproxy/internal/antigravity"
 	"github.com/tproxy/tproxy/internal/auth"
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
@@ -55,15 +56,24 @@ type requestLogState struct {
 }
 
 type Server struct {
-	cfg                     *config.Config
-	store                   *store.Store
-	router                  *router.Router
-	auth                    *auth.Manager
+	// cfg is swapped wholesale by /api/admin/reload and /api/admin/config/import
+	// while other requests are reading it, so it is only ever replaced, never
+	// mutated in place. Use currentConfig/setConfig.
+	cfg    atomic.Pointer[config.Config]
+	store  *store.Store
+	router *router.Router
+	auth   *auth.Manager
+	// managementMu guards the credential state below. It is written by the
+	// password-change handler and by config reload, and read by managementAuth
+	// on every management request, so unsynchronised access is a race on the
+	// gateway's authentication decision.
+	managementMu            sync.RWMutex
 	managementSecret        string
 	managementSecretFromEnv bool
 	dashboardPasswordAuth   bool
 	allowRemoteMgmt         bool
 	allowLanMgmt            bool
+	dashboardPasswordCache  *dashboardPasswordCache
 	ccFilterNaming          atomic.Bool
 	// Idle-connection keepalives; zero disables them.
 	streamKeepalive    time.Duration
@@ -88,7 +98,8 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 		authManager = auth.NewManager(dataStore, nil)
 	}
 	requestRouter.SetCredentialRefresher(authManager)
-	server := &Server{cfg: cfg, store: dataStore, router: requestRouter, auth: authManager, allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit)}
+	server := &Server{store: dataStore, router: requestRouter, auth: authManager, allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit), dashboardPasswordCache: newDashboardPasswordCache()}
+	server.cfg.Store(cfg)
 	server.streamKeepalive = parsePositiveDuration(cfg.Streaming.KeepaliveInterval)
 	server.nonStreamKeepalive = parsePositiveDuration(cfg.Streaming.NonStreamKeepaliveInterval)
 	server.loadManagementSecret(context.Background())
@@ -97,6 +108,23 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 	server.loadClaudeAliasResolver()
 	server.loadCursorAliasResolver()
 	return server
+}
+
+// currentConfig returns the configuration in force. The returned value is
+// shared by concurrent readers and must be treated as immutable; to change a
+// field, copy it, edit the copy and hand it to setConfig.
+func (s *Server) currentConfig() *config.Config {
+	if cfg := s.cfg.Load(); cfg != nil {
+		return cfg
+	}
+	return &config.Config{}
+}
+
+func (s *Server) setConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	s.cfg.Store(cfg)
 }
 
 func (s *Server) SetConfigPath(path string) { s.configPath = path }
@@ -108,7 +136,7 @@ func (s *Server) StartBackground(ctx context.Context) {
 	s.auth.Start(ctx)
 	backgroundCtx, cancel := context.WithCancel(ctx)
 	s.backgroundCancel = cancel
-	interval, err := time.ParseDuration(s.cfg.Retention.CleanupInterval)
+	interval, err := time.ParseDuration(s.currentConfig().Retention.CleanupInterval)
 	if err != nil || interval <= 0 {
 		interval = time.Hour
 	}
@@ -126,9 +154,27 @@ func (s *Server) StartBackground(ctx context.Context) {
 			}
 		}
 	}()
+	s.startAntigravityVersionRefresh(backgroundCtx)
 	s.initTunnelService()
 	if s.tunnel != nil {
 		s.tunnel.StartBackground(backgroundCtx)
+	}
+}
+
+// startAntigravityVersionRefresh keeps the Antigravity build tproxy announces in
+// step with the shipping one. It runs only when an Antigravity provider is
+// actually configured, so installations that never touch it make no outbound
+// call for it.
+func (s *Server) startAntigravityVersionRefresh(ctx context.Context) {
+	providers, err := s.store.Providers(ctx)
+	if err != nil {
+		return
+	}
+	for _, provider := range providers {
+		if provider.Type == "antigravity" && provider.Enabled {
+			antigravity.StartVersionRefresh(ctx)
+			return
+		}
 	}
 }
 
@@ -144,17 +190,17 @@ func (s *Server) Close() {
 }
 
 func (s *Server) runRetentionCleanup(ctx context.Context) {
-	if value, err := time.ParseDuration(s.cfg.Retention.UsageEvents); err == nil && value > 0 {
+	if value, err := time.ParseDuration(s.currentConfig().Retention.UsageEvents); err == nil && value > 0 {
 		_, _ = s.store.PruneUsage(ctx, time.Now().UTC().Add(-value))
 	}
-	if value, err := time.ParseDuration(s.cfg.Retention.MediaJobs); err == nil && value > 0 {
+	if value, err := time.ParseDuration(s.currentConfig().Retention.MediaJobs); err == nil && value > 0 {
 		_, _ = s.store.PruneMediaJobs(ctx, time.Now().UTC().Add(-value))
 	}
-	if value, err := time.ParseDuration(s.cfg.Retention.AuditEvents); err == nil && value > 0 {
+	if value, err := time.ParseDuration(s.currentConfig().Retention.AuditEvents); err == nil && value > 0 {
 		_, _ = s.store.PruneAuditEvents(ctx, time.Now().UTC().Add(-value))
 		_, _ = s.store.PruneConfigVersions(ctx, time.Now().UTC().Add(-value))
 	}
-	oauthRetention, _ := time.ParseDuration(s.cfg.Retention.OAuthSessions)
+	oauthRetention, _ := time.ParseDuration(s.currentConfig().Retention.OAuthSessions)
 	s.auth.PurgeExpiredSessions(oauthRetention)
 }
 
@@ -211,7 +257,7 @@ func (s *Server) clientAuth(next http.Handler) http.Handler {
 			if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok && key != nil {
 				state.ClientAPIKeyID = key.ID
 			}
-		} else if !s.cfg.Server.AllowLocalWithoutKey || !security.IsLoopback(r) {
+		} else if !s.currentConfig().Server.AllowLocalWithoutKey || !security.IsLoopback(r) {
 			writeStreamAwareError(w, r, http.StatusUnauthorized, "missing_api_key", "Bearer client API key is required", useClientRequestID(r))
 			return
 		}
@@ -299,7 +345,8 @@ func (s *Server) managementAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "management_remote_disabled", "remote management is disabled", useClientRequestID(r))
 			return
 		}
-		if s.managementRequestViaTunnel(r) && !s.managementSecretFromEnv {
+		secret, secretFromEnv, passwordAuth := s.managementCredentials()
+		if s.managementRequestViaTunnel(r) && !secretFromEnv {
 			writeError(w, http.StatusServiceUnavailable, "tunnel_management_secret_required", "tunnel management requires TPROXY_MANAGEMENT_SECRET", useClientRequestID(r))
 			return
 		}
@@ -307,18 +354,18 @@ func (s *Server) managementAuth(next http.Handler) http.Handler {
 		// non-loopback management surface must have an operator-provided secret;
 		// otherwise a newly installed, publicly reachable service would accept a
 		// known default password.
-		if !security.IsLoopback(r) && !s.managementSecretFromEnv {
+		if !security.IsLoopback(r) && !secretFromEnv {
 			writeError(w, http.StatusServiceUnavailable, "management_secret_required", "remote management requires a management secret", useClientRequestID(r))
 			return
 		}
 		token := managementToken(r)
-		matched := s.managementSecret != "" && security.ConstantTimeEqual(token, s.managementSecret)
+		matched := secret != "" && security.ConstantTimeEqual(token, secret)
 		// An environment-managed secret is the sole credential on remote paths;
 		// never let the local bootstrap password become a remote fallback. Keep
 		// the local dashboard password usable for loopback administration even
 		// when an operator also configured a remote secret.
-		if !matched && s.dashboardPasswordAuth && s.isLocalManagementRequest(r) {
-			matched, _ = s.store.VerifyDashboardPassword(r.Context(), token)
+		if !matched && passwordAuth && s.isLocalManagementRequest(r) {
+			matched = s.verifyDashboardPassword(r.Context(), token)
 		}
 		if !matched {
 			writeError(w, http.StatusUnauthorized, "invalid_management_secret", "invalid management secret", useClientRequestID(r))
@@ -806,17 +853,17 @@ func attachClientPolicyMetadata(request *canonical.Request, key *store.APIKey) {
 func (s *Server) enforceClientBudget(ctx context.Context, key *store.APIKey) error {
 	now := time.Now().UTC()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	if s.cfg.Limits.BudgetUSDPerDay > 0 {
+	if s.currentConfig().Limits.BudgetUSDPerDay > 0 {
 		used, err := s.store.TotalEstimatedCostSince(ctx, start)
 		if err != nil {
 			return fmt.Errorf("check global budget: %w", err)
 		}
-		if used >= s.cfg.Limits.BudgetUSDPerDay {
-			return fmt.Errorf("global daily budget of $%.4f has been exhausted", s.cfg.Limits.BudgetUSDPerDay)
+		if used >= s.currentConfig().Limits.BudgetUSDPerDay {
+			return fmt.Errorf("global daily budget of $%.4f has been exhausted", s.currentConfig().Limits.BudgetUSDPerDay)
 		}
 	}
 	if key != nil && key.Policy.Team != "" {
-		for _, team := range s.cfg.Teams {
+		for _, team := range s.currentConfig().Teams {
 			if team.ID != key.Policy.Team || team.Limits.BudgetUSDPerDay <= 0 {
 				continue
 			}
@@ -845,11 +892,11 @@ func (s *Server) enforceClientBudget(ctx context.Context, key *store.APIKey) err
 
 func (s *Server) limitScopes(key *store.APIKey) []limitScope {
 	scopes := make([]limitScope, 0, 3)
-	if s.cfg.Limits != (config.LimitPolicy{}) {
-		scopes = append(scopes, limitScope{ID: "global", Limits: s.cfg.Limits})
+	if s.currentConfig().Limits != (config.LimitPolicy{}) {
+		scopes = append(scopes, limitScope{ID: "global", Limits: s.currentConfig().Limits})
 	}
 	if key != nil && key.Policy.Team != "" {
-		for _, team := range s.cfg.Teams {
+		for _, team := range s.currentConfig().Teams {
 			if team.ID == key.Policy.Team {
 				scopes = append(scopes, limitScope{ID: "team:" + team.ID, Limits: team.Limits})
 				break
@@ -863,9 +910,9 @@ func (s *Server) limitScopes(key *store.APIKey) []limitScope {
 }
 
 func (s *Server) effectiveLimits(key *store.APIKey) config.LimitPolicy {
-	limits := s.cfg.Limits
+	limits := s.currentConfig().Limits
 	if key != nil && key.Policy.Team != "" {
-		for _, team := range s.cfg.Teams {
+		for _, team := range s.currentConfig().Teams {
 			if team.ID == key.Policy.Team {
 				limits = mergeLimitPolicies(limits, team.Limits)
 				break
@@ -1479,7 +1526,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid_request", err.Error(), useClientRequestID(r))
 			return
 		}
-		if providerCfg.Type == "plugin-http" && !s.cfg.Security.PluginsEnabled {
+		if providerCfg.Type == "plugin-http" && !s.currentConfig().Security.PluginsEnabled {
 			writeError(w, http.StatusForbidden, "plugins_disabled", "plugin execution is disabled by security policy", useClientRequestID(r))
 			return
 		}
@@ -1556,15 +1603,16 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			gateway = store.DefaultGatewaySettings()
 		}
+		remoteManagement, _ := s.managementScopes()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"retention":               s.cfg.Retention,
+			"retention":               s.currentConfig().Retention,
 			"payload_capture":         false,
-			"allow_remote_management": s.allowRemoteMgmt,
+			"allow_remote_management": remoteManagement,
 			"allow_lan_management":    gateway.AllowLANManagement,
 			"public_base_url":         gateway.PublicBaseURL,
-			"server_host":             s.cfg.Server.Host,
+			"server_host":             s.currentConfig().Server.Host,
 			"server_port":             s.clientFacingPort(),
-			"restart_required":        gateway.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
+			"restart_required":        gateway.AllowLANManagement && isLoopbackBindHost(s.currentConfig().Server.Host),
 			"lan_ips":                 lanIPsForGateway(gateway.AllowLANManagement),
 			"token_saver": map[string]any{
 				"enabled":              true,
@@ -1615,13 +1663,13 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = s.store.RecordConfigVersion(r.Context(), "reload", next)
-		s.cfg = next
+		s.setConfig(next)
 		s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 		s.router.ConfigureRouting(next.Routing)
 		_ = s.router.SyncAccountRotationSettings(r.Context())
 		s.loadManagementSecret(r.Context())
 		s.loadGatewaySettings(r.Context())
-		s.allowRemoteMgmt = next.Server.AllowRemoteManagement
+		s.setRemoteManagement(next.Server.AllowRemoteManagement)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config_path": s.configPath})
 	case "/api/admin/oauth/start":
 		s.oauthStart(w, r)
@@ -2121,7 +2169,7 @@ func (s *Server) adminDeleteModel(w http.ResponseWriter, r *http.Request, modelI
 			return
 		}
 		if next != nil {
-			s.cfg = next
+			s.setConfig(next)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model_id": modelID, "config_updated": s.configPath != ""})
@@ -2387,7 +2435,7 @@ func (s *Server) adminAPIKeySecrets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
 		return
 	}
-	secrets, err := s.store.MatchAPIKeySecrets(r.Context(), config.APIKeySecretCandidates(s.cfg))
+	secrets, err := s.store.MatchAPIKeySecrets(r.Context(), config.APIKeySecretCandidates(s.currentConfig()))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
 		return
@@ -2569,7 +2617,7 @@ func (s *Server) adminQuotaSummary(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"global_limits": s.cfg.Limits,
+		"global_limits": s.currentConfig().Limits,
 		"api_keys":      items,
 		"day_start":     since.UTC().Format(time.RFC3339),
 	})
@@ -2798,7 +2846,7 @@ func (s *Server) adminConfigExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
 		return
 	}
-	exported, err := s.store.ExportConfig(r.Context(), s.cfg)
+	exported, err := s.store.ExportConfig(r.Context(), s.currentConfig())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_export_failed", err.Error(), useClientRequestID(r))
 		return
@@ -2851,11 +2899,11 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.RecordConfigVersion(r.Context(), "import", &next)
-	s.cfg = &next
+	s.setConfig(&next)
 	s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 	s.router.ConfigureRouting(next.Routing)
 	s.loadManagementSecret(r.Context())
-	s.allowRemoteMgmt = next.Server.AllowRemoteManagement
+	s.setRemoteManagement(next.Server.AllowRemoteManagement)
 	s.loadGatewaySettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "imported_at": time.Now().UTC(), "database": "sqlite"})
 }
@@ -3200,10 +3248,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		state.ErrorCode = writer.Header().Get("X-TProxy-Error-Code")
 		s.liveLogs.Push(store.RequestLog{RequestID: state.RequestID, ClientAPIKeyID: state.ClientAPIKeyID, Method: r.Method, Path: r.URL.Path, Protocol: state.Protocol, PublicModelID: state.PublicModelID, ProviderID: state.ProviderID, CredentialID: state.CredentialID, Attempt: state.Attempt, Status: status, LatencyMS: time.Since(started).Milliseconds(), ErrorCode: state.ErrorCode, Metadata: metadata, CreatedAt: time.Now().UTC()})
 		isOAuthCallback := r.URL.Path == "/api/admin/oauth/callback"
-		if strings.HasPrefix(r.URL.Path, "/api/admin/") && !isOAuthCallback && r.Method != http.MethodGet && r.Method != http.MethodOptions {
+		if strings.HasPrefix(r.URL.Path, "/api/admin/") && !isOAuthCallback && r.Method != http.MethodGet && r.Method != http.MethodOptions && !adminRequestIsAction(r.URL.Path) {
 			_ = s.store.AddAuditEvent(context.Background(), store.AuditEvent{Actor: "management", Action: r.Method + " " + r.URL.Path, ResourceType: "admin", Status: status, Metadata: map[string]any{"request_id": state.RequestID}, CreatedAt: time.Now().UTC()})
 			if status < http.StatusBadRequest {
-				_ = s.store.RecordConfigVersion(context.Background(), "admin:"+r.Method+" "+r.URL.Path, s.cfg)
+				_ = s.store.RecordConfigVersion(context.Background(), "admin:"+r.Method+" "+r.URL.Path, s.currentConfig())
 			}
 		}
 		log.Printf("request_id=%s method=%s path=%s status=%d duration_ms=%d", state.RequestID, r.Method, r.URL.Path, status, time.Since(started).Milliseconds())

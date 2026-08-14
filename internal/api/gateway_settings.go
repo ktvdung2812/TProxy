@@ -17,10 +17,10 @@ import (
 func (s *Server) loadGatewaySettings(ctx context.Context) {
 	settings, err := s.store.GatewaySettings(ctx)
 	if err != nil {
-		s.allowLanMgmt = false
+		s.setLanManagement(false)
 		return
 	}
-	s.allowLanMgmt = settings.AllowLANManagement
+	s.setLanManagement(settings.AllowLANManagement)
 	s.ccFilterNaming.Store(settings.CCFilterNaming)
 }
 
@@ -31,10 +31,11 @@ func (s *Server) managementClientAllowed(r *http.Request) bool {
 	if security.IsLoopback(r) {
 		return true
 	}
-	if s.allowRemoteMgmt {
+	remote, lan := s.managementScopes()
+	if remote {
 		return true
 	}
-	if s.allowLanMgmt && security.IsPrivateNetwork(r) {
+	if lan && security.IsPrivateNetwork(r) {
 		return true
 	}
 	return false
@@ -131,7 +132,7 @@ func (s *Server) adminGatewaySettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "gateway_settings_failed", err.Error(), useClientRequestID(r))
 			return
 		}
-		s.allowLanMgmt = settings.AllowLANManagement
+		s.setLanManagement(settings.AllowLANManagement)
 		s.ccFilterNaming.Store(settings.CCFilterNaming)
 		response := gatewaySettingsPayload(s, settings)
 		response["ok"] = true
@@ -147,7 +148,7 @@ func (s *Server) clientFacingPort() int {
 			return port
 		}
 	}
-	return s.cfg.Server.Port
+	return s.currentConfig().Server.Port
 }
 
 func lanIPsForGateway(allowLAN bool) []string {
@@ -162,9 +163,9 @@ func gatewaySettingsPayload(s *Server, settings store.GatewaySettings) map[strin
 		"allow_lan_management": settings.AllowLANManagement,
 		"public_base_url":      settings.PublicBaseURL,
 		"cc_filter_naming":     settings.CCFilterNaming,
-		"server_host":          s.cfg.Server.Host,
+		"server_host":          s.currentConfig().Server.Host,
 		"server_port":          s.clientFacingPort(),
-		"restart_required":     settings.AllowLANManagement && isLoopbackBindHost(s.cfg.Server.Host),
+		"restart_required":     settings.AllowLANManagement && isLoopbackBindHost(s.currentConfig().Server.Host),
 	}
 	if settings.AllowLANManagement {
 		payload["lan_ips"] = lanIPsForGateway(true)

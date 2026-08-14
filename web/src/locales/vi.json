@@ -946,7 +946,6 @@
     "request_plural": "yêu cầu",
     "retention": {
       "usageEvents": "Sự kiện sử dụng",
-      "requestLogs": "Nhật ký yêu cầu",
       "auditEvents": "Sự kiện audit",
       "mediaJobs": "Media jobs",
       "oauthSessions": "Phiên OAuth",

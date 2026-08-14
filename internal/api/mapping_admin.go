@@ -29,7 +29,7 @@ func bridgeConfigFromYAML(cfg config.ClaudeAliasConfig) bridge.Config {
 }
 
 func (s *Server) loadClaudeAliasResolver() {
-	resolver := bridge.NewResolver(bridgeConfigFromYAML(s.cfg.ClaudeAliases))
+	resolver := bridge.NewResolver(bridgeConfigFromYAML(s.currentConfig().ClaudeAliases))
 	resolver.SetEnvOverrides(bridge.EnvOverrides())
 	if overrides, err := s.store.ClaudeAliasSettings(context.Background()); err == nil {
 		resolver.SetOverrides(overrides.Models)

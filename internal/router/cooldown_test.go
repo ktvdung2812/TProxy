@@ -23,6 +23,17 @@ func TestCooldownUntilUsesRetryAfterSeconds(t *testing.T) {
 	}
 }
 
+func TestCooldownUntilUsesGoogleRetryInfoDuration(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	until, ok := parseRetryAfter(now, "0.479417207s", time.Minute)
+	if !ok {
+		t.Fatal("expected protobuf duration to parse")
+	}
+	if got := until.Sub(now); got != 479417207*time.Nanosecond {
+		t.Fatalf("duration=%s", got)
+	}
+}
+
 func TestCooldownUntilAuthErrors(t *testing.T) {
 	settings := CooldownSettingsFromConfig(config.CooldownConfig{})
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)

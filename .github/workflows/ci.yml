@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Check formatting
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt reported unformatted files; run 'gofmt -w .'"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  race:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Test with race detector
+        run: go test -race ./...
+
+  dashboard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      # The Go binary embeds internal/api/dashboard, and those build artifacts
+      # are committed by hand. The failure mode that actually bites is a partial
+      # commit: index.html gets the new content-hashed asset names but the asset
+      # files themselves are not staged (or the old ones are not removed), which
+      # ships a dashboard that loads nothing. Checking the references resolve is
+      # reliable; byte-comparing a fresh build would depend on vite producing
+      # identical output on a different OS, which is not guaranteed.
+      - name: Verify committed dashboard references resolve
+        run: |
+          set -euo pipefail
+          root=internal/api/dashboard
+          missing=0
+          while read -r asset; do
+            [ -z "$asset" ] && continue
+            if [ ! -f "$root/$asset" ]; then
+              echo "::error::$root/index.html references missing asset $asset"
+              missing=1
+            fi
+          done <<< "$(grep -oE '(src|href)="/dashboard/[^"]+"' "$root/index.html" \
+                      | sed -E 's|.*"/dashboard/||; s|"$||')"
+          for asset in "$root"/assets/*; do
+            [ -e "$asset" ] || continue
+            name="assets/$(basename "$asset")"
+            if ! grep -q "$name" "$root/index.html"; then
+              echo "::error::$name is committed but no longer referenced by index.html"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
+
+      - name: Install dashboard dependencies
+        run: npm --prefix web ci
+
+      - name: Type-check and build dashboard
+        run: npm --prefix web run build

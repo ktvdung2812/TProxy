@@ -85,6 +85,10 @@ func TestDisableFallbackStopsAfterCredentialPreparationFailure(t *testing.T) {
 	defer failing.Close()
 	cfg := fallbackConfig(failing.URL, secondary.URL)
 	cfg.Providers[0].Credentials[0].AuthType = "oauth"
+	// An enrolled credential carries a token; the failure under test is the
+	// refresh, not a missing enrolment. Without a secret the credential seeds as
+	// auth_required and never reaches prepareCredential at all.
+	cfg.Providers[0].Credentials[0].Secret = "stale-oauth-token"
 	dataStore := newStore(t, cfg)
 	requestRouter := router.New(dataStore, providers.NewRegistry())
 	requestRouter.SetCredentialRefresher(failingCredentialRefresher{})
@@ -119,6 +123,10 @@ func TestDisableFallbackStopsStreamingCredentialPreparationFailure(t *testing.T)
 	defer failing.Close()
 	cfg := fallbackConfig(failing.URL, secondary.URL)
 	cfg.Providers[0].Credentials[0].AuthType = "oauth"
+	// An enrolled credential carries a token; the failure under test is the
+	// refresh, not a missing enrolment. Without a secret the credential seeds as
+	// auth_required and never reaches prepareCredential at all.
+	cfg.Providers[0].Credentials[0].Secret = "stale-oauth-token"
 	dataStore := newStore(t, cfg)
 	requestRouter := router.New(dataStore, providers.NewRegistry())
 	requestRouter.SetCredentialRefresher(failingCredentialRefresher{})

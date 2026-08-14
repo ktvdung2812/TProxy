@@ -107,6 +107,24 @@ func (s CooldownSettings) accountLevel(status int) bool {
 }
 
 func (s CooldownSettings) ComputeUntil(now time.Time, status int, retryAfter string, backoffCount int) time.Time {
+	return s.computeUntil(now, status, retryAfter, "", backoffCount)
+}
+
+// ComputeUntilWithReason additionally honours google.rpc.ErrorInfo's reason.
+// Google returns 429 both for a rate limit that clears in under a second and
+// for a quota that is gone for the day, and a quota-exhausted response can
+// still carry a short retryDelay. Obeying that delay sends the request straight
+// back to an account that has nothing left, so the reason has to override it.
+func (s CooldownSettings) ComputeUntilWithReason(now time.Time, status int, retryAfter, reason string, backoffCount int) time.Time {
+	return s.computeUntil(now, status, retryAfter, reason, backoffCount)
+}
+
+func (s CooldownSettings) computeUntil(now time.Time, status int, retryAfter, reason string, backoffCount int) time.Time {
+	if status == 429 && quotaExhaustedReason(reason) {
+		// Ignore retryAfter entirely here: it describes when the rate limiter
+		// would next admit a request, not when the quota returns.
+		return applyJitter(s.quotaExhaustedBackoff(backoffCount), s.Max, now)
+	}
 	if until, ok := parseRetryAfter(now, retryAfter, s.Max); ok {
 		return applyJitter(until.Sub(now), s.Max, now)
 	}
@@ -122,6 +140,37 @@ func (s CooldownSettings) ComputeUntil(now time.Time, status int, retryAfter str
 		duration = s.Fallback
 	}
 	return applyJitter(duration, s.Max, now)
+}
+
+// quotaExhaustedReason recognises the ErrorInfo reason that means the account
+// has no quota left, as opposed to being briefly throttled.
+//
+// Only QUOTA_EXHAUSTED qualifies. RESOURCE_EXHAUSTED is the gRPC status Google
+// puts on *both* conditions — a rate limit that clears in under a second and a
+// quota that is gone for the day arrive with the same status and the same
+// "Resource has been exhausted (e.g. check quota)." text. Treating that status
+// as exhaustion benches a healthy credential for minutes over a momentary
+// throttle, so the distinction has to come from the ErrorInfo reason.
+func quotaExhaustedReason(reason string) bool {
+	return strings.EqualFold(strings.TrimSpace(reason), "QUOTA_EXHAUSTED")
+}
+
+// quotaExhaustedBackoff benches the credential for the configured 429 window
+// and grows it while the account keeps coming back exhausted, so a drained
+// account is not retried once per request for the rest of the day.
+func (s CooldownSettings) quotaExhaustedBackoff(backoffCount int) time.Duration {
+	base := s.Status429
+	if base <= 0 {
+		base = s.Fallback
+	}
+	if base <= 0 {
+		base = time.Minute
+	}
+	scaled := float64(base) * math.Pow(2, float64(backoffCount))
+	if scaled > float64(s.Max) {
+		return s.Max
+	}
+	return time.Duration(scaled)
 }
 
 func (s CooldownSettings) fallbackForStatus(status int) time.Duration {
@@ -166,6 +215,14 @@ func parseRetryAfter(now time.Time, raw string, max time.Duration) (time.Time, b
 		}
 		return now.Add(d), true
 	}
+	// google.rpc.RetryInfo is encoded as a protobuf duration (for example
+	// "0.479417207s") rather than a Retry-After delta-seconds value.
+	if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+		if parsed > max {
+			parsed = max
+		}
+		return now.Add(parsed), true
+	}
 	if parsed, err := http.ParseTime(raw); err == nil && parsed.After(now) {
 		d := parsed.Sub(now)
 		if d > max {
@@ -177,5 +234,5 @@ func parseRetryAfter(now time.Time, raw string, max time.Duration) (time.Time, b
 }
 
 func credentialCooldownUntil(now time.Time, settings CooldownSettings, err error, backoffCount int) time.Time {
-	return settings.ComputeUntil(now, providers.Status(err), providers.RetryAfter(err), backoffCount)
+	return settings.ComputeUntilWithReason(now, providers.Status(err), providers.RetryAfter(err), providers.Reason(err), backoffCount)
 }

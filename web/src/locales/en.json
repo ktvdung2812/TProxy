@@ -946,7 +946,6 @@
     "request_plural": "requests",
     "retention": {
       "usageEvents": "Usage events",
-      "requestLogs": "Request logs",
       "auditEvents": "Audit events",
       "mediaJobs": "Media jobs",
       "oauthSessions": "OAuth sessions",
