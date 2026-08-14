@@ -409,16 +409,10 @@ func TestObservabilityRecordsAndRetentionAreBounded(t *testing.T) {
 	}
 	defer dataStore.Close()
 	old := time.Now().UTC().Add(-48 * time.Hour)
-	if err = dataStore.AddRequestLog(context.Background(), RequestLog{RequestID: "req-old", Method: "GET", Path: "/v1/models", Status: 200, CreatedAt: old}); err != nil {
-		t.Fatal(err)
-	}
 	if err = dataStore.AddAuditEvent(context.Background(), AuditEvent{Action: "POST /api/admin/models", Status: 200, CreatedAt: old}); err != nil {
 		t.Fatal(err)
 	}
 	if err = dataStore.AddUsage(context.Background(), UsageEvent{RequestID: "usage-old", CreatedAt: old}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = dataStore.PruneRequestLogs(context.Background(), time.Now().UTC().Add(-24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = dataStore.PruneAuditEvents(context.Background(), time.Now().UTC().Add(-24*time.Hour)); err != nil {
@@ -427,11 +421,10 @@ func TestObservabilityRecordsAndRetentionAreBounded(t *testing.T) {
 	if _, err = dataStore.PruneUsage(context.Background(), time.Now().UTC().Add(-24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	logs, _ := dataStore.RecentRequestLogs(context.Background(), 10)
 	audits, _ := dataStore.RecentAuditEvents(context.Background(), 10)
 	usage, _ := dataStore.RecentUsage(context.Background(), 10)
-	if len(logs) != 0 || len(audits) != 0 || len(usage) != 0 {
-		t.Fatalf("retention logs=%d audits=%d usage=%d", len(logs), len(audits), len(usage))
+	if len(audits) != 0 || len(usage) != 0 {
+		t.Fatalf("retention audits=%d usage=%d", len(audits), len(usage))
 	}
 	if err = dataStore.RecordConfigVersion(context.Background(), "test", &config.Config{Database: config.DatabaseConfig{Driver: "sqlite"}}); err != nil {
 		t.Fatal(err)
@@ -818,7 +811,7 @@ func TestExportConfigRedactsCredentialMetadata(t *testing.T) {
 	}
 }
 
-func TestRequestAndAuditLogsRedactSecretMetadata(t *testing.T) {
+func TestAuditLogsRedactSecretMetadata(t *testing.T) {
 	key, err := security.GenerateMasterKey()
 	if err != nil {
 		t.Fatal(err)
@@ -833,23 +826,15 @@ func TestRequestAndAuditLogsRedactSecretMetadata(t *testing.T) {
 	}
 	defer dataStore.Close()
 	metadata := map[string]any{"Authorization": "Bearer access-secret", "nested": map[string]any{"refresh_token": "refresh-secret"}, "message": "api_key=key-secret"}
-	if err = dataStore.AddRequestLog(context.Background(), RequestLog{RequestID: "request", Metadata: metadata}); err != nil {
-		t.Fatal(err)
-	}
 	if err = dataStore.AddAuditEvent(context.Background(), AuditEvent{Action: "test", Metadata: metadata}); err != nil {
 		t.Fatal(err)
 	}
-	var requestRaw, auditRaw string
-	if err = dataStore.db.QueryRow(`SELECT metadata_json FROM request_logs WHERE request_id='request'`).Scan(&requestRaw); err != nil {
-		t.Fatal(err)
-	}
+	var auditRaw string
 	if err = dataStore.db.QueryRow(`SELECT metadata_json FROM audit_events WHERE action='test'`).Scan(&auditRaw); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{requestRaw, auditRaw} {
-		if strings.Contains(raw, "access-secret") || strings.Contains(raw, "refresh-secret") || strings.Contains(raw, "key-secret") {
-			t.Fatalf("log metadata leaked secret: %s", raw)
-		}
+	if strings.Contains(auditRaw, "access-secret") || strings.Contains(auditRaw, "refresh-secret") || strings.Contains(auditRaw, "key-secret") {
+		t.Fatalf("audit metadata leaked secret: %s", auditRaw)
 	}
 }
 
@@ -1473,16 +1458,50 @@ func TestSeedSkipsPlaceholderCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(openAICreds) != 1 || openAICreds[0].ID != "openai-primary" {
-		t.Fatalf("openai credentials = %+v", openAICreds)
+	byID := map[string]Credential{}
+	for _, credential := range openAICreds {
+		byID[credential.ID] = credential
+	}
+	// An api_key credential whose secret never resolves is a genuine
+	// placeholder: it can never authenticate, so it gets no row.
+	if _, present := byID["openai-missing"]; present {
+		t.Fatalf("api_key credential with unresolved secret was seeded: %+v", openAICreds)
+	}
+	if byID["openai-primary"].Status != "healthy" {
+		t.Fatalf("api_key credential = %+v", byID["openai-primary"])
+	}
+	// An OAuth credential is different: the token arrives from the enrolment
+	// wizard, which needs the row to bind to. Seed it, but park it in
+	// auth_required so the router leaves it alone until it is enrolled.
+	oauth, present := byID["openai-oauth"]
+	if !present {
+		t.Fatalf("oauth credential was dropped by seed: %+v", openAICreds)
+	}
+	if oauth.Status != "auth_required" {
+		t.Fatalf("unenrolled oauth credential status = %q, want auth_required", oauth.Status)
+	}
+	for _, eligible := range EligibleCredentials(openAICreds, time.Now()) {
+		if eligible.ID == "openai-oauth" {
+			t.Fatal("unenrolled oauth credential must not be routable")
+		}
 	}
 
+	// A disabled provider still keeps its credentials: routing already filters
+	// on the provider's own enabled flag, and dropping the rows here would make
+	// a config export/import round-trip lose them.
 	disabledCreds, err := dataStore.Credentials(context.Background(), "ollama-local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(disabledCreds) != 0 {
+	if len(disabledCreds) != 1 || disabledCreds[0].ID != "ollama-none" {
 		t.Fatalf("disabled provider credentials = %+v", disabledCreds)
+	}
+	disabledProvider, err := dataStore.Provider(context.Background(), "ollama-local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabledProvider.Enabled {
+		t.Fatal("provider should have stayed disabled")
 	}
 
 	enabledNoneCreds, err := dataStore.Credentials(context.Background(), "ollama-enabled")
@@ -1491,5 +1510,108 @@ func TestSeedSkipsPlaceholderCredentials(t *testing.T) {
 	}
 	if len(enabledNoneCreds) != 1 || enabledNoneCreds[0].ID != "ollama-local-none" {
 		t.Fatalf("enabled none-auth credentials = %+v", enabledNoneCreds)
+	}
+}
+
+// Config export writes OAuth credentials back out, so seeding has to accept
+// them or every export/import cycle silently drops the operator's accounts.
+func TestSeedPreservesOAuthCredentialsAcrossConfigRoundTrip(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "roundtrip.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	ctx := context.Background()
+	if err = dataStore.Seed(ctx, &config.Config{Providers: []config.ProviderConfig{{
+		ID: "claude-sub", Type: "claude", Name: "Claude", Enabled: true,
+		Credentials: []config.CredentialConfig{{ID: "claude-account", AuthType: "oauth", Label: "Subscription", Secret: "token-from-wizard"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	exported, err := dataStore.ExportConfig(ctx, &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.Seed(ctx, exported); err != nil {
+		t.Fatal(err)
+	}
+
+	credentials, err := dataStore.Credentials(ctx, "claude-sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 || credentials[0].ID != "claude-account" {
+		t.Fatalf("oauth credential lost on round trip: %+v", credentials)
+	}
+	// The export redacts the secret, so re-importing must not wipe the stored
+	// token: the ON CONFLICT clause keeps the existing ciphertext.
+	if credentials[0].Secret != "token-from-wizard" {
+		t.Fatalf("stored oauth token was clobbered by import: %q", credentials[0].Secret)
+	}
+}
+
+// RecordConfigVersion is called after every admin mutation, but most of those
+// leave the configuration untouched. Without suppression a production install
+// accumulated 335,952 rows holding only 919 distinct digests.
+func TestRecordConfigVersionSuppressesDuplicates(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "versions.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	ctx := context.Background()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "p1", Type: "openai-compatible", Name: "P1", Enabled: true,
+		Credentials: []config.CredentialConfig{{ID: "c1", AuthType: "api_key", Secret: "s"}},
+	}}}
+	if err = dataStore.Seed(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		if err = dataStore.RecordConfigVersion(ctx, "admin:POST /api/admin/whatever", cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	versions, err := dataStore.RecentConfigVersions(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("10 identical recordings produced %d rows, want 1", len(versions))
+	}
+
+	// A genuine change must still append a row.
+	if err = dataStore.SaveProvider(ctx, config.ProviderConfig{ID: "p2", Type: "ollama", Name: "P2", Enabled: true, BaseURL: "http://127.0.0.1:11434"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.RecordConfigVersion(ctx, "admin:POST /api/admin/providers", cfg); err != nil {
+		t.Fatal(err)
+	}
+	versions, err = dataStore.RecentConfigVersions(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("a real configuration change produced %d rows, want 2", len(versions))
 	}
 }

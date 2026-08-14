@@ -21,3 +21,6 @@ models.dev-catalog.json.new
 *.bak-shm
 *.bak-wal
 *.png
+
+# Local agent/tooling workspace
+/.pi/

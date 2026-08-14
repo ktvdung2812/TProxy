@@ -197,6 +197,16 @@ type refreshCall struct {
 	err        error
 }
 
+// antigravityProjectCall coalesces recovery of a missing Cloud Code project
+// ID. Imported legacy credentials can have a valid access token but no
+// project_id; without coalescing, concurrent first requests would all attempt
+// to onboard the same account.
+type antigravityProjectCall struct {
+	done       chan struct{}
+	credential store.Credential
+	err        error
+}
+
 type discoveryEntry struct {
 	config    config.OAuthConfig
 	expiresAt time.Time
@@ -211,6 +221,7 @@ type Manager struct {
 	mu        sync.Mutex
 	sessions  map[string]*session
 	refresh   map[string]*refreshCall
+	projects  map[string]*antigravityProjectCall
 	discovery map[string]discoveryEntry
 	now       func() time.Time
 	// ageRefreshAttempt throttles age-based rotation per credential so a failing
@@ -227,7 +238,7 @@ type Manager struct {
 func NewManager(dataStore *store.Store, client *http.Client) *Manager {
 	client = oauthHTTPClient(client)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{store: dataStore, client: client, rootCtx: ctx, cancel: cancel, sessions: make(map[string]*session), refresh: make(map[string]*refreshCall), discovery: make(map[string]discoveryEntry), ageRefreshAttempt: make(map[string]time.Time), now: time.Now, prewarm: NewPrewarmManager()}
+	return &Manager{store: dataStore, client: client, rootCtx: ctx, cancel: cancel, sessions: make(map[string]*session), refresh: make(map[string]*refreshCall), projects: make(map[string]*antigravityProjectCall), discovery: make(map[string]discoveryEntry), ageRefreshAttempt: make(map[string]time.Time), now: time.Now, prewarm: NewPrewarmManager()}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -962,7 +973,14 @@ func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Prov
 	token := credential.OAuthToken
 	if token == nil {
 		token = &store.OAuthToken{AccessToken: credential.Secret, TokenType: credential.TokenType}
+		credential.OAuthToken = token
 	}
+	var err error
+	credential, err = m.prepareAntigravityCredential(ctx, provider, credential)
+	if err != nil {
+		return credential, err
+	}
+	token = credential.OAuthToken
 	if token.AccessToken == "" {
 		_ = m.store.MarkCredentialAuthRequired(ctx, credential.ID, "authorization_required")
 		return credential, &Error{code: "authorization_required", permanent: true}
@@ -977,7 +995,7 @@ func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Prov
 		credential.Secret = token.AccessToken
 		credential.TokenType = token.TokenType
 		credential.OAuthToken = token
-		return credential, nil
+		return m.ensureAntigravityProject(ctx, provider, credential)
 	}
 	if token.RefreshToken == "" {
 		_ = m.store.MarkCredentialAuthRequired(ctx, credential.ID, "authorization_required")
@@ -1794,7 +1812,18 @@ func (m *Manager) clientID(cfg config.OAuthConfig) string {
 	}
 	return strings.TrimSpace(cfg.ClientID)
 }
-func (m *Manager) clientSecret(cfg config.OAuthConfig) string { return config.Env(cfg.ClientSecretEnv) }
+
+// clientSecret prefers an operator-supplied secret and otherwise falls back to
+// the public secret that ships with a known installed-application client ID.
+// The fallback is what lets a provider such as Antigravity be enrolled without
+// the operator having to discover and set an environment variable for a value
+// that is not actually confidential.
+func (m *Manager) clientSecret(cfg config.OAuthConfig) string {
+	if value := config.Env(cfg.ClientSecretEnv); value != "" {
+		return value
+	}
+	return config.BuiltinOAuthClientSecret(m.clientID(cfg))
+}
 
 func (m *Manager) statusFor(item *session) SessionStatus {
 	item.mu.Lock()

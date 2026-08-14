@@ -13,26 +13,49 @@ import (
 )
 
 func (s *Server) loadManagementSecret(ctx context.Context) {
-	s.managementSecret = ""
-	s.managementSecretFromEnv = false
-	s.dashboardPasswordAuth = false
 	// Always bootstrap the local dashboard verifier, even when an environment
 	// secret overrides it for remote management. This keeps a fresh install
 	// deterministic without ever logging or returning the default password.
 	_, generated, err := s.store.EnsureDashboardPassword(ctx)
+	passwordAuth := err == nil
 	if err != nil {
 		log.Printf("warning: dashboard password unavailable: %v", err)
-	} else {
-		s.dashboardPasswordAuth = true
-		if generated {
-			log.Printf("tproxy dashboard password initialized; change it from Settings before enabling remote access")
-		}
+	} else if generated {
+		log.Printf("tproxy dashboard password initialized; change it from Settings before enabling remote access")
 	}
-	if env := config.Env(s.cfg.Security.ManagementSecretEnv); env != "" {
-		s.managementSecret = env
-		s.managementSecretFromEnv = true
-		return
-	}
+	env := config.Env(s.currentConfig().Security.ManagementSecretEnv)
+
+	s.managementMu.Lock()
+	defer s.managementMu.Unlock()
+	s.dashboardPasswordAuth = passwordAuth
+	s.managementSecret = env
+	s.managementSecretFromEnv = env != ""
+}
+
+// managementCredentials snapshots the credential state under one read lock so
+// the auth decision cannot observe a half-applied reload.
+func (s *Server) managementCredentials() (secret string, fromEnv bool, passwordAuth bool) {
+	s.managementMu.RLock()
+	defer s.managementMu.RUnlock()
+	return s.managementSecret, s.managementSecretFromEnv, s.dashboardPasswordAuth
+}
+
+func (s *Server) setRemoteManagement(allowed bool) {
+	s.managementMu.Lock()
+	defer s.managementMu.Unlock()
+	s.allowRemoteMgmt = allowed
+}
+
+func (s *Server) setLanManagement(allowed bool) {
+	s.managementMu.Lock()
+	defer s.managementMu.Unlock()
+	s.allowLanMgmt = allowed
+}
+
+func (s *Server) managementScopes() (remote bool, lan bool) {
+	s.managementMu.RLock()
+	defer s.managementMu.RUnlock()
+	return s.allowRemoteMgmt, s.allowLanMgmt
 }
 
 func (s *Server) adminDashboardPassword(w http.ResponseWriter, r *http.Request) {
@@ -60,12 +83,13 @@ func (s *Server) adminDashboardPassword(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_request", "new_password must be at least 6 characters", useClientRequestID(r))
 		return
 	}
-	if s.managementSecretFromEnv {
+	secret, fromEnv, passwordAuth := s.managementCredentials()
+	if fromEnv {
 		writeError(w, http.StatusConflict, "management_secret_env_configured", "management password is configured by environment", useClientRequestID(r))
 		return
 	}
-	matched := s.managementSecret != "" && security.ConstantTimeEqual(current, s.managementSecret)
-	if !matched && s.dashboardPasswordAuth && s.isLocalManagementRequest(r) {
+	matched := secret != "" && security.ConstantTimeEqual(current, secret)
+	if !matched && passwordAuth && s.isLocalManagementRequest(r) {
 		matched, _ = s.store.VerifyDashboardPassword(r.Context(), current)
 	}
 	if !matched {
@@ -81,9 +105,14 @@ func (s *Server) adminDashboardPassword(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "dashboard_password_save_failed", err.Error(), useClientRequestID(r))
 		return
 	}
+	s.managementMu.Lock()
 	if !s.managementSecretFromEnv {
 		s.managementSecret = next
 	}
 	s.dashboardPasswordAuth = true
+	s.managementMu.Unlock()
+	// The stored verifier changed, so any cached decision for the old password
+	// must not keep granting access.
+	s.dashboardPasswordCache.reset()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -84,7 +84,6 @@ streaming:
 
 retention:
   usage-events: 2160h
-  request-logs: 720h
   audit-events: 2160h
   media-jobs: 720h
   oauth-sessions: 24h

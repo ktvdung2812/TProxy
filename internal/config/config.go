@@ -159,9 +159,12 @@ type PrewarmConfig struct {
 	TopNAccounts         int    `yaml:"top-n" json:"top_n"`
 }
 
+// RetentionConfig bounds the durable bookkeeping tables. Request logs are
+// deliberately absent: they are served from an in-memory ring buffer and never
+// written to the database (the admin logs endpoint reports "persisted": false),
+// so a retention setting for them would describe cleanup that does not happen.
 type RetentionConfig struct {
 	UsageEvents     string `yaml:"usage-events" json:"usage_events"`
-	RequestLogs     string `yaml:"request-logs" json:"request_logs"`
 	AuditEvents     string `yaml:"audit-events" json:"audit_events"`
 	MediaJobs       string `yaml:"media-jobs" json:"media_jobs"`
 	OAuthSessions   string `yaml:"oauth-sessions" json:"oauth_sessions"`
@@ -384,9 +387,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Retention.UsageEvents == "" {
 		cfg.Retention.UsageEvents = "2160h"
-	}
-	if cfg.Retention.RequestLogs == "" {
-		cfg.Retention.RequestLogs = "720h"
 	}
 	if cfg.Retention.AuditEvents == "" {
 		cfg.Retention.AuditEvents = "2160h"
@@ -903,6 +903,30 @@ func UsesLegacyClaudeOAuthScopes(scopes []string) bool {
 	return claudeOAuthScopesDiffer(scopes)
 }
 
+// builtinOAuthClientSecrets pairs a public installed-application client ID with
+// its client secret.
+//
+// Google's installed-app OAuth flow (RFC 8252) accepts that a desktop client
+// cannot keep a secret: the value is shipped inside the application itself and
+// is not a confidential credential. Antigravity is one such client, and tproxy
+// already ships its client ID — without the matching secret the enrolment flow
+// cannot start at all, which surfaced as "OAuth provider configuration is
+// invalid" on a provider the user never had a way to configure.
+//
+// Keyed by client ID because that is what the secret actually belongs to, and
+// kept out of OAuthConfig so it is never written to the database or included in
+// a configuration export. An operator can still override it by setting the
+// provider's client-secret-env variable.
+var builtinOAuthClientSecrets = map[string]string{
+	"1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com": "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",
+}
+
+// BuiltinOAuthClientSecret returns the public client secret paired with a known
+// installed-application client ID, or an empty string when there is none.
+func BuiltinOAuthClientSecret(clientID string) string {
+	return builtinOAuthClientSecrets[strings.TrimSpace(clientID)]
+}
+
 func setOAuthDefault(oauth *OAuthConfig, authorizationURL, tokenURL, clientID, redirectURL string) {
 	if oauth.AuthorizationURL == "" {
 		oauth.AuthorizationURL = authorizationURL
@@ -975,7 +999,7 @@ func (cfg *Config) Validate() error {
 	if _, err := time.ParseDuration(ttl); err != nil {
 		return fmt.Errorf("invalid session affinity ttl: %w", err)
 	}
-	for name, value := range map[string]string{"usage-events": cfg.Retention.UsageEvents, "request-logs": cfg.Retention.RequestLogs, "audit-events": cfg.Retention.AuditEvents, "media-jobs": cfg.Retention.MediaJobs, "oauth-sessions": cfg.Retention.OAuthSessions, "cleanup-interval": cfg.Retention.CleanupInterval} {
+	for name, value := range map[string]string{"usage-events": cfg.Retention.UsageEvents, "audit-events": cfg.Retention.AuditEvents, "media-jobs": cfg.Retention.MediaJobs, "oauth-sessions": cfg.Retention.OAuthSessions, "cleanup-interval": cfg.Retention.CleanupInterval} {
 		parsed, err := time.ParseDuration(value)
 		if err != nil || parsed <= 0 {
 			return fmt.Errorf("invalid retention %s duration %q", name, value)

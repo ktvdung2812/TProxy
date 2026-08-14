@@ -307,6 +307,24 @@ func TestLoopbackDashboardPasswordRemainsUsableWithEnvironmentSecret(t *testing.
 		t.Fatalf("loopback dashboard password status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
+	// With LAN management off the client is refused before any credential is
+	// examined, so this alone would not prove the password was rejected.
+	blocked := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	blocked.RemoteAddr = "192.168.1.50:1234"
+	withDefaultManagementAuth(blocked)
+	blockedRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blockedRecorder, blocked)
+	if blockedRecorder.Code != http.StatusForbidden || !strings.Contains(blockedRecorder.Body.String(), "management_remote_disabled") {
+		t.Fatalf("LAN request without LAN management status=%d body=%s", blockedRecorder.Code, blockedRecorder.Body.String())
+	}
+
+	// Admit the LAN client so the request reaches the credential check, then
+	// assert the loopback-only dashboard password is still refused there.
+	if err := dataStore.SaveGatewaySettings(context.Background(), store.GatewaySettings{AllowLANManagement: true}); err != nil {
+		t.Fatal(err)
+	}
+	server.loadGatewaySettings(context.Background())
+
 	remote := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
 	remote.RemoteAddr = "192.168.1.50:1234"
 	withDefaultManagementAuth(remote)
@@ -314,6 +332,16 @@ func TestLoopbackDashboardPasswordRemainsUsableWithEnvironmentSecret(t *testing.
 	server.Handler().ServeHTTP(remoteRecorder, remote)
 	if remoteRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("remote accepted local dashboard password: status=%d body=%s", remoteRecorder.Code, remoteRecorder.Body.String())
+	}
+
+	// The environment secret is the credential that is meant to work remotely.
+	authorized := httptest.NewRequest(http.MethodGet, "/api/admin/snapshot", nil)
+	authorized.RemoteAddr = "192.168.1.50:1234"
+	authorized.Header.Set("Authorization", "Bearer remote-only-secret")
+	authorizedRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(authorizedRecorder, authorized)
+	if authorizedRecorder.Code != http.StatusOK {
+		t.Fatalf("environment secret rejected on LAN: status=%d body=%s", authorizedRecorder.Code, authorizedRecorder.Body.String())
 	}
 }
 
@@ -1610,7 +1638,7 @@ func withDefaultManagementAuth(r *http.Request) {
 	r.Header.Set("Authorization", "Bearer "+testDashboardPassword)
 }
 
-func apiTestStore(t *testing.T, cfg *config.Config) *store.Store {
+func apiTestStore(t testing.TB, cfg *config.Config) *store.Store {
 	t.Helper()
 	key, err := security.GenerateMasterKey()
 	if err != nil {

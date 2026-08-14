@@ -59,14 +59,14 @@ func (s *Server) adminGetAccountRotation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
 		return
 	}
-	strategy := s.cfg.Routing.Strategy
+	strategy := s.currentConfig().Routing.Strategy
 	if strategy == "" {
 		strategy = router.StrategyRoundRobin
 	}
 	if settings.Strategy != "" {
 		strategy = settings.Strategy
 	}
-	stickyLimit := s.cfg.Routing.StickyRoundRobinLimit
+	stickyLimit := s.currentConfig().Routing.StickyRoundRobinLimit
 	if settings.StickyRoundRobinLimit > 0 {
 		stickyLimit = settings.StickyRoundRobinLimit
 	}
@@ -74,7 +74,7 @@ func (s *Server) adminGetAccountRotation(w http.ResponseWriter, r *http.Request)
 		stickyLimit = 3
 	}
 	providerStrategies := map[string]store.ProviderRotationStrategy{}
-	for providerID, providerCfg := range s.cfg.Routing.ProviderStrategies {
+	for providerID, providerCfg := range s.currentConfig().Routing.ProviderStrategies {
 		providerStrategies[providerID] = store.ProviderRotationStrategy{
 			Strategy:              providerCfg.Strategy,
 			StickyRoundRobinLimit: providerCfg.StickyRoundRobinLimit,
@@ -112,10 +112,14 @@ func (s *Server) adminPutAccountRotation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if payload.Strategy != "" {
-		s.cfg.Routing.Strategy = payload.Strategy
-		s.cfg.Routing.StickyRoundRobinLimit = payload.StickyRoundRobinLimit
+		// Copy-on-write: the live config is shared with in-flight requests, so
+		// the routing fields cannot be edited in place.
+		next := *s.currentConfig()
+		next.Routing.Strategy = payload.Strategy
+		next.Routing.StickyRoundRobinLimit = payload.StickyRoundRobinLimit
+		s.setConfig(&next)
 	}
-	s.router.ConfigureRouting(s.cfg.Routing)
+	s.router.ConfigureRouting(s.currentConfig().Routing)
 	if err := s.router.SyncAccountRotationSettings(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "rotation_sync_failed", err.Error(), useClientRequestID(r))
 		return

@@ -31,7 +31,6 @@ type Props = {
 function buildRetentionRows(t: (key: string) => string): Array<{ key: keyof AdminSettings["retention"]; label: string }> {
   return [
     { key: "usage_events", label: t("settings.retention.usageEvents") },
-    { key: "request_logs", label: t("settings.retention.requestLogs") },
     { key: "audit_events", label: t("settings.retention.auditEvents") },
     { key: "media_jobs", label: t("settings.retention.mediaJobs") },
     { key: "oauth_sessions", label: t("settings.retention.oauthSessions") },

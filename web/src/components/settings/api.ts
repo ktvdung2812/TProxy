@@ -1,6 +1,5 @@
 export type RetentionSettings = {
   usage_events?: string;
-  request_logs?: string;
   audit_events?: string;
   media_jobs?: string;
   oauth_sessions?: string;
