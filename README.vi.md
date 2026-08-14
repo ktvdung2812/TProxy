@@ -77,7 +77,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 
 ### Vận hành & quản trị
 
-- **Client API key** với chính sách từng key: model được phép, endpoint, RPM, concurrency, kích thước input, media job và ngân sách hàng ngày.
+- **Client API key** mặc định dùng tất cả model, hỗ trợ bật/tắt model theo từng key cùng chính sách endpoint, RPM, concurrency, kích thước input, media job và ngân sách hàng ngày.
 - **Teams** với giới hạn phạm vi và tổng hợp chi phí.
 - **Token Saver** pipeline nén (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** cho từng provider (OPEN / DEGRADED / CLOSED).

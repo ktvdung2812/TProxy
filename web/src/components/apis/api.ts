@@ -56,7 +56,7 @@ export function toggleApiKey(secret: string, key: ApiKeyRecord, enabled: boolean
   return updateApiKey(secret, key.id, {
     id: key.id,
     name: key.name,
-    models: key.models?.length ? key.models.join(", ") : "*",
+    models: Array.isArray(key.models) ? key.models.join(", ") : "*",
     enabled,
     team: key.policy?.team || "",
     endpoints: key.policy?.endpoints?.join(", ") || "",
