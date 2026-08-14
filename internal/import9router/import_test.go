@@ -78,6 +78,124 @@ func TestImport9routerBackupApplies(t *testing.T) {
 	}
 }
 
+func TestImport9routerAntigravityPreservesProjectID(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "providerConnections": [
+	    {
+	      "id": "ag-credential",
+	      "provider": "gemini-cli",
+	      "authType": "oauth",
+	      "name": "Antigravity Account",
+	      "email": "user@example.com",
+	      "isActive": true,
+	      "accessToken": "access-token",
+	      "refreshToken": "refresh-token",
+	      "projectId": "cloud-project-123",
+	      "providerSpecificData": {"project_id": "ignored-project"}
+	    }
+	  ]
+	}`)
+
+	result, err := import9router.Import(context.Background(), dataStore, payload, import9router.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "gemini-cli")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-123" {
+		t.Fatalf("project_id=%#v, want cloud-project-123", got)
+	}
+}
+
+func TestImport9routerAntigravityPreservesObjectProjectID(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "providerConnections": [
+	    {
+	      "id": "ag-object-credential",
+	      "provider": "gemini-cli",
+	      "authType": "oauth",
+	      "name": "Antigravity Account",
+	      "email": "user@example.com",
+	      "isActive": true,
+	      "accessToken": "access-token",
+	      "project_id": {"cloudaicompanionProject": {"id": "cloud-project-object"}}
+	    }
+	  ]
+	}`)
+
+	result, err := import9router.Import(context.Background(), dataStore, payload, import9router.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "gemini-cli")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-object" {
+		t.Fatalf("project_id=%#v, want cloud-project-object", got)
+	}
+}
+
+func TestImport9routerAntigravityPreservesNestedProjectVariant(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "providerConnections": [
+	    {
+	      "id": "ag-project-credential",
+	      "provider": "gemini-cli",
+	      "authType": "oauth",
+	      "name": "Antigravity Account",
+	      "accessToken": "access-token",
+	      "project": {"cloudaicompanionProject": {"id": "cloud-project-nested"}}
+	    }
+	  ]
+	}`)
+
+	result, err := import9router.Import(context.Background(), dataStore, payload, import9router.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "gemini-cli")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-nested" {
+		t.Fatalf("project_id=%#v, want cloud-project-nested", got)
+	}
+}
+
+func TestImport9routerAntigravityPreservesSnakeCaseCompanionProject(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "providerConnections": [
+	    {
+	      "id": "ag-snake-project-credential",
+	      "provider": "gemini-cli",
+	      "authType": "oauth",
+	      "name": "Antigravity Account",
+	      "accessToken": "access-token",
+	      "cloudaicompanion_project": {"id": "cloud-project-snake"}
+	    }
+	  ]
+	}`)
+
+	result, err := import9router.Import(context.Background(), dataStore, payload, import9router.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "gemini-cli")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-snake" {
+		t.Fatalf("project_id=%#v, want cloud-project-snake", got)
+	}
+}
+
 func openTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	dir := t.TempDir()

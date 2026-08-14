@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -27,6 +28,17 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+type doneSignalContext struct {
+	context.Context
+	doneCalled chan struct{}
+	once       sync.Once
+}
+
+func (c *doneSignalContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.doneCalled) })
+	return c.Context.Done()
 }
 
 func TestBrowserPKCEStateSingleUseAndEncryptedToken(t *testing.T) {
@@ -1393,6 +1405,320 @@ func TestAntigravityBrowserOAuthEnrichesCredentialAndPreservesProjectOnRefresh(t
 	}
 	if refreshed.Secret != "antigravity-refreshed" || refreshed.OAuthToken.Extra["project_id"] != "cloud-project-123" || projectCalls.Load() != 1 || tokenCalls.Load() != 2 {
 		t.Fatalf("refreshed=%+v projectCalls=%d tokenCalls=%d", refreshed, projectCalls.Load(), tokenCalls.Load())
+	}
+}
+
+func TestAntigravityEnsureValidRecoversMissingProjectID(t *testing.T) {
+	var projectCalls atomic.Int32
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1internal:loadCodeAssist" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer antigravity-access" {
+			t.Fatalf("authorization=%q", r.Header.Get("Authorization"))
+		}
+		projectCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cloudaicompanionProject":"cloud-project-recovered"}`))
+	}))
+	defer providerServer.Close()
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", BaseURL: providerServer.URL + "/v1internal", Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: providerServer.URL + "/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveOAuthCredential(context.Background(), "antigravity", "antigravity-account", "Antigravity", "user@example.com", store.OAuthToken{
+		AccessToken:  "antigravity-access",
+		RefreshToken: "antigravity-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		Extra:        map[string]any{"imported_from": "legacy"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "antigravity")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+
+	updated, err := manager.EnsureValid(context.Background(), *provider, credentials[0], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.OAuthToken.Extra["project_id"]; got != "cloud-project-recovered" || projectCalls.Load() != 1 {
+		t.Fatalf("updated=%+v projectCalls=%d", updated, projectCalls.Load())
+	}
+	persisted, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil || persisted.OAuthToken.Extra["project_id"] != "cloud-project-recovered" {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+}
+
+func TestAntigravityEnsureValidCoalescesConcurrentProjectRecovery(t *testing.T) {
+	projectStarted := make(chan struct{})
+	releaseProject := make(chan struct{})
+	var projectCalls atomic.Int32
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1internal:loadCodeAssist" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		if projectCalls.Add(1) == 1 {
+			close(projectStarted)
+		}
+		<-releaseProject
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cloudaicompanionProject":"cloud-project-recovered"}`))
+	}))
+	defer providerServer.Close()
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", BaseURL: providerServer.URL, Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: providerServer.URL + "/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveOAuthCredential(context.Background(), "antigravity", "antigravity-account", "Antigravity", "user@example.com", store.OAuthToken{
+		AccessToken:  "antigravity-access",
+		RefreshToken: "antigravity-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, providerServer.Client())
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "antigravity")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+
+	results := make(chan error, 2)
+	go func() {
+		updated, ensureErr := manager.EnsureValid(context.Background(), *provider, credentials[0], false)
+		if ensureErr != nil {
+			results <- ensureErr
+			return
+		}
+		if got := updated.OAuthToken.Extra["project_id"]; got != "cloud-project-recovered" {
+			results <- fmt.Errorf("project_id=%#v", got)
+			return
+		}
+		results <- nil
+	}()
+	select {
+	case <-projectStarted:
+	case <-time.After(time.Second):
+		t.Fatal("project recovery did not start")
+	}
+	secondContext := &doneSignalContext{Context: context.Background(), doneCalled: make(chan struct{})}
+	go func() {
+		updated, ensureErr := manager.EnsureValid(secondContext, *provider, credentials[0], false)
+		if ensureErr != nil {
+			results <- ensureErr
+			return
+		}
+		if got := updated.OAuthToken.Extra["project_id"]; got != "cloud-project-recovered" {
+			results <- fmt.Errorf("project_id=%#v", got)
+			return
+		}
+		results <- nil
+	}()
+	select {
+	case <-secondContext.doneCalled:
+	case <-time.After(time.Second):
+		t.Fatal("second request did not join project recovery")
+	}
+	close(releaseProject)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if projectCalls.Load() != 1 {
+		t.Fatalf("project calls=%d, want 1", projectCalls.Load())
+	}
+}
+
+func TestAntigravityEnsureValidMigratesProjectIDFromMetadata(t *testing.T) {
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: "https://oauth.example.test/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveOAuthCredential(context.Background(), "antigravity", "antigravity-account", "Antigravity", "user@example.com", store.OAuthToken{
+		AccessToken:  "antigravity-access",
+		RefreshToken: "antigravity-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.UpdateCredentialMetadata(context.Background(), "antigravity-account", map[string]any{
+		"cloudaicompanionProject": map[string]any{"id": "metadata-project-123"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, nil)
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := manager.EnsureValid(context.Background(), *provider, credential, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.OAuthToken.Extra["project_id"]; got != "metadata-project-123" {
+		t.Fatalf("project_id=%#v, want metadata-project-123", got)
+	}
+	persisted, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil || persisted.OAuthToken.Extra["project_id"] != "metadata-project-123" {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+}
+
+func TestAntigravityEnsureValidMigratesMetadataForLegacyOAuthCredential(t *testing.T) {
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: "https://oauth.example.test/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveCredential(context.Background(), "antigravity", config.CredentialConfig{
+		ID: "antigravity-legacy", AuthType: "oauth", Secret: "antigravity-access",
+		Metadata: map[string]any{"project": map[string]any{"id": "metadata-project-legacy"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, nil)
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "antigravity-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := manager.EnsureValid(context.Background(), *provider, credential, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.OAuthToken == nil || updated.OAuthToken.Extra["project_id"] != "metadata-project-legacy" {
+		t.Fatalf("updated=%+v", updated)
+	}
+	persisted, err := dataStore.CredentialByID(context.Background(), "antigravity-legacy")
+	if err != nil || persisted.OAuthToken == nil || persisted.OAuthToken.Extra["project_id"] != "metadata-project-legacy" {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+}
+
+func TestAntigravityEnsureValidCanonicalizesLegacyProjectID(t *testing.T) {
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: "https://oauth.example.test/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveOAuthCredential(context.Background(), "antigravity", "antigravity-account", "Antigravity", "user@example.com", store.OAuthToken{
+		AccessToken:  "antigravity-access",
+		RefreshToken: "antigravity-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		Extra:        map[string]any{"cloudaicompanionProject": map[string]any{"id": "legacy-project-123"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, nil)
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := manager.EnsureValid(context.Background(), *provider, credential, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.OAuthToken.Extra["project_id"]; got != "legacy-project-123" {
+		t.Fatalf("project_id=%#v, want legacy-project-123", got)
+	}
+	persisted, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil || persisted.OAuthToken.Extra["project_id"] != "legacy-project-123" {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+}
+
+func TestAntigravityEnsureValidReplacesBlankCanonicalProjectID(t *testing.T) {
+	cfg := &config.Config{Providers: []config.ProviderConfig{{
+		ID: "antigravity", Type: "antigravity", Enabled: true,
+		OAuth: &config.OAuthConfig{TokenURL: "https://oauth.example.test/token", ClientID: "antigravity-client"},
+	}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	if err := dataStore.SaveOAuthCredential(context.Background(), "antigravity", "antigravity-account", "Antigravity", "user@example.com", store.OAuthToken{
+		AccessToken:  "antigravity-access",
+		RefreshToken: "antigravity-refresh",
+		TokenType:    "Bearer",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		Extra: map[string]any{
+			"project_id":              "  ",
+			"cloudaicompanionProject": map[string]any{"id": "legacy-project-123"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, nil)
+	defer manager.Close()
+	provider, err := dataStore.Provider(context.Background(), "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := manager.EnsureValid(context.Background(), *provider, credential, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := updated.OAuthToken.Extra["project_id"]; got != "legacy-project-123" {
+		t.Fatalf("project_id=%#v, want legacy-project-123", got)
+	}
+	persisted, err := dataStore.CredentialByID(context.Background(), "antigravity-account")
+	if err != nil || persisted.OAuthToken.Extra["project_id"] != "legacy-project-123" {
+		t.Fatalf("persisted=%+v err=%v", persisted, err)
+	}
+}
+
+func TestAntigravityEnsureValidRejectsMissingCredentialIDRecovery(t *testing.T) {
+	manager := NewManager(nil, nil)
+	defer manager.Close()
+	_, err := manager.EnsureValid(context.Background(), store.Provider{Type: "antigravity"}, store.Credential{
+		AuthType:   "oauth",
+		Secret:     "antigravity-access",
+		OAuthToken: &store.OAuthToken{AccessToken: "antigravity-access"},
+	}, false)
+	if err == nil || Code(err) != "oauth_provider_unavailable" {
+		t.Fatalf("err=%v, want oauth_provider_unavailable", err)
 	}
 }
 

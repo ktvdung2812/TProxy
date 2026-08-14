@@ -38,25 +38,25 @@ type CredentialQuota struct {
 }
 
 var quotaSupportedTypes = map[string]bool{
-	"codex":              true,
-	"claude":             true,
-	"copilot":            true,
-	"antigravity":        true,
-	"glm":                true,
-	"glm-cn":             true,
-	"minimax":            true,
-	"minimax-cn":         true,
-	"vercel-ai-gateway":  true,
-	"grok-cli":           true,
-	"xai":                true,
-	"kiro":               true,
-	"qoder":              true,
-	"codebuddy-cn":       true,
-	"github":             true,
-	"gemini-cli":         true,
-	"kimi":               true,
-	"kimi-coding":        true,
-	"ollama":             true,
+	"codex":             true,
+	"claude":            true,
+	"copilot":           true,
+	"antigravity":       true,
+	"glm":               true,
+	"glm-cn":            true,
+	"minimax":           true,
+	"minimax-cn":        true,
+	"vercel-ai-gateway": true,
+	"grok-cli":          true,
+	"xai":               true,
+	"kiro":              true,
+	"qoder":             true,
+	"codebuddy-cn":      true,
+	"github":            true,
+	"gemini-cli":        true,
+	"kimi":              true,
+	"kimi-coding":       true,
+	"ollama":            true,
 }
 
 // SupportsQuota reports whether a provider type or preset ID has an upstream quota probe.
@@ -82,6 +82,7 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 	if credential.ID == "" || credential.Secret == "" {
 		return result, &ProviderError{Code: "authorization_required", Message: "credential has no access token", Status: http.StatusUnauthorized}
 	}
+	ctx = withCredentialProxy(ctx, credential)
 	if quota, ok := r.credentialQuotaByPreset(ctx, provider, credential); ok {
 		return quota, nil
 	}
@@ -89,7 +90,6 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		result.Message = fmt.Sprintf("Upstream quota API is not implemented for %s", provider.Type)
 		return result, nil
 	}
-	ctx = withCredentialProxy(ctx, credential)
 	switch provider.Type {
 	case "codex":
 		return r.codexQuota(ctx, provider, credential)
@@ -192,12 +192,12 @@ func (r *Registry) copilotQuota(ctx context.Context, credential store.Credential
 		Quotas:       map[string]QuotaEntry{},
 	}
 	headers := http.Header{
-		"Authorization":           {"token " + credential.Secret},
-		"Accept":                  {"application/json"},
-		"X-GitHub-Api-Version":    {"2023-09-01"},
-		"User-Agent":              {"tproxy-quota/1.0"},
-		"Editor-Version":          {"vscode/1.100.0"},
-		"Editor-Plugin-Version":   {"copilot-chat/0.26.7"},
+		"Authorization":         {"token " + credential.Secret},
+		"Accept":                {"application/json"},
+		"X-GitHub-Api-Version":  {"2023-09-01"},
+		"User-Agent":            {"tproxy-quota/1.0"},
+		"Editor-Version":        {"vscode/1.100.0"},
+		"Editor-Plugin-Version": {"copilot-chat/0.26.7"},
 	}
 	body, status, err := r.quotaGET(ctx, "https://api.github.com/copilot_internal/user", headers)
 	if err != nil {

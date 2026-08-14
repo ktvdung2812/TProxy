@@ -466,30 +466,69 @@ func applyImportedOAuthExtras(providerID string, conn ProviderConnection, token 
 	if token.Extra == nil {
 		token.Extra = map[string]any{}
 	}
-	if providerID != "cursor" {
-		return
+	switch {
+	case providerID == "cursor":
+		machineID := firstNonEmpty(
+			stringFromAny(conn.ProviderSpecificData["machineId"]),
+			stringFromAny(conn.ProviderSpecificData["machine_id"]),
+		)
+		if machineID == "" {
+			return
+		}
+		token.Extra["machine_id"] = machineID
+		token.Extra["machineId"] = machineID
+		token.Extra["auth_method"] = firstNonEmpty(
+			stringFromAny(conn.ProviderSpecificData["authMethod"]),
+			"imported",
+		)
+		token.Extra["client_type"] = "ide"
+		token.Extra["client_version"] = "3.1.0"
+	case isAntigravityProvider(providerID):
+		projectID := firstNonEmpty(
+			projectIDFromAny(conn.ProjectID),
+			projectIDFromAny(conn.ProjectIDSnake),
+			projectIDFromAny(conn.Project),
+			projectIDFromAny(conn.CloudAICompanionProject),
+			projectIDFromAny(conn.CloudAICompanionSnake),
+			projectIDFromAny(conn.ProviderSpecificData["projectId"]),
+			projectIDFromAny(conn.ProviderSpecificData["project_id"]),
+			projectIDFromAny(conn.ProviderSpecificData["project"]),
+			projectIDFromAny(conn.ProviderSpecificData["cloudaicompanionProject"]),
+			projectIDFromAny(conn.ProviderSpecificData["cloudaicompanion_project"]),
+		)
+		if projectID != "" {
+			token.Extra["project_id"] = projectID
+		}
 	}
-	machineID := firstNonEmpty(
-		stringFromAny(conn.ProviderSpecificData["machineId"]),
-		stringFromAny(conn.ProviderSpecificData["machine_id"]),
-	)
-	if machineID == "" {
-		return
-	}
-	token.Extra["machine_id"] = machineID
-	token.Extra["machineId"] = machineID
-	token.Extra["auth_method"] = firstNonEmpty(
-		stringFromAny(conn.ProviderSpecificData["authMethod"]),
-		"imported",
-	)
-	token.Extra["client_type"] = "ide"
-	token.Extra["client_version"] = "3.1.0"
+}
+
+func isAntigravityProvider(providerID string) bool {
+	preset, ok := ninerouter.Lookup(providerID)
+	return ok && preset.Type == "antigravity"
 }
 
 func stringFromAny(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
+}
+
+func projectIDFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		return firstNonEmpty(
+			projectIDFromAny(typed["id"]),
+			projectIDFromAny(typed["projectId"]),
+			projectIDFromAny(typed["project_id"]),
+			projectIDFromAny(typed["project"]),
+			projectIDFromAny(typed["cloudaicompanionProject"]),
+			projectIDFromAny(typed["cloudaicompanion_project"]),
+		)
 	default:
 		return ""
 	}

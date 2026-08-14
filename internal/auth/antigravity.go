@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tproxy/tproxy/internal/antigravity"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
 const (
-	antigravityDefaultBaseURL   = "https://cloudcode-pa.googleapis.com"
-	antigravityDailyBaseURL     = "https://daily-cloudcode-pa.googleapis.com"
-	antigravityUserAgent        = "antigravity/hub/2.2.1 darwin/arm64"
-	antigravityOnboardUserAgent = antigravityUserAgent + " google-api-nodejs-client/10.3.0"
+	antigravityDefaultBaseURL = "https://cloudcode-pa.googleapis.com"
+	antigravityDailyBaseURL   = "https://daily-cloudcode-pa.googleapis.com"
+	antigravityOnboardTimeout = 30 * time.Second
 )
 
 func (m *Manager) prepareProviderToken(ctx context.Context, provider store.Provider, token store.OAuthToken, email string) (store.OAuthToken, string, error) {
@@ -77,10 +77,7 @@ func (m *Manager) enrichAntigravityToken(ctx context.Context, provider store.Pro
 			email = discovered
 		}
 	}
-	projectID := stringValue(token.Extra["project_id"])
-	if projectID == "" {
-		projectID = stringValue(token.Extra["projectId"])
-	}
+	projectID := antigravityProjectFromExtra(token.Extra)
 	if projectID == "" {
 		var err error
 		projectID, err = m.fetchAntigravityProjectID(ctx, provider, token.AccessToken)
@@ -91,8 +88,147 @@ func (m *Manager) enrichAntigravityToken(ctx context.Context, provider store.Pro
 	if projectID == "" {
 		return token, email, &Error{code: "oauth_provider_unavailable", err: errors.New("Antigravity project ID is unavailable")}
 	}
-	token.Extra["project_id"] = projectID
+	token = antigravityTokenWithProjectID(token, projectID)
 	return token, email, nil
+}
+
+// ensureAntigravityProject recovers metadata missing from older imports even
+// when their access token is still fresh. A Cloud Code request cannot proceed
+// without a project ID, so recover it before returning a credential to the
+// router and persist the canonical project_id for subsequent requests.
+func (m *Manager) ensureAntigravityProject(ctx context.Context, provider store.Provider, credential store.Credential) (store.Credential, error) {
+	if provider.Type != "antigravity" || credential.AuthType != "oauth" || credential.OAuthToken == nil {
+		return credential, nil
+	}
+	if projectID := antigravityProjectFromExtra(credential.OAuthToken.Extra); projectID != "" {
+		if antigravityProjectValue(credential.OAuthToken.Extra["project_id"]) == "" {
+			return m.persistAntigravityProject(ctx, credential, antigravityTokenWithProjectID(*credential.OAuthToken, projectID))
+		}
+		return credential, nil
+	}
+	if credential.ID == "" {
+		return credential, &Error{code: "oauth_provider_unavailable", err: errors.New("Antigravity credential ID is unavailable for project recovery")}
+	}
+
+	m.mu.Lock()
+	if existing := m.projects[credential.ID]; existing != nil {
+		m.mu.Unlock()
+		select {
+		case <-existing.done:
+			return existing.credential, existing.err
+		case <-ctx.Done():
+			return credential, ctx.Err()
+		}
+	}
+	call := &antigravityProjectCall{done: make(chan struct{})}
+	m.projects[credential.ID] = call
+	m.mu.Unlock()
+
+	updated, err := m.runAntigravityProjectRecovery(ctx, provider, credential, call)
+	return updated, err
+}
+
+func (m *Manager) runAntigravityProjectRecovery(ctx context.Context, provider store.Provider, credential store.Credential, call *antigravityProjectCall) (updated store.Credential, err error) {
+	updated = credential
+	defer func() {
+		if recover() != nil {
+			err = errors.New("Antigravity project recovery failed")
+		}
+		m.mu.Lock()
+		call.credential, call.err = updated, err
+		delete(m.projects, credential.ID)
+		close(call.done)
+		m.mu.Unlock()
+	}()
+	return m.recoverAntigravityProject(ctx, provider, credential)
+}
+
+// prepareAntigravityCredential repairs imported metadata before the normal
+// provider token preparation path. It avoids a control-plane call when the
+// project ID already lives in non-secret credential metadata, while keeping
+// the canonical value inside the encrypted OAuth token envelope.
+func (m *Manager) prepareAntigravityCredential(ctx context.Context, provider store.Provider, credential store.Credential) (store.Credential, error) {
+	if provider.Type != "antigravity" || credential.AuthType != "oauth" || credential.OAuthToken == nil || antigravityProjectFromExtra(credential.OAuthToken.Extra) != "" {
+		return credential, nil
+	}
+	projectID := antigravityProjectFromExtra(credential.Metadata)
+	if projectID == "" {
+		return credential, nil
+	}
+	token := antigravityTokenWithProjectID(*credential.OAuthToken, projectID)
+	credential.OAuthToken = &token
+	return m.persistAntigravityProject(ctx, credential, token)
+}
+
+func (m *Manager) recoverAntigravityProject(ctx context.Context, provider store.Provider, credential store.Credential) (store.Credential, error) {
+	if credential.OAuthToken == nil || strings.TrimSpace(credential.OAuthToken.AccessToken) == "" {
+		_ = m.store.MarkCredentialAuthRequired(ctx, credential.ID, "authorization_required")
+		return credential, &Error{code: "authorization_required", permanent: true}
+	}
+	token := *credential.OAuthToken
+	if token.Extra == nil {
+		token.Extra = make(map[string]any)
+	}
+	projectID, err := m.fetchAntigravityProjectID(ctx, provider, token.AccessToken)
+	if err != nil {
+		return credential, &Error{code: "oauth_provider_unavailable", err: err}
+	}
+	if projectID == "" {
+		return credential, &Error{code: "oauth_provider_unavailable", err: errors.New("Antigravity project ID is unavailable")}
+	}
+	token = antigravityTokenWithProjectID(token, projectID)
+	return m.persistAntigravityProject(ctx, credential, token)
+}
+
+func antigravityTokenWithProjectID(token store.OAuthToken, projectID string) store.OAuthToken {
+	projectID = strings.TrimSpace(projectID)
+	extra := make(map[string]any, len(token.Extra)+1)
+	for key, value := range token.Extra {
+		extra[key] = value
+	}
+	extra["project_id"] = projectID
+	token.Extra = extra
+	return token
+}
+
+func (m *Manager) persistAntigravityProject(ctx context.Context, credential store.Credential, token store.OAuthToken) (store.Credential, error) {
+	if err := m.store.UpdateOAuthToken(ctx, credential.ID, token); err != nil {
+		return credential, err
+	}
+	credential.Secret = token.AccessToken
+	credential.TokenType = token.TokenType
+	credential.OAuthToken = &token
+	credential.Status = "healthy"
+	credential.CooldownUntil = time.Time{}
+	credential.LastErrorCode = ""
+	credential.LastError = ""
+	return credential, nil
+}
+
+func antigravityProjectFromExtra(extra map[string]any) string {
+	if extra == nil {
+		return ""
+	}
+	for _, key := range []string{"project_id", "projectId", "cloudaicompanionProject", "cloudaicompanion_project", "project"} {
+		if projectID := antigravityProjectValue(extra[key]); projectID != "" {
+			return projectID
+		}
+	}
+	return ""
+}
+
+func antigravityProjectValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		for _, key := range []string{"id", "project_id", "projectId", "cloudaicompanionProject", "cloudaicompanion_project"} {
+			if projectID := antigravityProjectValue(typed[key]); projectID != "" {
+				return projectID
+			}
+		}
+	}
+	return ""
 }
 
 func (m *Manager) fetchAntigravityEmail(ctx context.Context, target, accessToken string) (string, error) {
@@ -102,7 +238,7 @@ func (m *Manager) fetchAntigravityEmail(ctx context.Context, target, accessToken
 	}
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", antigravityUserAgent)
+	request.Header.Set("User-Agent", antigravity.UserAgent())
 	response, err := m.client.Do(request)
 	if err != nil {
 		return "", err
@@ -119,11 +255,11 @@ func (m *Manager) fetchAntigravityEmail(ctx context.Context, target, accessToken
 }
 
 func (m *Manager) fetchAntigravityProjectID(ctx context.Context, provider store.Provider, accessToken string) (string, error) {
-	baseURL := strings.TrimRight(provider.BaseURL, "/")
+	baseURL := antigravityBaseURL(provider.BaseURL)
 	if baseURL == "" {
 		baseURL = antigravityDefaultBaseURL
 	}
-	payload, err := m.antigravityJSON(ctx, baseURL+"/v1internal:loadCodeAssist", accessToken, antigravityUserAgent, map[string]any{
+	payload, err := m.antigravityJSON(ctx, baseURL+"/v1internal:loadCodeAssist", accessToken, antigravity.UserAgent(), map[string]any{
 		"metadata": map[string]any{"ideType": "ANTIGRAVITY"},
 	}, false)
 	if err != nil {
@@ -141,12 +277,17 @@ func (m *Manager) fetchAntigravityProjectID(ctx context.Context, provider store.
 		"tier_id": tierID,
 		"metadata": map[string]any{
 			"ide_type":    "ANTIGRAVITY",
-			"ide_version": "2.2.1",
+			"ide_version": antigravity.Version(),
 			"ide_name":    "antigravity",
 		},
 	}
 	for attempt := 0; attempt < 5; attempt++ {
-		payload, err = m.antigravityJSON(ctx, onboardBaseURL+"/v1internal:onboardUser", accessToken, antigravityOnboardUserAgent, requestBody, true)
+		// An injected HTTP client is allowed to have no timeout. Bound each
+		// onboarding poll nevertheless so an unavailable control plane cannot
+		// permanently pin an OAuth completion or credential-recovery request.
+		attemptCtx, cancel := context.WithTimeout(ctx, antigravityOnboardTimeout)
+		payload, err = m.antigravityJSON(attemptCtx, onboardBaseURL+"/v1internal:onboardUser", accessToken, antigravity.OnboardUserAgent(), requestBody, true)
+		cancel()
 		if err != nil {
 			return "", err
 		}
@@ -161,6 +302,18 @@ func (m *Manager) fetchAntigravityProjectID(ctx context.Context, provider store.
 		}
 	}
 	return "", errors.New("Antigravity onboarding did not complete")
+}
+
+// antigravityBaseURL accepts both the Cloud Code origin and legacy presets
+// ending in /v1internal. Cloud Code actions are written as
+// /v1internal:<action>, so retaining that suffix would create an invalid
+// /v1internal/v1internal:<action> URL.
+func antigravityBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(strings.ToLower(baseURL), "/v1internal") {
+		baseURL = strings.TrimRight(baseURL[:len(baseURL)-len("/v1internal")], "/")
+	}
+	return baseURL
 }
 
 func (m *Manager) antigravityJSON(ctx context.Context, target, accessToken, userAgent string, body map[string]any, controlPlane bool) (map[string]any, error) {
@@ -198,16 +351,9 @@ func antigravityProjectID(payload map[string]any) string {
 	if payload == nil {
 		return ""
 	}
-	for _, key := range []string{"cloudaicompanionProject", "projectId", "project", "project_id"} {
-		switch value := payload[key].(type) {
-		case string:
-			if value = strings.TrimSpace(value); value != "" {
-				return value
-			}
-		case map[string]any:
-			if id := strings.TrimSpace(stringValue(value["id"])); id != "" {
-				return id
-			}
+	for _, key := range []string{"cloudaicompanionProject", "cloudaicompanion_project", "projectId", "project", "project_id"} {
+		if projectID := antigravityProjectValue(payload[key]); projectID != "" {
+			return projectID
 		}
 	}
 	for _, key := range []string{"response", "result"} {

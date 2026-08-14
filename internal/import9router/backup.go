@@ -17,21 +17,26 @@ type Backup struct {
 }
 
 type ProviderConnection struct {
-	ID                   string         `json:"id"`
-	Provider             string         `json:"provider"`
-	AuthType             string         `json:"authType"`
-	Name                 string         `json:"name"`
-	Email                string         `json:"email"`
-	Priority             int            `json:"priority"`
-	IsActive             bool           `json:"isActive"`
-	AccessToken          string         `json:"accessToken"`
-	RefreshToken         string         `json:"refreshToken"`
-	ExpiresAt            string         `json:"expiresAt"`
-	Scope                string         `json:"scope"`
-	APIKey               string         `json:"apiKey"`
-	LastUsedAt           string         `json:"lastUsedAt"`
-	ConsecutiveUseCount  int            `json:"consecutiveUseCount"`
-	ProviderSpecificData map[string]any `json:"providerSpecificData"`
+	ID                      string         `json:"id"`
+	Provider                string         `json:"provider"`
+	AuthType                string         `json:"authType"`
+	Name                    string         `json:"name"`
+	Email                   string         `json:"email"`
+	Priority                int            `json:"priority"`
+	IsActive                bool           `json:"isActive"`
+	AccessToken             string         `json:"accessToken"`
+	RefreshToken            string         `json:"refreshToken"`
+	ExpiresAt               string         `json:"expiresAt"`
+	ProjectID               any            `json:"projectId"`
+	ProjectIDSnake          any            `json:"project_id"`
+	Project                 any            `json:"project"`
+	CloudAICompanionProject any            `json:"cloudaicompanionProject"`
+	CloudAICompanionSnake   any            `json:"cloudaicompanion_project"`
+	Scope                   string         `json:"scope"`
+	APIKey                  string         `json:"apiKey"`
+	LastUsedAt              string         `json:"lastUsedAt"`
+	ConsecutiveUseCount     int            `json:"consecutiveUseCount"`
+	ProviderSpecificData    map[string]any `json:"providerSpecificData"`
 }
 
 type ProxyPool struct {

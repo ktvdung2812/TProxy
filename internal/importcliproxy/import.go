@@ -13,17 +13,22 @@ import (
 )
 
 type AuthFile struct {
-	Type         string         `json:"type"`
-	AccessToken  string         `json:"access_token"`
-	RefreshToken string         `json:"refresh_token"`
-	IDToken      string         `json:"id_token"`
-	Email        string         `json:"email"`
-	AccountID    string         `json:"account_id"`
-	Disabled     bool           `json:"disabled"`
-	Expired      string         `json:"expired"`
-	LastRefresh  string         `json:"last_refresh"`
-	APIKey       string         `json:"api_key"`
-	Extra        map[string]any `json:"-"`
+	Type                    string         `json:"type"`
+	AccessToken             string         `json:"access_token"`
+	RefreshToken            string         `json:"refresh_token"`
+	IDToken                 string         `json:"id_token"`
+	Email                   string         `json:"email"`
+	AccountID               string         `json:"account_id"`
+	Disabled                bool           `json:"disabled"`
+	Expired                 string         `json:"expired"`
+	LastRefresh             string         `json:"last_refresh"`
+	APIKey                  string         `json:"api_key"`
+	ProjectID               any            `json:"project_id"`
+	ProjectIDCamel          any            `json:"projectId"`
+	Project                 any            `json:"project"`
+	CloudAICompanionProject any            `json:"cloudaicompanionProject"`
+	CloudAICompanionSnake   any            `json:"cloudaicompanion_project"`
+	Extra                   map[string]any `json:"-"`
 }
 
 type Options struct {
@@ -56,15 +61,16 @@ type providerSpec struct {
 }
 
 var providerSpecs = map[string]providerSpec{
-	"codex":               {Type: "codex", Name: "OpenAI Codex"},
-	"claude":              {Type: "claude", Name: "Anthropic Claude"},
-	"xai":                 {Type: "xai", Name: "xAI (Grok)"},
-	"antigravity":         {Type: "antigravity", Name: "Google Antigravity"},
-	"kimi":                {Type: "kimi", Name: "Kimi Code"},
-	"gemini":              {Type: "gemini", Name: "Google Gemini"},
-	"copilot":             {Type: "copilot", Name: "GitHub Copilot"},
+	"codex":                {Type: "codex", Name: "OpenAI Codex"},
+	"claude":               {Type: "claude", Name: "Anthropic Claude"},
+	"xai":                  {Type: "xai", Name: "xAI (Grok)"},
+	"antigravity":          {Type: "antigravity", Name: "Google Antigravity"},
+	"gemini-cli":           {Type: "antigravity", Name: "Google Gemini CLI"},
+	"kimi":                 {Type: "kimi", Name: "Kimi Code"},
+	"gemini":               {Type: "gemini", Name: "Google Gemini"},
+	"copilot":              {Type: "copilot", Name: "GitHub Copilot"},
 	"openai-compatibility": {Type: "openai-compatible", Name: "OpenAI Compatible"},
-	"openai-compatible":  {Type: "openai-compatible", Name: "OpenAI Compatible"},
+	"openai-compatible":    {Type: "openai-compatible", Name: "OpenAI Compatible"},
 }
 
 func ParseAuthFiles(data []byte) ([]AuthFile, error) {
@@ -158,12 +164,19 @@ func (i *importer) ensureProvider(ctx context.Context, providerID string) {
 		i.result.Counts.Providers++
 		return
 	}
-	if err := i.store.SaveProvider(ctx, config.ProviderConfig{
+	providerConfig := config.ProviderConfig{
 		ID:      providerID,
 		Type:    spec.Type,
 		Name:    spec.Name,
 		Enabled: true,
-	}); err != nil {
+	}
+	// A Gemini CLI export does not carry a Cloud Code base URL. Apply just the
+	// Antigravity defaults needed to make that imported credential usable; keep
+	// other CLIProxy provider imports on their established bootstrap path.
+	if spec.Type == "antigravity" {
+		config.ApplyProviderDefaults(&providerConfig)
+	}
+	if err := i.store.SaveProvider(ctx, providerConfig); err != nil {
 		i.fail(fmt.Sprintf("provider %q: %v", providerID, err))
 		return
 	}
@@ -211,13 +224,18 @@ func (i *importer) importAuthFile(ctx context.Context, file AuthFile) {
 		TokenType:    "Bearer",
 		ExpiresAt:    parseTime(firstNonEmpty(file.Expired)),
 		Extra: map[string]any{
-			"account_id":      file.AccountID,
-			"id_token":        file.IDToken,
-			"last_refresh":    file.LastRefresh,
-			"imported_from":   "cliproxyapi",
-			"cliproxy_type":   file.Type,
+			"account_id":        file.AccountID,
+			"id_token":          file.IDToken,
+			"last_refresh":      file.LastRefresh,
+			"imported_from":     "cliproxyapi",
+			"cliproxy_type":     file.Type,
 			"cliproxy_provider": spec.Type,
 		},
+	}
+	if spec.Type == "antigravity" {
+		if projectID := antigravityProjectID(file); projectID != "" {
+			token.Extra["project_id"] = projectID
+		}
 	}
 	if i.dryRun {
 		i.result.Counts.Credentials++
@@ -231,6 +249,34 @@ func (i *importer) importAuthFile(ctx context.Context, file AuthFile) {
 		_ = i.store.SetCredentialEnabled(ctx, credentialID, false)
 	}
 	i.result.Counts.Credentials++
+}
+
+func antigravityProjectID(file AuthFile) string {
+	return firstNonEmpty(
+		projectIDFromAny(file.ProjectID),
+		projectIDFromAny(file.ProjectIDCamel),
+		projectIDFromAny(file.Project),
+		projectIDFromAny(file.CloudAICompanionProject),
+		projectIDFromAny(file.CloudAICompanionSnake),
+	)
+}
+
+func projectIDFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		return firstNonEmpty(
+			projectIDFromAny(typed["id"]),
+			projectIDFromAny(typed["project_id"]),
+			projectIDFromAny(typed["projectId"]),
+			projectIDFromAny(typed["project"]),
+			projectIDFromAny(typed["cloudaicompanionProject"]),
+			projectIDFromAny(typed["cloudaicompanion_project"]),
+		)
+	default:
+		return ""
+	}
 }
 
 func credentialIDFor(file AuthFile) string {

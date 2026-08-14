@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
@@ -24,7 +26,12 @@ type ProviderError struct {
 	Code       string
 	Message    string
 	RetryAfter string
-	Err        error
+	// Reason carries google.rpc.ErrorInfo's reason when the upstream supplies
+	// one. Google APIs return 429 for two very different situations —
+	// RATE_LIMIT_EXCEEDED, which clears in seconds, and QUOTA_EXHAUSTED, which
+	// does not — and only this field tells them apart.
+	Reason string
+	Err    error
 }
 
 func (e *ProviderError) Error() string {
@@ -138,7 +145,9 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cursor": "cursor", "cline": "openai", "clinepass": "openai",
 		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai",
 	}
-	noDiscovery := providerType == "antigravity" || providerType == "tavily" || providerType == "elevenlabs" || providerType == "cursor" || providerType == "grok-web" || providerType == "perplexity-web"
+	// Antigravity is absent: it serves a real catalogue through
+	// fetchAvailableModels, the same endpoint the quota tracker uses.
+	noDiscovery := providerType == "tavily" || providerType == "elevenlabs" || providerType == "cursor" || providerType == "grok-web" || providerType == "perplexity-web"
 	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: !noDiscovery, BootstrapRetry: true}, nil
 }
 
@@ -173,7 +182,7 @@ func (r *Registry) DiscoverModels(ctx context.Context, provider store.Provider, 
 
 func (r *Registry) discover(ctx context.Context, provider store.Provider, credential store.Credential) ([]DiscoveredModel, error) {
 	if provider.Type == "antigravity" {
-		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity model discovery requires a project-scoped generation request"}
+		return discoverAntigravityModels(ctx, r, provider, credential)
 	}
 	if provider.Type == "cursor" {
 		return discoverCursorModels(ctx, r, provider, credential)
@@ -431,6 +440,7 @@ func upstreamBodyErrorForProvider(status int, data []byte, retryAfter, baseURL s
 
 func buildUpstreamBodyError(status int, data []byte, retryAfter string) *ProviderError {
 	message := strings.TrimSpace(string(data))
+	reason := ""
 	var parsed map[string]any
 	if json.Unmarshal(data, &parsed) == nil {
 		if item, ok := parsed["error"].(map[string]any); ok {
@@ -441,12 +451,121 @@ func buildUpstreamBodyError(status int, data []byte, retryAfter string) *Provide
 		if text, ok := parsed["message"].(string); ok {
 			message = text
 		}
+		// Google APIs commonly put retry guidance in a protobuf JSON RetryInfo
+		// detail instead of an HTTP Retry-After header. Preserve it for the
+		// router on quota and transient failures alike.
+		if retryAfter == "" {
+			retryAfter = googleRetryInfoDelay(parsed)
+		}
+		reason = googleErrorInfoReason(parsed)
 	}
 	if message == "" {
 		message = http.StatusText(status)
 	}
 	message = security.RedactText(message)
-	return &ProviderError{Status: status, Code: store.ErrorCode(status), Message: message, RetryAfter: retryAfter}
+	return &ProviderError{Status: status, Code: store.ErrorCode(status), Message: message, RetryAfter: retryAfter, Reason: reason}
+}
+
+// googleErrorInfoReason reads the machine-readable reason from a google.rpc
+// ErrorInfo detail. It is the only reliable way to tell a transient rate limit
+// from real quota exhaustion, because both arrive as HTTP 429.
+func googleErrorInfoReason(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	errorPayload, _ := payload["error"].(map[string]any)
+	if errorPayload == nil {
+		errorPayload = payload
+	}
+	details, _ := errorPayload["details"].([]any)
+	for _, value := range details {
+		detail, _ := value.(map[string]any)
+		if detail == nil || !strings.Contains(stringValue(detail["@type"]), "google.rpc.ErrorInfo") {
+			continue
+		}
+		if reason := strings.TrimSpace(stringValue(detail["reason"])); reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+func googleRetryInfoDelay(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	errorPayload, _ := payload["error"].(map[string]any)
+	if errorPayload == nil {
+		errorPayload = payload
+	}
+	details, _ := errorPayload["details"].([]any)
+	for _, value := range details {
+		detail, _ := value.(map[string]any)
+		if detail == nil || !strings.Contains(stringValue(detail["@type"]), "google.rpc.RetryInfo") {
+			continue
+		}
+		if delay := googleRetryDelayValue(detail["retryDelay"]); delay != "" {
+			return delay
+		}
+	}
+	return ""
+}
+
+func googleRetryDelayValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		delay := strings.TrimSpace(typed)
+		if parsed, err := time.ParseDuration(delay); err == nil && parsed > 0 {
+			return delay
+		}
+	case map[string]any:
+		seconds, secondsOK := googleRetryDurationComponent(typed["seconds"])
+		nanos, nanosOK := googleRetryDurationComponent(typed["nanos"])
+		if !secondsOK || !nanosOK || seconds < 0 || nanos < 0 || nanos >= int64(time.Second) {
+			return ""
+		}
+		maxDuration := time.Duration(1<<63 - 1)
+		maxSeconds := int64(maxDuration / time.Second)
+		maxNanos := int64(maxDuration % time.Second)
+		if seconds > maxSeconds || (seconds == maxSeconds && nanos > maxNanos) {
+			return ""
+		}
+		delay := time.Duration(seconds)*time.Second + time.Duration(nanos)
+		if delay > 0 {
+			return delay.String()
+		}
+	}
+	return ""
+}
+
+// googleRetryDurationComponent accepts protobuf JSON duration components.
+// int64-valued protobuf fields, including Duration.seconds, are emitted as
+// strings by the standard JSON mapping.
+func googleRetryDurationComponent(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return 0, true
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		return parsed, err == nil
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	case float64:
+		// JSON values decode as float64. Round-trip through a fixed-point
+		// representation so fractional, non-finite, and out-of-range values
+		// fail parsing instead of relying on an unsafe float-to-int conversion.
+		parsed, err := strconv.ParseInt(strconv.FormatFloat(typed, 'f', -1, 64), 10, 64)
+		return parsed, err == nil
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case int32:
+		return int64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 type openAIAdapter struct{ client *http.Client }
@@ -1665,7 +1784,12 @@ func mergeStreamUsage(current, update canonical.Usage) canonical.Usage {
 }
 func parseGeminiUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
-	return canonical.Usage{InputTokens: numberValue(usage["promptTokenCount"]), OutputTokens: numberValue(usage["candidatesTokenCount"]), ReasoningTokens: numberValue(usage["thoughtsTokenCount"])}
+	return canonical.Usage{
+		InputTokens:     numberValue(usage["promptTokenCount"]),
+		OutputTokens:    numberValue(usage["candidatesTokenCount"]),
+		ReasoningTokens: numberValue(usage["thoughtsTokenCount"]),
+		CachedTokens:    numberValue(usage["cachedContentTokenCount"]),
+	}
 }
 
 func Status(err error) int {
@@ -1687,6 +1811,16 @@ func RetryAfter(err error) string {
 	var providerErr *ProviderError
 	if errors.As(err, &providerErr) {
 		return providerErr.RetryAfter
+	}
+	return ""
+}
+
+// Reason exposes google.rpc.ErrorInfo's reason so the router can tell a
+// transient rate limit apart from exhausted quota.
+func Reason(err error) string {
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		return providerErr.Reason
 	}
 	return ""
 }
