@@ -1,6 +1,6 @@
 {
   "name": "@ktvdung1606/tproxy",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "npm wrapper for the tproxy AI gateway binary — includes system tray and auto-start",
   "license": "MIT",
   "repository": {
