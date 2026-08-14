@@ -162,10 +162,10 @@ func TestCodexSanitizeInputItemsKeepsReasoningIDWithEncryptedContent(t *testing.
 			"model": "gpt-5.4",
 			"input": []any{
 				map[string]any{
-					"type":                "reasoning",
-					"id":                  "rs_good",
-					"encrypted_content":   "opaque-signature",
-					"summary":             []any{},
+					"type":              "reasoning",
+					"id":                "rs_good",
+					"encrypted_content": "opaque-signature",
+					"summary":           []any{},
 				},
 			},
 		},

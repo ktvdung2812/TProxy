@@ -181,14 +181,14 @@ func (m *Manager) refreshCodebuddyToken(ctx context.Context, refreshToken string
 
 func codebuddyRequestHeaders() map[string]string {
 	return map[string]string{
-		"Content-Type":        "application/json",
-		"Accept":              "application/json",
-		"User-Agent":          codebuddyUserAgent,
-		"X-Requested-With":    "XMLHttpRequest",
-		"X-Domain":            "copilot.tencent.com",
-		"X-No-Authorization":  "true",
-		"X-No-User-Id":        "true",
-		"X-Product":           "SaaS",
+		"Content-Type":       "application/json",
+		"Accept":             "application/json",
+		"User-Agent":         codebuddyUserAgent,
+		"X-Requested-With":   "XMLHttpRequest",
+		"X-Domain":           "copilot.tencent.com",
+		"X-No-Authorization": "true",
+		"X-No-User-Id":       "true",
+		"X-Product":          "SaaS",
 	}
 }
 

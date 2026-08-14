@@ -138,9 +138,9 @@ func openAIContentBlocks(msg map[string]any, toolNameMap map[string]string) []ma
 	role := stringValue(msg["role"])
 	if role == "tool" {
 		return []map[string]any{{
-			"type":         "tool_result",
-			"tool_use_id":  stringValue(msg["tool_call_id"]),
-			"content":      msg["content"],
+			"type":        "tool_result",
+			"tool_use_id": stringValue(msg["tool_call_id"]),
+			"content":     msg["content"],
 		}}
 	}
 	var blocks []map[string]any

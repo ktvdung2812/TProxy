@@ -234,13 +234,13 @@ func (m *Manager) ImportKiroAPIKey(ctx context.Context, apiKey, region string) (
 		Secret:   apiKey,
 		Email:    email,
 		Metadata: map[string]any{
-			"profile_arn":  profileARN,
-			"profileArn":   profileARN,
-			"region":       region,
-			"auth_method":  "api_key",
-			"authMethod":   "api_key",
-			"provider":     "API Key",
-			"api_key":      apiKey,
+			"profile_arn": profileARN,
+			"profileArn":  profileARN,
+			"region":      region,
+			"auth_method": "api_key",
+			"authMethod":  "api_key",
+			"provider":    "API Key",
+			"api_key":     apiKey,
 		},
 	}, nil
 }

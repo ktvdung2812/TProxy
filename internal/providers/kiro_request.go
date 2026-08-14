@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	kiroAgenticSuffix   = "-agentic"
-	kiroThinkingSuffix  = "-thinking"
-	kiroThinkingBudget  = 16000
-	kiroAgenticPrompt   = "You MUST follow chunked write protocol: never write more than 300 lines per file operation."
-	kiroDefaultBuilder  = "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX"
-	kiroDefaultSocial   = "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK"
+	kiroAgenticSuffix  = "-agentic"
+	kiroThinkingSuffix = "-thinking"
+	kiroThinkingBudget = 16000
+	kiroAgenticPrompt  = "You MUST follow chunked write protocol: never write more than 300 lines per file operation."
+	kiroDefaultBuilder = "arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX"
+	kiroDefaultSocial  = "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK"
 )
 
 type kiroResolvedModel struct {

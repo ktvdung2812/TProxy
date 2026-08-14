@@ -4,10 +4,10 @@ import "testing"
 
 func TestLookupAliases(t *testing.T) {
 	cases := map[string]string{
-		"cx":  "codex",
-		"gh":  "github",
+		"cx":   "codex",
+		"gh":   "github",
 		"gcli": "grok-cli",
-		"glm": "glm",
+		"glm":  "glm",
 	}
 	for alias, wantID := range cases {
 		preset, ok := Lookup(alias)

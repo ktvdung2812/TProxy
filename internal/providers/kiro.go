@@ -151,12 +151,12 @@ func kiroEndpoint(base string) string {
 
 func kiroHeaders(credential store.Credential) http.Header {
 	headers := http.Header{
-		"Content-Type":        {"application/json"},
-		"Accept":              {"application/vnd.amazon.eventstream"},
-		"Amz-Sdk-Request":     {"attempt=1; max=3"},
+		"Content-Type":          {"application/json"},
+		"Accept":                {"application/vnd.amazon.eventstream"},
+		"Amz-Sdk-Request":       {"attempt=1; max=3"},
 		"Amz-Sdk-Invocation-Id": {uuid.NewString()},
-		"User-Agent":          {"AWS-SDK-JS/3.0.0 kiro-ide/1.0.0"},
-		"X-Amz-User-Agent":     {"aws-sdk-js/3.0.0 kiro-ide/1.0.0"},
+		"User-Agent":            {"AWS-SDK-JS/3.0.0 kiro-ide/1.0.0"},
+		"X-Amz-User-Agent":      {"aws-sdk-js/3.0.0 kiro-ide/1.0.0"},
 	}
 	authMethod := credentialExtraString(credential, "auth_method", "authMethod")
 	token := credential.Secret

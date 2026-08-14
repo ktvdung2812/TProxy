@@ -8,9 +8,9 @@ import (
 type TargetKind string
 
 const (
-	TargetKindChatGPT  TargetKind = "chatgpt"
-	TargetKindClaude   TargetKind = "claude"
-	TargetKindVirtual  TargetKind = "virtual"
+	TargetKindChatGPT TargetKind = "chatgpt"
+	TargetKindClaude  TargetKind = "claude"
+	TargetKindVirtual TargetKind = "virtual"
 )
 
 type AliasTarget struct {

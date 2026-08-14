@@ -18,9 +18,9 @@ func TestEncodeAvailableModelsRequest(t *testing.T) {
 func TestModelsFromParameterizedMetadataUsesVariantString(t *testing.T) {
 	entries := modelsFromParameterizedMetadata([]parameterizedModel{
 		{
-			Name:             "claude-opus-4-8",
+			Name:              "claude-opus-4-8",
 			ClientDisplayName: "Claude Opus 4.8",
-			SupportsImages:   true,
+			SupportsImages:    true,
 			Variants: []parameterizedVariant{
 				{
 					VariantStringRepresentation: "claude-opus-4-8-thinking-high",
@@ -50,15 +50,15 @@ func TestModelsFromParameterizedMetadataUsesVariantString(t *testing.T) {
 func TestModelsFromParameterizedMetadataBuildsEffortRows(t *testing.T) {
 	entries := modelsFromParameterizedMetadata([]parameterizedModel{
 		{
-			Name:             "cursor-grok-4.5",
+			Name:              "cursor-grok-4.5",
 			ClientDisplayName: "Cursor Grok 4.5",
 			Variants: []parameterizedVariant{
 				{
-					Parameters: []modelParameter{{ID: "effort", Value: "low"}},
+					Parameters:  []modelParameter{{ID: "effort", Value: "low"}},
 					DisplayName: "Low",
 				},
 				{
-					Parameters: []modelParameter{{ID: "effort", Value: "high"}},
+					Parameters:  []modelParameter{{ID: "effort", Value: "high"}},
 					DisplayName: "High",
 				},
 			},

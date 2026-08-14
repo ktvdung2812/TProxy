@@ -28,17 +28,17 @@ func TestUnwrapProtoVal(t *testing.T) {
 func TestParseGrokCLIBillingMonthlyAndOnDemand(t *testing.T) {
 	billing := map[string]any{
 		"config": map[string]any{
-			"monthlyLimit":       map[string]any{"val": float64(150)},
-			"includedUsed":       map[string]any{"val": float64(23.98)},
-			"onDemandCap":        map[string]any{"val": float64(50)},
-			"onDemandUsed":       map[string]any{"val": float64(10)},
-			"prepaidBalance":     map[string]any{"val": float64(12)},
+			"monthlyLimit":         map[string]any{"val": float64(150)},
+			"includedUsed":         map[string]any{"val": float64(23.98)},
+			"onDemandCap":          map[string]any{"val": float64(50)},
+			"onDemandUsed":         map[string]any{"val": float64(10)},
+			"prepaidBalance":       map[string]any{"val": float64(12)},
 			"isUnifiedBillingUser": true,
-			"billingPeriodEnd":   "2026-07-01T00:00:00+00:00",
+			"billingPeriodEnd":     "2026-07-01T00:00:00+00:00",
 		},
 	}
 	user := map[string]any{
-		"subscriptionTier": "super_grok",
+		"subscriptionTier":  "super_grok",
 		"hasGrokCodeAccess": true,
 	}
 

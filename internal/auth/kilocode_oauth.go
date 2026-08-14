@@ -43,9 +43,9 @@ func initiateKilocodeDeviceFlow() (kilocodeDeviceStart, error) {
 		return kilocodeDeviceStart{}, &Error{code: "oauth_provider_unavailable", err: fmt.Errorf("kilocode initiate HTTP %d", resp.StatusCode)}
 	}
 	var raw struct {
-		Code             string `json:"code"`
-		VerificationURL  string `json:"verificationUrl"`
-		ExpiresIn        int    `json:"expiresIn"`
+		Code            string `json:"code"`
+		VerificationURL string `json:"verificationUrl"`
+		ExpiresIn       int    `json:"expiresIn"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return kilocodeDeviceStart{}, &Error{code: "oauth_provider_unavailable", err: err}

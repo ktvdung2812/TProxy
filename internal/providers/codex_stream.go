@@ -92,9 +92,9 @@ func translateCodexEvent(raw map[string]any, state *codexStreamState) []canonica
 
 	case "response.reasoning_summary_text.done", "reasoning_summary_text.done":
 		return []canonical.Event{{
-			Type:  canonical.EventReasoningDelta,
-			ID:    state.responseID,
-			Model: state.model,
+			Type:      canonical.EventReasoningDelta,
+			ID:        state.responseID,
+			Model:     state.model,
 			Reasoning: "\n\n",
 		}}
 

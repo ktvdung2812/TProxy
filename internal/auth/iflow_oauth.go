@@ -140,7 +140,7 @@ func (m *Manager) enrichIflowToken(ctx context.Context, token store.OAuthToken, 
 		return token, &Error{code: "oauth_provider_unavailable", err: fmt.Errorf("iflow user info HTTP %d", resp.StatusCode)}
 	}
 	var raw struct {
-		Success bool `json:"success"`
+		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
 			APIKey   string `json:"apiKey"`

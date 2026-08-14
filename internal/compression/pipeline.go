@@ -21,15 +21,15 @@ const (
 )
 
 type Stats struct {
-	Mode         Mode
-	BytesBefore  int
-	BytesAfter   int
-	TokensSaved  int
-	RTKSaved     int
-	CavemanSaved int
-	CCRSaved     int
+	Mode          Mode
+	BytesBefore   int
+	BytesAfter    int
+	TokensSaved   int
+	RTKSaved      int
+	CavemanSaved  int
+	CCRSaved      int
 	HeadroomSaved int
-	LLMSaved     int
+	LLMSaved      int
 }
 
 // CompressRequest runs the configured compression pipeline (fail-open).

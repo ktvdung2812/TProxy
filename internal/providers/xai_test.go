@@ -10,11 +10,11 @@ import (
 
 func TestXAIModelUsesResponsesAPI(t *testing.T) {
 	cases := map[string]bool{
-		"grok-4.5":           true,
-		"grok-4.5-fast":      true,
-		"grok-4.3":           false,
-		"grok-build-0.1":     false,
-		"grok-3":             false,
+		"grok-4.5":       true,
+		"grok-4.5-fast":  true,
+		"grok-4.3":       false,
+		"grok-build-0.1": false,
+		"grok-3":         false,
 	}
 	for model, want := range cases {
 		if got := xaiModelUsesResponsesAPI(model); got != want {

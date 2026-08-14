@@ -14,19 +14,19 @@ import (
 const claudeOAuthToolPrefix = "proxy_"
 
 type claudeStreamState struct {
-	messageID           string
-	model               string
-	messageStartSent    bool
-	nextBlockIndex      int
-	textBlockIndex      int
-	textBlockStarted    bool
-	textBlockClosed     bool
-	thinkingBlockIndex  int
+	messageID            string
+	model                string
+	messageStartSent     bool
+	nextBlockIndex       int
+	textBlockIndex       int
+	textBlockStarted     bool
+	textBlockClosed      bool
+	thinkingBlockIndex   int
 	thinkingBlockStarted bool
-	toolCalls           map[int]toolCallState
-	toolArgBuffers      map[int]string
-	finishReason        string
-	usage               *canonical.Usage
+	toolCalls            map[int]toolCallState
+	toolArgBuffers       map[int]string
+	finishReason         string
+	usage                *canonical.Usage
 }
 
 type toolCallState struct {

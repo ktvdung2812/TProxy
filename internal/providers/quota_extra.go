@@ -259,7 +259,7 @@ func (r *Registry) minimaxQuota(ctx context.Context, provider store.Provider, cr
 	}
 	headers := http.Header{
 		"Authorization": {"Bearer " + credential.Secret},
-		"Accept":          {"application/json"},
+		"Accept":        {"application/json"},
 	}
 	var body []byte
 	var status int
@@ -322,7 +322,7 @@ func (r *Registry) vercelGatewayQuota(ctx context.Context, credential store.Cred
 	}
 	headers := http.Header{
 		"Authorization": {"Bearer " + credential.Secret},
-		"Accept":          {"application/json"},
+		"Accept":        {"application/json"},
 	}
 	body, status, err := r.quotaGET(ctx, "https://ai-gateway.vercel.sh/v1/credits", headers)
 	if err != nil {
@@ -356,9 +356,9 @@ func (r *Registry) vercelGatewayQuota(ctx context.Context, credential store.Cred
 
 // Grok CLI / Grok Build billing endpoints (official grok-shell traffic).
 //
-//   GET /v1/billing                 — monthly allotment in cents (monthlyLimit/used)
-//   GET /v1/billing?format=credits  — weekly productUsage %, on-demand, prepaid
-//   GET /v1/user?include=subscription — plan tier
+//	GET /v1/billing                 — monthly allotment in cents (monthlyLimit/used)
+//	GET /v1/billing?format=credits  — weekly productUsage %, on-demand, prepaid
+//	GET /v1/user?include=subscription — plan tier
 //
 // Values are protobuf-json style `{ "val": number }` or plain numbers.
 const (
@@ -490,9 +490,9 @@ func parseGrokCLIBilling(billing, user map[string]any) (plan string, quotas map[
 // parseGrokCLIBillingMerged maps cli-chat-proxy billing responses into dashboard
 // quota windows.
 //
-//   credits — GET /v1/billing?format=credits (productUsage %, on-demand, prepaid, weekly period)
-//   plain   — GET /v1/billing (monthlyLimit/used in cents for SuperGrok / GrokPro)
-//   user    — GET /v1/user?include=subscription (plan tier)
+//	credits — GET /v1/billing?format=credits (productUsage %, on-demand, prepaid, weekly period)
+//	plain   — GET /v1/billing (monthlyLimit/used in cents for SuperGrok / GrokPro)
+//	user    — GET /v1/user?include=subscription (plan tier)
 func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string, quotas map[string]QuotaEntry, message string) {
 	quotas = map[string]QuotaEntry{}
 	creditsCfg := grokCLIConfig(credits)
@@ -881,10 +881,10 @@ func (r *Registry) kiroQuota(ctx context.Context, credential store.Credential) C
 		Quotas:       map[string]QuotaEntry{},
 	}
 	headers := http.Header{
-		"Authorization":  {"Bearer " + credential.Secret},
-		"Accept":         {"application/json"},
+		"Authorization":    {"Bearer " + credential.Secret},
+		"Accept":           {"application/json"},
 		"x-amz-user-agent": {"aws-sdk-js/1.0.0 KiroIDE"},
-		"user-agent":     {"aws-sdk-js/1.0.0 KiroIDE"},
+		"user-agent":       {"aws-sdk-js/1.0.0 KiroIDE"},
 	}
 	url := "https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits?isEmailRequired=true&origin=AI_EDITOR&resourceType=AGENTIC_REQUEST"
 	body, status, err := r.quotaGET(ctx, url, headers)
