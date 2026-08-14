@@ -153,4 +153,3 @@ func (s *Store) SaveCursorAliasSettings(ctx context.Context, settings CursorAlia
 		"models": payloadModels,
 	})
 }
-

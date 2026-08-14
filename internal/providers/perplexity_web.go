@@ -43,14 +43,14 @@ var pplxWebThinkingMap = map[string]string{
 }
 
 var (
-	pplxCitationRE  = regexp.MustCompile(`\[\d+\]`)
-	pplxGrokTagRE   = regexp.MustCompile(`(?s)<grok:[^>]*>.*?</grok:[^>]*>`)
-	pplxGrokSelfRE  = regexp.MustCompile(`<grok:[^>]*/>`)
-	pplxXMLDeclRE   = regexp.MustCompile(`<\?xml[^?]*\?>`)
-	pplxResponseRE  = regexp.MustCompile(`(?i)</?response\b[^>]*>`)
-	pplxMultiSpace  = regexp.MustCompile(` {2,}`)
-	pplxMultiNL     = regexp.MustCompile(`\n{3,}`)
-	pplxSessionMu   sync.Mutex
+	pplxCitationRE   = regexp.MustCompile(`\[\d+\]`)
+	pplxGrokTagRE    = regexp.MustCompile(`(?s)<grok:[^>]*>.*?</grok:[^>]*>`)
+	pplxGrokSelfRE   = regexp.MustCompile(`<grok:[^>]*/>`)
+	pplxXMLDeclRE    = regexp.MustCompile(`<\?xml[^?]*\?>`)
+	pplxResponseRE   = regexp.MustCompile(`(?i)</?response\b[^>]*>`)
+	pplxMultiSpace   = regexp.MustCompile(` {2,}`)
+	pplxMultiNL      = regexp.MustCompile(`\n{3,}`)
+	pplxSessionMu    sync.Mutex
 	pplxSessionCache = map[string]pplxSessionEntry{}
 )
 
@@ -451,21 +451,21 @@ func buildPplxRequestBody(query, mode, modelPref, followUpUUID string) map[strin
 	return map[string]any{
 		"query_str": query,
 		"params": map[string]any{
-			"query_str":              query,
-			"search_focus":           "internet",
-			"mode":                   mode,
-			"model_preference":       modelPref,
-			"sources":                []string{"web"},
-			"attachments":            []any{},
-			"frontend_uuid":          randomUUIDLike(),
-			"frontend_context_uuid":  randomUUIDLike(),
-			"version":                pplxWebAPIVersion,
-			"language":               "en-US",
-			"timezone":               "UTC",
-			"search_recency_filter":  nil,
-			"is_incognito":           true,
-			"use_schematized_api":    true,
-			"last_backend_uuid":      followUpUUID,
+			"query_str":             query,
+			"search_focus":          "internet",
+			"mode":                  mode,
+			"model_preference":      modelPref,
+			"sources":               []string{"web"},
+			"attachments":           []any{},
+			"frontend_uuid":         randomUUIDLike(),
+			"frontend_context_uuid": randomUUIDLike(),
+			"version":               pplxWebAPIVersion,
+			"language":              "en-US",
+			"timezone":              "UTC",
+			"search_recency_filter": nil,
+			"is_incognito":          true,
+			"use_schematized_api":   true,
+			"last_backend_uuid":     followUpUUID,
 		},
 	}
 }

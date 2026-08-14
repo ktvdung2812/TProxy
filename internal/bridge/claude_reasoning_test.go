@@ -4,16 +4,16 @@ import "testing"
 
 func TestNormalizeReasoningEffort(t *testing.T) {
 	cases := map[string]string{
-		"":         "",
-		"default":  "",
-		"inherit":  "",
-		" HIGH ":   "high",
-		"none":     "none",
-		"minimal":  "minimal",
-		"xhigh":    "xhigh",
-		"max":      "max",
-		"ultra":    "",
-		"invalid":  "",
+		"":        "",
+		"default": "",
+		"inherit": "",
+		" HIGH ":  "high",
+		"none":    "none",
+		"minimal": "minimal",
+		"xhigh":   "xhigh",
+		"max":     "max",
+		"ultra":   "",
+		"invalid": "",
 	}
 	for input, want := range cases {
 		if got := NormalizeReasoningEffort(input); got != want {

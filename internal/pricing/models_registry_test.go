@@ -8,7 +8,7 @@ import (
 
 func TestBuildModelsRegistryIndex(t *testing.T) {
 	payload := map[string]any{
-		"openai/gpt-5.6-luna": map[string]any{"id": "openai/gpt-5.6-luna", "name": "GPT-5.6 Luna"},
+		"openai/gpt-5.6-luna":         map[string]any{"id": "openai/gpt-5.6-luna", "name": "GPT-5.6 Luna"},
 		"anthropic/claude-sonnet-4-5": map[string]any{"id": "anthropic/claude-sonnet-4-5"},
 	}
 	full, bare, names := buildModelsRegistryIndex(payload)

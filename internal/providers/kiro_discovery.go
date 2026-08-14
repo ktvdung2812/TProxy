@@ -214,14 +214,14 @@ func kiroDiscoveryHeaders(accessToken string, credential store.Credential) http.
 		machineID,
 	)
 	headers := http.Header{
-		"Authorization":           {"Bearer " + accessToken},
-		"Accept":                    {"application/json"},
-		"User-Agent":                {userAgent},
-		"X-Amz-User-Agent":          {fmt.Sprintf("aws-sdk-js/1.0.0 KiroIDE-0.10.32-%s", machineID)},
-		"X-Amzn-Kiro-Agent-Mode":    {"vibe"},
+		"Authorization":               {"Bearer " + accessToken},
+		"Accept":                      {"application/json"},
+		"User-Agent":                  {userAgent},
+		"X-Amz-User-Agent":            {fmt.Sprintf("aws-sdk-js/1.0.0 KiroIDE-0.10.32-%s", machineID)},
+		"X-Amzn-Kiro-Agent-Mode":      {"vibe"},
 		"X-Amzn-Codewhisperer-Optout": {"true"},
-		"Amz-Sdk-Request":           {"attempt=1; max=1"},
-		"Amz-Sdk-Invocation-Id":     {uuid.NewString()},
+		"Amz-Sdk-Request":             {"attempt=1; max=1"},
+		"Amz-Sdk-Invocation-Id":       {uuid.NewString()},
 	}
 	authMethod := credentialExtraString(credential, "auth_method", "authMethod")
 	if authMethod == "api_key" {
@@ -233,9 +233,9 @@ func kiroDiscoveryHeaders(accessToken string, credential store.Credential) http.
 }
 
 type kiroModelVariant struct {
-	id, name  string
-	thinking  bool
-	agentic   bool
+	id, name string
+	thinking bool
+	agentic  bool
 }
 
 func expandKiroModelVariants(upstreamID, display string) []kiroModelVariant {

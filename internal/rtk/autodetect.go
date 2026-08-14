@@ -7,31 +7,31 @@ import (
 )
 
 var (
-	reGitDiff       = regexp.MustCompile(`(?m)^diff --git `)
-	reGitDiffHunk   = regexp.MustCompile(`(?m)^@@ `)
-	reGitStatus     = regexp.MustCompile(`(?m)^On branch |^nothing to commit|^Changes (not |to be )|^Untracked files:`)
-	reGitLog        = regexp.MustCompile(`(?m)^[*|/\\ ]*commit [0-9a-f]{7,40}$`)
-	rePorcelain     = regexp.MustCompile(`(?m)^[ MADRCU?!][ MADRCU?!] \S`)
-	reBuildOutput   = regexp.MustCompile(`(?im)^(npm (warn|error|ERR!)|yarn (warn|error)|\s*Compiling\s+\S+|\s*Downloading\s+\S+|added \d+ package|\[ERROR\]|BUILD (SUCCESS|FAILED)|\s*Finished\s+|Successfully (installed|built)|ERROR:)`)
-	reTreeGlyph     = regexp.MustCompile(`[├└]──|│  `)
-	reLSRow         = regexp.MustCompile(`(?m)^[-dlbcps][rwx-]{9}`)
-	reLSTotal       = regexp.MustCompile(`(?m)^total \d+$`)
-	readNumberedRe  = regexp.MustCompile(`^\s*\d+\|`)
+	reGitDiff      = regexp.MustCompile(`(?m)^diff --git `)
+	reGitDiffHunk  = regexp.MustCompile(`(?m)^@@ `)
+	reGitStatus    = regexp.MustCompile(`(?m)^On branch |^nothing to commit|^Changes (not |to be )|^Untracked files:`)
+	reGitLog       = regexp.MustCompile(`(?m)^[*|/\\ ]*commit [0-9a-f]{7,40}$`)
+	rePorcelain    = regexp.MustCompile(`(?m)^[ MADRCU?!][ MADRCU?!] \S`)
+	reBuildOutput  = regexp.MustCompile(`(?im)^(npm (warn|error|ERR!)|yarn (warn|error)|\s*Compiling\s+\S+|\s*Downloading\s+\S+|added \d+ package|\[ERROR\]|BUILD (SUCCESS|FAILED)|\s*Finished\s+|Successfully (installed|built)|ERROR:)`)
+	reTreeGlyph    = regexp.MustCompile(`[├└]──|│  `)
+	reLSRow        = regexp.MustCompile(`(?m)^[-dlbcps][rwx-]{9}`)
+	reLSTotal      = regexp.MustCompile(`(?m)^total \d+$`)
+	readNumberedRe = regexp.MustCompile(`^\s*\d+\|`)
 )
 
 var filterRegistry = map[string]namedFilter{
-	"git-diff":        {name: "git-diff", fn: filterGitDiff},
-	"git-status":      {name: "git-status", fn: filterGitStatus},
-	"git-log":         {name: "git-log", fn: filterGitLog},
-	"build-output":    {name: "build-output", fn: filterBuildOutput},
-	"grep":            {name: "grep", fn: filterGrep},
-	"find":            {name: "find", fn: filterFind},
-	"tree":            {name: "tree", fn: filterTree},
-	"ls":              {name: "ls", fn: filterLS},
-	"search-list":     {name: "search-list", fn: filterSearchList},
-	"read-numbered":   {name: "read-numbered", fn: filterReadNumbered},
-	"dedup-log":       {name: "dedup-log", fn: filterDedupLog},
-	"smart-truncate":  {name: "smart-truncate", fn: filterSmartTruncate},
+	"git-diff":       {name: "git-diff", fn: filterGitDiff},
+	"git-status":     {name: "git-status", fn: filterGitStatus},
+	"git-log":        {name: "git-log", fn: filterGitLog},
+	"build-output":   {name: "build-output", fn: filterBuildOutput},
+	"grep":           {name: "grep", fn: filterGrep},
+	"find":           {name: "find", fn: filterFind},
+	"tree":           {name: "tree", fn: filterTree},
+	"ls":             {name: "ls", fn: filterLS},
+	"search-list":    {name: "search-list", fn: filterSearchList},
+	"read-numbered":  {name: "read-numbered", fn: filterReadNumbered},
+	"dedup-log":      {name: "dedup-log", fn: filterDedupLog},
+	"smart-truncate": {name: "smart-truncate", fn: filterSmartTruncate},
 }
 
 func autoDetectFilter(text string) namedFilter {

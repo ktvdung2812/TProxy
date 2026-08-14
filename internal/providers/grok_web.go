@@ -29,20 +29,20 @@ type grokWebModel struct {
 }
 
 var grokWebModelMap = map[string]grokWebModel{
-	"grok-3":           {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3", IsThinking: false},
-	"grok-3-mini":      {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3_MINI_THINKING", IsThinking: true},
-	"grok-3-thinking":  {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3_THINKING", IsThinking: true},
-	"grok-4":           {GrokModel: "grok-4", ModelMode: "MODEL_MODE_GROK_4", IsThinking: false},
-	"grok-4-mini":      {GrokModel: "grok-4-mini", ModelMode: "MODEL_MODE_GROK_4_MINI_THINKING", IsThinking: true},
-	"grok-4-thinking":  {GrokModel: "grok-4", ModelMode: "MODEL_MODE_GROK_4_THINKING", IsThinking: true},
-	"grok-4-heavy":     {GrokModel: "grok-4", ModelMode: "MODEL_MODE_HEAVY", IsThinking: true},
-	"grok-4.1-mini":    {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_GROK_4_1_MINI_THINKING", IsThinking: true},
-	"grok-4.1-fast":    {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_FAST", IsThinking: false},
-	"grok-4.1-expert":  {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_EXPERT", IsThinking: true},
+	"grok-3":            {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3", IsThinking: false},
+	"grok-3-mini":       {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3_MINI_THINKING", IsThinking: true},
+	"grok-3-thinking":   {GrokModel: "grok-3", ModelMode: "MODEL_MODE_GROK_3_THINKING", IsThinking: true},
+	"grok-4":            {GrokModel: "grok-4", ModelMode: "MODEL_MODE_GROK_4", IsThinking: false},
+	"grok-4-mini":       {GrokModel: "grok-4-mini", ModelMode: "MODEL_MODE_GROK_4_MINI_THINKING", IsThinking: true},
+	"grok-4-thinking":   {GrokModel: "grok-4", ModelMode: "MODEL_MODE_GROK_4_THINKING", IsThinking: true},
+	"grok-4-heavy":      {GrokModel: "grok-4", ModelMode: "MODEL_MODE_HEAVY", IsThinking: true},
+	"grok-4.1-mini":     {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_GROK_4_1_MINI_THINKING", IsThinking: true},
+	"grok-4.1-fast":     {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_FAST", IsThinking: false},
+	"grok-4.1-expert":   {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_EXPERT", IsThinking: true},
 	"grok-4.1-thinking": {GrokModel: "grok-4-1-thinking-1129", ModelMode: "MODEL_MODE_GROK_4_1_THINKING", IsThinking: true},
-	"grok-4.2":         {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
-	"grok-4.20":        {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
-	"grok-4.20-beta":   {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
+	"grok-4.2":          {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
+	"grok-4.20":         {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
+	"grok-4.20-beta":    {GrokModel: "grok-420", ModelMode: "MODEL_MODE_GROK_420", IsThinking: false},
 }
 
 type grokWebAdapter struct{ client *http.Client }

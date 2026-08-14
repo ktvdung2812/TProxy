@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	kiroDefaultRegion  = "us-east-1"
+	kiroDefaultRegion   = "us-east-1"
 	kiroDefaultStartURL = "https://view.awsapps.com/start"
-	kiroClientName     = "kiro-oauth-client"
-	kiroClientType     = "public"
-	kiroIssuerURL      = "https://identitycenter.amazonaws.com/ssoins-722374e8c3c8e6c6"
+	kiroClientName      = "kiro-oauth-client"
+	kiroClientType      = "public"
+	kiroIssuerURL       = "https://identitycenter.amazonaws.com/ssoins-722374e8c3c8e6c6"
 )
 
 var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}-[a-z]+-\d{1,2}$`)

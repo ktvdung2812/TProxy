@@ -31,20 +31,20 @@ var canonicalProviderOrder = []string{
 }
 
 var providerTypeAliases = map[string][]string{
-	"openai-codex":        {"openai", "github-copilot"},
-	"codex":               {"openai", "github-copilot"},
-	"openai-compatible":   {"openai", "github-copilot"},
-	"openai":              {"openai"},
-	"anthropic":           {"anthropic"},
-	"google":              {"google"},
-	"gemini":              {"google"},
-	"github-copilot":      {"github-copilot"},
-	"copilot":             {"github-copilot"},
-	"deepseek":            {"deepseek"},
-	"groq":                {"groq"},
-	"mistral":             {"mistral"},
-	"xai":                 {"xai"},
-	"ollama":              {"ollama"},
+	"openai-codex":      {"openai", "github-copilot"},
+	"codex":             {"openai", "github-copilot"},
+	"openai-compatible": {"openai", "github-copilot"},
+	"openai":            {"openai"},
+	"anthropic":         {"anthropic"},
+	"google":            {"google"},
+	"gemini":            {"google"},
+	"github-copilot":    {"github-copilot"},
+	"copilot":           {"github-copilot"},
+	"deepseek":          {"deepseek"},
+	"groq":              {"groq"},
+	"mistral":           {"mistral"},
+	"xai":               {"xai"},
+	"ollama":            {"ollama"},
 }
 
 type modelEntry struct {

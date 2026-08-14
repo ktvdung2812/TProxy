@@ -33,9 +33,9 @@ const (
 
 	clientSideToolV2MCP = 19
 
-	compressFlagNone       = 0x00
-	compressFlagGzip       = 0x01
-	compressFlagTrailer    = 0x02
+	compressFlagNone        = 0x00
+	compressFlagGzip        = 0x01
+	compressFlagTrailer     = 0x02
 	compressFlagGzipTrailer = 0x03
 )
 
@@ -67,14 +67,14 @@ const (
 	fieldUnknown53          = 53
 	fieldUnifiedModeName    = 54
 
-	fieldMsgContent         = 1
-	fieldMsgRole            = 2
-	fieldMsgID              = 13
-	fieldMsgToolResults     = 18
-	fieldMsgIsAgentic       = 29
-	fieldMsgServerBubbleID  = 32
-	fieldMsgUnifiedMode     = 47
-	fieldMsgSupportedTools  = 51
+	fieldMsgContent        = 1
+	fieldMsgRole           = 2
+	fieldMsgID             = 13
+	fieldMsgToolResults    = 18
+	fieldMsgIsAgentic      = 29
+	fieldMsgServerBubbleID = 32
+	fieldMsgUnifiedMode    = 47
+	fieldMsgSupportedTools = 51
 
 	fieldToolResultCallID      = 1
 	fieldToolResultName        = 2
@@ -84,11 +84,11 @@ const (
 	fieldToolResultToolCall    = 11
 	fieldToolResultModelCallID = 12
 
-	fieldCV2RTool         = 1
-	fieldCV2RMCPResult    = 28
-	fieldCV2RCallID       = 35
-	fieldCV2RModelCallID  = 48
-	fieldCV2RToolIndex    = 49
+	fieldCV2RTool        = 1
+	fieldCV2RMCPResult   = 28
+	fieldCV2RCallID      = 35
+	fieldCV2RModelCallID = 48
+	fieldCV2RToolIndex   = 49
 
 	fieldMCPRSelectedTool = 1
 	fieldMCPRResult       = 2
@@ -106,19 +106,19 @@ const (
 
 	fieldInstructionText = 1
 
-	fieldSettingPath      = 1
-	fieldSettingUnknown3  = 3
-	fieldSettingUnknown6  = 6
-	fieldSettingUnknown8  = 8
-	fieldSettingUnknown9  = 9
-	fieldSetting6Field1   = 1
-	fieldSetting6Field2   = 2
+	fieldSettingPath     = 1
+	fieldSettingUnknown3 = 3
+	fieldSettingUnknown6 = 6
+	fieldSettingUnknown8 = 8
+	fieldSettingUnknown9 = 9
+	fieldSetting6Field1  = 1
+	fieldSetting6Field2  = 2
 
-	fieldMetaPlatform   = 1
-	fieldMetaArch       = 2
-	fieldMetaVersion    = 3
-	fieldMetaCWD        = 4
-	fieldMetaTimestamp  = 5
+	fieldMetaPlatform  = 1
+	fieldMetaArch      = 2
+	fieldMetaVersion   = 3
+	fieldMetaCWD       = 4
+	fieldMetaTimestamp = 5
 
 	fieldMsgIDID      = 1
 	fieldMsgIDSummary = 2
@@ -129,17 +129,17 @@ const (
 	fieldMCPToolParams = 3
 	fieldMCPToolServer = 4
 
-	fieldToolCall     = 1
-	fieldResponse     = 2
-	fieldToolID       = 3
-	fieldToolName     = 9
-	fieldToolRawArgs  = 10
-	fieldToolIsLast   = 11
+	fieldToolCall      = 1
+	fieldResponse      = 2
+	fieldToolID        = 3
+	fieldToolName      = 9
+	fieldToolRawArgs   = 10
+	fieldToolIsLast    = 11
 	fieldToolMCPParams = 27
 
-	fieldMCPToolsList     = 1
-	fieldMCPNestedName    = 1
-	fieldMCPNestedParams  = 3
+	fieldMCPToolsList    = 1
+	fieldMCPNestedName   = 1
+	fieldMCPNestedParams = 3
 
 	fieldResponseText = 1
 	fieldThinking     = 25

@@ -7,9 +7,9 @@ import (
 
 // DiscoveredModelEntry is a normalized Cursor model row for upstream discovery.
 type DiscoveredModelEntry struct {
-	ID               string
-	Name             string
-	SupportsImages   bool
+	ID                string
+	Name              string
+	SupportsImages    bool
 	SupportsReasoning bool
 }
 

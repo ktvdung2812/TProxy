@@ -41,21 +41,21 @@ type CredentialUsageSummary struct {
 }
 
 type UsageStatsPayload struct {
-	TotalRequests         int                              `json:"totalRequests"`
-	TotalPromptTokens     int                              `json:"totalPromptTokens"`
-	TotalCompletionTokens int                              `json:"totalCompletionTokens"`
-	TotalCachedTokens     int                              `json:"totalCachedTokens"`
-	TotalCost             float64                          `json:"totalCost"`
-	ByProvider            map[string]UsageBucketEntry      `json:"byProvider"`
-	ByModel               map[string]UsageBucketEntry      `json:"byModel"`
-	ByAccount             map[string]UsageBucketEntry      `json:"byAccount"`
+	TotalRequests         int                               `json:"totalRequests"`
+	TotalPromptTokens     int                               `json:"totalPromptTokens"`
+	TotalCompletionTokens int                               `json:"totalCompletionTokens"`
+	TotalCachedTokens     int                               `json:"totalCachedTokens"`
+	TotalCost             float64                           `json:"totalCost"`
+	ByProvider            map[string]UsageBucketEntry       `json:"byProvider"`
+	ByModel               map[string]UsageBucketEntry       `json:"byModel"`
+	ByAccount             map[string]UsageBucketEntry       `json:"byAccount"`
 	ByCredential          map[string]CredentialUsageSummary `json:"byCredential"`
-	ByAPIKey              map[string]UsageBucketEntry      `json:"byApiKey"`
-	ByEndpoint            map[string]UsageBucketEntry      `json:"byEndpoint"`
-	RecentRequests        []UsageRecentRequest             `json:"recentRequests"`
-	ActiveRequests        []any                            `json:"activeRequests"`
-	Pending               map[string]any                   `json:"pending"`
-	ErrorProvider         string                           `json:"errorProvider"`
+	ByAPIKey              map[string]UsageBucketEntry       `json:"byApiKey"`
+	ByEndpoint            map[string]UsageBucketEntry       `json:"byEndpoint"`
+	RecentRequests        []UsageRecentRequest              `json:"recentRequests"`
+	ActiveRequests        []any                             `json:"activeRequests"`
+	Pending               map[string]any                    `json:"pending"`
+	ErrorProvider         string                            `json:"errorProvider"`
 }
 
 type UsageChartPoint struct {
@@ -120,8 +120,8 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 	for rows.Next() {
 		var (
 			publicModelID, providerID, upstreamModel, credentialID, clientAPIKeyID, created string
-			status, inputTokens, outputTokens, cachedTokens                              int
-			cost                                                                           float64
+			status, inputTokens, outputTokens, cachedTokens                                 int
+			cost                                                                            float64
 		)
 		if err := rows.Scan(&publicModelID, &providerID, &upstreamModel, &credentialID, &clientAPIKeyID, &status, &inputTokens, &outputTokens, &cachedTokens, &cost, &created); err != nil {
 			return UsageStatsPayload{}, err

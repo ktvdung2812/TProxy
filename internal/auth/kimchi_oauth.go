@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	kimchiWebAppURL      = "https://app.kimchi.dev"
-	kimchiValidationURL  = "https://api.cast.ai/v1/llm/openai/supported-providers"
-	kimchiUserInfoURL    = "https://app.kimchi.dev/api/v1/me"
+	kimchiWebAppURL     = "https://app.kimchi.dev"
+	kimchiValidationURL = "https://api.cast.ai/v1/llm/openai/supported-providers"
+	kimchiUserInfoURL   = "https://app.kimchi.dev/api/v1/me"
 )
 
 func kimchiAuthorizationURL(redirectURI, state string) string {

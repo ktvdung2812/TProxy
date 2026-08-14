@@ -252,10 +252,10 @@ func BuildCursorOAuthToken(accessToken, machineID string) store.OAuthToken {
 		TokenType:   "Bearer",
 		ExpiresAt:   time.Now().Add(24 * time.Hour),
 		Extra: map[string]any{
-			"machine_id":   machineID,
-			"machineId":    machineID,
-			"auth_method":  "imported",
-			"client_type":  "ide",
+			"machine_id":     machineID,
+			"machineId":      machineID,
+			"auth_method":    "imported",
+			"client_type":    "ide",
 			"client_version": "3.1.0",
 		},
 	}

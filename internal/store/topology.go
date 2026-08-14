@@ -9,12 +9,12 @@ import (
 )
 
 type TopologyModelUsage struct {
-	Provider      string `json:"provider"`
-	CredentialID  string `json:"credential_id"`
-	AccountLabel  string `json:"account_label"`
-	Model         string `json:"model"`
-	RequestCount  int    `json:"request_count"`
-	LastUsedAt    string `json:"last_used_at"`
+	Provider     string `json:"provider"`
+	CredentialID string `json:"credential_id"`
+	AccountLabel string `json:"account_label"`
+	Model        string `json:"model"`
+	RequestCount int    `json:"request_count"`
+	LastUsedAt   string `json:"last_used_at"`
 }
 
 type TopologyClient struct {
@@ -36,18 +36,18 @@ type TopologyClientSummary struct {
 }
 
 type TopologyClientModelRow struct {
-	Model         string `json:"model"`
-	Provider      string `json:"provider"`
-	CredentialID  string `json:"credential_id"`
-	AccountLabel  string `json:"account_label"`
-	RequestCount  int    `json:"request_count"`
-	LastUsedAt    string `json:"last_used_at"`
+	Model        string `json:"model"`
+	Provider     string `json:"provider"`
+	CredentialID string `json:"credential_id"`
+	AccountLabel string `json:"account_label"`
+	RequestCount int    `json:"request_count"`
+	LastUsedAt   string `json:"last_used_at"`
 }
 
 type TopologyClientDetail struct {
-	ClientKeyID string                  `json:"client_key_id"`
-	ClientLabel string                  `json:"client_label"`
-	Summary     TopologyClientSummary   `json:"summary"`
+	ClientKeyID string                   `json:"client_key_id"`
+	ClientLabel string                   `json:"client_label"`
+	Summary     TopologyClientSummary    `json:"summary"`
 	Models      []TopologyClientModelRow `json:"models"`
 }
 

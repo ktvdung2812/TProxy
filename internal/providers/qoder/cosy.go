@@ -21,11 +21,11 @@ import (
 )
 
 type CosyCreds struct {
-	UserID     string
-	AuthToken  string
-	Name       string
-	Email      string
-	MachineID  string
+	UserID    string
+	AuthToken string
+	Name      string
+	Email     string
+	MachineID string
 }
 
 type encryptedUserInfo struct {

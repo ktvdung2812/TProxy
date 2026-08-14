@@ -26,7 +26,7 @@ func TestCompressRequestOpenAIToolMessage(t *testing.T) {
 	request := map[string]any{
 		"messages": []any{
 			map[string]any{
-				"role": "tool",
+				"role":    "tool",
 				"content": strings.Repeat("error: build failed\n", 80),
 			},
 		},
@@ -59,9 +59,9 @@ func TestCompressRequestSkipsErrorToolResult(t *testing.T) {
 				"role": "user",
 				"content": []any{
 					map[string]any{
-						"type":      "tool_result",
-						"is_error":  true,
-						"content":   strings.Repeat("x", 600),
+						"type":        "tool_result",
+						"is_error":    true,
+						"content":     strings.Repeat("x", 600),
 						"tool_use_id": "t1",
 					},
 				},
