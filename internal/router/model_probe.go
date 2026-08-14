@@ -122,3 +122,78 @@ func (r *Router) pickCredentialForTest(ctx context.Context, providerID, credenti
 	}
 	return store.Credential{}, fmt.Errorf("no credentials configured for provider %s", providerID)
 }
+
+// CredentialChatResult is one exchange run against a single credential.
+type CredentialChatResult struct {
+	Content   string          `json:"content"`
+	Reasoning string          `json:"reasoning,omitempty"`
+	Model     string          `json:"model,omitempty"`
+	LatencyMS int64           `json:"latency_ms"`
+	Usage     canonical.Usage `json:"usage"`
+}
+
+// ChatWithCredential runs a completion through one specific credential and
+// returns what the model actually said.
+//
+// It deliberately bypasses routing and failover: the point is to exercise this
+// account, so a request that would normally rotate to a healthy sibling must
+// fail here instead, and surface why.
+func (r *Router) ChatWithCredential(ctx context.Context, providerID, credentialID, modelID string, messages []canonical.Message) (CredentialChatResult, error) {
+	provider, err := r.store.Provider(ctx, providerID)
+	if err != nil {
+		return CredentialChatResult{}, err
+	}
+	credential, err := r.store.CredentialByID(ctx, credentialID)
+	if err != nil {
+		return CredentialChatResult{}, err
+	}
+	if credential.ProviderID != providerID {
+		return CredentialChatResult{}, fmt.Errorf("credential %s does not belong to provider %s", credentialID, providerID)
+	}
+	adapter, err := r.registry.Adapter(provider.Type)
+	if err != nil {
+		return CredentialChatResult{}, err
+	}
+	prepared, prepareErr := r.prepareCredential(ctx, Selection{Provider: *provider, Credential: credential}, false)
+	if prepareErr != nil {
+		return CredentialChatResult{}, asCredentialError(prepareErr)
+	}
+
+	start := time.Now()
+	request := canonical.Request{
+		RequestID:     fmt.Sprintf("account-test-%d", start.UnixNano()),
+		Source:        accountTestProtocol(provider.Type),
+		UpstreamModel: modelID,
+		MaxTokens:     1024,
+		Messages:      messages,
+	}
+	response, err := adapter.Execute(ctx, *provider, prepared, request)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return CredentialChatResult{LatencyMS: latency}, err
+	}
+	if response == nil {
+		return CredentialChatResult{LatencyMS: latency}, fmt.Errorf("provider returned no response")
+	}
+	return CredentialChatResult{
+		Content:   fmt.Sprint(response.Content),
+		Reasoning: response.Reasoning,
+		Model:     response.Model,
+		LatencyMS: latency,
+		Usage:     response.Usage,
+	}, nil
+}
+
+// accountTestProtocol picks the request shape for a pinned-credential test.
+//
+// A provider's own protocol is normally right: each adapter builds its native
+// body directly from canonical messages. Responses is the exception — an
+// adapter seeing it forwards the upstream stream verbatim for a client that
+// speaks that protocol, and those raw events carry no canonical text, so the
+// reply would arrive empty. The neutral OpenAI shape is used there instead.
+func accountTestProtocol(providerType string) canonical.Protocol {
+	if source := providers.DefaultProtocol(providerType); source != canonical.ProtocolResponses {
+		return source
+	}
+	return canonical.ProtocolOpenAI
+}

@@ -9,6 +9,8 @@ import { ConfirmDialog, Toggle, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
 import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
 import { consumeCodexResetCredit, fetchCredentialProxyUsage, fetchCredentialQuota, type CredentialProxyUsage, type CredentialQuota } from "./api";
+import { QuotaRingGrid } from "./QuotaRingGrid";
+import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
 import {
   ACCOUNT_FILTER_OPTIONS,
@@ -31,6 +33,8 @@ import {
   quotaEntries,
   resolveQuotaProviderFilter,
   runWithConcurrency,
+  usesQuotaRingLayout,
+  usesQuotaStackedLayout,
   type QuotaUrlSort,
 } from "./utils";
 
@@ -783,14 +787,32 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                   ) : quota?.message && allEntries.length === 0 ? (
                     <div className="quota-tracker-card-message">{quota.message}</div>
                   ) : (
-                    <QuotaTable
-                      rows={visibleEntries}
-                      credentialActive={activeCredentialIds.has(credential.id)}
-                      proxyUsage={
-                        proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
-                      }
-                      onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
-                    />
+                    usesQuotaStackedLayout(quotaKey) ? (
+                      <QuotaStackedBar
+                        rows={visibleEntries}
+                        proxyUsage={
+                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
+                        }
+                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
+                      />
+                    ) : usesQuotaRingLayout(quotaKey) ? (
+                      <QuotaRingGrid
+                        rows={visibleEntries}
+                        proxyUsage={
+                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
+                        }
+                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
+                      />
+                    ) : (
+                      <QuotaTable
+                        rows={visibleEntries}
+                        credentialActive={activeCredentialIds.has(credential.id)}
+                        proxyUsage={
+                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
+                        }
+                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
+                      />
+                    )
                   )}
 
                   {hiddenEntries.length > 0 ? (

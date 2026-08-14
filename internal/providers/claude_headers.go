@@ -46,19 +46,18 @@ func splitHeaderList(value string) []string {
 	return result
 }
 
+// mergeAnthropicBeta unions two beta lists while preserving order: the existing
+// list first, then any betas the client added. Order is deliberate — upstream
+// sees the raw header, and a set that reshuffles between otherwise identical
+// requests is a fingerprint of its own.
 func mergeAnthropicBeta(existing, incoming string) string {
-	merged := map[string]struct{}{}
-	for _, beta := range splitHeaderList(existing) {
-		merged[beta] = struct{}{}
-	}
-	for _, beta := range splitHeaderList(incoming) {
-		merged[beta] = struct{}{}
-	}
-	if len(merged) == 0 {
-		return ""
-	}
-	values := make([]string, 0, len(merged))
-	for beta := range merged {
+	seen := map[string]struct{}{}
+	values := make([]string, 0, 8)
+	for _, beta := range append(splitHeaderList(existing), splitHeaderList(incoming)...) {
+		if _, duplicate := seen[beta]; duplicate {
+			continue
+		}
+		seen[beta] = struct{}{}
 		values = append(values, beta)
 	}
 	return strings.Join(values, ",")

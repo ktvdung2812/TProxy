@@ -148,6 +148,11 @@ func pingMaxTokens(provider store.Provider, modelID string) int {
 	return 16
 }
 
+// DefaultProtocol reports the request protocol a provider type speaks natively.
+func DefaultProtocol(providerType string) canonical.Protocol {
+	return defaultProtocol(providerType)
+}
+
 func defaultProtocol(providerType string) canonical.Protocol {
 	switch providerType {
 	case "codex":

@@ -381,12 +381,71 @@ func TestClaudeAuthorizationURLUsesCodeFlowScopes(t *testing.T) {
 	if query.Get("response_type") != "code" || query.Get("code_challenge") == "" {
 		t.Fatalf("authorize URL missing PKCE fields: %s", authorization)
 	}
-	wantScope := "org:create_api_key user:profile user:inference"
+	wantScope := "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 	if query.Get("scope") != wantScope {
 		t.Fatalf("unexpected scope: %q", query.Get("scope"))
 	}
 	if query.Get("redirect_uri") != "http://localhost:28120/callback" {
 		t.Fatalf("unexpected redirect_uri: %q", query.Get("redirect_uri"))
+	}
+}
+
+// Anthropic rejects a state carrying a readable prefix with "Invalid request
+// format" before the consent screen renders, which made every Claude login fail
+// regardless of redirect or scopes. The state must stay a bare high-entropy
+// base64url value.
+func TestOAuthStateIsBareHighEntropyValue(t *testing.T) {
+	state, err := oauthState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state) != 43 {
+		t.Fatalf("state length = %d (%q), want 43", len(state), state)
+	}
+	for _, r := range state {
+		isBase64URL := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
+		if !isBase64URL {
+			t.Fatalf("state contains %q, which is not base64url: %q", r, state)
+		}
+	}
+	if strings.Contains(state, "oauth") {
+		t.Fatalf("state carries a readable prefix: %q", state)
+	}
+	other, err := oauthState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other == state {
+		t.Fatal("state is not unique per call")
+	}
+}
+
+// Anthropic validates the authorize request strictly; the reference clients all
+// emit these parameters in this order, so it is pinned rather than left to the
+// alphabetical ordering url.Values.Encode would produce.
+func TestClaudeAuthorizationURLKeepsClientParameterOrder(t *testing.T) {
+	authorization := claudeAuthorizationURL(
+		"oauth_state_test",
+		"verifier-test",
+		config.ClaudeRedirectURL,
+		"client-id",
+		config.ClaudeOAuthScopes(),
+	)
+	query := strings.TrimPrefix(authorization, "https://claude.ai/oauth/authorize?")
+	names := make([]string, 0, 8)
+	for _, pair := range strings.Split(query, "&") {
+		name, _, found := strings.Cut(pair, "=")
+		if !found {
+			t.Fatalf("malformed query pair %q in %s", pair, authorization)
+		}
+		names = append(names, name)
+	}
+	want := []string{"code", "client_id", "response_type", "redirect_uri", "scope", "code_challenge", "code_challenge_method", "state"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("parameter order = %v, want %v", names, want)
+	}
+	if !strings.Contains(authorization, "redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback") {
+		t.Fatalf("redirect not encoded as expected: %s", authorization)
 	}
 }
 

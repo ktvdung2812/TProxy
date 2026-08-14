@@ -6,12 +6,15 @@ import { ProviderLogo } from "../providers/ProviderLogo";
 import { RequestLogsTable, type RequestSortKey } from "../logs/RequestLogsTable";
 import type { SortOrder } from "../logs/utils";
 import { Badge, Button, Modal, Toggle, cn } from "../ui";
+import { AccountTestChat } from "./AccountTestChat";
 import {
   fetchCredentialQuota,
   fetchCredentialRequestLogs,
   type CredentialProxyUsage,
   type CredentialQuota,
 } from "./api";
+import { QuotaRingGrid } from "./QuotaRingGrid";
+import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
 import {
   formatQuotaName,
@@ -20,6 +23,8 @@ import {
   getColorEmoji,
   getConnectionLabel,
   quotaEntries,
+  usesQuotaRingLayout,
+  usesQuotaStackedLayout,
 } from "./utils";
 
 type CredentialRow = {
@@ -269,7 +274,8 @@ export function QuotaAccountDetailModal({
         </div>
       )}
     >
-      <div className="quota-account-modal-body">
+      <div className="quota-account-modal-layout">
+        <div className="quota-account-modal-body">
         <div className="quota-account-modal-hero">
           <ProviderLogo className="quota-tracker-provider-icon quota-tracker-provider-icon-lg" providerType={quotaKey} style={{ color: info.color }} />
           <div className="quota-account-modal-hero-copy">
@@ -396,11 +402,17 @@ export function QuotaAccountDetailModal({
             </button>
           </div>
           {entries.length > 0 ? (
-            <QuotaTable
-              rows={entries}
-              credentialActive={credentialActive}
-              proxyUsage={usage}
-            />
+            usesQuotaRingLayout(quotaKey) ? (
+              <QuotaRingGrid rows={entries} proxyUsage={usage} />
+            ) : usesQuotaStackedLayout(quotaKey) ? (
+              <QuotaStackedBar rows={entries} proxyUsage={usage} />
+            ) : (
+              <QuotaTable
+                rows={entries}
+                credentialActive={credentialActive}
+                proxyUsage={usage}
+              />
+            )
           ) : (
             <p className="quota-account-modal-empty">No quota data loaded for this account.</p>
           )}
@@ -428,6 +440,13 @@ export function QuotaAccountDetailModal({
             />
           )}
         </div>
+        </div>
+
+        <AccountTestChat
+          secret={secret}
+          credentialId={credential.id}
+          credentialEnabled={credential.enabled}
+        />
       </div>
     </Modal>
   );

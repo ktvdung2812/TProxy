@@ -3017,6 +3017,319 @@ button:disabled,
   .quota-account-modal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quota-account-modal-details { grid-template-columns: 1fr; }
 }
+
+/* Account detail modal: account data left, test chat right, each column its
+   own scroll area. The modal is given a definite height so both columns have a
+   stable canvas — without it the chat panel would end wherever its content
+   stopped instead of running the full height beside the account data. */
+/* Two class selectors, deliberately: the size class (.modal-lg) is declared
+   later in this file, so a single-class override here would lose on order and
+   silently leave the modal at its default width. */
+.modal.quota-account-modal {
+  width: 80vw;
+  max-width: 80vw;
+  height: 80vh;
+  max-height: 80vh;
+}
+.quota-account-modal .modal-body {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.quota-account-modal-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* 8:2 — the account data carries tables and stat tiles that wrap badly when
+     squeezed; the chat is a probe and stays legible narrow. */
+  grid-template-columns: minmax(0, 8fr) minmax(0, 2fr);
+  gap: 20px;
+  align-items: stretch;
+}
+.quota-account-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.account-test-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-brand-lg, 12px);
+  background: var(--color-surface-2);
+}
+.account-test-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.account-test-chat-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.account-test-chat-title h5 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.account-test-chat-title .material-symbols-outlined { font-size: 18px; color: var(--color-text-muted); }
+.account-test-chat-model {
+  width: 100%;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: var(--color-text-main);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.account-test-chat-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+.account-test-chat-empty {
+  margin: auto 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+.account-test-chat-error { color: var(--color-danger); }
+.account-test-chat-turn {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  /* Near-full width: at this column width, reserving a gutter for the
+     conversational look costs more than the alignment cue is worth. */
+  max-width: 96%;
+}
+.account-test-chat-turn p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.account-test-chat-turn-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-text-main);
+}
+.account-test-chat-turn-assistant {
+  align-self: flex-start;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-main);
+}
+.account-test-chat-turn-failed {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  color: var(--color-danger);
+}
+.account-test-chat-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+/* Stacked rather than side by side: at the 2/10 column width a textarea and a
+   button on one row leave neither usable. */
+.account-test-chat-compose { display: flex; flex-direction: column; gap: 8px; }
+.account-test-chat-compose > button { align-self: stretch; justify-content: center; }
+.account-test-chat-compose textarea {
+  width: 100%;
+  min-width: 0;
+  resize: none;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-main);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.account-test-chat-compose textarea:disabled { opacity: 0.6; }
+@media (max-width: 1080px) {
+  /* Stacked: two independent scroll areas make no sense in one column, so the
+     modal body goes back to being the single scroll container. */
+  .modal.quota-account-modal { width: 100%; max-width: 100%; height: auto; max-height: min(86vh, 820px); }
+  .quota-account-modal .modal-body { display: block; overflow-y: auto; }
+  .quota-account-modal-layout { grid-template-columns: minmax(0, 1fr); }
+  .quota-account-modal-body { overflow: visible; padding-right: 0; }
+  .account-test-chat { height: 420px; }
+}
+/* One weekly pool drawn as a segmented bar, for providers that meter several
+   products against a shared allowance. Segments share a hue at decreasing
+   strength rather than using distinct colours: they are parts of one whole, and
+   separate hues would read as separate limits — the exact confusion this
+   layout exists to remove. */
+.quota-stacked { display: grid; gap: 10px; }
+.quota-stacked-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.quota-stacked-headline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.quota-stacked-headline-success .quota-stacked-remaining { color: var(--color-success); }
+.quota-stacked-headline-warning .quota-stacked-remaining { color: var(--color-warning); }
+.quota-stacked-headline-danger .quota-stacked-remaining { color: var(--color-danger); }
+.quota-stacked-remaining { font-size: 12px; font-weight: 600; }
+.quota-stacked-reset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.quota-stacked-reset-absolute { opacity: 0.75; }
+.quota-stacked-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+}
+.quota-stacked-segment { height: 100%; min-width: 2px; transition: width 0.25s ease; }
+.quota-stacked-segment-0 { background: var(--color-primary); }
+.quota-stacked-segment-1 { background: color-mix(in srgb, var(--color-primary) 72%, transparent); }
+.quota-stacked-segment-2 { background: color-mix(in srgb, var(--color-primary) 52%, transparent); }
+.quota-stacked-segment-3 { background: color-mix(in srgb, var(--color-primary) 36%, transparent); }
+.quota-stacked-segment-4 { background: color-mix(in srgb, var(--color-primary) 24%, transparent); }
+.quota-stacked-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quota-stacked-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.quota-stacked-swatch { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.quota-stacked-legend-name { color: var(--color-text-muted); }
+.quota-stacked-legend-value { font-weight: 600; color: var(--color-text-main); }
+.quota-stacked-hide {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--color-text-muted); cursor: pointer; opacity: 0;
+  transition: opacity 0.15s;
+}
+.quota-stacked-legend-item:hover .quota-stacked-hide,
+.quota-stacked-hide:focus-visible { opacity: 1; }
+.quota-stacked-hide .material-symbols-outlined { font-size: 13px; }
+.quota-stacked-extra {
+  display: grid;
+  grid-template-columns: minmax(0, 140px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.quota-stacked-extra-name { color: var(--color-text-muted); }
+
+/* Per-model quota rings. Used where a provider meters every model separately
+   and the bar list would run past a screen. */
+.quota-ring-wrap { display: grid; gap: 10px; }
+.quota-ring-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quota-ring-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  text-align: center;
+}
+.quota-ring-chart { position: relative; display: flex; align-items: center; justify-content: center; }
+.quota-ring-track { stroke: var(--color-border); opacity: 0.5; }
+.quota-ring-value { transition: stroke-dashoffset 0.3s ease; }
+.quota-ring-success .quota-ring-value { stroke: var(--color-success); }
+.quota-ring-warning .quota-ring-value { stroke: var(--color-warning); }
+.quota-ring-danger .quota-ring-value { stroke: var(--color-danger); }
+.quota-ring-percent {
+  position: absolute;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.quota-ring-name {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-main);
+  /* Two lines then ellipsis: model names vary from "Gemini 3 Flash" to
+     "Claude Sonnet 4.6 (Thinking)", and letting them grow would leave the
+     tiles ragged. The full name stays in the title attribute. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.quota-ring-reset {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+.quota-ring-reset-absolute { opacity: 0.75; }
+.quota-ring-hide {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+.quota-ring-item:hover .quota-ring-hide,
+.quota-ring-hide:focus-visible { opacity: 1; }
+.quota-ring-hide:hover { background: var(--color-surface); color: var(--color-text-main); }
+.quota-ring-hide .material-symbols-outlined { font-size: 15px; }
+@media (max-width: 1280px) {
+  .quota-ring-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .quota-ring-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .quota-ring-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .quota-reset-status {
   display: inline-flex; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   color: var(--color-primary); font-size: 11px; font-weight: 600;

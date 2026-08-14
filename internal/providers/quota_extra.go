@@ -532,10 +532,19 @@ func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string
 		}
 	}
 
-	// 2) Product usage bars from format=credits (weekly windows, percent used).
+	// 2) Product usage bars from format=credits.
 	//    Live GrokPro shape: productUsage: [{product:"GrokBuild", usagePercent:1}, ...]
+	//
+	//    These are slices of ONE weekly allowance, not separate allowances: the
+	//    x.ai usage page renders them as segments of a single bar whose total is
+	//    their sum (e.g. Build 95% + Voice 2% + Chat 1% = 98% of the week used).
+	//    Reporting each as its own 0-100 window overstated the account badly —
+	//    a barely-touched product still read as ~100% free while the shared pool
+	//    was nearly gone, and routing kept picking an account with 2% left.
 	productPeriodEnd := weeklyPeriodEnd
 	if products, ok := creditsCfg["productUsage"].([]any); ok {
+		weeklyUsed := 0.0
+		hasWeekly := false
 		for _, raw := range products {
 			item, _ := raw.(map[string]any)
 			if item == nil {
@@ -556,12 +565,28 @@ func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string
 			if usedPct > 100 {
 				usedPct = 100
 			}
-			key := "product_" + strings.ToLower(product)
+			weeklyUsed += usedPct
+			hasWeekly = true
+			// Kept for display only; grokProductBreakdownKey is excluded from
+			// the routing gate so the same usage is not counted twice.
+			key := grokProductBreakdownKey(product)
 			quotas[key] = QuotaEntry{
 				Name:      product,
 				Used:      usedPct,
 				Total:     100,
 				Remaining: 100 - usedPct,
+				ResetAt:   productPeriodEnd,
+			}
+		}
+		if hasWeekly {
+			if weeklyUsed > 100 {
+				weeklyUsed = 100
+			}
+			quotas["weekly"] = QuotaEntry{
+				Name:      "Weekly limit",
+				Used:      weeklyUsed,
+				Total:     100,
+				Remaining: 100 - weeklyUsed,
 				ResetAt:   productPeriodEnd,
 			}
 		}
@@ -721,9 +746,18 @@ func grokCLIMonthlyAllotment(config, root map[string]any, cents bool) (limit, us
 	return limit, used, true
 }
 
+// grokProductBreakdownPrefix marks the per-product slices of Grok's weekly
+// allowance. They are shown to explain where the week went, never used to judge
+// whether the account has capacity — the aggregate "weekly" window does that.
+const grokProductBreakdownPrefix = "product_"
+
+func grokProductBreakdownKey(product string) string {
+	return grokProductBreakdownPrefix + strings.ToLower(product)
+}
+
 func hasGrokCLIProductQuota(quotas map[string]QuotaEntry) bool {
 	for key := range quotas {
-		if strings.HasPrefix(key, "product_") {
+		if strings.HasPrefix(key, grokProductBreakdownPrefix) {
 			return true
 		}
 	}

@@ -30,6 +30,18 @@ func QuotaEntryRemainingPercent(entry QuotaEntry) float64 {
 func quotaKeyAffectsRouting(providerType, key string) bool {
 	normalizedKey := strings.ToLower(strings.TrimSpace(key))
 	normalizedType := strings.ToLower(strings.TrimSpace(providerType))
+	// Grok's per-product bars are slices of its weekly allowance, which is
+	// already tracked as its own window. Counting them again would let an
+	// untouched product (Chat at 1% used) report the account as free while the
+	// shared pool it draws from is spent.
+	if strings.HasPrefix(normalizedKey, grokProductBreakdownPrefix) {
+		return false
+	}
+	// Grok is the exception to the rule below: it has no session window, so its
+	// weekly allowance is the real limit rather than an auxiliary one.
+	if isGrokQuotaProviderType(normalizedType) {
+		return normalizedKey != "review"
+	}
 	if strings.Contains(normalizedKey, "weekly") || strings.Contains(normalizedKey, "review") {
 		return false
 	}
@@ -37,6 +49,12 @@ func quotaKeyAffectsRouting(providerType, key string) bool {
 		return normalizedKey == "session"
 	}
 	return true
+}
+
+// isGrokQuotaProviderType covers both the generic xAI provider type and the
+// grok-cli preset, which report the same billing shape.
+func isGrokQuotaProviderType(providerType string) bool {
+	return providerType == "xai" || providerType == "grok-cli"
 }
 
 // QuotaAtZero reports whether routing quota is fully depleted (0% left).

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tproxy/tproxy/internal/store"
@@ -260,5 +261,62 @@ func TestGrokCLIQuotaHTTPIntegration(t *testing.T) {
 	quota := reg.grokCLIQuota(t.Context(), store.Provider{ID: "grok-cli", Type: "xai"}, store.Credential{ID: "c1"})
 	if quota.Message == "" {
 		t.Fatal("expected missing-token message")
+	}
+}
+
+// Grok's productUsage entries are slices of one weekly allowance, not separate
+// allowances. The x.ai usage page for this account showed a single weekly bar
+// at 98% used, split Build 95% / Voice 2% / Chat 1%.
+func TestParseGrokCLIBillingMergedAggregatesProductsIntoWeekly(t *testing.T) {
+	credits := map[string]any{
+		"config": map[string]any{
+			"productUsage": []any{
+				map[string]any{"product": "GrokBuild", "usagePercent": float64(95)},
+				map[string]any{"product": "GrokVoice", "usagePercent": float64(2)},
+				map[string]any{"product": "GrokChat", "usagePercent": float64(1)},
+			},
+			"currentPeriod": map[string]any{
+				"type": "USAGE_PERIOD_TYPE_WEEKLY",
+				"end":  "2026-08-15T00:06:00+00:00",
+			},
+		},
+	}
+
+	_, quotas, _ := parseGrokCLIBillingMerged(credits, nil, map[string]any{"subscriptionTier": "GrokPro"})
+
+	weekly, ok := quotas["weekly"]
+	if !ok {
+		t.Fatalf("no aggregate weekly window: %+v", quotas)
+	}
+	if weekly.Used != 98 || weekly.Total != 100 || weekly.Remaining != 2 {
+		t.Fatalf("weekly = %+v, want 98 used / 2 remaining", weekly)
+	}
+
+	// The breakdown stays visible…
+	if build := quotas["product_grokbuild"]; build.Used != 95 {
+		t.Fatalf("build breakdown = %+v", build)
+	}
+	// …but must not gate routing, or a 1%-used Chat bar would report this
+	// nearly exhausted account as free.
+	for key := range quotas {
+		if strings.HasPrefix(key, grokProductBreakdownPrefix) && quotaKeyAffectsRouting("grok-cli", key) {
+			t.Fatalf("breakdown key %q gates routing", key)
+		}
+	}
+	if !quotaKeyAffectsRouting("grok-cli", "weekly") {
+		t.Fatal("grok weekly window must gate routing: it is the account's real limit")
+	}
+}
+
+// The generic rule treats weekly as auxiliary because Codex and Claude gate on
+// their session window; Grok has none, so it must not inherit that.
+func TestGrokWeeklyGatesRoutingUnlikeOtherProviders(t *testing.T) {
+	if quotaKeyAffectsRouting("codex", "weekly") || quotaKeyAffectsRouting("claude", "weekly") {
+		t.Fatal("weekly should stay auxiliary for session-based providers")
+	}
+	for _, providerType := range []string{"xai", "grok-cli"} {
+		if !quotaKeyAffectsRouting(providerType, "weekly") {
+			t.Fatalf("%s weekly must gate routing", providerType)
+		}
 	}
 }

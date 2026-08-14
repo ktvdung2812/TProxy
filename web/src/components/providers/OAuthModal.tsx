@@ -63,6 +63,10 @@ export function OAuthModal({
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
+  // Tracks that this opening of the modal has already begun a flow. It has to
+  // be a ref rather than derived from phase: the guarded callers below can run
+  // twice before any render commits, at which point phase still reads "idle".
+  const startedRef = useRef(false);
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current) {
@@ -153,6 +157,14 @@ export function OAuthModal({
   }, []);
 
   const handleStart = useCallback(async () => {
+    // A second entry opens a second authorization window and starts a second
+    // upstream session, which strands the first one: the code the user ends up
+    // pasting belongs to whichever session they authorized, and the other sits
+    // pending until it expires. React invokes mount effects twice in
+    // development, and a double click reaches here before the first render
+    // commits, so both paths are covered by the same guard.
+    if (startedRef.current) return;
+    startedRef.current = true;
     setPhase("starting");
     setErrorMsg("");
     try {
@@ -207,10 +219,17 @@ export function OAuthModal({
   ]);
 
   useEffect(() => {
-    if (open && autoStart && phase === "idle") {
+    // Closing is what arms the next flow; while the modal stays open the guard
+    // inside handleStart keeps this to a single start no matter how often the
+    // effect re-runs.
+    if (!open) {
+      startedRef.current = false;
+      return;
+    }
+    if (autoStart) {
       void handleStart();
     }
-  }, [open, autoStart, phase, handleStart]);
+  }, [open, autoStart, handleStart]);
 
   const handleCancel = useCallback(async () => {
     stopPolling();
