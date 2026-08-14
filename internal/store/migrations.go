@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 20
+const sqliteCurrentSchemaVersion = 21
 
 type sqliteMigration struct {
 	version int
@@ -60,6 +60,7 @@ var sqliteMigrations = []sqliteMigration{
 		return addColumnIfMissing(ctx, tx, "usage_events", "cached_tokens", `ALTER TABLE usage_events ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`)
 	}},
 	{version: 20, apply: migrateCredentialCreatedAt},
+	{version: 21, apply: migrateAPIKeyModelDefaults},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -127,7 +128,7 @@ CREATE TABLE IF NOT EXISTS route_targets (
  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS api_keys (
- id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', key_hash TEXT NOT NULL UNIQUE, models_json TEXT NOT NULL DEFAULT '[]',
+ id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', key_hash TEXT NOT NULL UNIQUE, models_json TEXT NOT NULL DEFAULT '["*"]',
  policy_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1, last_used_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -343,6 +344,15 @@ func migrateCredentialCreatedAt(ctx context.Context, tx *sql.Tx) error {
 	) WHERE created_at = '' AND EXISTS (
 		SELECT 1 FROM usage_events ue WHERE ue.credential_id = credentials.id
 	)`)
+	return err
+}
+
+// migrateAPIKeyModelDefaults preserves the legacy meaning of an empty model
+// list before empty selections become an explicit deny-all policy. New and
+// migrated keys use "*" for the default allow-all behavior.
+func migrateAPIKeyModelDefaults(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `UPDATE api_keys SET models_json='["*"]'
+WHERE TRIM(models_json) IN ('', '[]', 'null')`)
 	return err
 }
 

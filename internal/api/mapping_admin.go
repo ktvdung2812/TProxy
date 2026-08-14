@@ -537,6 +537,50 @@ func (s *Server) placeholderModelInfo(id string) (map[string]any, bool) {
 	return nil, false
 }
 
+func apiKeyAllowsAllModels(key *store.APIKey) bool {
+	if key == nil {
+		return true
+	}
+	for _, model := range key.Models {
+		if model == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// placeholderModelListed keeps restricted client catalogs identical to the
+// administrator's explicit model selection. Compatibility placeholders remain
+// available in the full catalog, or when a legacy/imported policy names one
+// directly, but they do not crowd out the concrete models selected in the UI.
+func (s *Server) placeholderModelListed(key *store.APIKey, entry map[string]any) bool {
+	if apiKeyAllowsAllModels(key) {
+		return true
+	}
+	id, _ := entry["id"].(string)
+	return id != "" && s.store.PublicModelAllowed(key, id)
+}
+
+// placeholderModelAllowed controls direct metadata lookups for compatibility
+// placeholders. Restricted keys may inspect only aliases whose final target is
+// authorized, even though those aliases stay out of their advertised catalog.
+func (s *Server) placeholderModelAllowed(ctx context.Context, key *store.APIKey, entry map[string]any) bool {
+	if apiKeyAllowsAllModels(key) {
+		return true
+	}
+	target, _ := entry["resolves_to"].(string)
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	// Cursor slots may point to a Claude/Codex placeholder. Apply the same
+	// second-stage rewrite used by ingress before asking the router to enforce
+	// the API key's concrete public-model policy.
+	target = s.claudeAliasResolver().ResolveModel(target)
+	_, err := s.router.Resolve(ctx, target, key)
+	return err == nil
+}
+
 func (s *Server) resolveClaudeIngressModel(r *http.Request, model string) string {
 	resolved := resolveIngressModel(r, model)
 	// Cursor free-form aliases first so a slot can point at a Claude/Codex placeholder (e.g. fable).

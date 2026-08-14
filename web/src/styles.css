@@ -4694,6 +4694,13 @@ button:disabled,
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+.usage-stat-exact {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 .usage-stat-primary { color: var(--color-brand-500); }
 .usage-stat-info { color: #6ab0bf; }
 .usage-stat-success { color: #3da066; }
@@ -6829,6 +6836,313 @@ button:disabled,
   color: var(--color-text-main);
 }
 
+.apis-model-access-summary {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-muted) 9%, transparent);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.apis-model-access-summary.is-all {
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  color: var(--color-primary);
+}
+
+.api-model-access {
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+
+.api-model-access-mode,
+.api-model-access-toolbar,
+.api-model-access-row,
+.api-model-access-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.api-model-access-mode {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-1));
+}
+
+.api-model-access-title,
+.api-model-access-hint,
+.api-model-access-footer p,
+.api-model-access-empty p {
+  margin: 0;
+}
+
+.api-model-access-title {
+  color: var(--color-text-main);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.api-model-access-hint {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.api-model-access-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.api-model-access-toolbar .input-icon {
+  flex: 1;
+  max-width: 330px;
+}
+
+.api-model-access-count {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.api-model-access-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.api-model-access-row {
+  min-height: 54px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  transition: background 0.15s ease;
+}
+
+.api-model-access-row:last-child {
+  border-bottom: 0;
+}
+
+.api-model-access-row.is-enabled {
+  background: color-mix(in srgb, var(--color-primary) 3%, transparent);
+}
+
+.api-model-access-label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.api-model-access-label strong {
+  overflow: hidden;
+  color: var(--color-text-main);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-model-access-label code {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-model-access-action {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.api-model-access-empty {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.api-model-access-empty .material-symbols-outlined {
+  font-size: 24px;
+}
+
+.api-model-access-empty-text {
+  margin: 0;
+  padding: 28px 12px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.api-model-access-footer {
+  min-height: 44px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-2);
+}
+
+.api-model-access-footer p {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.api-model-access-footer > div {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+/* API key editor: policy fields stay on the left while model access gets a
+   dedicated, independently scrollable workspace on the right. */
+.modal.api-key-edit-modal {
+  width: min(94vw, 1180px);
+  max-width: 1180px;
+  height: min(84vh, 780px);
+  max-height: min(84vh, 780px);
+}
+
+.api-key-edit-modal .modal-body {
+  display: flex;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.api-key-edit-form {
+  flex: 1;
+  min-height: 0;
+}
+
+.api-key-edit-form,
+.api-key-edit-layout {
+  display: grid;
+}
+
+.api-key-edit-form {
+  grid-template-columns: minmax(330px, 0.9fr) minmax(420px, 1.1fr);
+}
+
+.api-key-edit-pane {
+  min-width: 0;
+  min-height: 0;
+  padding: 20px;
+}
+
+.api-key-edit-info {
+  overflow-y: auto;
+}
+
+.api-key-edit-models {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-surface-1) 72%, transparent);
+}
+
+.api-key-edit-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.api-key-edit-section-head > .material-symbols-outlined {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  color: var(--color-primary);
+  font-size: 18px;
+}
+
+.api-key-edit-section-head h4,
+.api-key-edit-section-head p,
+.api-key-edit-enabled p {
+  margin: 0;
+}
+
+.api-key-edit-section-head h4 {
+  color: var(--color-text-main);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.api-key-edit-section-head p {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.api-key-edit-models > .field {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.api-key-edit-models .api-model-access {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.api-key-edit-models .api-model-access-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.api-key-edit-enabled {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+}
+
+.api-key-edit-enabled strong {
+  color: var(--color-text-main);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.api-key-edit-enabled p {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.api-key-edit-footer {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .apis-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -6856,6 +7170,54 @@ button:disabled,
 
   .apis-key-delete {
     opacity: 1;
+  }
+}
+
+@media (max-width: 900px) {
+  .modal.api-key-edit-modal {
+    width: min(96vw, 720px);
+    max-width: 720px;
+    height: min(90vh, 860px);
+    max-height: min(90vh, 860px);
+  }
+
+  .api-key-edit-modal .modal-body {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .api-key-edit-form {
+    display: block;
+  }
+
+  .api-key-edit-pane {
+    overflow: visible;
+    padding: 18px;
+  }
+
+  .api-key-edit-models {
+    border-top: 1px solid var(--color-border-subtle);
+    border-left: 0;
+  }
+
+  .api-key-edit-models .api-model-access-list {
+    max-height: 340px;
+  }
+}
+
+@media (max-width: 640px) {
+  .api-model-access-toolbar,
+  .api-model-access-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .api-model-access-toolbar .input-icon {
+    max-width: none;
+  }
+
+  .api-model-access-footer > div {
+    justify-content: flex-end;
   }
 }
 

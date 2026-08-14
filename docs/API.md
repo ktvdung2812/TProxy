@@ -131,6 +131,7 @@ Provider credentials submitted to the management API are encrypted before persis
 Proxy pools accept `http://`, `https://`, `socks5://`, `socks5h://`, `direct` and `none`. Their URL ciphertext is encrypted in SQLite; snapshots expose only a redacted host. A provider or credential can bind multiple pool IDs, which are rotated with request selection. Deleting a bound pool returns `409`.
 
 Creating a client key returns its plaintext exactly once. Subsequent snapshots expose only the key ID, name, model policy, enabled state and last-use timestamp.
+New client keys allow every model by default. The model policy uses `["*"]` to include current and future models, an explicit list to allow only selected public model/combo IDs, and `[]` to deny all model access. Administrators can switch between these modes from the APIs dashboard.
 Client-key policies can restrict endpoints, requests per minute, concurrent streams, input bytes, output tokens, active media jobs and daily estimated cost. Limit failures are typed and occur before provider selection, so they never trigger fallback.
 
 Provider health and model discovery use lightweight catalog requests. Discovery results are suggestions only; administrator-defined public models and aliases are never overwritten automatically.

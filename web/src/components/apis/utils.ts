@@ -1,4 +1,4 @@
-import type { ApiKeyFormData, ApiKeyRecord, ProxyEndpoint } from "./types";
+import type { ApiKeyFormData, ApiKeyRecord, ApiModelOption, ProxyEndpoint } from "./types";
 import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
 
 export function normalizeBaseUrl(origin: string): string {
@@ -49,7 +49,7 @@ export function apiKeyToForm(key: ApiKeyRecord): ApiKeyFormData {
   return {
     id: key.id,
     name: key.name,
-    models: key.models?.length ? key.models.join(", ") : "*",
+    models: key.models?.join(", ") || "",
     enabled: key.enabled,
     team: key.policy?.team || "",
     endpoints: key.policy?.endpoints?.join(", ") || "",
@@ -88,7 +88,7 @@ export function formToPayload(form: ApiKeyFormData, editing: boolean) {
 
   const payload: Record<string, unknown> = {
     name: form.name.trim(),
-    models: models.length ? models : ["*"],
+    models,
     enabled: form.enabled,
     policy: {
       ...(form.team.trim() ? { team: form.team.trim() } : {}),
@@ -134,19 +134,19 @@ type ExampleComboSource = {
 export function buildExampleModelOptions(
   models: ExampleModelSource[] | null | undefined,
   combos: ExampleComboSource[] | null | undefined,
-): Array<{ value: string; label: string }> {
-  const options: Array<{ value: string; label: string }> = [];
+): ApiModelOption[] {
+  const options: ApiModelOption[] = [];
 
   for (const model of models || []) {
     if (!model.Enabled) continue;
     const label = model.DisplayName?.trim() || model.ID;
-    options.push({ value: model.ID, label });
+    options.push({ value: model.ID, label, group: "models" });
   }
 
   for (const combo of combos || []) {
     if (!combo.enabled) continue;
     const label = combo.display_name?.trim() || combo.id;
-    options.push({ value: combo.id, label });
+    options.push({ value: combo.id, label, group: "combos" });
   }
 
   return options.sort((a, b) => a.label.localeCompare(b.label));

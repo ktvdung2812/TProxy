@@ -78,7 +78,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 
 ### Operations & governance
 
-- **Client API keys** with per-key policies: allowed models, endpoints, RPM, concurrency, input size, media jobs, and daily budget.
+- **Client API keys** default to all models, with per-key toggles plus endpoint, RPM, concurrency, input size, media-job, and daily-budget policies.
 - **Teams** with scoped limits and cost aggregation.
 - **Token Saver** compression pipeline (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** per provider (OPEN / DEGRADED / CLOSED).

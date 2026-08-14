@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/pricing"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/router"
 	"github.com/tproxy/tproxy/internal/security"
@@ -171,6 +172,64 @@ func TestModelsIncludesPlaceholderRewrite(t *testing.T) {
 	}
 	if !strings.Contains(infoRecorder.Body.String(), `"placeholder":true`) {
 		t.Fatalf("expected placeholder model info, got %s", infoRecorder.Body.String())
+	}
+}
+
+func TestRestrictedAPIKeyCatalogHidesForbiddenPlaceholders(t *testing.T) {
+	t.Setenv("TPROXY_RESTRICTED_CATALOG_KEY", "restricted-catalog-secret")
+	cfg := &config.Config{
+		Server:        config.ServerConfig{AllowLocalWithoutKey: false},
+		ClaudeAliases: config.ClaudeAliasConfig{Fable: "forbidden-model"},
+		ClientAPIKeys: []config.ClientAPIKey{{
+			ID: "restricted-catalog", KeyEnv: "TPROXY_RESTRICTED_CATALOG_KEY", Models: []string{"allowed-model"},
+		}},
+		Models: []config.PublicModelConfig{
+			{ID: "allowed-model", Enabled: true},
+			{ID: "forbidden-model", Enabled: true},
+		},
+	}
+	dataStore := apiTestStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	registry := pricing.NewModelsRegistry(pricing.ModelsRegistryOptions{})
+	full, bare, names := pricing.BuildModelsRegistryIndexForTest(map[string]any{
+		"test/forbidden-model": map[string]any{"id": "test/forbidden-model"},
+	})
+	registry.SetIndexForTest(full, bare, names)
+	requestRouter.SetModelsRegistry(registry)
+	server := NewServer(cfg, dataStore, requestRouter)
+	defer server.Close()
+	handler := server.Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer restricted-catalog-secret")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("catalog status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].ID != "allowed-model" {
+		t.Fatalf("restricted catalog = %+v, want only explicitly allowed model", payload.Data)
+	}
+	for _, model := range payload.Data {
+		if model.ID == "gpt-sol" {
+			t.Fatalf("forbidden placeholder leaked into restricted catalog: %+v", payload.Data)
+		}
+	}
+
+	infoRequest := httptest.NewRequest(http.MethodGet, "/v1/models/info?id=gpt-sol", nil)
+	infoRequest.Header.Set("Authorization", "Bearer restricted-catalog-secret")
+	infoRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(infoRecorder, infoRequest)
+	if infoRecorder.Code != http.StatusNotFound {
+		t.Fatalf("forbidden placeholder info status=%d body=%s", infoRecorder.Code, infoRecorder.Body.String())
 	}
 }
 

@@ -22,7 +22,8 @@ import { TunnelSection } from "./TunnelSection";
 import { EndpointRow } from "./EndpointRow";
 import { LanPortHelpModal } from "./LanPortHelpModal";
 import { SecurityWarning } from "./SecurityWarning";
-import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage } from "./types";
+import { ApiModelAccessField } from "./ApiModelAccessField";
+import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage, ApiModelOption } from "./types";
 import {
   PROXY_ENDPOINTS,
   apiKeyToForm,
@@ -37,7 +38,7 @@ import {
 type Props = {
   secret: string;
   apiKeys: ApiKeyRecord[];
-  modelOptions: Array<{ value: string; label: string }>;
+  modelOptions: ApiModelOption[];
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onMutated?: () => void;
@@ -451,6 +452,12 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
               const spent = usage?.cost_usd_today || 0;
               const requests = usage?.requests_today || 0;
               const storedSecret = getStoredApiKeySecret(key.id);
+              const allModels = key.models?.includes("*");
+              const modelAccess = allModels
+                ? t("apis.allModels")
+                : key.models?.length
+                  ? t("apis.selectedModelsShort", { count: key.models.length })
+                  : t("apis.noModelAccess");
 
               return (
                 <div key={key.id} className={key.enabled ? "apis-key-row" : "apis-key-row is-paused"}>
@@ -476,7 +483,8 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                       )}
                     </div>
                     <p className="apis-key-row-meta">
-                      {key.models?.length ? key.models.join(", ") : "*"} · {formatLimitSummary(key)}
+                      <span className={`apis-model-access-summary${allModels ? " is-all" : ""}`}>{modelAccess}</span>
+                      {" · "}{formatLimitSummary(key)}
                     </p>
                     <p className="apis-key-row-meta">
                       {loadingUsage ? t("apis.loadingUsage") : `${compact(requests)} requests today · ${usd(spent)} spent`}
@@ -559,11 +567,11 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                   onChange={(event) => setFormData({ ...formData, id: event.target.value })}
                 />
               </Field>
-              <Field label="Allowed models" hint="* or comma-separated">
-                <Input
-                  placeholder="*"
+              <Field label={t("apis.allowedModels")} hint={t("apis.modelsHint")}>
+                <ApiModelAccessField
                   value={formData.models}
-                  onChange={(event) => setFormData({ ...formData, models: event.target.value })}
+                  modelOptions={modelOptions}
+                  onChange={(models) => setFormData({ ...formData, models })}
                 />
               </Field>
               <Field label="Team ID" hint="optional">
@@ -631,51 +639,11 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
           setEditingKey(null);
           setEditSecret("");
         }}
-        title="Edit API key"
+        title={t("apis.editKeyTitle")}
         size="lg"
-      >
-        <form className="apis-form" onSubmit={handleEdit}>
-          <Field label="Name" required>
-            <Input
-              value={formData.name}
-              onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Allowed models" hint="* or comma-separated">
-            <Input
-              value={formData.models}
-              onChange={(event) => setFormData({ ...formData, models: event.target.value })}
-            />
-          </Field>
-          <Field
-            label="API key secret"
-            hint="Stored only in this browser for copy and examples. Paste the client secret if you imported or created this key elsewhere."
-          >
-            <Input
-              type="password"
-              autoComplete="off"
-              placeholder="tp_… or paste secret from backup"
-              value={editSecret}
-              onChange={(event) => setEditSecret(event.target.value)}
-            />
-          </Field>
-          <Field label="Team ID" hint="optional">
-            <Input value={formData.team} onChange={(event) => setFormData({ ...formData, team: event.target.value })} />
-          </Field>
-          <Field label="Allowed endpoints" hint="optional">
-            <Input
-              value={formData.endpoints}
-              onChange={(event) => setFormData({ ...formData, endpoints: event.target.value })}
-            />
-          </Field>
-          {renderKeyLimitsForm()}
-          <Toggle
-            label="Key enabled"
-            checked={formData.enabled}
-            onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })}
-          />
-          <div className="apis-form-actions">
+        className="api-key-edit-modal"
+        footer={
+          <div className="api-key-edit-footer">
             <Button
               type="button"
               variant="outline"
@@ -685,12 +653,88 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                 setEditSecret("");
               }}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
-            <Button type="submit" variant="primary" icon="save" disabled={saving || !formData.name.trim()}>
-              Save changes
+            <Button
+              type="submit"
+              form="api-key-edit-form"
+              variant="primary"
+              icon="save"
+              disabled={saving || !formData.name.trim()}
+            >
+              {t("apis.saveChanges")}
             </Button>
           </div>
+        }
+      >
+        <form id="api-key-edit-form" className="api-key-edit-form" onSubmit={handleEdit}>
+          <section className="api-key-edit-pane api-key-edit-info custom-scrollbar">
+            <div className="api-key-edit-section-head">
+              <span className="material-symbols-outlined">key</span>
+              <div>
+                <h4>{t("apis.apiInformation")}</h4>
+                <p>{t("apis.apiInformationHint")}</p>
+              </div>
+            </div>
+
+            <div className="apis-form">
+              <Field label={t("apis.keyName")} required>
+                <Input
+                  value={formData.name}
+                  onChange={(event) => setFormData({ ...formData, name: event.target.value })}
+                  required
+                />
+              </Field>
+              <Field label={t("apis.apiKeySecret")} hint={t("apis.apiKeySecretHint")}>
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={t("apis.secretPlaceholder")}
+                  value={editSecret}
+                  onChange={(event) => setEditSecret(event.target.value)}
+                />
+              </Field>
+              <Field label={t("apis.teamId")} hint={t("apis.optional")}>
+                <Input value={formData.team} onChange={(event) => setFormData({ ...formData, team: event.target.value })} />
+              </Field>
+              <Field label={t("apis.allowedEndpoints")} hint={t("apis.optional")}>
+                <Input
+                  value={formData.endpoints}
+                  onChange={(event) => setFormData({ ...formData, endpoints: event.target.value })}
+                />
+              </Field>
+              {renderKeyLimitsForm()}
+              <div className="api-key-edit-enabled">
+                <div>
+                  <strong>{t("apis.keyEnabled")}</strong>
+                  <p>{t("apis.keyEnabledHint")}</p>
+                </div>
+                <Toggle
+                  label=""
+                  checked={formData.enabled}
+                  onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })}
+                  aria-label={t("apis.keyEnabled")}
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="api-key-edit-pane api-key-edit-models">
+            <div className="api-key-edit-section-head">
+              <span className="material-symbols-outlined">view_in_ar</span>
+              <div>
+                <h4>{t("apis.modelAccess")}</h4>
+                <p>{t("apis.modelAccessHint")}</p>
+              </div>
+            </div>
+            <Field hint={t("apis.modelsHint")}>
+              <ApiModelAccessField
+                value={formData.models}
+                modelOptions={modelOptions}
+                onChange={(models) => setFormData({ ...formData, models })}
+              />
+            </Field>
+          </section>
         </form>
       </Modal>
 

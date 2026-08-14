@@ -1232,13 +1232,17 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
+	restrictedCatalog := !apiKeyAllowsAllModels(key)
 	data := make([]map[string]any, 0, len(models))
 	seen := make(map[string]struct{}, len(models))
 	for _, model := range models {
 		if !model.Enabled || !s.store.PublicModelAllowed(key, model.ID) {
 			continue
 		}
-		if !s.router.IsModelCatalogVisible(r.Context(), model) {
+		// An explicit API-key selection is an administrator decision and must
+		// remain visible even when the optional global models.dev registry does
+		// not know the model yet. Authorization above still fails closed.
+		if !restrictedCatalog && !s.router.IsModelCatalogVisible(r.Context(), model) {
 			continue
 		}
 		display := s.router.CatalogDisplayEntry(r.Context(), model)
@@ -1249,6 +1253,9 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{"id": display.ID, "object": "model", "name": display.Name, "owned_by": "tproxy", "capabilities": model.Capabilities, "limits": model.Limits, "endpoint": modelEndpointKind(model), "created": time.Now().Unix()})
 	}
 	for _, entry := range s.placeholderModelCatalog() {
+		if !s.placeholderModelListed(key, entry) {
+			continue
+		}
 		id, _ := entry["id"].(string)
 		if id == "" {
 			continue
@@ -1272,11 +1279,15 @@ func (s *Server) modelInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "id is required", useClientRequestID(r))
 		return
 	}
+	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	if info, ok := s.placeholderModelInfo(id); ok {
+		if !s.placeholderModelAllowed(r.Context(), key, info) {
+			writeError(w, 404, "model_not_found", "model is not available to this API key", useClientRequestID(r))
+			return
+		}
 		writeJSON(w, 200, info)
 		return
 	}
-	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	model, err := s.router.Resolve(r.Context(), id, key)
 	if err != nil {
 		writeError(w, 404, "model_not_found", err.Error(), useClientRequestID(r))
@@ -2426,6 +2437,10 @@ func (s *Server) adminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 		return
 	}
+	if err := validateAPIKeyModelSelection(request.Models); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_model_selection", err.Error(), useClientRequestID(r))
+		return
+	}
 	id, key, err := s.store.CreateAPIKey(r.Context(), request.ID, request.Name, request.Models, request.Policy)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "api_key_create_failed", err.Error(), useClientRequestID(r))
@@ -2467,6 +2482,10 @@ func (s *Server) adminAPIKeyItem(w http.ResponseWriter, r *http.Request, id stri
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 			return
 		}
+		if err := validateAPIKeyModelSelection(request.Models); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_model_selection", err.Error(), useClientRequestID(r))
+			return
+		}
 		if err := s.store.UpdateAPIKey(r.Context(), id, request.Name, request.Models, request.Enabled, request.Policy); err != nil {
 			writeError(w, http.StatusBadRequest, "api_key_update_failed", err.Error(), useClientRequestID(r))
 			return
@@ -2481,6 +2500,27 @@ func (s *Server) adminAPIKeyItem(w http.ResponseWriter, r *http.Request, id stri
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "PUT or DELETE required", useClientRequestID(r))
 	}
+}
+
+const (
+	maxAPIKeyModels        = 2048
+	maxAPIKeyModelIDLength = 256
+)
+
+func validateAPIKeyModelSelection(models []string) error {
+	if len(models) > maxAPIKeyModels {
+		return fmt.Errorf("models cannot contain more than %d entries", maxAPIKeyModels)
+	}
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			return errors.New("model ids cannot be empty")
+		}
+		if len(model) > maxAPIKeyModelIDLength {
+			return fmt.Errorf("model id cannot exceed %d bytes", maxAPIKeyModelIDLength)
+		}
+	}
+	return nil
 }
 
 func (s *Server) adminCredentialQuota(w http.ResponseWriter, r *http.Request, credentialID string) {

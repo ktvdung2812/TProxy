@@ -46,6 +46,12 @@ export type ApiKeyFormData = {
   budget_usd_per_day: number;
 };
 
+export type ApiModelOption = {
+  value: string;
+  label: string;
+  group: "models" | "combos";
+};
+
 export type ProxyEndpoint = {
   path: string;
   methods: string[];

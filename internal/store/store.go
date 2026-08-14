@@ -369,7 +369,14 @@ VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET public_model_id=excluded.p
 		if key == "" {
 			continue
 		}
-		models, _ := json.Marshal(keyCfg.Models)
+		configuredModels := keyCfg.Models
+		// Declarative config historically treated both omitted and empty model
+		// lists as allow-all. Preserve that contract for config-managed keys;
+		// the management API uses an explicit [] to represent deny-all.
+		if len(configuredModels) == 0 {
+			configuredModels = nil
+		}
+		models, _ := json.Marshal(normalizeAPIKeyModels(configuredModels))
 		policy, _ := json.Marshal(keyCfg.Policy)
 		if _, err = tx.ExecContext(ctx, `INSERT INTO api_keys(id,name,key_hash,models_json,policy_json,enabled) VALUES(?,?,?,?,?,1)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_hash=excluded.key_hash,models_json=excluded.models_json,policy_json=excluded.policy_json,enabled=1`, keyCfg.ID, keyCfg.Name, security.HashAPIKey(key), string(models), string(policy)); err != nil {
@@ -901,10 +908,12 @@ func (s *Store) ImportClientAPIKey(ctx context.Context, id, name, plaintext stri
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(plaintext) == "" {
 		return errors.New("api key id and plaintext are required")
 	}
+	// Imports predate explicit deny-all policies and used an empty list as the
+	// allow-all default, so keep that compatibility at this boundary.
 	if len(models) == 0 {
-		models = []string{"*"}
+		models = nil
 	}
-	encodedModels, _ := json.Marshal(models)
+	encodedModels, _ := json.Marshal(normalizeAPIKeyModels(models))
 	encodedPolicy, _ := json.Marshal(config.ClientKeyPolicy{})
 	_, err := s.db.ExecContext(ctx, `INSERT INTO api_keys(id,name,key_hash,models_json,policy_json,enabled) VALUES(?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_hash=excluded.key_hash,models_json=excluded.models_json,policy_json=excluded.policy_json,enabled=excluded.enabled`,
@@ -928,7 +937,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, id, name string, models []stri
 		id = security.NewID("key_")
 	}
 	plaintext := security.NewID("tp_")
-	encodedModels, _ := json.Marshal(models)
+	encodedModels, _ := json.Marshal(normalizeAPIKeyModels(models))
 	var policy config.ClientKeyPolicy
 	if len(policies) > 0 {
 		policy = policies[0]
@@ -942,7 +951,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, id, name string, models []stri
 }
 
 func (s *Store) UpdateAPIKey(ctx context.Context, id, name string, models []string, enabled bool, policies ...config.ClientKeyPolicy) error {
-	encodedModels, _ := json.Marshal(models)
+	encodedModels, _ := json.Marshal(normalizeAPIKeyModels(models))
 	if len(policies) > 0 {
 		encodedPolicy, _ := json.Marshal(policies[0])
 		result, err := s.db.ExecContext(ctx, `UPDATE api_keys SET name=?,models_json=?,policy_json=?,enabled=? WHERE id=?`, name, string(encodedModels), string(encodedPolicy), boolInt(enabled), id)
@@ -2752,7 +2761,7 @@ func sensitiveFieldName(name string) bool {
 }
 
 func (s *Store) PublicModelAllowed(apiKey *APIKey, modelID string) bool {
-	if apiKey == nil || len(apiKey.Models) == 0 {
+	if apiKey == nil {
 		return true
 	}
 	for _, allowed := range apiKey.Models {
@@ -2761,6 +2770,34 @@ func (s *Store) PublicModelAllowed(apiKey *APIKey, modelID string) bool {
 		}
 	}
 	return false
+}
+
+// normalizeAPIKeyModels gives the model policy three unambiguous states:
+// nil means the caller omitted the policy and receives the secure product
+// default (all models), ["*"] tracks all current and future models, and an
+// explicit empty slice denies every model. Explicit lists are trimmed and
+// deduplicated so request-time checks remain bounded by useful entries.
+func normalizeAPIKeyModels(models []string) []string {
+	if models == nil {
+		return []string{"*"}
+	}
+	result := make([]string, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if model == "*" {
+			return []string{"*"}
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		result = append(result, model)
+	}
+	return result
 }
 
 func EligibleCredentials(creds []Credential, now time.Time) []Credential {
