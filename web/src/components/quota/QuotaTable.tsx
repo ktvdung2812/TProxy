@@ -66,10 +66,12 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                     <div className="quota-tracker-progress-fill" style={{ width: `${Math.min(row.remaining, 100)}%` }} />
                   </div>
                   <div className="quota-tracker-usage">
-                    <span>
-                      {Math.round(row.used).toLocaleString()} / {row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString()}
+                    <span
+                      className={cn("quota-tracker-percent", `quota-tracker-percent-${tone}`)}
+                      title={`${Math.round(row.used).toLocaleString()} / ${row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString()}`}
+                    >
+                      Còn {row.remaining}%
                     </span>
-                    <span className={cn("quota-tracker-percent", `quota-tracker-percent-${tone}`)}>{row.remaining}%</span>
                   </div>
                 </td>
                 <td className="quota-tracker-cell quota-tracker-cell-reset">

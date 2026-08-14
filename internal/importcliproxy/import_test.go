@@ -65,3 +65,94 @@ func TestParseCliproxyAuthArray(t *testing.T) {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
 }
+
+func TestImportCliproxyAntigravityPreservesProjectID(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "type": "antigravity",
+	  "access_token": "access-token",
+	  "refresh_token": "refresh-token",
+	  "email": "user@example.com",
+	  "cloudaicompanionProject": {"id": "cloud-project-123"}
+	}`)
+
+	result, err := importcliproxy.Import(context.Background(), dataStore, payload, importcliproxy.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "antigravity")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-123" {
+		t.Fatalf("project_id=%#v, want cloud-project-123", got)
+	}
+}
+
+func TestImportCliproxyGeminiCLIUsesAntigravityProjectID(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "type": "gemini-cli",
+	  "access_token": "access-token",
+	  "email": "user@example.com",
+	  "projectId": {"id": "cloud-project-cli"}
+	}`)
+
+	result, err := importcliproxy.Import(context.Background(), dataStore, payload, importcliproxy.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	providers, err := dataStore.Providers(context.Background())
+	if err != nil || len(providers) != 1 || providers[0].Type != "antigravity" || providers[0].BaseURL != "https://cloudcode-pa.googleapis.com" {
+		t.Fatalf("providers=%+v err=%v", providers, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "gemini-cli")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-cli" {
+		t.Fatalf("project_id=%#v, want cloud-project-cli", got)
+	}
+}
+
+func TestImportCliproxyAntigravityPreservesNestedProjectVariant(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "type": "antigravity",
+	  "access_token": "access-token",
+	  "project": {"cloudaicompanionProject": {"id": "cloud-project-nested"}}
+	}`)
+
+	result, err := importcliproxy.Import(context.Background(), dataStore, payload, importcliproxy.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "antigravity")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-nested" {
+		t.Fatalf("project_id=%#v, want cloud-project-nested", got)
+	}
+}
+
+func TestImportCliproxyAntigravityPreservesSnakeCaseCompanionProject(t *testing.T) {
+	dataStore := openTestStore(t)
+	payload := []byte(`{
+	  "type": "antigravity",
+	  "access_token": "access-token",
+	  "cloudaicompanion_project": {"id": "cloud-project-snake"}
+	}`)
+
+	result, err := importcliproxy.Import(context.Background(), dataStore, payload, importcliproxy.Options{})
+	if err != nil || !result.OK {
+		t.Fatalf("import: result=%+v err=%v", result, err)
+	}
+	credentials, err := dataStore.Credentials(context.Background(), "antigravity")
+	if err != nil || len(credentials) != 1 {
+		t.Fatalf("credentials=%+v err=%v", credentials, err)
+	}
+	if got := credentials[0].OAuthToken.Extra["project_id"]; got != "cloud-project-snake" {
+		t.Fatalf("project_id=%#v, want cloud-project-snake", got)
+	}
+}

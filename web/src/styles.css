@@ -3073,7 +3073,7 @@ button:disabled,
 .quota-tracker-progress-warning { background: color-mix(in srgb, var(--color-warning) 12%, transparent); }
 .quota-tracker-progress-danger { background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
 .quota-tracker-usage { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 10px; color: var(--color-text-muted); }
-.quota-tracker-percent { font-weight: 600; }
+.quota-tracker-percent { font-weight: 600; font-size: 11.5px; line-height: 1.1; }
 .quota-tracker-percent-success { color: var(--color-success); }
 .quota-tracker-percent-warning { color: var(--color-warning); }
 .quota-tracker-percent-danger { color: var(--color-danger); }

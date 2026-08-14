@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/tproxy/tproxy/internal/antigravity"
 	"github.com/tproxy/tproxy/internal/store"
 )
-
-const antigravityQuotaUserAgent = "antigravity/hub/2.2.1 darwin/arm64"
 
 var antigravityImportantModels = []string{
 	"gemini-3-flash-agent",
@@ -39,10 +40,16 @@ func (r *Registry) antigravityQuota(ctx context.Context, credential store.Creden
 		result.Message = "Antigravity access token not available."
 		return result, nil
 	}
+	// The OAuth token is the canonical source for the project selected during
+	// enrollment. loadCodeAssist is useful for the plan name and as a legacy
+	// fallback, but it can temporarily omit the project even for a healthy
+	// credential.
+	projectID := antigravityProject(credential)
 	subscription, _ := r.antigravitySubscription(ctx, token)
-	projectID := ""
 	if subscription != nil {
-		projectID = stringValue(firstValue(subscription, "cloudaicompanionProject", "cloudaicompanion_project"))
+		if projectID == "" {
+			projectID = antigravityProjectFromValues(subscription)
+		}
 		result.Plan = stringValue(firstValue(subscription, "currentTier", "plan"))
 		if tier, ok := subscription["currentTier"].(map[string]any); ok {
 			if name := stringValue(tier["name"]); name != "" {
@@ -89,21 +96,15 @@ func (r *Registry) antigravityQuota(ctx context.Context, credential store.Creden
 		if info == nil {
 			continue
 		}
-		remainingFraction := float64(numberValue(info["remainingFraction"]))
-		total := 1000.0
-		remaining := remainingFraction * total
-		used := total - remaining
 		name := stringValue(firstValue(raw, "displayName", "display_name"))
 		if name == "" {
 			name = modelKey
 		}
-		result.Quotas[modelKey] = QuotaEntry{
-			Name:      name,
-			Used:      used,
-			Total:     total,
-			Remaining: remaining,
-			ResetAt:   parseResetAt(firstValue(info, "resetTime", "reset_at")),
+		entry, ok := antigravityQuotaEntry(name, info["remainingFraction"], firstValue(info, "resetTime", "reset_at"))
+		if !ok {
+			continue
 		}
+		result.Quotas[modelKey] = entry
 	}
 	if len(result.Quotas) == 0 {
 		result.Message = "Antigravity connected. No quota windows returned."
@@ -128,7 +129,7 @@ func (r *Registry) geminiCLIQuota(ctx context.Context, credential store.Credenti
 	plan := result.Plan
 	if projectID == "" {
 		if sub, _ := r.geminiCLISubscription(ctx, token); sub != nil {
-			projectID = stringValue(firstValue(sub, "cloudaicompanionProject", "cloudaicompanion_project"))
+			projectID = antigravityProjectFromValues(sub)
 			if tier, ok := sub["currentTier"].(map[string]any); ok {
 				if name := stringValue(tier["name"]); name != "" {
 					plan = name
@@ -165,17 +166,11 @@ func (r *Registry) geminiCLIQuota(ctx context.Context, credential store.Credenti
 		if modelID == "" || bucket["remainingFraction"] == nil {
 			continue
 		}
-		remainingFraction := float64(numberValue(bucket["remainingFraction"]))
-		total := 1000.0
-		remaining := remainingFraction * total
-		used := total - remaining
-		result.Quotas[modelID] = QuotaEntry{
-			Name:      modelID,
-			Used:      used,
-			Total:     total,
-			Remaining: remaining,
-			ResetAt:   parseResetAt(bucket["resetTime"]),
+		entry, ok := antigravityQuotaEntry(modelID, bucket["remainingFraction"], bucket["resetTime"])
+		if !ok {
+			continue
 		}
+		result.Quotas[modelID] = entry
 	}
 	if len(result.Quotas) == 0 {
 		result.Message = "Gemini CLI connected. No quota windows returned."
@@ -214,11 +209,11 @@ func (r *Registry) geminiCLISubscription(ctx context.Context, token string) (map
 
 func antigravityQuotaHeaders(token string) http.Header {
 	return http.Header{
-		"Authorization":   {"Bearer " + token},
-		"Content-Type":    {"application/json"},
-		"User-Agent":      {antigravityQuotaUserAgent},
-		"X-Client-Name":   {"antigravity"},
-		"X-Client-Version": {"2.2.1"},
+		"Authorization":    {"Bearer " + token},
+		"Content-Type":     {"application/json"},
+		"User-Agent":       {antigravity.UserAgent()},
+		"X-Client-Name":    {"antigravity"},
+		"X-Client-Version": {antigravity.Version()},
 	}
 }
 
@@ -234,6 +229,58 @@ func credentialAccessToken(credential store.Credential) string {
 		return credential.OAuthToken.AccessToken
 	}
 	return credential.Secret
+}
+
+// antigravityQuotaEntry preserves Antigravity's normalized 1,000-unit display
+// counts while keeping Remaining in the percentage unit used by the dashboard
+// and routing state. Cloud Code may encode remainingFraction as either a JSON
+// number or a numeric string.
+func antigravityQuotaEntry(name string, rawFraction, resetAt any) (QuotaEntry, bool) {
+	fraction, ok := antigravityRemainingFraction(rawFraction)
+	if !ok {
+		return QuotaEntry{}, false
+	}
+	const total = 1000.0
+	remainingUnits := fraction * total
+	return QuotaEntry{
+		Name:      name,
+		Used:      total - remainingUnits,
+		Total:     total,
+		Remaining: fraction * 100,
+		ResetAt:   parseResetAt(resetAt),
+	}, true
+}
+
+func antigravityRemainingFraction(value any) (float64, bool) {
+	var fraction float64
+	switch typed := value.(type) {
+	case float64:
+		fraction = typed
+	case float32:
+		fraction = float64(typed)
+	case int:
+		fraction = float64(typed)
+	case int64:
+		fraction = float64(typed)
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		fraction = parsed
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err != nil {
+			return 0, false
+		}
+		fraction = parsed
+	default:
+		return 0, false
+	}
+	if math.IsNaN(fraction) || math.IsInf(fraction, 0) || fraction < 0 || fraction > 1 {
+		return 0, false
+	}
+	return fraction, true
 }
 
 func (r *Registry) quotaPOST(ctx context.Context, target string, headers http.Header, body map[string]any) ([]byte, int, error) {

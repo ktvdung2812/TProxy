@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,10 +37,17 @@ func TestCodexAdapterTranslatesResponsesAndParsesSSE(t *testing.T) {
 			t.Fatalf("codex body must not include max_output_tokens: %+v", body)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-1\",\"model\":\"gpt-5.4\"}}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"))
-		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		for _, event := range []string{
+			`{"type":"response.created","response":{"id":"resp-1","model":"gpt-5.4"}}`,
+			`{"type":"response.output_text.delta","delta":"hello"}`,
+			`{"type":"response.completed","response":{"usage":{"input_tokens":4,"output_tokens":2}}}`,
+			`[DONE]`,
+		} {
+			_, _ = w.Write([]byte("data: " + event + "\n\n"))
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
 	}))
 	defer upstream.Close()
 	adapter, err := NewRegistry().Adapter("codex")
@@ -46,7 +55,7 @@ func TestCodexAdapterTranslatesResponsesAndParsesSSE(t *testing.T) {
 		t.Fatal(err)
 	}
 	credential := store.Credential{ID: "codex-account", AuthType: "oauth", Secret: "codex-access", TokenType: "Bearer", OAuthToken: &store.OAuthToken{AccessToken: "codex-access", Extra: map[string]any{"account_id": "acct-123"}}}
-	response, err := adapter.Execute(context.Background(), store.Provider{ID: "codex", Type: "codex", BaseURL: upstream.URL}, credential, canonical.Request{Source: canonical.ProtocolResponses, UpstreamModel: "gpt-5.4", Raw: map[string]any{"model": "public", "input": "hello"}})
+	response, err := adapter.Execute(context.Background(), store.Provider{ID: "codex", Type: "codex", BaseURL: upstream.URL}, credential, canonical.Request{Source: canonical.ProtocolOpenAI, UpstreamModel: "gpt-5.4", Raw: map[string]any{"model": "public", "input": "hello"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,8 +209,14 @@ func TestClaudeOAuthAdapterUsesBearerAndClaudeHeaders(t *testing.T) {
 
 func TestAntigravityAdapterWrapsCloudCodeRequestAndNormalizesResponses(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/") || r.Header.Get("X-Request-ID") != "req-1" {
+		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/ide/") {
 			t.Fatalf("headers = %+v", r.Header)
+		}
+		// No Antigravity client sends a correlation header, so sending one only
+		// marks the request as coming from something other than the IDE. The
+		// envelope carries its own requestId, which is where Cloud Code looks.
+		if got := r.Header.Get("X-Request-ID"); got != "" {
+			t.Fatalf("X-Request-ID = %q, want it absent from the Antigravity path", got)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -234,7 +249,7 @@ func TestAntigravityAdapterWrapsCloudCodeRequestAndNormalizesResponses(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := store.Provider{ID: "antigravity", Type: "antigravity", BaseURL: upstream.URL}
+	provider := store.Provider{ID: "antigravity", Type: "antigravity", BaseURL: upstream.URL + "/v1internal"}
 	credential := store.Credential{ID: "antigravity-account", AuthType: "oauth", Secret: "antigravity-access", TokenType: "Bearer", OAuthToken: &store.OAuthToken{Extra: map[string]any{"project_id": "cloud-project-123"}}}
 	request := canonical.Request{
 		RequestID: "req-1", SessionID: "session-1", UpstreamModel: "gemini-3-pro",
@@ -267,6 +282,151 @@ func TestAntigravityAdapterWrapsCloudCodeRequestAndNormalizesResponses(t *testin
 	}
 	if text != "stream-text" || reasoning != "stream-thought" || usage.InputTokens != 2 || usage.OutputTokens != 1 {
 		t.Fatalf("stream text=%q reasoning=%q usage=%+v", text, reasoning, usage)
+	}
+}
+
+func TestAntigravityAdapterAcceptsObjectProjectMetadata(t *testing.T) {
+	credential := store.Credential{
+		AuthType: "oauth",
+		OAuthToken: &store.OAuthToken{Extra: map[string]any{
+			"cloudaicompanionProject": map[string]any{"id": "cloud-project-object"},
+		}},
+	}
+	body, err := antigravityBody(canonical.Request{RequestID: "request", UpstreamModel: "gemini-3-pro"}, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := body["project"]; got != "cloud-project-object" {
+		t.Fatalf("project=%#v, want cloud-project-object", got)
+	}
+}
+
+func TestAntigravityAdapterAcceptsSnakeCaseCompanionProjectMetadata(t *testing.T) {
+	credential := store.Credential{
+		AuthType: "oauth",
+		OAuthToken: &store.OAuthToken{Extra: map[string]any{
+			"cloudaicompanion_project": map[string]any{"id": "cloud-project-snake"},
+		}},
+	}
+	body, err := antigravityBody(canonical.Request{RequestID: "request", UpstreamModel: "gemini-3-pro"}, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := body["project"]; got != "cloud-project-snake" {
+		t.Fatalf("project=%#v, want cloud-project-snake", got)
+	}
+}
+
+func TestAntigravityAdapterNormalizesCloudCodeRequestShape(t *testing.T) {
+	originalName := "9 invalid/tool name with spaces and an intentionally very long suffix"
+	longName := strings.Repeat("very-long-tool-name-", 5)
+	credential := store.Credential{AuthType: "oauth", OAuthToken: &store.OAuthToken{Extra: map[string]any{"project_id": "cloud-project"}}}
+	request := canonical.Request{
+		RequestID:     "caller controlled / request id",
+		UpstreamModel: "gemini-3-pro",
+		MaxTokens:     90_000,
+		Messages: []canonical.Message{
+			{Role: "assistant", ToolCalls: []map[string]any{{"id": "call-1", "type": "function", "function": map[string]any{"name": originalName, "arguments": `{"value":"x"}`}}}},
+			{Role: "tool", ToolCallID: "call-1", Name: originalName, Content: "done"},
+		},
+		Tools: []map[string]any{
+			{"type": "function", "function": map[string]any{"name": originalName, "parameters": map[string]any{
+				"type": []any{"object", "null"}, "properties": map[string]any{"value": map[string]any{"$ref": "#/$defs/Value", "pattern": ".*"}}, "required": []any{"value", "missing"}, "$defs": map[string]any{"Value": map[string]any{"type": "string"}},
+			}}},
+			{"type": "function", "function": map[string]any{"name": longName, "parameters": map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "object", "properties": map[string]any{"nested": map[string]any{"type": "string"}}}}}}},
+		},
+		ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": originalName}},
+	}
+
+	body, reverse, err := antigravityPreparedBody(request, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestID := stringValue(body["requestId"]); !regexp.MustCompile(`^agent/[0-9a-f-]{36}/\d+/[0-9a-f-]{36}/\d+$`).MatchString(requestID) {
+		t.Fatalf("requestId=%q", requestID)
+	}
+	inner, _ := body["request"].(map[string]any)
+	generation, _ := inner["generationConfig"].(map[string]any)
+	if got := numberValue(generation["maxOutputTokens"]); got != antigravityMaxOutputTokens {
+		t.Fatalf("maxOutputTokens=%d, want %d", got, antigravityMaxOutputTokens)
+	}
+	groups := antigravityMapSlice(inner["tools"])
+	if len(groups) != 1 {
+		t.Fatalf("tools=%#v", inner["tools"])
+	}
+	declarations := antigravityMapSlice(groups[0]["functionDeclarations"])
+	if len(declarations) != 2 {
+		t.Fatalf("declarations=%#v", groups[0])
+	}
+	firstName := stringValue(declarations[0]["name"])
+	if !antigravityToolNamePattern.MatchString(firstName) || firstName == originalName || len(firstName) > antigravityToolNameMaxLen {
+		t.Fatalf("wire name=%q", firstName)
+	}
+	if got := reverse[firstName]; got != originalName {
+		t.Fatalf("reverse[%q]=%q, want %q", firstName, got, originalName)
+	}
+	firstSchema, _ := declarations[0]["parameters"].(map[string]any)
+	properties, _ := firstSchema["properties"].(map[string]any)
+	valueSchema, _ := properties["value"].(map[string]any)
+	if firstSchema["$defs"] != nil || valueSchema["$ref"] != nil || valueSchema["pattern"] != nil || len(antigravityStrings(firstSchema["required"])) != 1 {
+		t.Fatalf("schema not normalized: %#v", firstSchema)
+	}
+	contents := antigravityMapSlice(inner["contents"])
+	callParts := antigravityMapSlice(contents[0]["parts"])
+	var call map[string]any
+	for _, part := range callParts {
+		if candidate, ok := part["functionCall"].(map[string]any); ok {
+			call = candidate
+			break
+		}
+	}
+	if call["name"] != firstName {
+		t.Fatalf("history function call=%#v want %q", call, firstName)
+	}
+	responseParts := antigravityMapSlice(contents[1]["parts"])
+	functionResponse, _ := responseParts[0]["functionResponse"].(map[string]any)
+	if functionResponse["name"] != firstName {
+		t.Fatalf("history function response=%#v want %q", functionResponse, firstName)
+	}
+	response := canonicalGeminiResponse(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"parts": []any{map[string]any{"functionCall": map[string]any{"name": firstName, "args": map[string]any{}}}}}}}}, "gemini-3-pro", reverse)
+	function, _ := response.ToolCalls[0]["function"].(map[string]any)
+	if got := function["name"]; got != originalName {
+		t.Fatalf("response function name=%q, want %q", got, originalName)
+	}
+	rawCandidates := antigravityAnySlice(response.Raw["candidates"])
+	rawContent, _ := rawCandidates[0].(map[string]any)["content"].(map[string]any)
+	rawCall, _ := antigravityMapSlice(rawContent["parts"])[0]["functionCall"].(map[string]any)
+	if got := rawCall["name"]; got != originalName {
+		t.Fatalf("raw response function name=%q, want %q", got, originalName)
+	}
+}
+
+func TestParseGeminiUsageIncludesCachedContentTokens(t *testing.T) {
+	usage := parseGeminiUsage(map[string]any{"promptTokenCount": 3, "candidatesTokenCount": 2, "cachedContentTokenCount": 7})
+	if usage.InputTokens != 3 || usage.OutputTokens != 2 || usage.CachedTokens != 7 {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
+func TestUpstreamGoogleRetryInfoPopulatesRetryAfter(t *testing.T) {
+	err := buildUpstreamBodyError(http.StatusTooManyRequests, []byte(`{"error":{"message":"quota exhausted","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.479417207s"}]}}`), "")
+	if got := RetryAfter(err); got != "0.479417207s" {
+		t.Fatalf("retryAfter=%q", got)
+	}
+	objectErr := buildUpstreamBodyError(http.StatusTooManyRequests, []byte(`{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":{"seconds":"1","nanos":"500000000"}}]}}`), "")
+	if got := RetryAfter(objectErr); got != "1.5s" {
+		t.Fatalf("object-form retryAfter=%q", got)
+	}
+	transientErr := buildUpstreamBodyError(http.StatusServiceUnavailable, []byte(`{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"2s"}]}}`), "")
+	if got := RetryAfter(transientErr); got != "2s" {
+		t.Fatalf("transient retryAfter=%q", got)
+	}
+	if got := RetryAfter(buildUpstreamBodyError(http.StatusTooManyRequests, []byte(`{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"bad"}]}}`), "")); got != "" {
+		t.Fatalf("invalid retryAfter=%q", got)
+	}
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.Message != "quota exhausted" {
+		t.Fatalf("error=%+v", err)
 	}
 }
 
@@ -664,7 +824,7 @@ func TestCursorAdapterRequiresMachineID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = adapter.Execute(context.Background(), store.Provider{ID: "cursor", Type: "cursor", BaseURL: "https://api2.cursor.sh"}, store.Credential{
-		AuthType: "oauth",
+		AuthType:   "oauth",
 		OAuthToken: &store.OAuthToken{AccessToken: "cursor-token"},
 	}, canonical.Request{UpstreamModel: "default", Messages: []canonical.Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
