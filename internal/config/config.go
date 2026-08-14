@@ -507,7 +507,6 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		NormalizeClaudeOAuth(provider.OAuth)
 		provider.OAuth.TokenRequestFormat = "json"
 		provider.OAuth.IncludeStateInToken = true
-		provider.OAuth.ListenForCallback = false
 		if provider.OAuth.RefreshSafetyWindow == "" {
 			provider.OAuth.RefreshSafetyWindow = "4h"
 		}
@@ -854,13 +853,31 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 	}
 }
 
+// ClaudeRedirectURL is the loopback callback the Claude Code CLI registers with
+// Anthropic, and the one this gateway reproduces. It is verified working: the
+// consent screen renders and Anthropic redirects back with a code.
+//
+// claudeHostedRedirectURL is Anthropic's own callback page, which renders the
+// code for manual pasting. It is recognized only so a config that briefly
+// carried it is migrated back onto the loopback callback.
+const (
+	ClaudeRedirectURL       = "http://localhost:54545/callback"
+	claudeHostedRedirectURL = "https://platform.claude.com/oauth/code/callback"
+)
+
+// claudeOAuthScopes is the Claude Code scope set, verified accepted by the
+// consent screen. org:create_api_key is deliberately absent: it asks to mint
+// org API keys, which this gateway never does, and the Claude Code CLI itself
+// does not request it.
 var claudeOAuthScopes = []string{
-	"org:create_api_key",
 	"user:profile",
 	"user:inference",
+	"user:sessions:claude_code",
+	"user:mcp_servers",
+	"user:file_upload",
 }
 
-// ClaudeOAuthScopes returns the canonical Claude OAuth scopes (9router-compatible).
+// ClaudeOAuthScopes returns the canonical Claude OAuth scopes.
 func ClaudeOAuthScopes() []string {
 	return append([]string(nil), claudeOAuthScopes...)
 }
@@ -879,10 +896,14 @@ func NormalizeClaudeOAuth(oauth *OAuthConfig) {
 	if _, exists := oauth.ExtraAuthParams["code"]; !exists {
 		oauth.ExtraAuthParams["code"] = "true"
 	}
-	if strings.TrimSpace(oauth.RedirectURL) == "http://localhost:54545/callback" {
-		oauth.RedirectURL = ""
+	if redirect := strings.TrimSpace(oauth.RedirectURL); redirect == "" || redirect == claudeHostedRedirectURL {
+		oauth.RedirectURL = ClaudeRedirectURL
 	}
-	oauth.ListenForCallback = false
+	// The redirect is a loopback port, so the gateway can catch the code itself
+	// instead of making the operator copy it out of a dead browser tab. The
+	// manual paste path stays available for when the listener cannot bind or
+	// the browser runs on another machine.
+	oauth.ListenForCallback = strings.TrimSpace(oauth.RedirectURL) == ClaudeRedirectURL
 }
 
 func claudeOAuthScopesDiffer(scopes []string) bool {

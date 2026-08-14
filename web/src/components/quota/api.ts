@@ -139,3 +139,49 @@ export function consumeCodexResetCredit(secret: string, credentialId: string) {
     return data;
   });
 }
+
+export type AccountChatMessage = { role: "user" | "assistant"; content: string };
+
+export type AccountChatResult = {
+  ok: boolean;
+  content?: string;
+  reasoning?: string;
+  model?: string;
+  latency_ms: number;
+  error?: string;
+  status?: number;
+  usage?: { input_tokens?: number; output_tokens?: number };
+};
+
+// Runs one exchange against this account specifically. The backend pins the
+// credential instead of routing, so a failure here belongs to this account and
+// is not masked by failover to a healthy sibling.
+export function sendAccountChat(
+  secret: string,
+  credentialId: string,
+  model: string,
+  messages: AccountChatMessage[],
+) {
+  return fetch(`/api/admin/credentials/${encodeURIComponent(credentialId)}/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+    },
+    body: JSON.stringify({ model, messages }),
+  }).then(async (response) => {
+    // A pinned-credential failure comes back 200 with ok:false and a plain
+    // error string; only transport and auth failures use the envelope shape.
+    const data = (await response.json().catch(() => ({}))) as Omit<AccountChatResult, "error"> & {
+      error?: { message?: string } | string;
+    };
+    if (!response.ok) {
+      const detail = typeof data.error === "string" ? data.error : data.error?.message;
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+    return {
+      ...data,
+      error: typeof data.error === "string" ? data.error : data.error?.message,
+    } as AccountChatResult;
+  });
+}

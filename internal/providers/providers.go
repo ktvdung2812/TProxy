@@ -1202,26 +1202,24 @@ func anthropicHeaders(provider store.Provider, credential store.Credential, requ
 	headers := authHeaders(provider, credential)
 	if credential.AuthType == "oauth" {
 		if headers.Get("anthropic-version") == "" {
-			headers.Set("anthropic-version", "2023-06-01")
+			headers.Set("anthropic-version", claudeAnthropicVersion)
 		}
+		client := clientHeadersFromRequest(request)
 		if provider.Type == "claude" {
-			if headers.Get("Anthropic-Beta") == "" {
-				headers.Set("Anthropic-Beta", "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14")
+			// A caller that is itself Claude Code already carries a coherent
+			// identity — its own version, session and build. Letting it through
+			// intact is more convincing than overwriting it with ours, so its
+			// headers are applied first and the defaults only fill the gaps.
+			// Any other caller gets the gateway's identity, because a stray
+			// third-party User-Agent is exactly the tell being avoided.
+			if claudeClientIsNative(client) {
+				applyClaudeCodeCompatibilityHeaders(headers, client)
+				applyClaudeCodeFingerprint(headers, credential, request.Stream)
+				return headers
 			}
-			if headers.Get("X-App") == "" {
-				headers.Set("X-App", "cli")
-			}
-			if headers.Get("User-Agent") == "" {
-				headers.Set("User-Agent", "claude-cli/2.1.63 (external, cli)")
-			}
-			if headers.Get("X-Stainless-Runtime") == "" {
-				headers.Set("X-Stainless-Runtime", "node")
-			}
-			if headers.Get("X-Stainless-Lang") == "" {
-				headers.Set("X-Stainless-Lang", "js")
-			}
+			applyClaudeCodeFingerprint(headers, credential, request.Stream)
 		}
-		applyClaudeCodeCompatibilityHeaders(headers, clientHeadersFromRequest(request))
+		applyClaudeCodeCompatibilityHeaders(headers, client)
 		return headers
 	}
 	headers.Del("Authorization")
@@ -1233,6 +1231,79 @@ func anthropicHeaders(provider store.Provider, credential store.Credential, requ
 	}
 	applyClaudeCodeCompatibilityHeaders(headers, clientHeadersFromRequest(request))
 	return headers
+}
+
+// anthropicRequestBody builds the upstream payload and, for Claude Code OAuth
+// credentials, makes it look like Claude Code traffic. The returned map turns
+// upstream tool names back into the caller's names; it is nil when nothing was
+// renamed.
+func anthropicRequestBody(provider store.Provider, credential store.Credential, request canonical.Request) (map[string]any, map[string]string) {
+	body := anthropicBody(request)
+	if provider.Type != "claude" || !isClaudeOAuthCredential(credential) || !claudeCloakingEnabled(provider) {
+		return body, nil
+	}
+	// A genuine Claude Code caller already sends Claude Code tool names and its
+	// own billing block; rewriting them would corrupt a request that was
+	// already in the right shape.
+	if claudeClientIsNative(clientHeadersFromRequest(request)) {
+		return body, nil
+	}
+	return body, claudeCloakRequest(body, credential, claudeAgentPromptEnabled(provider))
+}
+
+// claudeTLSFingerprintEnabled reports whether to dial Claude upstreams with the
+// Claude Code TLS handshake instead of Go's.
+//
+// Off by default. Unlike the header work, this changes the transport itself —
+// it pins the connection to HTTP/1.1 and replaces the TLS stack — so it is the
+// operator's call rather than something that switches on under them. Set
+// claude_tls_fingerprint to "on" in the provider config to enable it.
+func claudeTLSFingerprintEnabled(provider store.Provider) bool {
+	if provider.Type != "claude" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(stringValue(provider.Config["claude_tls_fingerprint"]))) {
+	case "on", "true", "enabled", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// withClaudeTransport marks the request for the Claude Code TLS handshake when
+// the provider opts in and the credential is a Claude Code OAuth token. An API
+// key is an ordinary third-party caller and is dialled normally.
+func withClaudeTransport(ctx context.Context, provider store.Provider, credential store.Credential) context.Context {
+	if !claudeTLSFingerprintEnabled(provider) || !isClaudeOAuthCredential(credential) {
+		return ctx
+	}
+	return withTLSFingerprint(ctx)
+}
+
+// claudeAgentPromptEnabled reports whether to prepend the Claude Code identity
+// line to the system prompt. It is off by default: unlike the headers and the
+// billing block, that line is visible to the model and changes how it answers,
+// which is a decision for the operator rather than a default.
+func claudeAgentPromptEnabled(provider store.Provider) bool {
+	switch strings.ToLower(strings.TrimSpace(stringValue(provider.Config["claude_agent_prompt"]))) {
+	case "on", "true", "enabled", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// claudeCloakingEnabled reports whether Claude Code imitation is active for a
+// provider. It is on by default because a Claude Code OAuth token is billed
+// against extra usage without it; set claude_cloaking to "off" in the provider
+// config to forward requests untouched.
+func claudeCloakingEnabled(provider store.Provider) bool {
+	switch strings.ToLower(strings.TrimSpace(stringValue(provider.Config["claude_cloaking"]))) {
+	case "off", "false", "disabled", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 func clientHeadersFromRequest(request canonical.Request) map[string]string {
@@ -1252,9 +1323,10 @@ func anthropicMessagesEndpoint(provider store.Provider) string {
 }
 
 func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (*canonical.Response, error) {
-	ctx = withCredentialProxy(ctx, credential)
+	ctx = withClaudeTransport(withCredentialProxy(ctx, credential), provider, credential)
 	request.Stream = false
-	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), correlationHeaders(anthropicHeaders(provider, credential, request), request.RequestID), anthropicBody(request))
+	body, toolNames := anthropicRequestBody(provider, credential, request)
+	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), correlationHeaders(anthropicHeaders(provider, credential, request), request.RequestID), body)
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
 	}
@@ -1266,6 +1338,7 @@ func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider,
 	if err = json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
+	claudeDecloakResponse(raw, toolNames)
 	result := &canonical.Response{Raw: raw, ID: stringValue(raw["id"]), Model: stringValue(raw["model"]), Role: "assistant", FinishReason: stringValue(raw["stop_reason"])}
 	blocks, _ := raw["content"].([]any)
 	var text strings.Builder
@@ -1286,11 +1359,12 @@ func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider,
 }
 
 func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
-	ctx = withCredentialProxy(ctx, credential)
+	ctx = withClaudeTransport(withCredentialProxy(ctx, credential), provider, credential)
 	request.Stream = true
 	headers := correlationHeaders(anthropicHeaders(provider, credential, request), request.RequestID)
 	headers.Set("Accept", "text/event-stream")
-	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), headers, anthropicBody(request))
+	body, toolNames := anthropicRequestBody(provider, credential, request)
+	response, err := executeJSON(ctx, a.client, http.MethodPost, anthropicMessagesEndpoint(provider), headers, body)
 	if err != nil {
 		return nil, &ProviderError{Code: "upstream_network", Err: err}
 	}
@@ -1345,7 +1419,8 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 			case "content_block_start":
 				block, _ := raw["content_block"].(map[string]any)
 				if stringValue(block["type"]) == "tool_use" {
-					out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: map[string]any{"id": block["id"], "type": "function", "function": map[string]any{"name": block["name"], "arguments": ""}}}
+					name := claudeDecloakToolName(stringValue(block["name"]), toolNames)
+					out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: map[string]any{"id": block["id"], "type": "function", "function": map[string]any{"name": name, "arguments": ""}}}
 				}
 			case "message_delta":
 				delta, _ := raw["delta"].(map[string]any)

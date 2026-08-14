@@ -1461,6 +1461,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			s.adminCredentialModels(w, r, strings.TrimSuffix(suffix, "/models"))
 			return
 		}
+		if strings.HasSuffix(suffix, "/chat") {
+			s.adminCredentialChat(w, r, strings.TrimSuffix(suffix, "/chat"))
+			return
+		}
 		if strings.HasSuffix(suffix, "/logs") {
 			s.adminCredentialLogs(w, r, strings.TrimSuffix(suffix, "/logs"))
 			return
@@ -2513,6 +2517,77 @@ func (s *Server) adminCredentialQuota(w http.ResponseWriter, r *http.Request, cr
 	writeJSON(w, http.StatusOK, quota)
 }
 
+// adminCredentialChat runs one exchange against a single account so an operator
+// can confirm it actually answers. It pins the credential rather than routing
+// normally: a request that silently failed over to a healthy sibling would
+// report the wrong account as working.
+func (s *Server) adminCredentialChat(w http.ResponseWriter, r *http.Request, credentialID string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
+		return
+	}
+	credentialID = strings.Trim(strings.TrimSuffix(credentialID, "/"), "/")
+	if credentialID == "" || strings.Contains(credentialID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "credential id is required", useClientRequestID(r))
+		return
+	}
+	var request struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if strings.TrimSpace(request.Model) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "model is required", useClientRequestID(r))
+		return
+	}
+	if len(request.Messages) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "at least one message is required", useClientRequestID(r))
+		return
+	}
+	credential, err := s.store.CredentialByID(r.Context(), credentialID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "credential_not_found", "credential not found", useClientRequestID(r))
+		return
+	}
+	messages := make([]canonical.Message, 0, len(request.Messages))
+	for _, message := range request.Messages {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			role = "user"
+		}
+		messages = append(messages, canonical.Message{Role: role, Content: message.Content})
+	}
+	result, err := s.router.ChatWithCredential(r.Context(), credential.ProviderID, credentialID, request.Model, messages)
+	if err != nil {
+		// The upstream refusing is the answer the operator asked for, so it is
+		// reported as a result rather than as a transport failure.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            false,
+			"error":         err.Error(),
+			"status":        providers.Status(err),
+			"latency_ms":    result.LatencyMS,
+			"credential_id": credentialID,
+			"model":         request.Model,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"content":       result.Content,
+		"reasoning":     result.Reasoning,
+		"model":         result.Model,
+		"latency_ms":    result.LatencyMS,
+		"usage":         result.Usage,
+		"credential_id": credentialID,
+	})
+}
+
 func (s *Server) adminCodexResetCredits(w http.ResponseWriter, r *http.Request, credentialID string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or POST required", useClientRequestID(r))
@@ -2932,14 +3007,12 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 	}
 	provider, providerErr := s.store.Provider(r.Context(), request.ProviderID)
 	if providerErr == nil && security.IsLoopback(r) {
-		if provider.Type == "claude" {
-			callbackURL, callbackErr := loopbackBrowserOAuthCallbackURL(r)
-			if callbackErr != nil {
-				writeError(w, http.StatusBadRequest, "oauth_configuration_invalid", callbackErr.Error(), useClientRequestID(r))
-				return
-			}
-			request.RedirectURL = callbackURL
-		} else if request.RedirectURL == "" {
+		// Claude is deliberately excluded: Anthropic only accepts its own
+		// registered redirect URIs, so pointing the flow at this gateway's
+		// address makes the authorize request fail before consent. Its
+		// configured redirect (config.ClaudeRedirectURL) is used instead, and
+		// the operator pastes the code the callback page displays.
+		if provider.Type != "claude" && request.RedirectURL == "" {
 			hasConfiguredRedirect := provider.OAuth != nil && strings.TrimSpace(provider.OAuth.RedirectURL) != ""
 			if !hasConfiguredRedirect {
 				callbackURL, callbackErr := defaultOAuthCallbackURL(r)
@@ -3071,23 +3144,6 @@ func defaultOAuthCallbackURL(r *http.Request) (string, error) {
 		scheme = forwarded
 	}
 	return scheme + "://" + host + "/api/admin/oauth/callback", nil
-}
-
-func loopbackBrowserOAuthCallbackURL(r *http.Request) (string, error) {
-	host, err := loopbackCallbackHost(r.Host)
-	if err != nil {
-		return "", err
-	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	} else if forwarded := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); forwarded != "" {
-		if forwarded != "http" && forwarded != "https" {
-			return "", errors.New("OAuth callback forwarded scheme must be http or https")
-		}
-		scheme = forwarded
-	}
-	return scheme + "://" + host + "/callback", nil
 }
 
 func writeBrowserOAuthPage(w http.ResponseWriter, status int, title, message string) {

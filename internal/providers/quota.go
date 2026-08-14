@@ -94,7 +94,7 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 	case "codex":
 		return r.codexQuota(ctx, provider, credential)
 	case "claude":
-		return r.claudeQuota(ctx, credential)
+		return r.claudeQuota(ctx, provider, credential)
 	case "copilot":
 		return r.copilotQuota(ctx, credential)
 	case "antigravity":
@@ -151,36 +151,6 @@ func (r *Registry) codexQuota(ctx context.Context, provider store.Provider, cred
 	if len(result.Quotas) == 0 {
 		result.Message = "Codex connected. No quota windows returned."
 	}
-	return result, nil
-}
-
-func (r *Registry) claudeQuota(ctx context.Context, credential store.Credential) (CredentialQuota, error) {
-	result := CredentialQuota{
-		CredentialID: credential.ID,
-		ProviderID:   credential.ProviderID,
-		ProviderType: "claude",
-		Quotas:       map[string]QuotaEntry{},
-	}
-	headers := authHeaders(store.Provider{Type: "claude"}, credential)
-	headers.Set("anthropic-version", "2023-06-01")
-	body, status, err := r.quotaGET(ctx, "https://api.anthropic.com/api/oauth/usage", headers)
-	if err != nil {
-		return result, err
-	}
-	if status == http.StatusOK {
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err == nil {
-			for key, raw := range payload {
-				if item, ok := raw.(map[string]any); ok {
-					result.Quotas[key] = quotaFromUsedTotal(item)
-				}
-			}
-			if len(result.Quotas) > 0 {
-				return result, nil
-			}
-		}
-	}
-	result.Message = "Claude connected. Usage is tracked per request."
 	return result, nil
 }
 
@@ -334,12 +304,6 @@ func githubQuotaEntry(item map[string]any, resetAt string) QuotaEntry {
 		return QuotaEntry{Name: "", Used: used, Total: 0, Unlimited: true, ResetAt: resetAt}
 	}
 	return QuotaEntry{Name: "", Used: used, Total: entitlement, Remaining: remaining, ResetAt: resetAt}
-}
-
-func quotaFromUsedTotal(item map[string]any) QuotaEntry {
-	used := float64(numberValue(firstValue(item, "used", "used_percent")))
-	total := float64(numberValue(firstValue(item, "total", "limit", "max")))
-	return QuotaEntry{Used: used, Total: total, Remaining: total - used, ResetAt: parseResetAt(item["reset_at"])}
 }
 
 func firstMap(values map[string]any, keys ...string) map[string]any {

@@ -118,11 +118,17 @@ func TestProviderDefaultsForCodexAndClaude(t *testing.T) {
 	if claude.OAuth.ExtraAuthParams["code"] != "true" {
 		t.Fatalf("claude OAuth extra auth params = %+v", claude.OAuth.ExtraAuthParams)
 	}
-	if len(claude.OAuth.Scopes) != 3 || claude.OAuth.Scopes[0] != "org:create_api_key" {
+	if len(claude.OAuth.Scopes) != 5 || claude.OAuth.Scopes[0] != "user:profile" || claude.OAuth.Scopes[2] != "user:sessions:claude_code" {
 		t.Fatalf("claude OAuth scopes = %+v", claude.OAuth.Scopes)
 	}
-	if claude.OAuth.ListenForCallback {
-		t.Fatalf("claude OAuth should not listen on a fixed callback port by default")
+	// The redirect is a loopback port, so the gateway catches the code itself.
+	if !claude.OAuth.ListenForCallback {
+		t.Fatal("claude OAuth should listen on its loopback callback port")
+	}
+	// Anthropic rejects any redirect it has not registered, so the default must
+	// be its hosted callback rather than an address of this gateway's.
+	if claude.OAuth.RedirectURL != ClaudeRedirectURL {
+		t.Fatalf("claude OAuth redirect = %q", claude.OAuth.RedirectURL)
 	}
 }
 
@@ -135,18 +141,30 @@ func TestNormalizeClaudeOAuthMigratesLegacyScopes(t *testing.T) {
 			"user:mcp_servers",
 			"user:file_upload",
 		},
-		RedirectURL:       "http://localhost:54545/callback",
-		ListenForCallback: true,
+		RedirectURL:       "https://platform.claude.com/oauth/code/callback",
+		ListenForCallback: false,
 	}
 	NormalizeClaudeOAuth(oauth)
-	if len(oauth.Scopes) != 3 || oauth.Scopes[0] != "org:create_api_key" {
+	if len(oauth.Scopes) != 5 || oauth.Scopes[0] != "user:profile" || oauth.Scopes[2] != "user:sessions:claude_code" {
 		t.Fatalf("migrated scopes = %+v", oauth.Scopes)
 	}
 	if oauth.ExtraAuthParams["code"] != "true" {
 		t.Fatalf("extra auth params = %+v", oauth.ExtraAuthParams)
 	}
-	if oauth.RedirectURL != "" || oauth.ListenForCallback {
-		t.Fatalf("legacy callback settings were not cleared: redirect=%q listen=%v", oauth.RedirectURL, oauth.ListenForCallback)
+	// Anthropic rejects the hosted callback for this client, so a stored config
+	// carrying it is migrated back onto the loopback listener.
+	if oauth.RedirectURL != ClaudeRedirectURL || !oauth.ListenForCallback {
+		t.Fatalf("legacy callback settings were not migrated: redirect=%q listen=%v", oauth.RedirectURL, oauth.ListenForCallback)
+	}
+}
+
+// An operator running their own OAuth client registers their own redirect, so
+// an explicit non-default value must survive normalization.
+func TestNormalizeClaudeOAuthKeepsCustomRedirect(t *testing.T) {
+	oauth := &OAuthConfig{RedirectURL: "https://gateway.example.test/claude/callback"}
+	NormalizeClaudeOAuth(oauth)
+	if oauth.RedirectURL != "https://gateway.example.test/claude/callback" {
+		t.Fatalf("custom redirect = %q", oauth.RedirectURL)
 	}
 }
 

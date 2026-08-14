@@ -11,10 +11,13 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/tlsfp"
 	xproxy "golang.org/x/net/proxy"
 )
 
 type proxyContextKey struct{}
+
+type tlsFingerprintContextKey struct{}
 
 func withCredentialProxy(ctx context.Context, credential store.Credential) context.Context {
 	if strings.TrimSpace(credential.ProxyURL) == "" {
@@ -23,16 +26,36 @@ func withCredentialProxy(ctx context.Context, credential store.Credential) conte
 	return context.WithValue(ctx, proxyContextKey{}, credential.ProxyURL)
 }
 
+// withTLSFingerprint marks a request to be sent over the Claude Code TLS
+// handshake. It travels on the context for the same reason the proxy does: the
+// adapters build requests, but the transport decides how to dial.
+func withTLSFingerprint(ctx context.Context) context.Context {
+	return context.WithValue(ctx, tlsFingerprintContextKey{}, true)
+}
+
+func tlsFingerprintRequested(ctx context.Context) bool {
+	enabled, _ := ctx.Value(tlsFingerprintContextKey{}).(bool)
+	return enabled
+}
+
 type proxyTransport struct {
 	direct *http.Transport
 	mu     sync.Mutex
 	items  map[string]*http.Transport
+	// Fingerprinted transports are pooled separately: they dial with a
+	// different handshake and speak HTTP/1.1, so their connections cannot be
+	// shared with the ordinary ones.
+	fingerprint map[string]http.RoundTripper
 }
 
 func newProxyTransport() *proxyTransport {
 	base := cloneHTTPTransport()
 	base.Proxy = http.ProxyFromEnvironment
-	return &proxyTransport{direct: base, items: make(map[string]*http.Transport)}
+	return &proxyTransport{
+		direct:      base,
+		items:       make(map[string]*http.Transport),
+		fingerprint: make(map[string]http.RoundTripper),
+	}
 }
 
 func cloneHTTPTransport() *http.Transport {
@@ -51,6 +74,14 @@ func cloneHTTPTransport() *http.Transport {
 func (p *proxyTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	raw, _ := request.Context().Value(proxyContextKey{}).(string)
 	raw = strings.TrimSpace(raw)
+	if tlsFingerprintRequested(request.Context()) {
+		if transport := p.fingerprintTransport(raw); transport != nil {
+			return transport.RoundTrip(request)
+		}
+		// The proxy cannot carry a fingerprinted handshake. Dropping the
+		// imitation is a smaller loss than dropping the request, so the
+		// ordinary path takes over.
+	}
 	if raw == "" {
 		return p.direct.RoundTrip(request)
 	}
@@ -59,6 +90,36 @@ func (p *proxyTransport) RoundTrip(request *http.Request) (*http.Response, error
 		return nil, err
 	}
 	return transport.RoundTrip(request)
+}
+
+// fingerprintTransport returns the fingerprinted transport for a proxy, or nil
+// when this proxy cannot carry one.
+func (p *proxyTransport) fingerprintTransport(raw string) http.RoundTripper {
+	p.mu.Lock()
+	if existing, ok := p.fingerprint[raw]; ok {
+		p.mu.Unlock()
+		return existing
+	}
+	p.mu.Unlock()
+
+	built, err := tlsfp.Transport(raw)
+	var transport http.RoundTripper
+	if err == nil {
+		transport = built
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if existing, ok := p.fingerprint[raw]; ok {
+		if built != nil {
+			built.CloseIdleConnections()
+		}
+		return existing
+	}
+	// A nil entry is cached too: an unsupported proxy will not become
+	// supported, and rebuilding it per request would be pure waste.
+	p.fingerprint[raw] = transport
+	return transport
 }
 
 func (p *proxyTransport) transport(raw string) (*http.Transport, error) {
@@ -90,6 +151,11 @@ func (p *proxyTransport) CloseIdleConnections() {
 	defer p.mu.Unlock()
 	for _, transport := range p.items {
 		transport.CloseIdleConnections()
+	}
+	for _, transport := range p.fingerprint {
+		if closer, ok := transport.(interface{ CloseIdleConnections() }); ok && transport != nil {
+			closer.CloseIdleConnections()
+		}
 	}
 }
 

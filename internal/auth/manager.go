@@ -48,6 +48,12 @@ const (
 	// sweep of many due credentials outlast the tick interval, so refreshes are
 	// spread over a small worker pool.
 	defaultRefreshWorkers = 16
+
+	// Cooldown applied to a credential whose refresh failed. A provider that
+	// sends Retry-After overrides the default within these bounds.
+	defaultRefreshCooldown = 30 * time.Second
+	minRefreshCooldown     = 5 * time.Second
+	maxRefreshCooldown     = 5 * time.Minute
 )
 
 const oauthCallbackSuccessHTML = `<!doctype html>
@@ -115,6 +121,11 @@ type Error struct {
 	code      string
 	permanent bool
 	err       error
+	// retryAfter carries an upstream-declared backoff (RFC 7231 Retry-After).
+	// A provider that rate-limits the token endpoint tells us how long to wait;
+	// ignoring it and retrying on our own fixed schedule is what turns a
+	// throttle into a lockout.
+	retryAfter time.Duration
 }
 
 func (e *Error) Error() string {
@@ -482,7 +493,11 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		if err := validateRedirectURL(redirectURL); err != nil {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: err}
 		}
-		item.state = security.NewID("oauth_state_")
+		state, stateErr := oauthState()
+		if stateErr != nil {
+			return StartResponse{}, stateErr
+		}
+		item.state = state
 		item.redirectURL = redirectURL
 		item.status = "pending"
 		verifier, err := pkceVerifier()
@@ -619,10 +634,17 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 	m.mu.Unlock()
 	if mode == "browser" && oauthConfig.ListenForCallback {
 		if err := m.startLocalCallback(item); err != nil {
-			m.mu.Lock()
-			delete(m.sessions, item.id)
-			m.mu.Unlock()
-			return StartResponse{}, err
+			// Claude's callback port is fixed by the redirect Anthropic
+			// registered, so it can already be held by the Claude Code CLI's
+			// own login. The code still lands in the browser's address bar and
+			// the dashboard accepts it pasted, so a busy port costs the
+			// convenience of auto-completion rather than the whole login.
+			if provider.Type != "claude" {
+				m.mu.Lock()
+				delete(m.sessions, item.id)
+				m.mu.Unlock()
+				return StartResponse{}, err
+			}
 		}
 	}
 	if mode == "device" {
@@ -1080,7 +1102,7 @@ func (m *Manager) performRefresh(ctx context.Context, provider store.Provider, c
 		if IsPermanent(err) {
 			_ = m.store.MarkCredentialAuthRequired(ctx, credential.ID, Code(err))
 		} else {
-			_ = m.store.SetCooldown(ctx, credential.ID, Code(err), "OAuth refresh temporarily unavailable", m.now().Add(30*time.Second))
+			_ = m.store.SetCooldown(ctx, credential.ID, Code(err), "OAuth refresh temporarily unavailable", m.now().Add(refreshCooldown(err)))
 		}
 		return credential, err
 	}
@@ -1478,14 +1500,76 @@ func (m *Manager) exchangeRefresh(ctx context.Context, cfg config.OAuthConfig, r
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
-	data, status, err := m.postTokenRequest(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
+	data, status, header, err := m.postTokenRequestWithHeader(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
 	if err != nil {
 		return store.OAuthToken{}, err
 	}
 	if status < 200 || status >= 300 {
-		return store.OAuthToken{}, oauthHTTPError(data, status, true)
+		refreshErr := oauthHTTPError(data, status, true)
+		if typed, ok := refreshErr.(*Error); ok {
+			typed.retryAfter = parseRetryAfter(header, m.now())
+		}
+		return store.OAuthToken{}, refreshErr
 	}
 	return parseToken(data, m.now())
+}
+
+// parseRetryAfter reads the backoff a provider asks for, in either of the two
+// forms it may take: delay in seconds, or an HTTP date. Anything unparseable or
+// non-positive yields zero, letting the caller fall back to its own spacing.
+func parseRetryAfter(header http.Header, now time.Time) time.Duration {
+	if header == nil {
+		return 0
+	}
+	if raw := strings.TrimSpace(header.Get("Retry-After-Ms")); raw != "" {
+		if milliseconds, err := strconv.Atoi(raw); err == nil && milliseconds > 0 {
+			return time.Duration(milliseconds) * time.Millisecond
+		}
+	}
+	raw := strings.TrimSpace(header.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0
+	}
+	if delay := when.Sub(now); delay > 0 {
+		return delay
+	}
+	return 0
+}
+
+// refreshCooldown decides how long a credential sits out after a failed
+// refresh: as long as the provider asked for, clamped so a stray header can
+// neither produce a hot retry loop nor park a credential for hours.
+func refreshCooldown(err error) time.Duration {
+	hint := retryAfterHint(err)
+	if hint <= 0 {
+		return defaultRefreshCooldown
+	}
+	if hint < minRefreshCooldown {
+		return minRefreshCooldown
+	}
+	if hint > maxRefreshCooldown {
+		return maxRefreshCooldown
+	}
+	return hint
+}
+
+// retryAfterHint returns the provider-declared backoff carried by an error.
+func retryAfterHint(err error) time.Duration {
+	var typed *Error
+	if errors.As(err, &typed) {
+		return typed.retryAfter
+	}
+	return 0
 }
 
 func (m *Manager) postForm(ctx context.Context, target string, form url.Values) ([]byte, int, error) {
@@ -1493,6 +1577,11 @@ func (m *Manager) postForm(ctx context.Context, target string, form url.Values) 
 }
 
 func (m *Manager) postTokenRequest(ctx context.Context, target string, form url.Values, requestFormat string) ([]byte, int, error) {
+	data, status, _, err := m.postTokenRequestWithHeader(ctx, target, form, requestFormat)
+	return data, status, err
+}
+
+func (m *Manager) postTokenRequestWithHeader(ctx context.Context, target string, form url.Values, requestFormat string) ([]byte, int, http.Header, error) {
 	format := strings.ToLower(strings.TrimSpace(requestFormat))
 	var body io.Reader
 	contentType := "application/x-www-form-urlencoded"
@@ -1505,7 +1594,7 @@ func (m *Manager) postTokenRequest(ctx context.Context, target string, form url.
 		}
 		encoded, encodeErr := json.Marshal(payload)
 		if encodeErr != nil {
-			return nil, 0, &Error{code: "oauth_configuration_invalid", permanent: true}
+			return nil, 0, nil, &Error{code: "oauth_configuration_invalid", permanent: true}
 		}
 		body = strings.NewReader(string(encoded))
 		contentType = "application/json"
@@ -1514,20 +1603,20 @@ func (m *Manager) postTokenRequest(ctx context.Context, target string, form url.
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, body)
 	if err != nil {
-		return nil, 0, &Error{code: "oauth_configuration_invalid", permanent: true}
+		return nil, 0, nil, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Accept", "application/json")
 	response, err := m.client.Do(request)
 	if err != nil {
-		return nil, 0, &Error{code: "oauth_provider_unavailable", err: err}
+		return nil, 0, nil, &Error{code: "oauth_provider_unavailable", err: err}
 	}
 	defer response.Body.Close()
 	data, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if readErr != nil {
-		return nil, response.StatusCode, &Error{code: "oauth_provider_unavailable"}
+		return nil, response.StatusCode, response.Header, &Error{code: "oauth_provider_unavailable"}
 	}
-	return data, response.StatusCode, nil
+	return data, response.StatusCode, response.Header, nil
 }
 
 func oauthHTTPError(data []byte, status int, refresh bool) error {
@@ -1677,6 +1766,21 @@ func authorizationURL(cfg config.OAuthConfig, state, verifier, redirectURL, clie
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+// oauthState returns the CSRF state for a browser flow.
+//
+// It is a bare high-entropy base64url value, deliberately carrying no readable
+// prefix. Anthropic rejects a prefixed state outright with "Invalid request
+// format" before the consent screen renders, and every reference client for
+// these provider flows sends exactly this shape, so the plain form is used for
+// all providers rather than special-cased for one.
+func oauthState() (string, error) {
+	data := make([]byte, 32)
+	if _, err := rand.Read(data); err != nil {
+		return "", &Error{code: "oauth_provider_unavailable", err: err}
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
 func pkceVerifier() (string, error) {

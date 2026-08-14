@@ -180,6 +180,27 @@ providers:
   # - id: claude-subscription
   #   type: claude
   #   enabled: true
+  #   config:
+  #     # Claude Code OAuth tokens are scoped to Claude Code. Requests that do
+  #     # not look like Claude Code traffic are billed against the account's
+  #     # extra usage instead of its plan, so by default tproxy presents the
+  #     # Claude Code client fingerprint (headers, billing block, tool names)
+  #     # on this provider's OAuth credentials. API keys are never altered, and
+  #     # a caller that is itself Claude Code is forwarded untouched.
+  #     # Set to "off" to forward every request exactly as received.
+  #     claude_cloaking: "on"
+  #     # Prepend "You are Claude Code, Anthropic's official CLI for Claude."
+  #     # to the system prompt. Off by default: unlike the headers above, this
+  #     # line is visible to the model and changes how it answers. The caller's
+  #     # own system prompt is kept either way.
+  #     claude_agent_prompt: "off"
+  #     # Dial Anthropic with the Claude Code TLS handshake instead of Go's, so
+  #     # the transport agrees with the headers above. This pins the connection
+  #     # to HTTP/1.1 (the handshake offers no h2) and replaces the TLS stack,
+  #     # so it is off by default. OAuth credentials only; API keys are always
+  #     # dialled normally. An https:// proxy cannot carry it and silently
+  #     # falls back to an ordinary connection.
+  #     claude_tls_fingerprint: "off"
   #   credentials:
   #     - id: claude-account
   #       label: Claude subscription

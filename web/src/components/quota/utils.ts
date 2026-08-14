@@ -44,9 +44,24 @@ export function getRemainingPercentage(entry: QuotaEntry) {
 
 const AUXILIARY_QUOTA_KEY = /weekly|review/i;
 
+// Grok's per-product bars are slices of its weekly allowance, already counted
+// by the aggregate window.
+const GROK_PRODUCT_BREAKDOWN_PREFIX = "product_";
+
+function isGrokQuotaProviderType(providerType: string) {
+  return providerType === "xai" || providerType === "grok-cli";
+}
+
+// Keep in step with quotaKeyAffectsRouting in internal/providers/quota_state.go:
+// the dashboard's depleted badge and the router's skip decision must agree, or
+// an account shows as available while requests are being routed away from it.
 export function quotaKeyAffectsRouting(providerType: string, key: string) {
   const normalizedKey = key.trim().toLowerCase();
   const normalizedType = providerType.trim().toLowerCase();
+  if (normalizedKey.startsWith(GROK_PRODUCT_BREAKDOWN_PREFIX)) return false;
+  // Grok has no session window, so its weekly allowance is the real limit
+  // rather than an auxiliary one.
+  if (isGrokQuotaProviderType(normalizedType)) return normalizedKey !== "review";
   if (AUXILIARY_QUOTA_KEY.test(normalizedKey)) return false;
   if (normalizedType === "codex") return normalizedKey === "session";
   return true;
@@ -248,4 +263,23 @@ export function patchQuotaSearchParams(
     else next.delete(QUOTA_URL_PARAMS.sort);
   }
   return next;
+}
+
+/**
+ * Providers that meter each model separately are shown as a grid of rings
+ * rather than a list of bars: the list grows with the model count and puts
+ * long model names on the same line as their percentage, where they collide.
+ */
+export function usesQuotaRingLayout(quotaKey: string) {
+  return quotaKey.trim().toLowerCase() === "antigravity";
+}
+
+/**
+ * Grok meters several products against one weekly pool, so its quota reads as a
+ * single segmented bar — the shape x.ai's own usage page uses — rather than one
+ * bar per product.
+ */
+export function usesQuotaStackedLayout(quotaKey: string) {
+  const normalized = quotaKey.trim().toLowerCase();
+  return normalized === "xai" || normalized === "grok-cli";
 }
