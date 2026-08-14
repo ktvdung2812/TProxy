@@ -1254,19 +1254,21 @@ func anthropicRequestBody(provider store.Provider, credential store.Credential, 
 // claudeTLSFingerprintEnabled reports whether to dial Claude upstreams with the
 // Claude Code TLS handshake instead of Go's.
 //
-// Off by default. Unlike the header work, this changes the transport itself —
-// it pins the connection to HTTP/1.1 and replaces the TLS stack — so it is the
-// operator's call rather than something that switches on under them. Set
-// claude_tls_fingerprint to "on" in the provider config to enable it.
+// On by default, for the same reason the header imitation is: a Claude Code
+// OAuth token presented over a Go handshake is billed as a third-party app
+// rather than against the account's plan, and the headers alone do not settle
+// that — the transport contradicts them. The cost is that the connection is
+// pinned to HTTP/1.1, since the imitated client offers no h2. Set
+// claude_tls_fingerprint to "off" to dial normally.
 func claudeTLSFingerprintEnabled(provider store.Provider) bool {
 	if provider.Type != "claude" {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(stringValue(provider.Config["claude_tls_fingerprint"]))) {
-	case "on", "true", "enabled", "yes":
-		return true
-	default:
+	case "off", "false", "disabled", "no":
 		return false
+	default:
+		return true
 	}
 }
 

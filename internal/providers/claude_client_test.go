@@ -187,36 +187,38 @@ func TestClaudeHeadersAreNotAppliedToOtherAnthropicProviders(t *testing.T) {
 	}
 }
 
-// The TLS fingerprint changes the transport itself, so it stays off unless the
-// operator turns it on — and never applies to an API key, which is an ordinary
-// third-party caller.
-func TestClaudeTLSFingerprintIsOptInAndOAuthOnly(t *testing.T) {
+// The fingerprint is on by default — without it the handshake contradicts the
+// Claude Code headers and the account is billed as a third-party app — but it
+// never applies to an API key, which is an ordinary third-party caller.
+func TestClaudeTLSFingerprintDefaultsOnAndIsOAuthOnly(t *testing.T) {
 	plain := store.Provider{ID: "claude", Type: "claude"}
-	if claudeTLSFingerprintEnabled(plain) {
-		t.Fatal("fingerprint must be off by default")
+	if !claudeTLSFingerprintEnabled(plain) {
+		t.Fatal("fingerprint must be on by default")
 	}
 
-	enabled := plain
-	enabled.Config = map[string]any{"claude_tls_fingerprint": "on"}
-	if !claudeTLSFingerprintEnabled(enabled) {
-		t.Fatal("claude_tls_fingerprint=on should enable it")
+	disabled := plain
+	disabled.Config = map[string]any{"claude_tls_fingerprint": "off"}
+	if claudeTLSFingerprintEnabled(disabled) {
+		t.Fatal("claude_tls_fingerprint=off should disable it")
 	}
 
+	// Other Anthropic-shaped providers are not Claude Code and must never be
+	// dialled as if they were, whatever their config says.
 	other := store.Provider{ID: "compat", Type: "anthropic-compatible", Config: map[string]any{"claude_tls_fingerprint": "on"}}
 	if claudeTLSFingerprintEnabled(other) {
 		t.Fatal("the flag is Claude-only")
 	}
 
 	ctx := context.Background()
-	if tlsFingerprintRequested(withClaudeTransport(ctx, enabled, oauthCredential())) != true {
-		t.Fatal("oauth credential on an enabled provider should be fingerprinted")
+	if !tlsFingerprintRequested(withClaudeTransport(ctx, plain, oauthCredential())) {
+		t.Fatal("oauth credential should be fingerprinted by default")
 	}
 	apiKey := store.Credential{ID: "cred-key", AuthType: "api_key", Secret: "sk-ant-api03-xyz"}
-	if tlsFingerprintRequested(withClaudeTransport(ctx, enabled, apiKey)) {
+	if tlsFingerprintRequested(withClaudeTransport(ctx, plain, apiKey)) {
 		t.Fatal("api key traffic must not be fingerprinted")
 	}
-	if tlsFingerprintRequested(withClaudeTransport(ctx, plain, oauthCredential())) {
-		t.Fatal("disabled provider must not be fingerprinted")
+	if tlsFingerprintRequested(withClaudeTransport(ctx, disabled, oauthCredential())) {
+		t.Fatal("an explicit off must be honoured")
 	}
 }
 
