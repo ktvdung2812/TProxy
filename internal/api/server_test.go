@@ -22,6 +22,34 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
+func TestRootRedirectsToDashboard(t *testing.T) {
+	cfg := &config.Config{
+		Server:   config.ServerConfig{AllowLocalWithoutKey: false},
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_TEST_MANAGEMENT"},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if location := recorder.Header().Get("Location"); location != "/dashboard/" {
+		t.Fatalf("location = %q", location)
+	}
+
+	// Unknown paths must keep their 404 — the redirect only covers exact "/".
+	notFound := httptest.NewRequest(http.MethodGet, "/no-such-page", nil)
+	notFoundRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(notFoundRecorder, notFound)
+	if notFoundRecorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown path status = %d", notFoundRecorder.Code)
+	}
+}
+
 func TestManagementTokenReadsUsageStreamBearerCredential(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/admin/usage/stream", nil)
 	request.Header.Set("Authorization", "Bearer management-test-secret")
