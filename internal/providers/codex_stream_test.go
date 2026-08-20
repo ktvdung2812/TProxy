@@ -104,3 +104,82 @@ func TestBuildCodexToolNameMapsSanitizesInvalidCharacters(t *testing.T) {
 		t.Fatalf("shortName = %q", shortName)
 	}
 }
+
+func TestTranslateCodexResponseFailedAtCapacity(t *testing.T) {
+	state := newCodexStreamState(nil)
+	events := translateCodexEvent(map[string]any{
+		"type": "response.failed",
+		"response": map[string]any{
+			"error": map[string]any{
+				"code":    "model_at_capacity",
+				"message": "Selected model is at capacity. Please try a different model.",
+			},
+		},
+	}, state)
+	if len(events) != 1 || events[0].Type != canonical.EventError {
+		t.Fatalf("events = %#v", events)
+	}
+	providerErr, ok := events[0].Err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", events[0].Err)
+	}
+	if providerErr.Status != 429 || providerErr.Code != CodeUpstreamModelAtCapacity {
+		t.Fatalf("capacity error = %d %q, want 429 %q", providerErr.Status, providerErr.Code, CodeUpstreamModelAtCapacity)
+	}
+	if providerErr.Message != "Selected model is at capacity. Please try a different model." {
+		t.Fatalf("message = %q", providerErr.Message)
+	}
+}
+
+func TestTranslateCodexResponseFailedGenericStaysBadGateway(t *testing.T) {
+	state := newCodexStreamState(nil)
+	events := translateCodexEvent(map[string]any{
+		"type":    "response.failed",
+		"message": "some other failure",
+	}, state)
+	if len(events) != 1 || events[0].Type != canonical.EventError {
+		t.Fatalf("events = %#v", events)
+	}
+	providerErr, ok := events[0].Err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", events[0].Err)
+	}
+	if providerErr.Status != 502 || providerErr.Code != "upstream_response_failed" {
+		t.Fatalf("generic failure = %d %q, want 502 upstream_response_failed", providerErr.Status, providerErr.Code)
+	}
+}
+
+func TestBuildUpstreamBodyErrorUpgradesCapacityBadRequest(t *testing.T) {
+	err := upstreamBodyErrorForProvider(400, []byte(`{"error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}`), "", "")
+	providerErr, ok := err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", err)
+	}
+	if providerErr.Status != 429 || providerErr.Code != CodeUpstreamModelAtCapacity {
+		t.Fatalf("capacity 400 = %d %q, want 429 %q", providerErr.Status, providerErr.Code, CodeUpstreamModelAtCapacity)
+	}
+}
+
+func TestBuildUpstreamBodyErrorKeepsOtherBadRequests(t *testing.T) {
+	err := upstreamBodyErrorForProvider(400, []byte(`{"error":{"message":"invalid request"}}`), "", "")
+	providerErr, ok := err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", err)
+	}
+	if providerErr.Status != 400 {
+		t.Fatalf("plain 400 became %d", providerErr.Status)
+	}
+}
+
+func TestModelAtCapacitySSE(t *testing.T) {
+	message, ok := ModelAtCapacitySSE([]byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}}`))
+	if !ok || message == "" {
+		t.Fatalf("capacity payload not recognised: message=%q ok=%v", message, ok)
+	}
+	if _, ok := ModelAtCapacitySSE([]byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"boom"}}}`)); ok {
+		t.Fatal("non-capacity payload recognised as capacity")
+	}
+	if _, ok := ModelAtCapacitySSE([]byte(`not json`)); ok {
+		t.Fatal("invalid JSON recognised as capacity")
+	}
+}

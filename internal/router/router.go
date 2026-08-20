@@ -587,6 +587,11 @@ func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, c
 			quota.QuotaAutoDisabled = &autoDisabled
 		}
 	}
+	if credential.ID != "" {
+		// Persist the renewal date so expiring-first routing can see it; the
+		// value only changes when the subscription does, so this is cheap.
+		_ = r.store.SyncCredentialRenewal(ctx, credential.ID, quota.RenewsAt)
+	}
 	return quota, nil
 }
 
@@ -1147,6 +1152,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 		status := 200
 		terminal := false
 		errorCode := ""
+		errorMessage := ""
 		var usage canonical.Usage
 	stream:
 		for event := range input {
@@ -1167,6 +1173,11 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 					terminal = true
 					status = http.StatusBadGateway
 					errorCode = "upstream_response_failed"
+					if message, ok := providers.ModelAtCapacitySSE(event.SSEData); ok {
+						status = http.StatusTooManyRequests
+						errorCode = providers.CodeUpstreamModelAtCapacity
+						errorMessage = message
+					}
 				}
 			}
 			if event.Usage != nil {
@@ -1178,6 +1189,9 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 					status = http.StatusBadGateway
 				}
 				errorCode = providers.Code(event.Err)
+				if providerErr, ok := event.Err.(*providers.ProviderError); ok {
+					errorMessage = providerErr.Message
+				}
 				terminal = true
 			} else if event.Type == canonical.EventMessageEnd {
 				terminal = true
@@ -1216,6 +1230,16 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 			// Client hung up. Not the provider's fault, so leave its circuit alone.
 		default:
 			r.recordProviderFailure(model.ID, selection.Provider.ID, status, fmt.Errorf("%s", errorCode))
+			if errorCode == providers.CodeUpstreamModelAtCapacity {
+				// The stream had already started, so failover was impossible —
+				// but bench this credential for the model so the next request
+				// tries a different route instead of repeating the failing
+				// stream.
+				if errorMessage == "" {
+					errorMessage = "Selected model is at capacity"
+				}
+				r.setCredentialCooldown(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: errorCode, Message: errorMessage})
+			}
 		}
 		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
 	}()

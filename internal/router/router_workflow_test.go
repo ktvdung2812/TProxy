@@ -218,3 +218,79 @@ func workflowTestStore(t *testing.T) *store.Store {
 	t.Cleanup(func() { _ = dataStore.Close() })
 	return dataStore
 }
+
+func TestWrapEventsBenchesCredentialOnMidStreamModelCapacity(t *testing.T) {
+	dataStore := workflowTestStore(t)
+	requestRouter := New(dataStore, providers.NewRegistry())
+	input := make(chan canonical.Event, 2)
+	input <- canonical.Event{Type: canonical.EventTextDelta, Text: "partial"}
+	input <- canonical.Event{Type: canonical.EventError, Err: &providers.ProviderError{Status: 429, Code: providers.CodeUpstreamModelAtCapacity, Message: "Selected model is at capacity. Please try a different model."}}
+	close(input)
+	selection := workflowTestSelection()
+	output := requestRouter.wrapEvents(context.Background(), workflowTestModel(), selection, canonical.Request{RequestID: "capacity-stream"}, time.Now(), input, nil)
+	for range output {
+	}
+	usage, err := dataStore.RecentUsage(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage) != 1 || usage[0].Status != 429 || usage[0].ErrorCode != providers.CodeUpstreamModelAtCapacity {
+		t.Fatalf("capacity stream usage=%+v", usage)
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("model at capacity mid-stream did not bench the credential for the model")
+	}
+}
+
+func TestWrapEventsBenchesCredentialOnPassthroughCapacityFailure(t *testing.T) {
+	dataStore := workflowTestStore(t)
+	requestRouter := New(dataStore, providers.NewRegistry())
+	input := make(chan canonical.Event, 1)
+	input <- canonical.Event{
+		Type:     canonical.EventResponsesSSE,
+		SSEEvent: "response.failed",
+		SSEData:  []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}}`),
+	}
+	close(input)
+	selection := workflowTestSelection()
+	output := requestRouter.wrapEvents(context.Background(), workflowTestModel(), selection, canonical.Request{RequestID: "capacity-passthrough"}, time.Now(), input, nil)
+	for range output {
+	}
+	usage, err := dataStore.RecentUsage(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage) != 1 || usage[0].Status != 429 || usage[0].ErrorCode != providers.CodeUpstreamModelAtCapacity {
+		t.Fatalf("passthrough capacity usage=%+v", usage)
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if until.IsZero() {
+		t.Fatal("passthrough response.failed at capacity did not bench the credential for the model")
+	}
+}
+
+func TestWrapEventsDoesNotBenchOnGenericMidStreamFailure(t *testing.T) {
+	dataStore := workflowTestStore(t)
+	requestRouter := New(dataStore, providers.NewRegistry())
+	input := make(chan canonical.Event, 1)
+	input <- canonical.Event{Type: canonical.EventError, Err: &providers.ProviderError{Status: 502, Code: "upstream_response_failed", Message: "boom"}}
+	close(input)
+	selection := workflowTestSelection()
+	output := requestRouter.wrapEvents(context.Background(), workflowTestModel(), selection, canonical.Request{RequestID: "generic-failed-stream"}, time.Now(), input, nil)
+	for range output {
+	}
+	until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !until.IsZero() {
+		t.Fatal("generic mid-stream failure should not bench the credential")
+	}
+}
