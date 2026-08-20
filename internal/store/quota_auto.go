@@ -4,7 +4,8 @@ import "context"
 
 // SyncCredentialQuotaState temporarily disables credentials at 0% quota and restores
 // them automatically once upstream quota recovers. Manual disables are left alone.
-func (s *Store) SyncCredentialQuotaState(ctx context.Context, credential Credential, depleted bool) (bool, error) {	autoDisabled := QuotaAutoDisabled(credential.Metadata)
+func (s *Store) SyncCredentialQuotaState(ctx context.Context, credential Credential, depleted bool) (bool, error) {
+	autoDisabled := QuotaAutoDisabled(credential.Metadata)
 
 	switch {
 	case depleted && credential.Enabled:
