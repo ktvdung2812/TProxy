@@ -55,6 +55,8 @@ func orderCredentialsByStrategy(strategy string, credentials []store.Credential,
 		return ctx.arena.OrderCredentials(credentials), nil
 	case routing.StrategyQuotaAware:
 		return sortQuotaHealthy(credentials), nil
+	case routing.StrategyExpiringFirst:
+		return sortExpiringFirst(credentials), nil
 	case routing.StrategySessionSticky:
 		return stickyRoundRobinOrder(credentials, ctx.stickyRoundRobinLimit*2, now)
 	default:
@@ -101,6 +103,28 @@ func sortQuotaHealthy(credentials []store.Credential) []store.Credential {
 			return !leftDepleted
 		}
 		return credentials[i].Priority > credentials[j].Priority
+	})
+	return ordered
+}
+
+// sortExpiringFirst fronts the credentials whose subscription renews soonest,
+// so remaining quota is spent before it resets. Credentials without a known
+// renewal date keep their relative order at the back.
+func sortExpiringFirst(credentials []store.Credential) []store.Credential {
+	ordered := append([]store.Credential(nil), credentials...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, leftOK := store.QuotaRenewsAt(credentials[i].Metadata)
+		right, rightOK := store.QuotaRenewsAt(credentials[j].Metadata)
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if leftOK && !left.Equal(right) {
+			return left.Before(right)
+		}
+		if credentials[i].Priority != credentials[j].Priority {
+			return credentials[i].Priority > credentials[j].Priority
+		}
+		return credentials[i].ID < credentials[j].ID
 	})
 	return ordered
 }

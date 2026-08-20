@@ -42,6 +42,7 @@ const QUOTA_PROVIDER_TYPES = new Set([
   "codex",
   "claude",
   "copilot",
+  "cursor",
   "github",
   "antigravity",
   "gemini-cli",
@@ -101,6 +102,17 @@ function loadVisibility(): QuotaVisibility {
 function getCodexResetCreditCount(quota?: CredentialQuota) {
   const value = quota?.reset_credits?.available_count;
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function formatRenewalDate(value?: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Props) {
@@ -646,6 +658,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             const isCodex = quotaKey === "codex" || credential.providerType === "codex";
             const resetCreditCount = getCodexResetCreditCount(quota);
             const isResettingLimit = resettingLimitId === credential.id;
+            const renewalDate = formatRenewalDate(quota?.renews_at);
 
             const isQuotaAutoDisabled = quota?.quota_auto_disabled === true;
 
@@ -829,6 +842,13 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                           {row.name}
                         </button>
                       ))}
+                    </div>
+                  ) : null}
+
+                  {renewalDate ? (
+                    <div className="quota-tracker-card-renewal">
+                      <span className="material-symbols-outlined">event_repeat</span>
+                      <span>Renews {renewalDate}</span>
                     </div>
                   ) : null}
                 </div>

@@ -21,6 +21,7 @@ const (
 	StrategyArenaELO           = "arena-elo"
 	StrategyHealthFirst        = "health-first"
 	StrategyQuotaAware         = "quota-aware"
+	StrategyExpiringFirst      = "expiring-first"
 	StrategySessionSticky      = "session-sticky"
 )
 
@@ -43,6 +44,7 @@ var AllStrategies = []string{
 	StrategyArenaELO,
 	StrategyHealthFirst,
 	StrategyQuotaAware,
+	StrategyExpiringFirst,
 	StrategySessionSticky,
 }
 
@@ -53,7 +55,7 @@ func IsValidStrategy(strategy string) bool {
 		StrategyRandom, StrategyPriorityWeighted, StrategyCapacityAware,
 		StrategyCostAware, StrategyLatencyAware, StrategyLKGP, StrategyTaskAware,
 		StrategyFusion, StrategyArenaELO, StrategyHealthFirst, StrategyQuotaAware,
-		StrategySessionSticky:
+		StrategyExpiringFirst, StrategySessionSticky:
 		return true
 	default:
 		return false

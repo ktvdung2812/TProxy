@@ -360,6 +360,12 @@ export function QuotaAccountDetailModal({
                 <dd>{localQuota.plan}</dd>
               </div>
             ) : null}
+            {localQuota?.renews_at ? (
+              <div>
+                <dt>Renews at</dt>
+                <dd>{formatAddedAt(localQuota.renews_at)}</dd>
+              </div>
+            ) : null}
             {localQuota?.quota_auto_disabled ? (
               <div>
                 <dt>Auto-paused</dt>

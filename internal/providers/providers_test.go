@@ -861,3 +861,46 @@ func TestParseOpenAIUsageIncludesCachedTokens(t *testing.T) {
 		t.Fatalf("usage = %+v", usage)
 	}
 }
+
+func TestCodexRenewalFromAccountsPayload(t *testing.T) {
+	payload := map[string]any{
+		"accounts": map[string]any{
+			"acc-1": map[string]any{
+				"entitlement": map[string]any{
+					"has_active_subscription": true,
+					"renews_at":             "2026-09-14T04:43:46+00:00",
+					"expires_at":            "2026-09-14T10:43:46+00:00",
+				},
+			},
+		},
+	}
+	if got := codexRenewalFromAccountsPayload(payload, "acc-1"); got != "2026-09-14T04:43:46Z" {
+		t.Fatalf("renews_at = %q", got)
+	}
+	// Without renews_at the expiry is the next best renewal signal.
+	delete(payload["accounts"].(map[string]any)["acc-1"].(map[string]any)["entitlement"].(map[string]any), "renews_at")
+	if got := codexRenewalFromAccountsPayload(payload, "acc-1"); got != "2026-09-14T10:43:46Z" {
+		t.Fatalf("expires_at fallback = %q", got)
+	}
+}
+
+func TestCodexRenewalFromAccountsPayloadSelectsWantedAccount(t *testing.T) {
+	payload := map[string]any{
+		"accounts": map[string]any{
+			"acc-1": map[string]any{"entitlement": map[string]any{"renews_at": "2026-09-14T04:43:46+00:00"}},
+			"acc-2": map[string]any{"entitlement": map[string]any{"renews_at": "2026-10-01T00:00:00+00:00"}},
+		},
+	}
+	if got := codexRenewalFromAccountsPayload(payload, "acc-2"); got != "2026-10-01T00:00:00Z" {
+		t.Fatalf("wanted account renews_at = %q", got)
+	}
+}
+
+func TestCodexRenewalFromAccountsPayloadSoftFails(t *testing.T) {
+	if got := codexRenewalFromAccountsPayload(map[string]any{}, ""); got != "" {
+		t.Fatalf("empty payload = %q", got)
+	}
+	if got := codexRenewalFromAccountsPayload(map[string]any{"accounts": map[string]any{"acc-1": map[string]any{}}}, ""); got != "" {
+		t.Fatalf("missing entitlement = %q", got)
+	}
+}

@@ -30,6 +30,7 @@ type CredentialQuota struct {
 	ProviderID        string                `json:"provider_id"`
 	ProviderType      string                `json:"provider_type"`
 	Plan              string                `json:"plan,omitempty"`
+	RenewsAt          string                `json:"renews_at,omitempty"`
 	Message           string                `json:"message,omitempty"`
 	ResetCredits      *CodexResetCredits    `json:"reset_credits,omitempty"`
 	Quotas            map[string]QuotaEntry `json:"quotas"`
@@ -52,6 +53,7 @@ var quotaSupportedTypes = map[string]bool{
 	"kiro":              true,
 	"qoder":             true,
 	"codebuddy-cn":      true,
+	"cursor":            true,
 	"github":            true,
 	"gemini-cli":        true,
 	"kimi":              true,
@@ -97,6 +99,8 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		return r.claudeQuota(ctx, provider, credential)
 	case "copilot":
 		return r.copilotQuota(ctx, credential)
+	case "cursor":
+		return r.cursorQuota(ctx, provider, credential), nil
 	case "antigravity":
 		return r.antigravityQuota(ctx, credential)
 	case "xai":
@@ -148,10 +152,61 @@ func (r *Registry) codexQuota(ctx context.Context, provider store.Provider, cred
 		appendCodexWindows(result.Quotas, "review", review)
 	}
 	result.ResetCredits = codexResetCreditsFromUsage(payload)
+	result.RenewsAt = r.codexSubscriptionRenewal(ctx, provider, credential)
 	if len(result.Quotas) == 0 {
 		result.Message = "Codex connected. No quota windows returned."
 	}
 	return result, nil
+}
+
+const codexAccountsCheckURL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
+
+// codexSubscriptionRenewal reads the subscription renewal date from the
+// accounts/check entitlement. The wham usage response carries no billing
+// fields, so this is a separate probe; failures are soft and only cost the
+// renewal date, never the quota data.
+func (r *Registry) codexSubscriptionRenewal(ctx context.Context, provider store.Provider, credential store.Credential) string {
+	body, status, err := r.quotaGET(ctx, codexAccountsCheckURL, codexHeaders(provider, credential, false, canonical.Request{}))
+	if err != nil || status < 200 || status >= 300 {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	wanted := ""
+	if credential.OAuthToken != nil && credential.OAuthToken.Extra != nil {
+		wanted = stringValue(firstValue(credential.OAuthToken.Extra, "account_id", "chatgpt_account_id"))
+	}
+	return codexRenewalFromAccountsPayload(payload, wanted)
+}
+
+// codexRenewalFromAccountsPayload picks the credential's account (or the only
+// account) out of the accounts/check response and reads its renewal date.
+func codexRenewalFromAccountsPayload(payload map[string]any, wantedAccountID string) string {
+	accounts, _ := payload["accounts"].(map[string]any)
+	if len(accounts) == 0 {
+		return ""
+	}
+	var selected map[string]any
+	for id, raw := range accounts {
+		entry, _ := raw.(map[string]any)
+		if entry == nil {
+			continue
+		}
+		if id == wantedAccountID {
+			selected = entry
+			break
+		}
+		if selected == nil {
+			selected = entry
+		}
+	}
+	if selected == nil {
+		return ""
+	}
+	entitlement, _ := selected["entitlement"].(map[string]any)
+	return parseResetAt(firstValue(entitlement, "renews_at", "expires_at"))
 }
 
 func (r *Registry) copilotQuota(ctx context.Context, credential store.Credential) (CredentialQuota, error) {
@@ -182,6 +237,7 @@ func (r *Registry) copilotQuota(ctx context.Context, credential store.Credential
 		return result, &ProviderError{Code: "quota_parse_failed", Message: "invalid Copilot usage response", Err: err}
 	}
 	result.Plan = stringValue(firstValue(payload, "copilot_plan", "access_type_sku"))
+	result.RenewsAt = parseResetAt(firstValue(payload, "quota_reset_date", "limited_user_reset_date"))
 	if snapshots, ok := payload["quota_snapshots"].(map[string]any); ok {
 		resetAt := parseResetAt(payload["quota_reset_date"])
 		for name, raw := range snapshots {

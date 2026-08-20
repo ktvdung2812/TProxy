@@ -14,6 +14,7 @@ export type CredentialQuota = {
   provider_id: string;
   provider_type: string;
   plan?: string;
+  renews_at?: string;
   message?: string;
   reset_credits?: {
     available_count: number;

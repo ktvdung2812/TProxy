@@ -58,8 +58,8 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
 
       <div className="quota-stacked-head">
         <span className={cn("quota-stacked-headline", `quota-stacked-headline-${tone}`)}>
-          {usedPct}% đã sử dụng
           <span className="quota-stacked-remaining">còn {aggregate.remaining}%</span>
+          <span className="quota-stacked-used">{usedPct}% đã sử dụng</span>
         </span>
         <span className="quota-stacked-reset" title={aggregate.reset_at || undefined}>
           {countdown !== "-" ? `in ${countdown}` : "N/A"}

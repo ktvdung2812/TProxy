@@ -368,6 +368,7 @@ export const ROTATION_STRATEGIES = [
   { id: "fill-first", label: "Fill first (priority order)" },
   { id: "round-robin", label: "Sticky round-robin" },
   { id: "weighted-round-robin", label: "Weighted round-robin" },
+  { id: "expiring-first", label: "Expiring first (soonest renewal)" },
 ] as const;
 
 export function fetchAccountRotation(secret: string) {
@@ -481,6 +482,7 @@ export const GLOBAL_ROTATION_STRATEGIES = [
   { id: "fill-first", label: "Fill first (priority order)" },
   { id: "round-robin", label: "Sticky round-robin (9router default)" },
   { id: "weighted-round-robin", label: "Weighted round-robin" },
+  { id: "expiring-first", label: "Expiring first (soonest renewal)" },
 ] as const;
 
 export function rotationStrategyLabel(strategy: string) {
