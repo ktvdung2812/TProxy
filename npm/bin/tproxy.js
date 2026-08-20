@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const net = require("node:net");
 const http = require("node:http");
+const crypto = require("node:crypto");
 const { findNativeTarget, nativeBinaryFileName, nativeTargets } = require("../lib/native-platforms");
 
 const packageRoot = path.resolve(__dirname, "..");
@@ -12,6 +13,7 @@ const repoRoot = path.resolve(packageRoot, "..");
 const defaultConfigTemplate = path.join(packageRoot, "config.default.yaml");
 const userConfigDir = path.join(os.homedir(), ".tproxy");
 const userConfigPath = path.join(userConfigDir, "config.yaml");
+const userEnvPath = path.join(userConfigDir, ".env");
 
 function ensureUserConfig() {
   if (fs.existsSync(userConfigPath)) return userConfigPath;
@@ -37,6 +39,67 @@ function ensureUserConfig() {
   ].join("\n");
   fs.writeFileSync(userConfigPath, fallback, "utf8");
   return userConfigPath;
+}
+
+function parseEnvFile(raw) {
+  const result = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+// On first launch after `npm install -g`, generate the master key and
+// management secret so provider credentials can be encrypted without any
+// manual setup. Real environment variables always win over the file.
+function ensureUserSecrets() {
+  fs.mkdirSync(userConfigDir, { recursive: true });
+  let existing = {};
+  if (fs.existsSync(userEnvPath)) {
+    existing = parseEnvFile(fs.readFileSync(userEnvPath, "utf8"));
+  }
+  const generated = [];
+  if (!existing.TPROXY_MASTER_KEY) {
+    existing.TPROXY_MASTER_KEY = crypto.randomBytes(32).toString("base64url");
+    generated.push("TPROXY_MASTER_KEY");
+  }
+  if (!existing.TPROXY_MANAGEMENT_SECRET) {
+    existing.TPROXY_MANAGEMENT_SECRET = crypto.randomBytes(32).toString("hex");
+    generated.push("TPROXY_MANAGEMENT_SECRET");
+  }
+  if (generated.length === 0) return;
+  const lines = [
+    "# tproxy local secrets — auto-generated on first run. Keep this file private.",
+    "# Regenerate the master key with: tproxy --print-master-key",
+    "",
+    ...Object.entries(existing).map(([key, value]) => `${key}=${value}`),
+    "",
+  ];
+  fs.writeFileSync(userEnvPath, lines.join("\n"), { encoding: "utf8", mode: 0o600 });
+  console.log(`🔐 Generated ${generated.join(" and ")} in ${userEnvPath}`);
+  console.log("   Back this file up — the master key protects stored provider credentials.");
+}
+
+function loadUserSecrets() {
+  ensureUserSecrets();
+  const values = parseEnvFile(fs.readFileSync(userEnvPath, "utf8"));
+  for (const [key, value] of Object.entries(values)) {
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
 }
 
 function withDefaultConfig(args) {
@@ -243,6 +306,7 @@ function spawnGatewayForTray(binary, args) {
 async function runTrayMode(rawArgs) {
   const { ensureTrayRuntime } = require("../lib/trayRuntime");
   ensureTrayRuntime({ silent: false });
+  loadUserSecrets();
 
   const args = withDefaultConfig(rawArgs.filter((a) => a !== "--tray" && a !== "-t" && a !== "tray"));
   let configPath = userConfigPath;
@@ -354,6 +418,7 @@ async function main() {
   }
 
   // Default: passthrough to Go binary (foreground)
+  loadUserSecrets();
   const args = withDefaultConfig(parsed.passthrough);
   const binary = resolveBinary();
   const child = spawnGateway(binary, args, { detached: false });
