@@ -20,6 +20,7 @@ const (
 	StrategyArenaELO           = routing.StrategyArenaELO
 	StrategyHealthFirst        = routing.StrategyHealthFirst
 	StrategyQuotaAware         = routing.StrategyQuotaAware
+	StrategyExpiringFirst      = routing.StrategyExpiringFirst
 	StrategySessionSticky      = routing.StrategySessionSticky
 )
 
