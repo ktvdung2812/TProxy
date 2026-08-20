@@ -207,6 +207,9 @@ func (s *Server) runRetentionCleanup(ctx context.Context) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/", http.StatusFound)
+	})
 	mux.Handle("/mcp", s.clientAuth(mcpBridgeHandler(s)))
 	mux.Handle("/dashboard/", s.tunnelDashboard(s.dashboard()))
 	mux.Handle("/assets/", s.tunnelDashboard(s.dashboard()))
