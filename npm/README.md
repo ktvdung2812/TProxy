@@ -75,3 +75,8 @@ Logs (macOS autostart): `~/.tproxy/logs/`.
 - First tray run on macOS/Linux may install `systray2` into `~/.tproxy/runtime/` (one-time).
 - Windows tray uses PowerShell `NotifyIcon` (no native binary).
 - Default config is created at `~/.tproxy/config.yaml` if missing.
+- On first launch, `TPROXY_MASTER_KEY` and `TPROXY_MANAGEMENT_SECRET` are
+  generated automatically and stored in `~/.tproxy/.env` (mode `0600`). Real
+  environment variables take precedence over this file. Back it up — the
+  master key protects stored provider credentials, and losing it makes them
+  undecryptable.
