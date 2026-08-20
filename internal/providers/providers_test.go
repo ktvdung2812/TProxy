@@ -868,8 +868,8 @@ func TestCodexRenewalFromAccountsPayload(t *testing.T) {
 			"acc-1": map[string]any{
 				"entitlement": map[string]any{
 					"has_active_subscription": true,
-					"renews_at":             "2026-09-14T04:43:46+00:00",
-					"expires_at":            "2026-09-14T10:43:46+00:00",
+					"renews_at":               "2026-09-14T04:43:46+00:00",
+					"expires_at":              "2026-09-14T10:43:46+00:00",
 				},
 			},
 		},
