@@ -1,7 +1,9 @@
 package providers
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 
@@ -9,6 +11,62 @@ import (
 )
 
 const codexToolNameMaxLen = 64
+
+// CodeUpstreamModelAtCapacity is the router-facing code for ChatGPT's
+// "Selected model is at capacity" failure. Upstream reports it as an HTTP 400
+// or a mid-stream response.failed — both read as permanent to the router — so
+// wherever it surfaces it is reclassified as a 429 carrying this code, which
+// triggers failover and a model-level cooldown instead.
+const CodeUpstreamModelAtCapacity = "upstream_model_at_capacity"
+
+// isModelAtCapacity recognises the model-capacity failure by its upstream
+// error code or message text.
+func isModelAtCapacity(code, message string) bool {
+	code = strings.ToLower(code)
+	if strings.Contains(code, "at_capacity") || strings.Contains(code, "at capacity") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(message), "at capacity")
+}
+
+// codexFailedError extracts the error code and message from a response.failed
+// (or error) event, which ChatGPT nests either at the top level or under the
+// response object.
+func codexFailedError(raw map[string]any) (code, message string) {
+	errorPayload, _ := raw["error"].(map[string]any)
+	if errorPayload == nil {
+		if response, _ := raw["response"].(map[string]any); response != nil {
+			errorPayload, _ = response["error"].(map[string]any)
+		}
+	}
+	if errorPayload != nil {
+		code = stringValue(errorPayload["code"])
+		message = stringValue(errorPayload["message"])
+	}
+	if code == "" {
+		code = stringValue(raw["code"])
+	}
+	if message == "" {
+		message = stringValue(raw["message"])
+	}
+	return code, message
+}
+
+// ModelAtCapacitySSE inspects a Responses API response.failed SSE payload and
+// reports whether it carries the model-capacity error, returning its message.
+// The passthrough stream forwards events verbatim, so this is the router's
+// only chance to recognise the condition on that path.
+func ModelAtCapacitySSE(data []byte) (message string, ok bool) {
+	var raw map[string]any
+	if json.Unmarshal(data, &raw) != nil {
+		return "", false
+	}
+	code, message := codexFailedError(raw)
+	if !isModelAtCapacity(code, message) {
+		return "", false
+	}
+	return message, true
+}
 
 var codexToolNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
@@ -254,9 +312,12 @@ func translateCodexEvent(raw map[string]any, state *codexStreamState) []canonica
 		return events
 
 	case "response.failed", "error":
-		message := stringValue(firstAny(raw["message"], nestedMapValue(raw, "error", "message")))
+		code, message := codexFailedError(raw)
 		if message == "" {
 			message = "Codex upstream response failed"
+		}
+		if isModelAtCapacity(code, message) {
+			return []canonical.Event{{Type: canonical.EventError, Err: &ProviderError{Status: http.StatusTooManyRequests, Code: CodeUpstreamModelAtCapacity, Message: message}}}
 		}
 		return []canonical.Event{{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "upstream_response_failed", Message: message}}}
 	}

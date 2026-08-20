@@ -463,6 +463,13 @@ func buildUpstreamBodyError(status int, data []byte, retryAfter string) *Provide
 		message = http.StatusText(status)
 	}
 	message = security.RedactText(message)
+	if status == http.StatusBadRequest && isModelAtCapacity("", message) {
+		// ChatGPT reports "Selected model is at capacity" as a 400, which the
+		// router treats as a permanent client error — no failover, no cooldown.
+		// Reclassify it as a 429 so the model is benched on this credential and
+		// the request fails over to another route.
+		return &ProviderError{Status: http.StatusTooManyRequests, Code: CodeUpstreamModelAtCapacity, Message: message, RetryAfter: retryAfter, Reason: reason}
+	}
 	return &ProviderError{Status: status, Code: store.ErrorCode(status), Message: message, RetryAfter: retryAfter, Reason: reason}
 }
 
