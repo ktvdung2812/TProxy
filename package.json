@@ -3,11 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "bash scripts/free-ports.sh && concurrently -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
-    "dev:web": "bash scripts/wait-for-backend.sh && npm --prefix web run dev",
-    "dev:backend": "bash scripts/dev-backend.sh",
+    "dev": "node scripts/free-ports.mjs && concurrently -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev:web": "node scripts/wait-for-backend.mjs && npm --prefix web run dev",
+    "dev:backend": "node scripts/dev-backend.mjs",
     "build": "node scripts/sync-version.mjs && npm --prefix web run build && go build -o bin/tproxy ./cmd/tproxy",
-    "start": "bash scripts/start-backend.sh"
+    "start": "node scripts/start-backend.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
