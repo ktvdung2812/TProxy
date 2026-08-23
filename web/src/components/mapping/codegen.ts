@@ -153,7 +153,6 @@ export function buildClaudeSettings(
 
 export function buildCodexConfig(
   baseUrl: string,
-  apiKey: string,
   primaryTier: GptCodenameTier = "fable",
 ): string {
   const model = GPT_CLIENT_TIER_PLACEHOLDERS[primaryTier] || "gpt-sol";
@@ -165,11 +164,14 @@ export function buildCodexConfig(
     `name = "tproxy"`,
     `base_url = "${baseUrl.replace(/\/v1\/?$/, "")}/v1"`,
     `wire_api = "responses"`,
-    `env_key = "TPROXY_API_KEY"`,
-    ``,
-    `# Set TPROXY_API_KEY=${apiKey || "your-api-key"} in the shell before running codex`,
+    `requires_openai_auth = true`,
   ];
   return lines.join("\n");
+}
+
+/** auth.json written next to ~/.codex/config.toml so Codex authenticates with a tproxy API key. */
+export function buildCodexAuth(apiKey: string): string {
+  return JSON.stringify({ OPENAI_API_KEY: apiKey.trim(), auth_mode: "apikey" }, null, 2);
 }
 
 export function buildBashExports(baseUrl: string, apiKey: string, primaryModel: MappingTier = DEFAULT_CLAUDE_PRIMARY_MODEL): string {

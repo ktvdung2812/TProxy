@@ -73,6 +73,7 @@ model_provider = "tproxy"
 name = "TProxy"
 base_url = "{{baseUrl}}"
 wire_api = "responses"
+requires_openai_auth = true
 
 [agents.subagent]
 model = "{{model}}"`,

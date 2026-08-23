@@ -136,9 +136,10 @@ func codexApply(req ApplyRequest) error {
 		"model_provider": providerKey,
 		"model_providers": map[string]any{
 			providerKey: map[string]any{
-				"name":     "TProxy",
-				"base_url": normalizeBaseURL(req.BaseURL, true),
-				"wire_api": "responses",
+				"name":                 "TProxy",
+				"base_url":             normalizeBaseURL(req.BaseURL, true),
+				"wire_api":             "responses",
+				"requires_openai_auth": true,
 			},
 		},
 		"agents": map[string]any{
