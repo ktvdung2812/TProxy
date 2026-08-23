@@ -952,7 +952,7 @@
     "configure": "Cấu hình",
     "publicBaseUrlSaved": "Đã lưu public base URL",
     "configuration": "Cấu hình",
-    "configurationDesc": "Xuất hoặc nhập cấu hình định tuyến. Reload áp dụng lại file config trên đĩa mà không cần khởi động lại.",
+    "configurationDesc": "Xuất hoặc nhập cấu hình định tuyến, kèm token OAuth. API key vẫn là biến môi trường. Reload áp dụng lại file config trên đĩa mà không cần khởi động lại.",
     "exportJSON": "Xuất JSON",
     "exportYAML": "Xuất YAML",
     "importFile": "Nhập file",

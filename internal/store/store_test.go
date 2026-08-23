@@ -1553,10 +1553,91 @@ func TestSeedPreservesOAuthCredentialsAcrossConfigRoundTrip(t *testing.T) {
 	if len(credentials) != 1 || credentials[0].ID != "claude-account" {
 		t.Fatalf("oauth credential lost on round trip: %+v", credentials)
 	}
-	// The export redacts the secret, so re-importing must not wipe the stored
-	// token: the ON CONFLICT clause keeps the existing ciphertext.
+	// The secret-free export redacts the secret, so re-importing must not wipe
+	// the stored token: the ON CONFLICT clause keeps the existing ciphertext.
 	if credentials[0].Secret != "token-from-wizard" {
 		t.Fatalf("stored oauth token was clobbered by import: %q", credentials[0].Secret)
+	}
+}
+
+func TestExportConfigWithOAuthTokensRoundTripsAcrossMasterKeys(t *testing.T) {
+	sourceKey, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceEncryptor, err := security.NewEncryptor(sourceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := OpenSQLite(filepath.Join(t.TempDir(), "source.db"), sourceEncryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+
+	ctx := context.Background()
+	if err = source.Seed(ctx, &config.Config{Providers: []config.ProviderConfig{{
+		ID: "claude-sub", Type: "claude", Name: "Claude", Enabled: true,
+		Credentials: []config.CredentialConfig{{ID: "claude-account", AuthType: "oauth", Label: "Subscription"}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = source.SaveOAuthCredential(ctx, "claude-sub", "claude-account", "Subscription", "user@example.com", OAuthToken{
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		TokenType:    "Bearer",
+		Extra:        map[string]any{"machine_id": "mid-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	redacted, err := source.ExportConfig(ctx, &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redacted.Providers[0].Credentials[0].Secret != "" {
+		t.Fatalf("secret-free export leaked oauth secret: %q", redacted.Providers[0].Credentials[0].Secret)
+	}
+
+	exported, err := source.ExportConfigWithOAuthTokens(ctx, &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(exported.Providers[0].Credentials[0].Secret, "access-secret") || !strings.Contains(exported.Providers[0].Credentials[0].Secret, "refresh-secret") {
+		t.Fatalf("oauth export missing tokens: %q", exported.Providers[0].Credentials[0].Secret)
+	}
+
+	destKey, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destEncryptor, err := security.NewEncryptor(destKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, err := OpenSQLite(filepath.Join(t.TempDir(), "dest.db"), destEncryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dest.Close()
+	if err = dest.Seed(ctx, exported); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := dest.Credentials(ctx, "claude-sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 || credentials[0].OAuthToken == nil {
+		t.Fatalf("imported oauth credential = %+v", credentials)
+	}
+	if credentials[0].OAuthToken.AccessToken != "access-secret" || credentials[0].OAuthToken.RefreshToken != "refresh-secret" {
+		t.Fatalf("imported oauth token = %+v", credentials[0].OAuthToken)
+	}
+	if credentials[0].OAuthToken.Extra["machine_id"] != "mid-1" {
+		t.Fatalf("imported oauth extra = %#v", credentials[0].OAuthToken.Extra)
+	}
+	if credentials[0].Status == "auth_required" {
+		t.Fatalf("imported oauth status = %q", credentials[0].Status)
 	}
 }
 

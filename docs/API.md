@@ -177,6 +177,8 @@ go run ./cmd/tproxy --config config.yaml --import-auth backups/oauth-auth.json
 
 Backups use `VACUUM INTO` so WAL state is included consistently. Restore stages and verifies a temporary copy before replacing the configured database. Restoring encrypted credentials requires the same `TPROXY_MASTER_KEY`.
 
+`GET /api/admin/config/export` includes OAuth access and refresh tokens so the file can be imported onto another machine without the source master key. API keys and proxy URLs remain environment placeholders. Config version history still uses the secret-free export.
+
 OAuth auth bundles contain only encrypted ciphertext and require the same master key. Import refuses unknown providers or ciphertext that cannot be decrypted; access and refresh tokens are never printed.
 
 Status responses are redacted:

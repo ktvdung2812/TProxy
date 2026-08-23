@@ -2964,7 +2964,7 @@ func (s *Server) adminConfigExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
 		return
 	}
-	exported, err := s.store.ExportConfig(r.Context(), s.currentConfig())
+	exported, err := s.store.ExportConfigWithOAuthTokens(r.Context(), s.currentConfig())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_export_failed", err.Error(), useClientRequestID(r))
 		return
