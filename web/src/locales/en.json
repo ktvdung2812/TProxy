@@ -952,7 +952,7 @@
     "configure": "Configure",
     "publicBaseUrlSaved": "Public base URL saved",
     "configuration": "Configuration",
-    "configurationDesc": "Export or import routing configuration. Reload reapplies the on-disk config file without restarting the process.",
+    "configurationDesc": "Export or import routing configuration, including OAuth tokens. API keys stay as environment placeholders. Reload reapplies the on-disk config file without restarting the process.",
     "exportJSON": "Export JSON",
     "exportYAML": "Export YAML",
     "importFile": "Import file",

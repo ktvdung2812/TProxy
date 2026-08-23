@@ -84,7 +84,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - **Circuit breaker** per provider (OPEN / DEGRADED / CLOSED).
 - **Tunnel exposure** — Cloudflare quick tunnel and Tailscale integration from the dashboard.
 - **Retention policies** for usage events, request logs, audit trails, and OAuth sessions.
-- **Config export/import** (secret-free YAML/JSON) plus encrypted OAuth bundle backup/restore.
+- **Config export/import** (YAML/JSON including OAuth tokens; API keys stay env placeholders) plus encrypted OAuth bundle backup/restore.
 
 ### Dashboard
 

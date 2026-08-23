@@ -314,7 +314,7 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 				credentialCfg.Weight = 1
 			}
 			if _, err = tx.ExecContext(ctx, `INSERT INTO credentials(id,provider_id,auth_type,label,email,secret_ciphertext,metadata_json,priority,weight,enabled,status,created_at)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`,
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=excluded.provider_id,auth_type=excluded.auth_type,label=excluded.label,email=excluded.email,secret_ciphertext=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.secret_ciphertext ELSE credentials.secret_ciphertext END,status=CASE WHEN excluded.secret_ciphertext <> '' THEN excluded.status ELSE credentials.status END,metadata_json=excluded.metadata_json,priority=excluded.priority,weight=excluded.weight,enabled=excluded.enabled`,
 				credentialCfg.ID, providerCfg.ID, credentialCfg.AuthType, credentialCfg.Label, credentialCfg.Email, ciphertext, string(metadata), credentialCfg.Priority, credentialCfg.Weight, boolInt(credentialCfg.IsEnabled()), seedCredentialStatus(credentialCfg, secret), now); err != nil {
 				return rollback(fmt.Errorf("seed credential %s: %w", credentialCfg.ID, err))
 			}
@@ -1974,8 +1974,11 @@ func seedCredentialSecret(credentialCfg config.CredentialConfig) string {
 // freshly imported credential waits for the wizard instead of burning a request
 // attempt on an empty token.
 func seedCredentialStatus(credentialCfg config.CredentialConfig, secret string) string {
-	if strings.EqualFold(strings.TrimSpace(credentialCfg.AuthType), "oauth") && secret == "" {
-		return "auth_required"
+	if strings.EqualFold(strings.TrimSpace(credentialCfg.AuthType), "oauth") {
+		if secret == "" {
+			return "auth_required"
+		}
+		return "healthy"
 	}
 	return credentialStatus(credentialCfg.AuthType)
 }
@@ -2526,8 +2529,20 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 // ExportConfig builds a declarative, secret-free configuration template from
 // SQLite. Secret-bearing values are represented by environment placeholders so
 // the result can be reviewed or imported only after the operator supplies the
-// corresponding environment variables.
+// corresponding environment variables. Config version history uses this path
+// so OAuth tokens are not written into config_versions in plaintext.
 func (s *Store) ExportConfig(ctx context.Context, base *config.Config) (*config.Config, error) {
+	return s.exportConfig(ctx, base, false)
+}
+
+// ExportConfigWithOAuthTokens is the operator download. OAuth access and
+// refresh tokens are included so a file can be imported onto another machine
+// without the source master key. API keys and proxy URLs stay env placeholders.
+func (s *Store) ExportConfigWithOAuthTokens(ctx context.Context, base *config.Config) (*config.Config, error) {
+	return s.exportConfig(ctx, base, true)
+}
+
+func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOAuthTokens bool) (*config.Config, error) {
 	result := &config.Config{}
 	if base != nil {
 		copy := *base
@@ -2559,7 +2574,11 @@ func (s *Store) ExportConfig(ctx context.Context, base *config.Config) (*config.
 		}
 		for _, credential := range credentials {
 			enabled := credential.Enabled
-			item.Credentials = append(item.Credentials, config.CredentialConfig{ID: credential.ID, Label: credential.Label, Email: credential.Email, AuthType: credential.AuthType, SecretEnv: "TPROXY_CREDENTIAL_" + exportToken(credential.ID), Priority: credential.Priority, Weight: credential.Weight, Enabled: &enabled, Metadata: redactExportMap(credential.Metadata), ProxyPools: append([]string(nil), credential.ProxyPoolIDs...)})
+			exported := config.CredentialConfig{ID: credential.ID, Label: credential.Label, Email: credential.Email, AuthType: credential.AuthType, SecretEnv: "TPROXY_CREDENTIAL_" + exportToken(credential.ID), Priority: credential.Priority, Weight: credential.Weight, Enabled: &enabled, Metadata: redactExportMap(credential.Metadata), ProxyPools: append([]string(nil), credential.ProxyPoolIDs...)}
+			if includeOAuthTokens {
+				exported.Secret = exportOAuthSecret(credential)
+			}
+			item.Credentials = append(item.Credentials, exported)
 		}
 		result.Providers = append(result.Providers, item)
 	}
@@ -2600,6 +2619,19 @@ func (s *Store) ExportConfig(ctx context.Context, base *config.Config) (*config.
 		result.ClientAPIKeys = append(result.ClientAPIKeys, config.ClientAPIKey{ID: key.ID, Name: key.Name, KeyEnv: "TPROXY_CLIENT_KEY_" + exportToken(key.ID), Models: append([]string(nil), key.Models...), Policy: key.Policy})
 	}
 	return result, nil
+}
+
+func exportOAuthSecret(credential Credential) string {
+	if !strings.EqualFold(strings.TrimSpace(credential.AuthType), "oauth") {
+		return ""
+	}
+	if credential.OAuthToken != nil && strings.TrimSpace(credential.OAuthToken.AccessToken) != "" {
+		encoded, err := json.Marshal(credential.OAuthToken)
+		if err == nil {
+			return string(encoded)
+		}
+	}
+	return strings.TrimSpace(credential.Secret)
 }
 
 func boolPointer(value bool) *bool { return &value }

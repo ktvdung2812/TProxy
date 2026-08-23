@@ -83,7 +83,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - **Circuit breaker** cho từng provider (OPEN / DEGRADED / CLOSED).
 - **Tunnel** — Cloudflare quick tunnel và tích hợp Tailscale từ dashboard.
 - **Chính sách lưu giữ** cho usage event, request log, audit trail và OAuth session.
-- **Xuất/nhập cấu hình** (YAML/JSON không chứa secret) cùng backup/khôi phục OAuth bundle mã hóa.
+- **Xuất/nhập cấu hình** (YAML/JSON kèm token OAuth; API key vẫn là biến môi trường) cùng backup/khôi phục OAuth bundle mã hóa.
 
 ### Trung tâm điều khiển (Dashboard)
 

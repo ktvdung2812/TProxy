@@ -1608,6 +1608,57 @@ func TestConfigurationExportRedactsSecretsAndInvalidImportKeepsState(t *testing.
 	}
 }
 
+func TestConfigurationExportIncludesOAuthTokensAndImportRestoresThem(t *testing.T) {
+	t.Setenv("TPROXY_EXPORT_API_SECRET", "api-key-must-stay-redacted")
+	sourceCfg := &config.Config{
+		Server: config.ServerConfig{AllowLocalWithoutKey: true},
+		Providers: []config.ProviderConfig{
+			{ID: "claude", Type: "claude", Enabled: true, Credentials: []config.CredentialConfig{{ID: "claude-account", AuthType: "oauth", Label: "Claude"}}},
+			{ID: "keys", Type: "openai-compatible", BaseURL: "http://127.0.0.1:9", Enabled: true, Credentials: []config.CredentialConfig{{ID: "api-credential", AuthType: "api_key", SecretEnv: "TPROXY_EXPORT_API_SECRET"}}},
+		},
+	}
+	sourceStore := apiTestStore(t, sourceCfg)
+	if err := sourceStore.SaveOAuthCredential(context.Background(), "claude", "claude-account", "Claude", "user@example.com", store.OAuthToken{AccessToken: "oauth-access-secret", RefreshToken: "oauth-refresh-secret", TokenType: "Bearer"}); err != nil {
+		t.Fatal(err)
+	}
+	sourceHandler := NewServer(sourceCfg, sourceStore, router.New(sourceStore, providers.NewRegistry())).Handler()
+	exportRequest := httptest.NewRequest(http.MethodGet, "/api/admin/config/export", nil)
+	exportRequest.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(exportRequest)
+	exportRecorder := httptest.NewRecorder()
+	sourceHandler.ServeHTTP(exportRecorder, exportRequest)
+	body := exportRecorder.Body.String()
+	if exportRecorder.Code != http.StatusOK || !strings.Contains(body, "oauth-access-secret") || !strings.Contains(body, "oauth-refresh-secret") {
+		t.Fatalf("oauth export status=%d body=%s", exportRecorder.Code, body)
+	}
+	if strings.Contains(body, "api-key-must-stay-redacted") {
+		t.Fatalf("api key leaked into config export: %s", body)
+	}
+
+	destCfg := &config.Config{Server: config.ServerConfig{AllowLocalWithoutKey: true}}
+	destStore := apiTestStore(t, destCfg)
+	destHandler := NewServer(destCfg, destStore, router.New(destStore, providers.NewRegistry())).Handler()
+	importRequest := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", strings.NewReader(body))
+	importRequest.RemoteAddr = "127.0.0.1:1234"
+	importRequest.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(importRequest)
+	importRecorder := httptest.NewRecorder()
+	destHandler.ServeHTTP(importRecorder, importRequest)
+	if importRecorder.Code != http.StatusOK {
+		t.Fatalf("oauth import status=%d body=%s", importRecorder.Code, importRecorder.Body.String())
+	}
+	credentials, err := destStore.Credentials(context.Background(), "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 1 || credentials[0].OAuthToken == nil || credentials[0].OAuthToken.AccessToken != "oauth-access-secret" || credentials[0].OAuthToken.RefreshToken != "oauth-refresh-secret" {
+		t.Fatalf("imported oauth credential = %+v", credentials)
+	}
+	if credentials[0].Status == "auth_required" {
+		t.Fatalf("imported oauth status = %q", credentials[0].Status)
+	}
+}
+
 func TestGlobalAndTeamLimitScopesAreEnforcedAtomically(t *testing.T) {
 	limiter := newRequestLimiter()
 	key := &store.APIKey{ID: "team-key", Policy: config.ClientKeyPolicy{Team: "engineering"}}

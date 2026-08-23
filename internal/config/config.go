@@ -275,7 +275,7 @@ type CredentialConfig struct {
 	Email      string         `yaml:"email" json:"email"`
 	AuthType   string         `yaml:"auth-type" json:"auth_type"`
 	SecretEnv  string         `yaml:"secret-env" json:"secret_env"`
-	Secret     string         `yaml:"-" json:"secret,omitempty"`
+	Secret     string         `yaml:"secret,omitempty" json:"secret,omitempty"`
 	Priority   int            `yaml:"priority" json:"priority"`
 	Weight     int            `yaml:"weight" json:"weight"`
 	Enabled    *bool          `yaml:"enabled" json:"enabled"`
