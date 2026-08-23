@@ -7,6 +7,7 @@ import type { ClaudeMappingResponse } from "./api";
 import {
   buildBashExports,
   buildClaudeSettings,
+  buildCodexAuth,
   buildCodexConfig,
   buildCursorSetupGuide,
   buildPowerShellExports,
@@ -29,7 +30,7 @@ type Props = {
 };
 
 type ClaudeFormat = "claude-settings" | "shell";
-type CodexFormat = "codex-settings";
+type CodexFormat = "codex-config" | "codex-auth";
 
 const PRIMARY_MODEL_OPTIONS = MAPPING_TIERS.filter((tier) => tier !== "default").map((tier) => ({
   value: tier,
@@ -46,9 +47,11 @@ const CLAUDE_FORMAT_HINTS: Record<ClaudeFormat, string> = {
   shell: "One-shot Claude Code env exports for this machine.",
 };
 
-const CODEX_FORMAT_HINT: Record<CodexFormat, string> = {
-  "codex-settings":
+const CODEX_FORMAT_HINTS: Record<CodexFormat, string> = {
+  "codex-config":
     "Paste into ~/.codex/config.toml. Client keeps GPT codenames (gpt-sol, gpt-terra, gpt-luna); tproxy maps them on /v1/chat/completions.",
+  "codex-auth":
+    "Paste into ~/.codex/auth.json (same folder as config.toml). Codex sends OPENAI_API_KEY to tproxy as the API key.",
 };
 
 export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
@@ -58,6 +61,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
   const [primaryModel, setPrimaryModel] = useState<MappingTier>(DEFAULT_CLAUDE_PRIMARY_MODEL);
   const [gptModel, setGptModel] = useState<GptCodenameTier>("fable");
   const [claudeFormat, setClaudeFormat] = useState<ClaudeFormat>("claude-settings");
+  const [codexFormat, setCodexFormat] = useState<CodexFormat>("codex-config");
   const [shell, setShell] = useState<"bash" | "powershell">("bash");
   const [copied, setCopied] = useState(false);
 
@@ -82,12 +86,19 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
     }
 
     if (client === "codex") {
-      return {
-        content: buildCodexConfig(baseUrl, apiKey, gptModel),
-        filename: "~/.codex/config.toml",
-        language: "toml",
-        hint: CODEX_FORMAT_HINT["codex-settings"],
-      };
+      return codexFormat === "codex-auth"
+        ? {
+            content: buildCodexAuth(apiKey),
+            filename: "~/.codex/auth.json",
+            language: "json",
+            hint: CODEX_FORMAT_HINTS["codex-auth"],
+          }
+        : {
+            content: buildCodexConfig(baseUrl, gptModel),
+            filename: "~/.codex/config.toml",
+            language: "toml",
+            hint: CODEX_FORMAT_HINTS["codex-config"],
+          };
     }
 
     if (claudeFormat === "claude-settings") {
@@ -112,7 +123,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
           language: "powershell",
           hint: CLAUDE_FORMAT_HINTS.shell,
         };
-  }, [client, claudeFormat, shell, baseUrl, apiKey, primaryModel, gptModel, overrides]);
+  }, [client, claudeFormat, codexFormat, shell, baseUrl, apiKey, primaryModel, gptModel, overrides]);
 
   const copyContent = async () => {
     try {
@@ -259,6 +270,25 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
               </button>
             </div>
           ) : null}
+        </div>
+      ) : client === "codex" ? (
+        <div className="mapping-code-toolbar">
+          <div className="usage-segmented">
+            <button
+              type="button"
+              className={codexFormat === "codex-config" ? "active" : ""}
+              onClick={() => setCodexFormat("codex-config")}
+            >
+              config.toml
+            </button>
+            <button
+              type="button"
+              className={codexFormat === "codex-auth" ? "active" : ""}
+              onClick={() => setCodexFormat("codex-auth")}
+            >
+              auth.json
+            </button>
+          </div>
         </div>
       ) : null}
 
