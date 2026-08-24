@@ -153,3 +153,37 @@ func (s *Store) SaveCursorAliasSettings(ctx context.Context, settings CursorAlia
 		"models": payloadModels,
 	})
 }
+
+// ModelMappingSettings stores global exact-name model rewrites applied to every
+// ingress before Cursor/Claude alias resolvers.
+type ModelMappingSettings struct {
+	Models bridge.ModelMappings
+}
+
+func (s *Store) ModelMappingSettings(ctx context.Context) (ModelMappingSettings, error) {
+	raw, err := s.GetAppSettingJSON(ctx, bridge.AppSettingModelMappings)
+	if err != nil {
+		return ModelMappingSettings{}, err
+	}
+	settings := ModelMappingSettings{Models: bridge.ModelMappings{}}
+	if nested, ok := raw["models"].(map[string]any); ok {
+		for source, value := range nested {
+			if target, ok := value.(string); ok && strings.TrimSpace(target) != "" {
+				settings.Models[source] = target
+			}
+		}
+	}
+	settings.Models = bridge.NormalizeModelMappings(settings.Models)
+	return settings, nil
+}
+
+func (s *Store) SaveModelMappingSettings(ctx context.Context, settings ModelMappingSettings) error {
+	models := bridge.NormalizeModelMappings(settings.Models)
+	payloadModels := map[string]any{}
+	for source, target := range models {
+		payloadModels[source] = target
+	}
+	return s.SetAppSettingJSON(ctx, bridge.AppSettingModelMappings, map[string]any{
+		"models": payloadModels,
+	})
+}

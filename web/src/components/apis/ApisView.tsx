@@ -589,6 +589,20 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                 />
               </Field>
               {renderKeyLimitsForm()}
+              <div className="api-key-edit-enabled">
+                <div>
+                  <strong>{t("apis.modelMappingTitle")}</strong>
+                  <p>{t("apis.modelMappingHint")}</p>
+                </div>
+                <Toggle
+                  label=""
+                  checked={!formData.disable_model_mapping}
+                  onChange={(event) =>
+                    setFormData({ ...formData, disable_model_mapping: !event.target.checked })
+                  }
+                  aria-label={t("apis.modelMappingTitle")}
+                />
+              </div>
             </>
           ) : null}
 
@@ -714,6 +728,20 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                   checked={formData.enabled}
                   onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })}
                   aria-label={t("apis.keyEnabled")}
+                />
+              </div>
+              <div className="api-key-edit-enabled">
+                <div>
+                  <strong>{t("apis.modelMappingTitle")}</strong>
+                  <p>{t("apis.modelMappingHint")}</p>
+                </div>
+                <Toggle
+                  label=""
+                  checked={!formData.disable_model_mapping}
+                  onChange={(event) =>
+                    setFormData({ ...formData, disable_model_mapping: !event.target.checked })
+                  }
+                  aria-label={t("apis.modelMappingTitle")}
                 />
               </div>
             </div>

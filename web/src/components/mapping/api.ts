@@ -74,3 +74,44 @@ export function fetchCursorMapping(secret: string, options?: { refresh?: boolean
 export function saveCursorMapping(secret: string, payload: { overrides: Record<string, string> }) {
   return adminFetch<CursorMappingResponse>(secret, "/api/admin/mapping/cursor", "PUT", payload);
 }
+
+export type ModelMappingRow = {
+  source: string;
+  target: string;
+  effective: string;
+};
+
+export type ModelMappingResponse = {
+  overrides: Record<string, string>;
+  rows: ModelMappingRow[];
+  content_mapping: Record<string, Record<string, string>>;
+};
+
+export type ModelMappingResolveResponse = {
+  requested: string;
+  resolved: string;
+  steps: string[];
+};
+
+export function fetchModelMapping(secret: string) {
+  return adminFetch<ModelMappingResponse>(secret, "/api/admin/mapping/models");
+}
+
+export function saveModelMapping(secret: string, payload: { overrides: Record<string, string> }) {
+  return adminFetch<ModelMappingResponse>(secret, "/api/admin/mapping/models", "PUT", payload);
+}
+
+export async function testModelMapping(
+  secret: string,
+  model: string,
+): Promise<ModelMappingResolveResponse> {
+  const query = new URLSearchParams({ model }).toString();
+  const response = await fetch(`/api/admin/mapping/models/resolve?${query}`, {
+    headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || `HTTP ${response.status}`);
+  }
+  return data as ModelMappingResolveResponse;
+}

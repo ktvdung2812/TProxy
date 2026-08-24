@@ -20,6 +20,7 @@ models.dev-catalog.json.new
 *.bak
 *.bak-shm
 *.bak-wal
+.DS_Store
 *.png
 
 # Local agent/tooling workspace

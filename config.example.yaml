@@ -113,6 +113,8 @@ client-api-keys:
     key-env: TPROXY_API_KEY
     policy:
       team: engineering
+      # Opt this key out of the global custom model mapping (model.mapping_rules).
+      # disable-model-mapping: true
       limits:
         requests-per-minute: 120
         concurrent-streams: 16

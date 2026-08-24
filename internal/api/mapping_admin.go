@@ -46,6 +46,14 @@ func (s *Server) loadCursorAliasResolver() {
 	s.cursorAliases = resolver
 }
 
+func (s *Server) loadModelMappingResolver() {
+	resolver := bridge.NewModelMappingResolver()
+	if settings, err := s.store.ModelMappingSettings(context.Background()); err == nil {
+		resolver.SetMappings(settings.Models)
+	}
+	s.modelMappings = resolver
+}
+
 func (s *Server) adminClaudeMapping(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -173,6 +181,112 @@ func (s *Server) cursorAliasResolver() *bridge.CursorResolver {
 		s.loadCursorAliasResolver()
 	}
 	return s.cursorAliases
+}
+
+func (s *Server) modelMappingResolver() *bridge.ModelMappingResolver {
+	if s.modelMappings == nil {
+		s.loadModelMappingResolver()
+	}
+	return s.modelMappings
+}
+
+// modelMappingEnabledForKey reports whether the caller's API key accepts the
+// global custom model mapping. Keys opt out via policy.disable_model_mapping.
+// A missing key (local no-key access) always gets mapping applied.
+func (s *Server) modelMappingEnabledForKey(r *http.Request) bool {
+	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
+	if key == nil {
+		return true
+	}
+	return !key.Policy.DisableModelMapping
+}
+
+func (s *Server) adminModelMapping(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.adminGetModelMapping(w, r)
+	case http.MethodPut:
+		s.adminPutModelMapping(w, r)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or PUT required", useClientRequestID(r))
+	}
+}
+
+func (s *Server) writeModelMappingResponse(w http.ResponseWriter, r *http.Request) {
+	resolver := s.modelMappingResolver()
+	effective := resolver.EffectiveMapping()
+	rows := make([]map[string]string, 0, len(effective))
+	keys := make([]string, 0, len(effective))
+	for source := range effective {
+		keys = append(keys, source)
+	}
+	sort.Strings(keys)
+	for _, source := range keys {
+		rows = append(rows, map[string]string{
+			"source":    source,
+			"target":    effective[source],
+			"effective": resolver.ResolveChain(source),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"overrides":       effective,
+		"rows":            rows,
+		"content_mapping": contentMappingSummary(),
+	})
+}
+
+func (s *Server) adminGetModelMapping(w http.ResponseWriter, r *http.Request) {
+	s.writeModelMappingResponse(w, r)
+}
+
+func (s *Server) adminPutModelMapping(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Overrides map[string]string `json:"overrides"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if payload.Overrides == nil {
+		payload.Overrides = map[string]string{}
+	}
+	mappings := bridge.NormalizeModelMappings(payload.Overrides)
+	if err := s.store.SaveModelMappingSettings(r.Context(), store.ModelMappingSettings{Models: mappings}); err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
+		return
+	}
+	s.modelMappingResolver().SetMappings(mappings)
+	s.writeModelMappingResponse(w, r)
+}
+
+// adminModelMappingResolve lets the dashboard preview how a requested model id
+// is rewritten through the global mapping chain.
+func (s *Server) adminModelMappingResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	requested := strings.TrimSpace(r.URL.Query().Get("model"))
+	if requested == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "model query parameter is required", useClientRequestID(r))
+		return
+	}
+	resolver := s.modelMappingResolver()
+	steps := []string{requested}
+	resolved := requested
+	for i := 0; i < bridge.MaxModelMappingDepth(); i++ {
+		next := resolver.Resolve(resolved)
+		if next == resolved {
+			break
+		}
+		resolved = next
+		steps = append(steps, resolved)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requested": requested,
+		"resolved":  resolved,
+		"steps":     steps,
+	})
 }
 
 func (s *Server) adminCursorMapping(w http.ResponseWriter, r *http.Request) {
@@ -509,6 +623,31 @@ func (s *Server) placeholderModelCatalog() []map[string]any {
 			"route":       "cursor-alias",
 		})
 	}
+	// Expose global custom model mapping sources in /v1/models so clients can pick them.
+	for source, target := range s.modelMappingResolver().EffectiveMapping() {
+		if source == "" || target == "" {
+			continue
+		}
+		// Skip keys already covered by Claude/Codex placeholders or Cursor slots.
+		if _, ok := bridge.PlaceholderRole(source); ok {
+			continue
+		}
+		if _, ok := s.cursorAliasResolver().EffectiveMapping()[source]; ok {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"id":          source,
+			"object":      "model",
+			"name":        placeholderDisplayName(source),
+			"owned_by":    "tproxy",
+			"placeholder": true,
+			"role":        "model-mapping",
+			"resolves_to": target,
+			"endpoint":    "placeholder",
+			"created":     time.Now().Unix(),
+			"route":       "model-mapping",
+		})
+	}
 	return entries
 }
 
@@ -519,7 +658,8 @@ func (s *Server) placeholderModelInfo(id string) (map[string]any, bool) {
 	}
 	_, isTier := bridge.PlaceholderRole(normalized)
 	_, isCursor := s.cursorAliasResolver().EffectiveMapping()[normalized]
-	if !isTier && !isCursor {
+	_, isCustom := s.modelMappingResolver().EffectiveMapping()[normalized]
+	if !isTier && !isCursor && !isCustom {
 		return nil, false
 	}
 	for _, entry := range s.placeholderModelCatalog() {
@@ -590,6 +730,11 @@ func (s *Server) resolveClaudeIngressModel(r *http.Request, model string) string
 
 func (s *Server) applyMappingIngress(r *http.Request, request *canonical.Request) {
 	preserveClaudeClientModel(request)
+	// Global custom mapping runs first so its target can still be a Cursor slot,
+	// tier placeholder or any public/virtual model handled by later layers.
+	if s.modelMappingEnabledForKey(r) {
+		request.PublicModelID = s.modelMappingResolver().ResolveChain(request.PublicModelID)
+	}
 	request.PublicModelID = s.resolveClaudeIngressModel(r, request.PublicModelID)
 	s.applyClaudeTierReasoningEffort(request)
 }

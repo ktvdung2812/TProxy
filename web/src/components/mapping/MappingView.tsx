@@ -7,11 +7,15 @@ import { Badge, Button, Card, Select, cn } from "../ui";
 import {
   fetchClaudeMapping,
   fetchCursorMapping,
+  fetchModelMapping,
   saveClaudeMapping,
   saveCursorMapping,
+  saveModelMapping,
+  testModelMapping,
   type ClaudeMappingResponse,
   type CursorCatalogModel,
   type CursorMappingResponse,
+  type ModelMappingResponse,
 } from "./api";
 import type { ModelRecord, RouteRecord } from "../models/types";
 import {
@@ -164,6 +168,13 @@ export function MappingView({
   const [addCursorSource, setAddCursorSource] = useState("");
   const [addCursorTarget, setAddCursorTarget] = useState("");
   const [refreshingCursorCatalog, setRefreshingCursorCatalog] = useState(false);
+  const [modelData, setModelData] = useState<ModelMappingResponse | null>(null);
+  const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({});
+  const [addModelSource, setAddModelSource] = useState("");
+  const [addModelTarget, setAddModelTarget] = useState("");
+  const [resolveInput, setResolveInput] = useState("");
+  const [resolveResult, setResolveResult] = useState<string[]>([]);
+  const [resolving, setResolving] = useState(false);
 
   const applyCursorResponse = useCallback(
     (cursorResponse: CursorMappingResponse, options?: { replaceOverrides?: boolean }) => {
@@ -178,10 +189,11 @@ export function MappingView({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [claudeResponse, cursorResponse] = await Promise.all([
+      const [claudeResponse, cursorResponse, modelResponse] = await Promise.all([
         fetchClaudeMapping(secret),
         // Backend auto-upgrades from static→live; no need for ?refresh=1 on every page load.
         fetchCursorMapping(secret),
+        fetchModelMapping(secret),
       ]);
       setData(claudeResponse);
       setOverrides({
@@ -201,6 +213,10 @@ export function MappingView({
       applyCursorResponse(cursorResponse);
       setAddCursorSource("");
       setAddCursorTarget("");
+      setModelData(modelResponse);
+      setModelOverrides({ ...(modelResponse.overrides || {}) });
+      setAddModelSource("");
+      setAddModelTarget("");
 
       // If we still only got the thin static fallback, force a live rediscover once.
       const catalogLen = cursorResponse.cursor_models?.length || cursorResponse.catalog_count || 0;
@@ -283,8 +299,22 @@ export function MappingView({
   const isClaude = activeTab === "claude";
   const isCodex = activeTab === "codex";
   const isCursor = activeTab === "cursor";
+  const isModels = activeTab === "models";
+
+  const mappedModelRows = useMemo(() => {
+    return Object.entries(modelOverrides)
+      .filter(([, target]) => target.trim())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([source, target]) => ({ source, target }));
+  }, [modelOverrides]);
 
   const filteredPlaceholders = useMemo(() => {
+    if (isModels) {
+      return mappedModelRows.map((row) => ({
+        name: row.source,
+        resolves: row.target,
+      }));
+    }
     if (isCursor) {
       return (cursorData?.placeholders || []).filter((item) => item.resolves);
     }
@@ -295,7 +325,7 @@ export function MappingView({
     return items
       .filter((item) => filter(item.name))
       .sort((left, right) => (rank.get(left.name) ?? 0) - (rank.get(right.name) ?? 0));
-  }, [activeTab, data?.placeholders, cursorData?.placeholders, isClaude, isCursor]);
+  }, [activeTab, data?.placeholders, cursorData?.placeholders, isClaude, isCursor, isModels, mappedModelRows]);
 
   const visibleTiers = useMemo(() => {
     const tiers = buildTiers(t);
@@ -335,7 +365,84 @@ export function MappingView({
     return cursorCatalog.filter((model) => !mapped.has(model.id.toLowerCase()));
   }, [cursorCatalog, cursorOverrides]);
 
-  const contentMapping = isCursor ? cursorData?.content_mapping : data?.content_mapping;
+  const contentMapping = isCursor
+    ? cursorData?.content_mapping
+    : isModels
+      ? modelData?.content_mapping
+      : data?.content_mapping;
+
+  const handleSaveModelMapping = async () => {
+    setSaving(true);
+    try {
+      const merged: Record<string, string> = { ...modelOverrides };
+      const pendingSource = addModelSource.trim();
+      const pendingTarget = addModelTarget.trim();
+      if (pendingSource && pendingTarget) {
+        merged[pendingSource] = pendingTarget;
+      } else if (pendingSource || pendingTarget) {
+        throw new Error(t("mapping.selectBothForSave"));
+      }
+      if (Object.keys(merged).length > 0) {
+        for (const [source, target] of Object.entries(merged)) {
+          if (source.trim().toLowerCase() === target.trim().toLowerCase()) {
+            throw new Error(t("mapping.modelIdentityRejected", { source }));
+          }
+        }
+      }
+      const response = await saveModelMapping(secret, { overrides: merged });
+      setModelData(response);
+      setModelOverrides({ ...(response.overrides || {}) });
+      setAddModelSource("");
+      setAddModelTarget("");
+      onNotice(
+        Object.keys(response.overrides || {}).length === 0
+          ? t("mapping.clearedAllModelMappings")
+          : t("mapping.savedModelMappings", { count: Object.keys(response.overrides || {}).length }),
+      );
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToSave"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addModelMapping = () => {
+    const source = addModelSource.trim();
+    const target = addModelTarget.trim();
+    if (!source || !target) {
+      onError(t("mapping.selectBothForAdd"));
+      return;
+    }
+    if (source.toLowerCase() === target.toLowerCase()) {
+      onError(t("mapping.modelIdentityRejected", { source }));
+      return;
+    }
+    setModelOverrides((current) => ({ ...current, [source]: target }));
+    setAddModelSource("");
+    setAddModelTarget("");
+  };
+
+  const removeModelMapping = (id: string) => {
+    setModelOverrides((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const runResolveTest = async () => {
+    const model = resolveInput.trim();
+    if (!model) return;
+    setResolving(true);
+    try {
+      const result = await testModelMapping(secret, model);
+      setResolveResult(result.steps || [result.requested, result.resolved]);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : t("mapping.failedToLoad"));
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const handleSaveClaude = async () => {
     setSaving(true);
@@ -419,7 +526,7 @@ export function MappingView({
     });
   };
 
-  if (loading && !data && !cursorData) {
+  if (loading && !data && !cursorData && !modelData) {
     return (
       <section className="section mapping-page">
         <div className="mapping-loading">
@@ -441,6 +548,8 @@ export function MappingView({
               <span dangerouslySetInnerHTML={{ __html: t("mapping.claudeDescription") }} />
             ) : isCodex ? (
               <span dangerouslySetInnerHTML={{ __html: t("mapping.codexDescription") }} />
+            ) : isModels ? (
+              <span dangerouslySetInnerHTML={{ __html: t("mapping.modelsDescription") }} />
             ) : (
               <span dangerouslySetInnerHTML={{ __html: t("mapping.cursorDescription") }} />
             )}
@@ -468,6 +577,13 @@ export function MappingView({
               onClick={() => setActiveTab("cursor")}
             >
               Cursor
+            </button>
+            <button
+              type="button"
+              className={activeTab === "models" ? "active" : ""}
+              onClick={() => setActiveTab("models")}
+            >
+              Models
             </button>
           </div>
           <Button variant="outline" size="sm" icon="refresh" disabled={loading} onClick={() => void load()}>
@@ -628,6 +744,150 @@ export function MappingView({
               </Button>
             </div>
           </Card>
+        ) : isModels ? (
+          <Card pad="md" className="mapping-card mapping-card-wide">
+            <div className="mapping-card-head">
+              <span className="material-symbols-outlined">alt_route</span>
+              <div>
+                <strong>Global model map</strong>
+                <p
+                  dangerouslySetInnerHTML={{
+                    __html: t("mapping.modelsPanelDescription"),
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="mapping-cursor-add-form">
+              <div className="mapping-cursor-add-fields">
+                <div className="mapping-cursor-field">
+                  <label htmlFor="model-mapping-source">Client model</label>
+                  <input
+                    id="model-mapping-source"
+                    type="text"
+                    value={addModelSource}
+                    onChange={(event) => setAddModelSource(event.target.value)}
+                    placeholder="gpt-5.6-sol"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <span className="mapping-placeholder-arrow mapping-cursor-arrow" aria-hidden>
+                  →
+                </span>
+                <div className="mapping-cursor-field mapping-cursor-field-target">
+                  <label htmlFor="model-mapping-target">Target model</label>
+                  <ModelTargetCombobox
+                    aria-label="Target model"
+                    value={addModelTarget}
+                    placeholder="deepseek-v4-pro or provider:model"
+                    options={modelOptions}
+                    onChange={setAddModelTarget}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  icon="add"
+                  disabled={!addModelSource.trim() || !addModelTarget.trim()}
+                  onClick={addModelMapping}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+
+            <div className="mapping-tier-grid mapping-cursor-rows">
+              {mappedModelRows.length === 0 ? (
+                <p className="mapping-placeholder-empty">
+                  No mappings yet. Add a client model → target model pair above.
+                </p>
+              ) : (
+                mappedModelRows.map((row) => (
+                  <div className="mapping-tier-row mapping-cursor-row" key={row.source}>
+                    <div className="mapping-tier-label">
+                      <strong>{row.source}</strong>
+                      {modelData?.overrides?.[row.source] ? (
+                        <Badge variant="default" size="sm">
+                          → {formatTargetLabel(row.target)}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mapping-tier-controls">
+                      <ModelTargetCombobox
+                        aria-label={`${row.source} target model`}
+                        value={row.target}
+                        placeholder="virtual-model or provider:model"
+                        options={modelOptions}
+                        onChange={(next) =>
+                          setModelOverrides((current) => ({ ...current, [row.source]: next }))
+                        }
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="close"
+                        aria-label={`Remove ${row.source}`}
+                        onClick={() => removeModelMapping(row.source)}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mapping-model-resolve-test">
+              <div className="mapping-cursor-field">
+                <label htmlFor="model-mapping-resolve">Test resolution</label>
+                <input
+                  id="model-mapping-resolve"
+                  type="text"
+                  value={resolveInput}
+                  onChange={(event) => setResolveInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void runResolveTest();
+                  }}
+                  placeholder="Type a client model to preview the rewrite chain…"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                icon={resolving ? "progress_activity" : "play_arrow"}
+                disabled={!resolveInput.trim() || resolving}
+                onClick={() => void runResolveTest()}
+              >
+                Resolve
+              </Button>
+              {resolveResult.length > 0 ? (
+                <div className="mapping-model-resolve-steps">
+                  {resolveResult.map((step, index) => (
+                    <span className="mapping-model-resolve-step" key={`${step}-${index}`}>
+                      {index > 0 ? <span className="mapping-placeholder-arrow">→</span> : null}
+                      <code>{step}</code>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mapping-actions">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                icon="save"
+                disabled={saving}
+                onClick={() => void handleSaveModelMapping()}
+              >
+                {saving ? "Saving…" : "Save model mapping"}
+              </Button>
+            </div>
+          </Card>
         ) : (
           <Card pad="md" className="mapping-card">
             <div className="mapping-card-head">
@@ -742,14 +1002,20 @@ export function MappingView({
                   ? "Claude client model IDs rewritten before routing."
                   : isCodex
                     ? "Codex / OpenAI client model IDs rewritten before routing."
-                    : "Cursor custom model IDs rewritten before routing."}
+                    : isModels
+                      ? "Custom model IDs rewritten before routing."
+                      : "Cursor custom model IDs rewritten before routing."}
               </p>
             </div>
           </div>
           <div className="mapping-placeholder-list">
             {filteredPlaceholders.length === 0 ? (
               <p className="mapping-placeholder-empty">
-                {isCursor ? "No Cursor aliases configured yet." : "No placeholders configured yet."}
+                {isCursor
+                  ? "No Cursor aliases configured yet."
+                  : isModels
+                    ? "No custom mappings configured yet."
+                    : "No placeholders configured yet."}
               </p>
             ) : (
               filteredPlaceholders.map((item) => (

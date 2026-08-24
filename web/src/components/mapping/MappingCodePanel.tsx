@@ -20,7 +20,7 @@ import {
   resolveTierTargets,
 } from "./codegen";
 
-type Client = "claude" | "codex" | "cursor";
+type Client = "claude" | "codex" | "cursor" | "models";
 
 type Props = {
   client: Client;

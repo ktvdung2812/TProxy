@@ -787,7 +787,9 @@
     "createKeyHint": "Tạo API key đầu tiên để xác thực client.",
     "failedRevokeKey": "Không thể thu hồi API key",
     "revokeKey": "Thu hồi API key",
-    "revoke": "Thu hồi"
+    "revoke": "Thu hồi",
+    "modelMappingTitle": "Áp dụng điều hướng model",
+    "modelMappingHint": "Khi bật, ánh xạ model toàn cục sẽ được áp dụng cho các model mà key này yêu cầu."
   },
   "models": {
     "title": "Models",
@@ -1058,7 +1060,12 @@
     "claudeOpus": "Claude Opus",
     "claudeSonnet": "Claude Sonnet",
     "sonnet": "Sonnet",
-    "claudeHaiku": "Claude Haiku"
+    "claudeHaiku": "Claude Haiku",
+    "modelsDescription": "Điều hướng tên model của client toàn cục — ví dụ <code>gpt-5.6-sol</code> → <code>deepseek-v4-pro</code>. Áp dụng cho mọi endpoint trước các placeholder tier. Từng API key có thể tắt riêng.",
+    "modelsPanelDescription": "Ánh xạ theo đúng tên model, áp dụng cho <strong>mọi</strong> request trước khi route theo tier Claude/Codex. Đích có thể là model ảo hoặc <code>provider:upstream-model</code>; việc phân luồng provider do Provider Priority Manager quyết định.",
+    "modelIdentityRejected": "Ánh xạ \"{source}\" vào chính nó là vô tác dụng nên bị từ chối.",
+    "savedModelMappings": "Đã lưu {count} ánh xạ model",
+    "clearedAllModelMappings": "Đã xóa toàn bộ ánh xạ model"
   },
   "chat": {
     "newChat": "Chat mới",

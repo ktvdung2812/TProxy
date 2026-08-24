@@ -787,7 +787,9 @@
     "createKeyHint": "Create your first API key to authenticate clients.",
     "failedRevokeKey": "Failed to revoke API key",
     "revokeKey": "Revoke API key",
-    "revoke": "Revoke"
+    "revoke": "Revoke",
+    "modelMappingTitle": "Apply model mapping",
+    "modelMappingHint": "When on, global custom model mappings rewrite this key's requested models."
   },
   "models": {
     "title": "Models",
@@ -1058,7 +1060,12 @@
     "claudeOpus": "Claude Opus",
     "claudeSonnet": "Claude Sonnet",
     "sonnet": "Sonnet",
-    "claudeHaiku": "Claude Haiku"
+    "claudeHaiku": "Claude Haiku",
+    "modelsDescription": "Rewrite any client model name globally — e.g. <code>gpt-5.6-sol</code> → <code>deepseek-v4-pro</code>. Applied to every endpoint before tier placeholders. Individual API keys can opt out.",
+    "modelsPanelDescription": "Exact-name rewrites applied to <strong>all</strong> requests before Claude/Codex tier routing. Targets may be virtual models or <code>provider:upstream-model</code>; Provider Priority Manager decides where the target is served from.",
+    "modelIdentityRejected": "Identity mapping for \"{source}\" is a no-op and was rejected.",
+    "savedModelMappings": "Saved {count} model mappings",
+    "clearedAllModelMappings": "Cleared all model mappings"
   },
   "chat": {
     "newChat": "New chat",

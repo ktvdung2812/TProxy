@@ -11,6 +11,7 @@ export type ApiKeyPolicy = {
   limits?: ApiKeyLimits;
   endpoints?: string[];
   team?: string;
+  disable_model_mapping?: boolean;
 };
 
 export type ApiKeyRecord = {
@@ -44,6 +45,7 @@ export type ApiKeyFormData = {
   max_output_tokens: number;
   media_jobs: number;
   budget_usd_per_day: number;
+  disable_model_mapping: boolean;
 };
 
 export type ApiModelOption = {
