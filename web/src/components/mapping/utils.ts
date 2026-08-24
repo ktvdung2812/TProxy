@@ -1,12 +1,13 @@
 import { resolveCanonicalUpstreamModel } from "../models/utils";
 import type { ModelRecord, RouteRecord } from "../models/types";
 
-export type MappingClientTab = "claude" | "codex" | "cursor";
+export type MappingClientTab = "claude" | "codex" | "cursor" | "models";
 
 export function parseMappingTab(hash: string): MappingClientTab {
   const value = hash.replace(/^#/, "").trim().toLowerCase();
   if (value === "codex") return "codex";
   if (value === "cursor") return "cursor";
+  if (value === "models") return "models";
   return "claude";
 }
 

@@ -42,6 +42,7 @@ export function emptyApiKeyForm(): ApiKeyFormData {
     max_output_tokens: 0,
     media_jobs: 0,
     budget_usd_per_day: 0,
+    disable_model_mapping: false,
   };
 }
 
@@ -59,6 +60,7 @@ export function apiKeyToForm(key: ApiKeyRecord): ApiKeyFormData {
     max_output_tokens: key.policy?.limits?.max_output_tokens || 0,
     media_jobs: key.policy?.limits?.media_jobs || 0,
     budget_usd_per_day: key.policy?.limits?.budget_usd_per_day || 0,
+    disable_model_mapping: key.policy?.disable_model_mapping === true,
   };
 }
 
@@ -94,6 +96,7 @@ export function formToPayload(form: ApiKeyFormData, editing: boolean) {
       ...(form.team.trim() ? { team: form.team.trim() } : {}),
       ...(endpoints.length ? { endpoints } : {}),
       ...(hasLimits ? { limits } : {}),
+      ...(form.disable_model_mapping ? { disable_model_mapping: true } : {}),
     },
   };
 

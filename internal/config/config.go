@@ -208,6 +208,10 @@ type ClientKeyPolicy struct {
 	Team      string            `yaml:"team" json:"team,omitempty"`
 	Tags      map[string]string `yaml:"tags" json:"tags,omitempty"`
 	Limits    LimitPolicy       `yaml:"limits" json:"limits,omitempty"`
+	// DisableModelMapping opts this key out of the global custom model mapping.
+	// When true the client's requested model name is passed to the existing
+	// Cursor/Claude alias resolution untouched by model.mapping_rules.
+	DisableModelMapping bool `yaml:"disable-model-mapping" json:"disable_model_mapping,omitempty"`
 }
 
 type LimitPolicy struct {
