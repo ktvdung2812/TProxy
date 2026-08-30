@@ -19,7 +19,7 @@ import {
   type ConnectionMethod,
 } from "./connectionMethods";
 import { ProviderLogo } from "./ProviderLogo";
-import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
+import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, reorderProviderCredentials, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
 import {
   fetchCredentialProxyUsage,
   fetchCredentialQuota,
@@ -27,7 +27,7 @@ import {
   type CredentialQuota,
 } from "../quota/api";
 import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
-import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByCreatedAt, formatCredentialAddedAt, formatServicePlanLabel, type Credential, type ModelAlias, type Provider } from "./types";
+import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByPriority, formatCredentialAddedAt, formatServicePlanLabel, moveCredentialBefore, type Credential, type ModelAlias, type Provider } from "./types";
 
 /** Providers whose upstream quota/balance probe is implemented in tproxy. */
 const CONNECTION_QUOTA_PROVIDER_IDS = new Set([
@@ -125,6 +125,10 @@ export function ProviderDetail({
     [catalog, presets, provider.ID],
   );
   const [credentialRefreshOverrides, setCredentialRefreshOverrides] = useState<Record<string, { status?: string; last_validated_at?: string }>>({});
+  const [credentialOrder, setCredentialOrder] = useState<string[] | null>(null);
+  const [draggingCredentialId, setDraggingCredentialId] = useState<string | null>(null);
+  const [dragOverCredentialId, setDragOverCredentialId] = useState<string | null>(null);
+  const [reorderingCredentials, setReorderingCredentials] = useState(false);
   const displayedCredentials = useMemo(
     () => credentials.map((credential) => {
       const override = credentialRefreshOverrides[credential.id];
@@ -133,12 +137,18 @@ export function ProviderDetail({
     [credentials, credentialRefreshOverrides],
   );
   const sortedCredentials = useMemo(
-    () => [...displayedCredentials].sort(compareCredentialsByCreatedAt),
-    [displayedCredentials],
+    () => {
+      const priorityOrder = [...displayedCredentials].sort(compareCredentialsByPriority);
+      if (!credentialOrder || credentialOrder.length !== priorityOrder.length) return priorityOrder;
+      const byId = new Map(priorityOrder.map((credential) => [credential.id, credential]));
+      if (credentialOrder.some((id) => !byId.has(id))) return priorityOrder;
+      return credentialOrder.map((id) => byId.get(id)!).filter(Boolean);
+    },
+    [displayedCredentials, credentialOrder],
   );
   const credentialAccountNumbers = useMemo(
-    () => buildCredentialAccountNumbers(credentials),
-    [credentials],
+    () => buildCredentialAccountNumbers(sortedCredentials),
+    [sortedCredentials],
   );
   const [accountQuery, setAccountQuery] = useState("");
   const [errorCodeFilter, setErrorCodeFilter] = useState("");
@@ -236,6 +246,7 @@ export function ProviderDetail({
   );
 
   useEffect(() => {
+    setCredentialOrder(null);
     const available = new Set(credentials.map((credential) => credential.id));
     setCredentialRefreshOverrides((current) => {
       const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
@@ -246,6 +257,40 @@ export function ProviderDetail({
       return next.length === current.length ? current : next;
     });
   }, [credentials]);
+
+  const handleCredentialDragStart = (event: React.DragEvent<HTMLButtonElement>, credentialId: string) => {
+    if (reorderingCredentials) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", credentialId);
+    setDraggingCredentialId(credentialId);
+    setDragOverCredentialId(null);
+  };
+
+  const handleCredentialDrop = async (event: React.DragEvent<HTMLElement>, targetId: string) => {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain") || draggingCredentialId;
+    setDraggingCredentialId(null);
+    setDragOverCredentialId(null);
+    if (!sourceId || sourceId === targetId || reorderingCredentials) return;
+    const next = moveCredentialBefore(sortedCredentials, sourceId, targetId);
+    if (next === sortedCredentials) return;
+    const nextIds = next.map((credential) => credential.id);
+    setCredentialOrder(nextIds);
+    setReorderingCredentials(true);
+    try {
+      await reorderProviderCredentials(secret, provider.ID, nextIds);
+      onNotice("Account order saved");
+      onMutated();
+    } catch (cause) {
+      setCredentialOrder(null);
+      onError(cause instanceof Error ? cause.message : "Failed to save account order");
+    } finally {
+      setReorderingCredentials(false);
+    }
+  };
 
   const filteredIdSet = useMemo(
     () => new Set(filteredCredentials.map((credential) => credential.id)),
@@ -539,6 +584,12 @@ export function ProviderDetail({
                 </span>
               ) : null}
             </div>
+            {sortedCredentials.length > 1 ? (
+              <p className="connections-order-hint">
+                <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+                Drag accounts into the order tproxy should try them. The first account is used first.
+              </p>
+            ) : null}
             {filteredCredentials.length === 0 ? (
               <EmptyState
                 icon="search_off"
@@ -609,6 +660,22 @@ export function ProviderDetail({
                   onShowModels={(c) => setModelsCredential(c)}
                   onMutated={onMutated}
                   onCredentialRefreshed={handleCredentialRefreshed}
+                  dragging={draggingCredentialId === cred.id}
+                  dragOver={dragOverCredentialId === cred.id}
+                  dragDisabled={reorderingCredentials}
+                  onDragStart={handleCredentialDragStart}
+                  onDragOver={(event, id) => {
+                    if (!reorderingCredentials && draggingCredentialId && draggingCredentialId !== id) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverCredentialId(id);
+                    }
+                  }}
+                  onDrop={handleCredentialDrop}
+                  onDragEnd={() => {
+                    setDraggingCredentialId(null);
+                    setDragOverCredentialId(null);
+                  }}
                   onNotice={onNotice}
                   onError={onError}
                 />
@@ -775,6 +842,13 @@ function ConnectionRow({
   onDeleted,
   onMutated,
   onCredentialRefreshed,
+  dragging,
+  dragOver,
+  dragDisabled,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
   onEdit,
   onReAuth,
   onShowModels,
@@ -796,6 +870,13 @@ function ConnectionRow({
   onShowModels: (credential: Credential) => void;
   onMutated: () => void;
   onCredentialRefreshed?: (credentialId: string, status?: string) => void;
+  dragging: boolean;
+  dragOver: boolean;
+  dragDisabled: boolean;
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>, credentialId: string) => void;
+  onDragOver: (event: React.DragEvent<HTMLDivElement>, credentialId: string) => void;
+  onDrop: (event: React.DragEvent<HTMLDivElement>, credentialId: string) => void;
+  onDragEnd: () => void;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 }) {
@@ -917,7 +998,11 @@ function ConnectionRow({
   };
 
   return (
-    <div className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}${credential.last_validated_at ? " has-updated-at" : ""}`}>
+    <div
+      className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}${credential.last_validated_at ? " has-updated-at" : ""}${dragging ? " is-dragging" : ""}${dragOver ? " is-drag-over" : ""}`}
+      onDragOver={(event) => onDragOver(event, credential.id)}
+      onDrop={(event) => void onDrop(event, credential.id)}
+    >
       {credential.last_validated_at ? (
         <span
           className="connection-updated-at"
@@ -926,6 +1011,18 @@ function ConnectionRow({
           Updated {formatRelativeTime(credential.last_validated_at)}
         </span>
       ) : null}
+      <button
+        type="button"
+        className="connection-drag-handle"
+        draggable={!dragDisabled}
+        onDragStart={(event) => onDragStart(event, credential.id)}
+        onDragEnd={onDragEnd}
+        disabled={dragDisabled}
+        aria-label={`Drag ${connectionTitle} to change account order`}
+        title="Drag to change account order"
+      >
+        <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+      </button>
       <label className="connection-select">
         <input
           type="checkbox"

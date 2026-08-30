@@ -1423,6 +1423,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/providers/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/providers/")
+		if strings.HasSuffix(suffix, "/credentials/order") {
+			s.adminReorderProviderCredentials(w, r, strings.TrimSuffix(suffix, "/credentials/order"))
+			return
+		}
 		if strings.HasSuffix(suffix, "/cooldowns/reset") {
 			s.adminResetProviderCooldowns(w, r, strings.TrimSuffix(suffix, "/cooldowns/reset"))
 			return
@@ -1463,6 +1467,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.HasSuffix(suffix, "/quota") {
 			s.adminCredentialQuota(w, r, strings.TrimSuffix(suffix, "/quota"))
+			return
+		}
+		if strings.HasSuffix(suffix, "/usage-chart") {
+			s.adminCredentialUsageChart(w, r, strings.TrimSuffix(suffix, "/usage-chart"))
 			return
 		}
 		if strings.HasSuffix(suffix, "/codex-reset-credits") {
@@ -2324,6 +2332,33 @@ func (s *Server) adminSaveCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "credential_id": request.Credential.ID})
 }
 
+func (s *Server) adminReorderProviderCredentials(w http.ResponseWriter, r *http.Request, providerID string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "PUT required", useClientRequestID(r))
+		return
+	}
+	if providerID == "" || strings.Contains(providerID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "provider id is required", useClientRequestID(r))
+		return
+	}
+	var request struct {
+		CredentialIDs []string `json:"credential_ids"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if err := s.store.ReorderCredentials(r.Context(), providerID, request.CredentialIDs); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "credential_reorder_failed", err.Error(), useClientRequestID(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider_id": providerID, "credential_ids": request.CredentialIDs})
+}
+
 func (s *Server) adminDeleteCredential(w http.ResponseWriter, r *http.Request, credentialID string) {
 	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "DELETE required", useClientRequestID(r))
@@ -2530,6 +2565,37 @@ func validateAPIKeyModelSelection(models []string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Server) adminCredentialUsageChart(w http.ResponseWriter, r *http.Request, credentialID string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	credentialID = strings.Trim(strings.TrimSuffix(credentialID, "/"), "/")
+	if credentialID == "" || strings.Contains(credentialID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "credential id is required", useClientRequestID(r))
+		return
+	}
+	if _, err := s.store.CredentialByID(r.Context(), credentialID); err != nil {
+		status := http.StatusInternalServerError
+		code, message := "store_error", err.Error()
+		if errors.Is(err, sql.ErrNoRows) {
+			status, code, message = http.StatusNotFound, "credential_not_found", "credential not found"
+		}
+		writeError(w, status, code, message, useClientRequestID(r))
+		return
+	}
+	period := strings.TrimSpace(r.URL.Query().Get("period"))
+	if period == "" {
+		period = "week"
+	}
+	points, err := s.store.CredentialUsageChart(r.Context(), credentialID, period, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, points)
 }
 
 func (s *Server) adminCredentialQuota(w http.ResponseWriter, r *http.Request, credentialID string) {

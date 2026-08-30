@@ -98,6 +98,7 @@ type Credential = {
   enabled: boolean;
   status?: string;
   priority?: number;
+  weight?: number;
   cooldown_until?: string;
   last_error_code?: string;
   last_error?: string;
@@ -361,6 +362,9 @@ function App() {
         email: credential.email,
         enabled: credential.enabled,
         auth_type: credential.auth_type,
+        priority: credential.priority,
+        weight: credential.weight,
+        proxy_pool_ids: credential.proxy_pool_ids,
         created_at: credential.created_at,
       })),
     );
@@ -503,7 +507,7 @@ function App() {
   );
 
   function QuotaPage() {
-    return <QuotaTrackerView secret={secret} credentials={quotaCredentials} onError={setError} onMutated={() => void load()} />;
+    return <QuotaTrackerView secret={secret} credentials={quotaCredentials} onError={setError} onNotice={setNotice} onMutated={() => void load()} />;
   }
 
   function FreeTiersPage() {
