@@ -77,6 +77,14 @@ export type CredentialUsageResponse = {
   by_credential: Record<string, CredentialProxyUsage>;
 };
 
+export type CredentialUsageChartPeriod = "day" | "week" | "month";
+
+export type CredentialUsageChartPoint = {
+  label: string;
+  requests: number;
+  tokens: number;
+};
+
 async function adminFetch<T>(secret: string, path: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(path, {
     method,
@@ -110,6 +118,17 @@ export function fetchCredentialRequestLogs(secret: string, credentialId: string,
   return adminFetch<{ credential_id: string; data: RequestLog[] }>(
     secret,
     `/api/admin/credentials/${encodeURIComponent(credentialId)}/logs?limit=${limit}`,
+  );
+}
+
+export function fetchCredentialUsageChart(
+  secret: string,
+  credentialId: string,
+  period: CredentialUsageChartPeriod,
+) {
+  return adminFetch<CredentialUsageChartPoint[]>(
+    secret,
+    `/api/admin/credentials/${encodeURIComponent(credentialId)}/usage-chart?period=${encodeURIComponent(period)}`,
   );
 }
 

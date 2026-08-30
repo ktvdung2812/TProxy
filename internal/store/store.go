@@ -683,6 +683,74 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider_id=exclud
 	return err
 }
 
+// ReorderCredentials makes credentialIDs the complete, top-to-bottom account
+// order for one provider. Higher credential priorities are tried first by the
+// router, so the first ID receives the highest priority. Keeping the update in
+// one transaction means a request never observes a partly reordered chain.
+func (s *Store) ReorderCredentials(ctx context.Context, providerID string, credentialIDs []string) error {
+	if providerID == "" {
+		return errors.New("provider id is required")
+	}
+	if _, err := s.Provider(ctx, providerID); err != nil {
+		return fmt.Errorf("provider %q not found: %w", providerID, err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM credentials WHERE provider_id=?`, providerID)
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		existing[id] = struct{}{}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(existing) != len(credentialIDs) {
+		return errors.New("credential order must include every account for the provider exactly once")
+	}
+
+	seen := make(map[string]struct{}, len(credentialIDs))
+	for _, id := range credentialIDs {
+		if id == "" {
+			return errors.New("credential id is required")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return errors.New("credential order contains a duplicate account")
+		}
+		if _, found := existing[id]; !found {
+			return errors.New("credential order contains an account outside this provider")
+		}
+		seen[id] = struct{}{}
+	}
+
+	statement, err := tx.PrepareContext(ctx, `UPDATE credentials SET priority=? WHERE id=? AND provider_id=?`)
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+	for index, id := range credentialIDs {
+		if _, err := statement.ExecContext(ctx, len(credentialIDs)-index, id, providerID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) DeleteProvider(ctx context.Context, providerID string) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id=?`, providerID)
 	if err != nil {

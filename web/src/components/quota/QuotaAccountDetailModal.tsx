@@ -7,6 +7,7 @@ import { RequestLogsTable, type RequestSortKey } from "../logs/RequestLogsTable"
 import type { SortOrder } from "../logs/utils";
 import { Badge, Button, Modal, Toggle, cn } from "../ui";
 import { AccountTestChat } from "./AccountTestChat";
+import { CredentialUsageChart } from "./CredentialUsageChart";
 import {
   fetchCredentialQuota,
   fetchCredentialRequestLogs,
@@ -49,6 +50,7 @@ type Props = {
   onClose: () => void;
   onToggleEnabled: (enabled: boolean) => void;
   toggling?: boolean;
+  accountToggleReady?: boolean;
   onQuotaUpdated?: (quota: CredentialQuota) => void;
   refreshCountdown?: number;
 };
@@ -87,6 +89,7 @@ export function QuotaAccountDetailModal({
   onClose,
   onToggleEnabled,
   toggling = false,
+  accountToggleReady = true,
   onQuotaUpdated,
   refreshCountdown,
 }: Props) {
@@ -293,7 +296,7 @@ export function QuotaAccountDetailModal({
               <span>Account routing</span>
               <Toggle
                 checked={credential.enabled}
-                disabled={toggling}
+                disabled={toggling || !accountToggleReady}
                 onChange={(event) => onToggleEnabled(event.target.checked)}
                 aria-label={credential.enabled ? "Disable account" : "Enable account"}
               />
@@ -423,6 +426,8 @@ export function QuotaAccountDetailModal({
             <p className="quota-account-modal-empty">No quota data loaded for this account.</p>
           )}
         </div>
+
+        <CredentialUsageChart secret={secret} credentialId={credential.id} active={open} />
 
         <div className="quota-account-modal-section">
           <div className="quota-account-modal-section-head">

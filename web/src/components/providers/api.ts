@@ -215,6 +215,16 @@ export function saveCredential(secret: string, body: SaveCredentialBody) {
   return adminFetch<{ ok: boolean; credential_id: string }>(secret, "/api/admin/credentials", "PUT", body);
 }
 
+/** Persist the top-to-bottom account order used by the router for a provider. */
+export function reorderProviderCredentials(secret: string, providerId: string, credentialIds: string[]) {
+  return adminFetch<{ ok: boolean; provider_id: string; credential_ids: string[] }>(
+    secret,
+    `/api/admin/providers/${encodeURIComponent(providerId)}/credentials/order`,
+    "PUT",
+    { credential_ids: credentialIds },
+  );
+}
+
 export function deleteCredential(secret: string, id: string) {
   return adminFetch<{ ok: boolean; credential_id: string }>(secret, `/api/admin/credentials/${encodeURIComponent(id)}`, "DELETE");
 }
@@ -505,4 +515,3 @@ export function effectiveProviderRotation(
     isOverride: Boolean(override?.strategy || override?.sticky_round_robin_limit),
   };
 }
-

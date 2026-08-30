@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -1408,6 +1409,55 @@ func TestTouchCredentialRotationPersistsState(t *testing.T) {
 	}
 	if credential.ConsecutiveUseCount != 2 || credential.LastUsedAt.IsZero() {
 		t.Fatalf("credential rotation state = %+v", credential)
+	}
+}
+
+func TestReorderCredentialsPersistsRouterOrderAtomically(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "credential-order.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	ctx := context.Background()
+	if err := dataStore.SaveProvider(ctx, config.ProviderConfig{ID: "codex", Type: "codex", Name: "Codex", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"first", "second", "third"} {
+		if err := dataStore.SaveCredential(ctx, "codex", config.CredentialConfig{ID: id, AuthType: "oauth", Enabled: boolPtr(true)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := dataStore.ReorderCredentials(ctx, "codex", []string{"third", "first", "second"}); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := dataStore.Credentials(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(credentials))
+	for _, credential := range credentials {
+		got = append(got, credential.ID)
+	}
+	if !reflect.DeepEqual(got, []string{"third", "first", "second"}) {
+		t.Fatalf("credential order = %v", got)
+	}
+	if err := dataStore.ReorderCredentials(ctx, "codex", []string{"third", "first"}); err == nil {
+		t.Fatal("incomplete credential order was accepted")
+	}
+	credentials, err = dataStore.Credentials(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials[0].ID != "third" || credentials[1].ID != "first" || credentials[2].ID != "second" {
+		t.Fatalf("invalid reorder changed persisted order: %+v", credentials)
 	}
 }
 

@@ -72,6 +72,26 @@ export function compareCredentialsByCreatedAt(left: Credential, right: Credentia
   return left.id.localeCompare(right.id);
 }
 
+/** Router order is represented by descending priority; creation/id is only a
+ * deterministic fallback for legacy accounts that all still have priority 0. */
+export function compareCredentialsByPriority(left: Credential, right: Credential): number {
+  const priorityDifference = (right.priority ?? 0) - (left.priority ?? 0);
+  if (priorityDifference !== 0) return priorityDifference;
+  return compareCredentialsByCreatedAt(left, right);
+}
+
+export function moveCredentialBefore<T extends Pick<Credential, "id">>(items: T[], draggedId: string, targetId: string): T[] {
+  if (draggedId === targetId) return items;
+  const from = items.findIndex((item) => item.id === draggedId);
+  const target = items.findIndex((item) => item.id === targetId);
+  if (from < 0 || target < 0) return items;
+  const next = [...items];
+  const [dragged] = next.splice(from, 1);
+  const insertAt = next.findIndex((item) => item.id === targetId);
+  next.splice(insertAt < 0 ? target : insertAt, 0, dragged);
+  return next;
+}
+
 export function formatCredentialAddedAt(value?: string) {
   if (!value) return "—";
   const date = new Date(value);

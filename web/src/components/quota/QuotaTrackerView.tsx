@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { deleteCredential, saveCredential } from "../providers/api";
+import { deleteCredential, reorderProviderCredentials, saveCredential } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
 import { ProviderLogo } from "../providers/ProviderLogo";
 import { useUsageStream } from "../usage/useUsageStream";
@@ -12,6 +12,7 @@ import { consumeCodexResetCredit, fetchCredentialProxyUsage, fetchCredentialQuot
 import { QuotaRingGrid } from "./QuotaRingGrid";
 import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
+import { moveCredentialBefore } from "../providers/types";
 import {
   ACCOUNT_FILTER_OPTIONS,
   AUTO_REFRESH_STORAGE_KEY,
@@ -80,6 +81,9 @@ type CredentialRow = {
   email?: string;
   enabled: boolean;
   auth_type: string;
+  priority?: number;
+  weight?: number;
+  proxy_pool_ids?: string[];
   created_at?: string;
 };
 
@@ -87,6 +91,7 @@ type Props = {
   secret: string;
   credentials: CredentialRow[];
   onError: (message: string) => void;
+  onNotice?: (message: string) => void;
   onMutated?: () => void;
 };
 
@@ -115,12 +120,13 @@ function formatRenewalDate(value?: string): string | null {
   });
 }
 
-export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Props) {
+export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMutated }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [quotaById, setQuotaById] = useState<Record<string, CredentialQuota>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [settledQuotaCredentialIds, setSettledQuotaCredentialIds] = useState<Set<string>>(() => new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -136,6 +142,10 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   const [resettingLimitId, setResettingLimitId] = useState<string | null>(null);
   const [activeCredentialIds, setActiveCredentialIds] = useState<Set<string>>(() => new Set());
   const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
+  const [credentialOrderByProvider, setCredentialOrderByProvider] = useState<Record<string, string[]>>({});
+  const [draggingCredentialId, setDraggingCredentialId] = useState<string | null>(null);
+  const [dragOverCredentialId, setDragOverCredentialId] = useState<string | null>(null);
+  const [reorderingProviderId, setReorderingProviderId] = useState<string | null>(null);
   const credentialsRef = useRef(credentials);
   const refreshingRef = useRef(false);
   const refreshAllRef = useRef<() => Promise<void>>(async () => {});
@@ -156,6 +166,30 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     () => credentials.filter((item) => supportsQuotaTracker(item)),
     [credentials],
   );
+
+  // Drop optimistic orders that no longer describe the current snapshot (for
+  // example after an account is added or deleted elsewhere).
+  useEffect(() => {
+    const idsByProvider = new Map<string, Set<string>>();
+    for (const credential of eligible) {
+      const ids = idsByProvider.get(credential.providerId) || new Set<string>();
+      ids.add(credential.id);
+      idsByProvider.set(credential.providerId, ids);
+    }
+    setCredentialOrderByProvider((current) => {
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [providerId, order] of Object.entries(current)) {
+        const ids = idsByProvider.get(providerId);
+        if (!ids || order.length !== ids.size || order.some((id) => !ids.has(id))) {
+          changed = true;
+          continue;
+        }
+        next[providerId] = order;
+      }
+      return changed ? next : current;
+    });
+  }, [eligible]);
 
   const providerOptions = useMemo(() => {
     const types = new Set(eligible.map((item) => quotaProviderKey(item)));
@@ -207,6 +241,14 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     [eligible],
   );
 
+  const accountCountByProviderId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const credential of eligible) {
+      counts[credential.providerId] = (counts[credential.providerId] || 0) + 1;
+    }
+    return counts;
+  }, [eligible]);
+
   const scopeCredentials = useMemo(() => {
     if (providerFilter === "all") return eligible;
     return eligible.filter((item) => quotaProviderKey(item) === providerFilter);
@@ -223,11 +265,24 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
 
   const sortedCredentials = useMemo(() => {
     return [...filteredCredentials].sort((a, b) => {
-      if (a.enabled !== b.enabled) {
-        return a.enabled ? -1 : 1;
-      }
       const providerA = quotaProviderKey(a);
       const providerB = quotaProviderKey(b);
+      if (a.providerId === b.providerId) {
+        if (expiringFirst) {
+          const diff = earliestResetAt(quotaById[a.id]) - earliestResetAt(quotaById[b.id]);
+          if (diff !== 0) return diff;
+        }
+        const providerOrder = credentialOrderByProvider[a.providerId];
+        if (providerOrder) {
+          const leftIndex = providerOrder.indexOf(a.id);
+          const rightIndex = providerOrder.indexOf(b.id);
+          if (leftIndex >= 0 && rightIndex >= 0 && leftIndex !== rightIndex) return leftIndex - rightIndex;
+        }
+        const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0);
+        if (priorityDiff !== 0) return priorityDiff;
+        return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
+      }
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
       const countDiff = (providerCounts[providerB] || 0) - (providerCounts[providerA] || 0);
       if (countDiff !== 0) {
         return countDiff;
@@ -235,17 +290,21 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
       if (providerA !== providerB) {
         return providerA.localeCompare(providerB);
       }
-      if (expiringFirst) {
-        const diff = earliestResetAt(quotaById[a.id]) - earliestResetAt(quotaById[b.id]);
-        if (diff !== 0) return diff;
-      }
       return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
     });
-  }, [filteredCredentials, expiringFirst, quotaById, providerCounts]);
+  }, [filteredCredentials, expiringFirst, quotaById, providerCounts, credentialOrderByProvider]);
 
   const credentialIdsKey = useMemo(
     () => sortedCredentials.map((item) => item.id).join("\u0000"),
     [sortedCredentials],
+  );
+
+  // Account routing controls stay locked until every account currently shown
+  // on the page has completed its first quota request. A failed request still
+  // counts as settled because its error is visible and the operator can retry.
+  const quotaDataReady = useMemo(
+    () => sortedCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
+    [sortedCredentials, settledQuotaCredentialIds],
   );
 
   const loadQuota = useCallback(
@@ -266,6 +325,12 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         return false;
       } finally {
         setLoading((current) => ({ ...current, [credentialId]: false }));
+        setSettledQuotaCredentialIds((current) => {
+          if (current.has(credentialId)) return current;
+          const next = new Set(current);
+          next.add(credentialId);
+          return next;
+        });
       }
     },
     [secret],
@@ -340,6 +405,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
   }, [autoRefresh]);
 
   const setCredentialEnabled = async (credential: CredentialRow, enabled: boolean) => {
+    if (!quotaDataReady) return;
     setTogglingId(credential.id);
     try {
       await saveCredential(secret, {
@@ -350,6 +416,9 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
           enabled,
           label: credential.label,
           email: credential.email,
+          priority: credential.priority,
+          weight: credential.weight,
+          proxy_pools: credential.proxy_pool_ids,
         },
       });
       onMutated?.();
@@ -378,8 +447,53 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
     }
   };
 
+  const handleCredentialDrop = async (event: React.DragEvent<HTMLElement>, target: CredentialRow) => {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain") || draggingCredentialId;
+    setDraggingCredentialId(null);
+    setDragOverCredentialId(null);
+    if (!sourceId || sourceId === target.id || reorderingProviderId) return;
+    const source = credentials.find((credential) => credential.id === sourceId);
+    if (!source || source.providerId !== target.providerId) return;
+
+    const previousOrder = credentialOrderByProvider[target.providerId];
+    const savedOrder = previousOrder;
+    const providerOrder = [...credentials]
+      .filter((credential) => credential.providerId === target.providerId)
+      .sort((left, right) => {
+        if (savedOrder) {
+          const leftIndex = savedOrder.indexOf(left.id);
+          const rightIndex = savedOrder.indexOf(right.id);
+          if (leftIndex >= 0 && rightIndex >= 0 && leftIndex !== rightIndex) return leftIndex - rightIndex;
+        }
+        const priorityDiff = (right.priority ?? 0) - (left.priority ?? 0);
+        if (priorityDiff !== 0) return priorityDiff;
+        return (getConnectionLabel(left) || left.id).localeCompare(getConnectionLabel(right) || right.id);
+      });
+    const next = moveCredentialBefore(providerOrder, sourceId, target.id);
+    if (next === providerOrder) return;
+    const nextIds = next.map((credential) => credential.id);
+    setCredentialOrderByProvider((current) => ({ ...current, [target.providerId]: nextIds }));
+    setReorderingProviderId(target.providerId);
+    try {
+      await reorderProviderCredentials(secret, target.providerId, nextIds);
+      onNotice?.("Account order saved");
+      onMutated?.();
+    } catch (cause) {
+      setCredentialOrderByProvider((current) => {
+        const nextState = { ...current };
+        if (previousOrder) nextState[target.providerId] = previousOrder;
+        else delete nextState[target.providerId];
+        return nextState;
+      });
+      onError(cause instanceof Error ? cause.message : "Failed to save account order");
+    } finally {
+      setReorderingProviderId(null);
+    }
+  };
+
   const bulkSetEnabled = async (targets: CredentialRow[], enabled: boolean) => {
-    if (!targets.length || bulkToggling) return;
+    if (!targets.length || bulkToggling || !quotaDataReady) return;
     setBulkToggling(true);
     try {
       await Promise.all(targets.map((credential) => setCredentialEnabled(credential, enabled)));
@@ -589,7 +703,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
           <button
             type="button"
             className="quota-tracker-chip quota-tracker-chip-danger"
-            disabled={bulkToggling}
+            disabled={bulkToggling || !quotaDataReady}
             onClick={handleDisableDepleted}
           >
             <span className="material-symbols-outlined">block</span>
@@ -599,7 +713,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
           <button
             type="button"
             className="quota-tracker-chip quota-tracker-chip-success"
-            disabled={bulkToggling}
+            disabled={bulkToggling || !quotaDataReady}
             onClick={handleEnableAvailable}
           >
             <span className="material-symbols-outlined">check_circle</span>
@@ -630,9 +744,19 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         </div>
       </div>
 
-      {expiringFirst ? (
+      {!quotaDataReady ? (
+        <div className="quota-tracker-banner quota-tracker-order-hint">
+          <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
+          Loading account quota data… account toggles will unlock when loading completes.
+        </div>
+      ) : expiringFirst ? (
         <div className="quota-tracker-banner">
           Expiring-first reorders accounts on this page by earliest quota reset time.
+        </div>
+      ) : accountStats.total > 1 ? (
+        <div className="quota-tracker-banner quota-tracker-order-hint">
+          <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+          Drag accounts within a provider to choose the order tproxy tries them. The first account is used first.
         </div>
       ) : null}
 
@@ -661,6 +785,9 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
             const renewalDate = formatRenewalDate(quota?.renews_at);
 
             const isQuotaAutoDisabled = quota?.quota_auto_disabled === true;
+            const canReorder = !expiringFirst && (accountCountByProviderId[credential.providerId] || 0) > 1;
+            const isDragging = draggingCredentialId === credential.id;
+            const isDragOver = dragOverCredentialId === credential.id;
 
             return (
               <article
@@ -670,10 +797,21 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                   "quota-tracker-card-selectable",
                   !credential.enabled && "quota-tracker-card-inactive",
                   detailCredential?.id === credential.id && "quota-tracker-card-selected",
+                  isDragging && "is-dragging",
+                  isDragOver && "is-drag-over",
                 )}
                 role="button"
                 tabIndex={0}
                 aria-label={`View details for ${getConnectionLabel(credential) || credential.id}`}
+                onDragOver={(event) => {
+                  const source = credentials.find((item) => item.id === draggingCredentialId);
+                  if (!reorderingProviderId && source && source.providerId === credential.providerId && source.id !== credential.id) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setDragOverCredentialId(credential.id);
+                  }
+                }}
+                onDrop={(event) => void handleCredentialDrop(event, credential)}
                 onClick={() => setDetailCredential(credential)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -688,6 +826,30 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                   onKeyDown={(event) => event.stopPropagation()}
                 >
                   <div className="quota-tracker-card-head-row">
+                    {canReorder ? (
+                      <button
+                        type="button"
+                        className="quota-tracker-drag-handle"
+                        draggable={!reorderingProviderId && !expiringFirst}
+                        disabled={Boolean(reorderingProviderId) || expiringFirst}
+                        onClick={(event) => event.stopPropagation()}
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", credential.id);
+                          setDraggingCredentialId(credential.id);
+                          setDragOverCredentialId(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggingCredentialId(null);
+                          setDragOverCredentialId(null);
+                        }}
+                        aria-label={`Drag ${getConnectionLabel(credential) || credential.id} to change account order`}
+                        title="Drag to change account order"
+                      >
+                        <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
+                      </button>
+                    ) : null}
                     <div className="quota-tracker-card-ident">
                       <ProviderLogo
                         className="quota-tracker-provider-icon quota-tracker-provider-icon-lg"
@@ -705,7 +867,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
                     </div>
                     <Toggle
                       checked={credential.enabled}
-                      disabled={rowBusy}
+                      disabled={rowBusy || !quotaDataReady}
                       onChange={(event) => void setCredentialEnabled(credential, event.target.checked)}
                       aria-label={credential.enabled ? "Disable connection" : "Enable connection"}
                     />
@@ -893,6 +1055,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onMutated }: Pr
         proxyUsage={selectedCredential ? proxyUsageById[selectedCredential.id] : undefined}
         credentialActive={selectedCredential ? activeCredentialIds.has(selectedCredential.id) : false}
         toggling={selectedCredential ? togglingId === selectedCredential.id : false}
+        accountToggleReady={quotaDataReady}
         onClose={() => setDetailCredential(null)}
         onToggleEnabled={(enabled) => {
           if (selectedCredential) void setCredentialEnabled(selectedCredential, enabled);

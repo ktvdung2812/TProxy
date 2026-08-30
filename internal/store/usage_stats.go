@@ -64,6 +64,15 @@ type UsageChartPoint struct {
 	Cost   float64 `json:"cost"`
 }
 
+// CredentialUsageChartPoint is the compact time-series payload used by the
+// account detail modal. Requests are counted independently of token totals so
+// zero-token/error attempts remain visible in the request series.
+type CredentialUsageChartPoint struct {
+	Label    string `json:"label"`
+	Requests int    `json:"requests"`
+	Tokens   int    `json:"tokens"`
+}
+
 type UsageLookupMaps struct {
 	ProviderNames  map[string]string
 	CredentialName map[string]string
@@ -233,6 +242,70 @@ func (s *Store) UsageChart(ctx context.Context, period string, now time.Time) ([
 		}
 		return s.usageDailyChart(ctx, now, days, since)
 	}
+}
+
+// CredentialUsageChart returns the last calendar day, week, or month of usage
+// for one credential. The day view uses hourly buckets; week and month use
+// calendar-day buckets in UTC, matching the existing dashboard usage charts.
+func (s *Store) CredentialUsageChart(ctx context.Context, credentialID, period string, now time.Time) ([]CredentialUsageChartPoint, error) {
+	if strings.TrimSpace(credentialID) == "" {
+		return nil, fmt.Errorf("credential id is required")
+	}
+
+	period = strings.TrimSpace(strings.ToLower(period))
+	startOfToday := usageStartOfDayUTC(now)
+	var start, end time.Time
+	var bucketCount int
+	var bucketSize time.Duration
+	var label func(time.Time) string
+	switch period {
+	case "day":
+		start, end = startOfToday, startOfToday.Add(24*time.Hour)
+		bucketCount, bucketSize, label = 24, time.Hour, func(value time.Time) string { return value.Format("15:04") }
+	case "week":
+		start, end = usageStartOfDayUTC(now.Add(-6*24*time.Hour)), startOfToday.Add(24*time.Hour)
+		bucketCount, bucketSize, label = 7, 24*time.Hour, func(value time.Time) string { return value.Format("Mon") }
+	case "month":
+		start, end = usageStartOfDayUTC(now.Add(-29*24*time.Hour)), startOfToday.Add(24*time.Hour)
+		bucketCount, bucketSize, label = 30, 24*time.Hour, func(value time.Time) string { return value.Format("Jan 2") }
+	default:
+		return nil, fmt.Errorf("invalid credential usage chart period %q", period)
+	}
+
+	buckets := make([]CredentialUsageChartPoint, bucketCount)
+	for index := range buckets {
+		buckets[index].Label = label(start.Add(time.Duration(index) * bucketSize))
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT input_tokens, output_tokens, created_at
+FROM usage_events
+WHERE credential_id=? AND created_at >= ? AND created_at < ?`,
+		credentialID, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	startMs := start.UnixMilli()
+	bucketMs := bucketSize.Milliseconds()
+	for rows.Next() {
+		var inputTokens, outputTokens int
+		var created string
+		if err := rows.Scan(&inputTokens, &outputTokens, &created); err != nil {
+			return nil, err
+		}
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, created)
+		if parseErr != nil {
+			continue
+		}
+		index := int((createdAt.UnixMilli() - startMs) / bucketMs)
+		if index < 0 || index >= len(buckets) {
+			continue
+		}
+		buckets[index].Requests++
+		buckets[index].Tokens += inputTokens + outputTokens
+	}
+	return buckets, rows.Err()
 }
 
 func (s *Store) usageHourlyChart(ctx context.Context, start, end time.Time, bucketCount int) ([]UsageChartPoint, error) {

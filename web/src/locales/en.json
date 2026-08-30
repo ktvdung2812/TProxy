@@ -253,7 +253,7 @@
     "apiKeyOptionalPlaceholder": "Optional API key",
     "apiKeyPlaceholder": "Paste API key",
     "priority": "Priority",
-    "priorityHint": "Lower runs first",
+    "priorityHint": "Higher runs first",
     "weight": "Weight",
     "weightHint": "Relative load share",
     "enabled": "Enabled",

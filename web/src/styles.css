@@ -2744,6 +2744,18 @@ button:disabled,
   padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent);
   background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--color-warning); font-size: 12px;
 }
+.quota-tracker-order-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-text-muted);
+}
+.quota-tracker-order-hint .material-symbols-outlined {
+  color: var(--color-primary);
+  font-size: 17px;
+}
 .quota-tracker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .quota-tracker-card {
   min-width: 0; border: 1px solid var(--color-border-subtle); border-radius: 12px; background: var(--color-surface);
@@ -2766,12 +2778,55 @@ button:disabled,
   border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border-subtle));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 25%, transparent);
 }
+.quota-tracker-card.is-dragging,
+.connection-row.is-dragging {
+  opacity: 0.45;
+}
+.quota-tracker-card.is-drag-over,
+.connection-row.is-drag-over {
+  border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-border-subtle));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+}
 .quota-tracker-card-head {
   display: flex; flex-direction: column; align-items: stretch; gap: 8px;
   padding: 10px 12px; border-bottom: 1px solid var(--color-border-subtle);
 }
 .quota-tracker-card-head-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0;
+}
+.quota-tracker-drag-handle,
+.connection-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: grab;
+  touch-action: none;
+}
+.quota-tracker-drag-handle:hover,
+.connection-drag-handle:hover {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+}
+.quota-tracker-drag-handle:active,
+.connection-drag-handle:active {
+  cursor: grabbing;
+}
+.quota-tracker-drag-handle:disabled,
+.connection-drag-handle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.quota-tracker-drag-handle .material-symbols-outlined,
+.connection-drag-handle .material-symbols-outlined {
+  font-size: 19px;
 }
 .quota-tracker-card-ident { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .quota-tracker-provider-icon {
@@ -2971,6 +3026,70 @@ button:disabled,
 .quota-account-modal-section-meta {
   font-size: 11px;
   color: var(--color-text-muted);
+}
+.credential-usage-chart {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface-2) 28%, transparent);
+}
+.credential-usage-chart-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.credential-usage-chart-toolbar h5 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.credential-usage-chart-toolbar p {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.credential-usage-chart-periods {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+.credential-usage-chart-periods button {
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.credential-usage-chart-periods button:hover,
+.credential-usage-chart-periods button.is-active {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+}
+.credential-usage-chart-canvas {
+  width: 100%;
+  min-height: 220px;
+}
+.credential-usage-chart-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 150px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.credential-usage-chart-state.is-error {
+  color: var(--color-danger);
 }
 .quota-account-modal-details {
   display: grid;
@@ -4219,7 +4338,7 @@ button:disabled,
 .connection-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto auto 1fr auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -4232,6 +4351,21 @@ button:disabled,
 .connection-row.is-selected {
   border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border-subtle));
   background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}
+.connection-row {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.connections-order-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.connections-order-hint .material-symbols-outlined {
+  font-size: 17px;
+  color: var(--color-primary);
 }
 .connection-select {
   display: inline-flex;
@@ -4582,7 +4716,7 @@ button:disabled,
 }
 
 @media (max-width: 700px) {
-  .connection-row { grid-template-columns: auto auto 1fr; }
+  .connection-row { grid-template-columns: auto auto auto 1fr; }
   .connection-actions {
     grid-column: 1 / -1;
     width: 100%;

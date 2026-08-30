@@ -253,7 +253,7 @@
     "apiKeyOptionalPlaceholder": "API key tùy chọn",
     "apiKeyPlaceholder": "Dán API key",
     "priority": "Ưu tiên",
-    "priorityHint": "Số thấp chạy trước",
+    "priorityHint": "Số cao chạy trước",
     "weight": "Trọng số",
     "weightHint": "Tỷ lệ chia tải",
     "enabled": "Đã bật",

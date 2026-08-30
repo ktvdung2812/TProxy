@@ -173,6 +173,64 @@ func TestUsageChartDailyBuckets(t *testing.T) {
 	}
 }
 
+func TestCredentialUsageChartBucketsByPeriodAndCredential(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "credential-usage-chart.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 15, 30, 0, 0, time.UTC)
+	for _, event := range []UsageEvent{
+		{RequestID: "today-1", CredentialID: "cred-1", Status: 200, InputTokens: 10, OutputTokens: 5, CreatedAt: now.Add(-time.Hour)},
+		{RequestID: "yesterday", CredentialID: "cred-1", Status: 200, InputTokens: 20, OutputTokens: 8, CreatedAt: now.Add(-25 * time.Hour)},
+		{RequestID: "other-account", CredentialID: "cred-2", Status: 200, InputTokens: 100, OutputTokens: 100, CreatedAt: now.Add(-time.Hour)},
+	} {
+		if err := dataStore.AddUsage(ctx, event); err != nil {
+			t.Fatalf("AddUsage() error = %v", err)
+		}
+	}
+
+	day, err := dataStore.CredentialUsageChart(ctx, "cred-1", "day", now)
+	if err != nil {
+		t.Fatalf("day chart error = %v", err)
+	}
+	var dayRequests, dayTokens int
+	for _, point := range day {
+		dayRequests += point.Requests
+		dayTokens += point.Tokens
+	}
+	if dayRequests != 1 || dayTokens != 15 {
+		t.Fatalf("day chart totals requests=%d tokens=%d points=%+v", dayRequests, dayTokens, day)
+	}
+
+	week, err := dataStore.CredentialUsageChart(ctx, "cred-1", "week", now)
+	if err != nil {
+		t.Fatalf("week chart error = %v", err)
+	}
+	var weekRequests, weekTokens int
+	for _, point := range week {
+		weekRequests += point.Requests
+		weekTokens += point.Tokens
+	}
+	if weekRequests != 2 || weekTokens != 43 {
+		t.Fatalf("week chart totals requests=%d tokens=%d points=%+v", weekRequests, weekTokens, week)
+	}
+
+	if _, err := dataStore.CredentialUsageChart(ctx, "cred-1", "year", now); err == nil {
+		t.Fatal("invalid chart period was accepted")
+	}
+}
+
 func TestUsagePeriodSince(t *testing.T) {
 	now := time.Date(2026, 7, 17, 15, 30, 0, 0, time.UTC)
 	since, err := UsagePeriodSince("today", now)

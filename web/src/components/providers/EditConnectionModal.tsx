@@ -121,7 +121,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
           <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Friendly name" />
         </Field>
         <div className="inline-fields">
-          <Field label="Priority" hint="Lower runs first">
+          <Field label="Priority" hint="Higher runs first">
             <Input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
           </Field>
           <Field label="Weight" hint="Relative load share">

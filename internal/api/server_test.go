@@ -1381,6 +1381,100 @@ func TestManagementCRUDForCredentialsModelsProvidersAndAPIKeys(t *testing.T) {
 	}
 }
 
+func TestAdminReorderProviderCredentials(t *testing.T) {
+	cfg := &config.Config{
+		Server:    config.ServerConfig{AllowLocalWithoutKey: false},
+		Providers: []config.ProviderConfig{{ID: "codex", Type: "codex", Name: "Codex", Enabled: true}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	ctx := context.Background()
+	enabled := true
+	for _, id := range []string{"account-a", "account-b", "account-c"} {
+		if err := dataStore.SaveCredential(ctx, "codex", config.CredentialConfig{ID: id, AuthType: "oauth", Enabled: &enabled}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/providers/codex/credentials/order", bytes.NewBufferString(`{"credential_ids":["account-c","account-a","account-b"]}`))
+	request.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(request)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("reorder status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	credentials, err := dataStore.Credentials(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(credentials) != 3 || credentials[0].ID != "account-c" || credentials[1].ID != "account-a" || credentials[2].ID != "account-b" {
+		t.Fatalf("reordered credentials=%+v", credentials)
+	}
+
+	invalid := httptest.NewRequest(http.MethodPut, "/api/admin/providers/codex/credentials/order", bytes.NewBufferString(`{"credential_ids":["account-c","foreign","account-b"]}`))
+	invalid.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(invalid)
+	invalidRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(invalidRecorder, invalid)
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid reorder status=%d body=%s", invalidRecorder.Code, invalidRecorder.Body.String())
+	}
+	credentials, err = dataStore.Credentials(ctx, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials[0].ID != "account-c" || credentials[1].ID != "account-a" || credentials[2].ID != "account-b" {
+		t.Fatalf("invalid reorder changed persisted order=%+v", credentials)
+	}
+}
+
+func TestAdminCredentialUsageChartIsScopedToCredential(t *testing.T) {
+	cfg := &config.Config{
+		Server:    config.ServerConfig{AllowLocalWithoutKey: false},
+		Providers: []config.ProviderConfig{{ID: "codex", Type: "codex", Name: "Codex", Enabled: true}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
+	defer server.Close()
+	enabled := true
+	for _, id := range []string{"chart-account", "other-account"} {
+		if err := dataStore.SaveCredential(context.Background(), "codex", config.CredentialConfig{ID: id, AuthType: "oauth", Enabled: &enabled}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, event := range []store.UsageEvent{
+		{RequestID: "chart-request", CredentialID: "chart-account", Status: 200, InputTokens: 10, OutputTokens: 5, CreatedAt: now},
+		{RequestID: "other-request", CredentialID: "other-account", Status: 200, InputTokens: 100, OutputTokens: 100, CreatedAt: now},
+	} {
+		if err := dataStore.AddUsage(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/credentials/chart-account/usage-chart?period=day", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	withDefaultManagementAuth(request)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("chart status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var points []store.CredentialUsageChartPoint
+	if err := json.Unmarshal(recorder.Body.Bytes(), &points); err != nil {
+		t.Fatal(err)
+	}
+	var requests, tokens int
+	for _, point := range points {
+		requests += point.Requests
+		tokens += point.Tokens
+	}
+	if requests != 1 || tokens != 15 {
+		t.Fatalf("chart totals requests=%d tokens=%d points=%+v", requests, tokens, points)
+	}
+}
+
 func TestClientPolicyLimitsAreTypedAndLogged(t *testing.T) {
 	t.Setenv("TPROXY_LIMITED_KEY", "limited-client-key")
 	cfg := &config.Config{ClientAPIKeys: []config.ClientAPIKey{{ID: "limited", Name: "Limited", KeyEnv: "TPROXY_LIMITED_KEY", Policy: config.ClientKeyPolicy{Endpoints: []string{"/v1/models", "/v1/responses"}, Limits: config.LimitPolicy{RequestsPerMinute: 2, MaxInputBytes: 128, MaxOutputTokens: 10}}}}}
