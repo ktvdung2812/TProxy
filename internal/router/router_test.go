@@ -1191,3 +1191,41 @@ func TestAllCredentialsAuthRequiredReportsReauthorization(t *testing.T) {
 		t.Fatalf("status/code = %d/%q want %d/credential_auth_required", providerErr.Status, providerErr.Code, http.StatusServiceUnavailable)
 	}
 }
+
+func TestStaleProviderStatusDoesNotHideHealthyCredential(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"stale","model":"upstream-a","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "credential-broken", AuthType: "none"},
+			{ID: "credential-healthy", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	if err := dataStore.MarkCredentialAuthRequired(context.Background(), "credential-broken", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	// A provider left marked auth_required by an older health sync must not take
+	// its still-working credentials out of the pool.
+	if err := dataStore.SetProviderHealth(context.Background(), "provider", "auth_required", "OAuth authorization is required", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "stale-provider-status", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Credential.ID != "credential-healthy" {
+		t.Fatalf("credential = %q want credential-healthy", result.Selection.Credential.ID)
+	}
+}

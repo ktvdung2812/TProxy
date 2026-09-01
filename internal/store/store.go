@@ -1502,15 +1502,18 @@ func (s *Store) SetProviderHealth(ctx context.Context, providerID, status, messa
 	return nil
 }
 
-// SyncProviderHealth recomputes provider status from enabled credential statuses.
+// SyncProviderHealth recomputes provider status from enabled credential
+// statuses. A provider counts as auth_required only when *every* enabled
+// credential does: one account waiting on re-authorization used to short-circuit
+// the scan and mark the whole provider auth_required, which took its healthy
+// accounts out of the routing pool with it.
 func (s *Store) SyncProviderHealth(ctx context.Context, providerID string) error {
 	credentials, err := s.Credentials(ctx, providerID)
 	if err != nil {
 		return err
 	}
-	status := "healthy"
+	enabled, authRequired, unhealthy := 0, 0, 0
 	message := ""
-	enabled := 0
 	for _, credential := range credentials {
 		if !credential.Enabled {
 			continue
@@ -1518,22 +1521,26 @@ func (s *Store) SyncProviderHealth(ctx context.Context, providerID string) error
 		enabled++
 		switch credential.Status {
 		case "auth_required":
-			status = "auth_required"
-			if credential.LastError != "" {
-				message = credential.LastError
-			}
-			return s.SetProviderHealth(ctx, providerID, status, message, time.Now())
+			authRequired++
 		case "cooldown":
-			if status == "healthy" {
-				status = "degraded"
-				if credential.LastError != "" {
-					message = credential.LastError
-				}
-			}
+		default:
+			continue
+		}
+		unhealthy++
+		if message == "" && credential.LastError != "" {
+			message = credential.LastError
 		}
 	}
-	if enabled == 0 {
-		status = "unknown"
+	status := "healthy"
+	switch {
+	case enabled == 0:
+		status, message = "unknown", ""
+	case authRequired == enabled:
+		status = "auth_required"
+	case unhealthy > 0:
+		status = "degraded"
+	default:
+		message = ""
 	}
 	return s.SetProviderHealth(ctx, providerID, status, message, time.Now())
 }

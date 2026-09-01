@@ -1746,3 +1746,51 @@ func TestRecordConfigVersionSuppressesDuplicates(t *testing.T) {
 		t.Fatalf("a real configuration change produced %d rows, want 2", len(versions))
 	}
 }
+
+func TestSyncProviderHealthKeepsProviderUsableWithOneBrokenCredential(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "health.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: "http://127.0.0.1:1", Enabled: true, Credentials: []config.CredentialConfig{
+		{ID: "credential-a", AuthType: "none"},
+		{ID: "credential-b", AuthType: "none"},
+	}}}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.MarkCredentialAuthRequired(context.Background(), "credential-a", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SyncProviderHealth(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := dataStore.Provider(context.Background(), "provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Status != "degraded" {
+		t.Fatalf("status = %q want degraded while a healthy credential remains", provider.Status)
+	}
+	if err = dataStore.MarkCredentialAuthRequired(context.Background(), "credential-b", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SyncProviderHealth(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	if provider, err = dataStore.Provider(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	if provider.Status != "auth_required" {
+		t.Fatalf("status = %q want auth_required once every credential needs re-authorization", provider.Status)
+	}
+}
