@@ -1382,7 +1382,12 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 		routesConsidered++
 		provider, errProvider := r.store.Provider(ctx, route.ProviderID)
-		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" || provider.Status == "auth_required" || provider.Status == "cooldown" {
+		// Provider status is a cached summary of the last health sync and can lag
+		// behind reality, so treat it as advisory: only a provider that is
+		// actually switched off is skipped here. Credential eligibility below is
+		// the real gate, which keeps a stale auth_required or cooldown status from
+		// hiding credentials that work right now.
+		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" {
 			providerBlocked = true
 			continue
 		}
