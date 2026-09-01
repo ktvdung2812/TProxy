@@ -1170,7 +1170,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			if selectionProvider := liveProviderFromContext(r); selectionProvider != "" {
 				s.liveUsage.RecordError(selectionProvider)
 			}
-			writeError(w, providerErrorHTTPStatus(errStream), providers.Code(errStream), errStream.Error(), request.RequestID)
+			writeProviderError(w, errStream, request.RequestID)
 			return
 		}
 		s.liveUsage.Begin(request.RequestID, stream.Selection.Provider.ID, model.ID, stream.Selection.Credential.ID, stream.Selection.Credential.Label)
@@ -1202,7 +1202,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		if selectionProvider := liveProviderFromContext(r); selectionProvider != "" {
 			s.liveUsage.RecordError(selectionProvider)
 		}
-		writeError(w, providerErrorHTTPStatus(errExecute), providers.Code(errExecute), errExecute.Error(), request.RequestID)
+		writeProviderError(w, errExecute, request.RequestID)
 		return
 	}
 	s.liveUsage.Begin(request.RequestID, result.Selection.Provider.ID, model.ID, result.Selection.Credential.ID, result.Selection.Credential.Label)
@@ -1379,7 +1379,7 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	if request.Stream {
 		stream, err := s.router.ExecuteStream(r.Context(), *model, request)
 		if err != nil {
-			writeError(w, providerErrorHTTPStatus(err), providers.Code(err), err.Error(), requestID)
+			writeProviderError(w, err, requestID)
 			return
 		}
 		if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
@@ -1392,7 +1392,7 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	}
 	result, err := s.router.Execute(r.Context(), *model, request)
 	if err != nil {
-		writeError(w, providerErrorHTTPStatus(err), providers.Code(err), err.Error(), requestID)
+		writeProviderError(w, err, requestID)
 		return
 	}
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
