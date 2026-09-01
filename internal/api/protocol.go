@@ -200,6 +200,16 @@ func writeError(w http.ResponseWriter, status int, code, message, requestID stri
 	writeJSON(w, status, map[string]any{"error": map[string]any{"type": "provider_error", "code": code, "message": security.RedactText(message), "request_id": requestID}})
 }
 
+// writeProviderError renders a routing or upstream failure and forwards the
+// Retry-After that goes with it, so a client backs off instead of treating a
+// rate-limited account as a dead connection and reconnecting in a loop.
+func writeProviderError(w http.ResponseWriter, err error, requestID string) {
+	if retryAfter := strings.TrimSpace(providers.RetryAfter(err)); retryAfter != "" {
+		w.Header().Set("Retry-After", retryAfter)
+	}
+	writeError(w, providerErrorHTTPStatus(err), providers.Code(err), err.Error(), requestID)
+}
+
 func providerErrorHTTPStatus(err error) int {
 	status := providers.Status(err)
 	if status == 0 {
