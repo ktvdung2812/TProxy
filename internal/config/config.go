@@ -63,6 +63,45 @@ type ProxyPoolConfig struct {
 
 func (p ProxyPoolConfig) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
 
+// IsDirectProxyURL reports whether value is a non-secret "no proxy" sentinel.
+func IsDirectProxyURL(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.EqualFold(value, "direct") || strings.EqualFold(value, "none")
+}
+
+// PrepareImport fills values that a secret-free export leaves as env placeholders
+// so the operator download can be loaded on another machine without those env vars.
+func (cfg *Config) PrepareImport() {
+	if cfg == nil {
+		return
+	}
+	for i, pool := range cfg.ProxyPools {
+		if strings.TrimSpace(pool.URL) != "" {
+			continue
+		}
+		envName := strings.TrimSpace(pool.URLEnv)
+		if envName == "" {
+			continue
+		}
+		if value := Env(envName); value != "" {
+			cfg.ProxyPools[i].URL = value
+			continue
+		}
+		cfg.ProxyPools[i].URL = "direct"
+	}
+	if len(cfg.Combos) == 0 {
+		return
+	}
+	kept := make([]ComboConfig, 0, len(cfg.Combos))
+	for _, combo := range cfg.Combos {
+		if len(combo.Items) == 0 {
+			continue
+		}
+		kept = append(kept, combo)
+	}
+	cfg.Combos = kept
+}
+
 type RoutingConfig struct {
 	Strategy              string                            `yaml:"strategy" json:"strategy"`
 	StickyRoundRobinLimit int                               `yaml:"sticky-round-robin-limit" json:"sticky_round_robin_limit"`
@@ -204,10 +243,11 @@ type ClientAPIKey struct {
 }
 
 type ClientKeyPolicy struct {
-	Endpoints []string          `yaml:"endpoints" json:"endpoints,omitempty"`
-	Team      string            `yaml:"team" json:"team,omitempty"`
-	Tags      map[string]string `yaml:"tags" json:"tags,omitempty"`
-	Limits    LimitPolicy       `yaml:"limits" json:"limits,omitempty"`
+	Endpoints     []string          `yaml:"endpoints" json:"endpoints,omitempty"`
+	CredentialIDs []string          `yaml:"credential-ids" json:"credential_ids,omitempty"`
+	Team          string            `yaml:"team" json:"team,omitempty"`
+	Tags          map[string]string `yaml:"tags" json:"tags,omitempty"`
+	Limits        LimitPolicy       `yaml:"limits" json:"limits,omitempty"`
 	// DisableModelMapping opts this key out of the global custom model mapping.
 	// When true the client's requested model name is passed to the existing
 	// Cursor/Claude alias resolution untouched by model.mapping_rules.
@@ -1095,7 +1135,7 @@ func (cfg *Config) Validate() error {
 			default:
 				return fmt.Errorf("provider %q credential %q has unsupported auth type %q", provider.ID, credential.ID, credential.AuthType)
 			}
-			if credential.AuthType == "oauth" && provider.OAuth == nil {
+			if credential.AuthType == "oauth" && provider.OAuth == nil && !oauthConfigOptional(provider.Type) {
 				return fmt.Errorf("provider %q credential %q requires oauth configuration", provider.ID, credential.ID)
 			}
 		}
@@ -1295,6 +1335,12 @@ func isCustomOAuthProviderType(providerType string) bool {
 	default:
 		return false
 	}
+}
+
+// oauthConfigOptional is true for providers whose tokens are imported rather
+// than enrolled through a provider-level OAuth client configuration.
+func oauthConfigOptional(providerType string) bool {
+	return providerType == "cursor"
 }
 
 func Env(name string) string {

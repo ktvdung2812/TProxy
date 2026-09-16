@@ -8,7 +8,8 @@ import { useUsageStream } from "../usage/useUsageStream";
 import { ConfirmDialog, Toggle, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
 import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
-import { consumeCodexResetCredit, fetchCredentialProxyUsage, fetchCredentialQuota, type CredentialProxyUsage, type CredentialQuota } from "./api";
+import { consumeCodexResetCredit, fetchCredentialProxyUsage, type CredentialProxyUsage, type CredentialQuota } from "./api";
+import { clearCachedQuota, loadCredentialQuotaOnce } from "./quotaOnce";
 import { QuotaRingGrid } from "./QuotaRingGrid";
 import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
@@ -33,7 +34,7 @@ import {
   patchQuotaSearchParams,
   quotaEntries,
   resolveQuotaProviderFilter,
-  runWithConcurrency,
+  compareQuotaAccountOrder,
   usesQuotaRingLayout,
   usesQuotaStackedLayout,
   type QuotaUrlSort,
@@ -90,6 +91,7 @@ type CredentialRow = {
 type Props = {
   secret: string;
   credentials: CredentialRow[];
+  accountsLoading?: boolean;
   onError: (message: string) => void;
   onNotice?: (message: string) => void;
   onMutated?: () => void;
@@ -120,7 +122,7 @@ function formatRenewalDate(value?: string): string | null {
   });
 }
 
-export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMutated }: Props) {
+export function QuotaTrackerView({ secret, credentials, accountsLoading = false, onError, onNotice, onMutated }: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -147,8 +149,12 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
   const [dragOverCredentialId, setDragOverCredentialId] = useState<string | null>(null);
   const [reorderingProviderId, setReorderingProviderId] = useState<string | null>(null);
   const credentialsRef = useRef(credentials);
-  const refreshingRef = useRef(false);
+  const passRunningRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const inFlightIdsRef = useRef(new Set<string>());
   const refreshAllRef = useRef<() => Promise<void>>(async () => {});
+  const ensureLoadedRef = useRef<() => Promise<void>>(async () => {});
+  const quotaPassReadyRef = useRef(false);
 
   credentialsRef.current = credentials;
 
@@ -263,56 +269,93 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
     };
   }, [scopeCredentials]);
 
-  const sortedCredentials = useMemo(() => {
-    return [...filteredCredentials].sort((a, b) => {
-      const providerA = quotaProviderKey(a);
-      const providerB = quotaProviderKey(b);
-      if (a.providerId === b.providerId) {
-        if (expiringFirst) {
-          const diff = earliestResetAt(quotaById[a.id]) - earliestResetAt(quotaById[b.id]);
-          if (diff !== 0) return diff;
-        }
-        const providerOrder = credentialOrderByProvider[a.providerId];
-        if (providerOrder) {
-          const leftIndex = providerOrder.indexOf(a.id);
-          const rightIndex = providerOrder.indexOf(b.id);
-          if (leftIndex >= 0 && rightIndex >= 0 && leftIndex !== rightIndex) return leftIndex - rightIndex;
-        }
-        const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0);
-        if (priorityDiff !== 0) return priorityDiff;
-        return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
-      }
-      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-      const countDiff = (providerCounts[providerB] || 0) - (providerCounts[providerA] || 0);
-      if (countDiff !== 0) {
-        return countDiff;
-      }
-      if (providerA !== providerB) {
-        return providerA.localeCompare(providerB);
-      }
-      return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
-    });
-  }, [filteredCredentials, expiringFirst, quotaById, providerCounts, credentialOrderByProvider]);
+  const accountOrderOptions = useMemo(
+    () => ({
+      providerKey: quotaProviderKey,
+      providerCounts,
+      providerOrder: credentialOrderByProvider,
+    }),
+    [providerCounts, credentialOrderByProvider],
+  );
 
-  const credentialIdsKey = useMemo(
-    () => sortedCredentials.map((item) => item.id).join("\u0000"),
-    [sortedCredentials],
+  const listOrderCredentials = useMemo(
+    () => [...filteredCredentials].sort((a, b) => compareQuotaAccountOrder(a, b, accountOrderOptions)),
+    [filteredCredentials, accountOrderOptions],
+  );
+
+  const loadOrderCredentials = useMemo(
+    () => [...eligible].sort((a, b) => compareQuotaAccountOrder(a, b, accountOrderOptions)),
+    [eligible, accountOrderOptions],
+  );
+
+  const loadOrderRef = useRef(loadOrderCredentials);
+  loadOrderRef.current = loadOrderCredentials;
+
+  const settledRef = useRef(settledQuotaCredentialIds);
+  settledRef.current = settledQuotaCredentialIds;
+
+  const eligibleIdsKey = useMemo(
+    () => eligible.map((item) => item.id).slice().sort().join("\u0000"),
+    [eligible],
   );
 
   // Account routing controls stay locked until every account currently shown
   // on the page has completed its first quota request. A failed request still
   // counts as settled because its error is visible and the operator can retry.
   const quotaDataReady = useMemo(
-    () => sortedCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
-    [sortedCredentials, settledQuotaCredentialIds],
+    () => listOrderCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
+    [listOrderCredentials, settledQuotaCredentialIds],
+  );
+  const quotaPassReady = useMemo(
+    () =>
+      loadOrderCredentials.length > 0 &&
+      loadOrderCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
+    [loadOrderCredentials, settledQuotaCredentialIds],
+  );
+  quotaPassReadyRef.current = quotaPassReady;
+
+  const sortedCredentials = useMemo(() => {
+    if (!expiringFirst || !quotaDataReady) return listOrderCredentials;
+    const resetAtById: Record<string, number> = {};
+    for (const row of listOrderCredentials) {
+      resetAtById[row.id] = earliestResetAt(quotaById[row.id]);
+    }
+    return [...listOrderCredentials].sort((a, b) =>
+      compareQuotaAccountOrder(a, b, { ...accountOrderOptions, resetAtById }),
+    );
+  }, [expiringFirst, quotaDataReady, listOrderCredentials, quotaById, accountOrderOptions]);
+
+  const quotaPassSettledCount = useMemo(
+    () => loadOrderCredentials.filter((item) => settledQuotaCredentialIds.has(item.id)).length,
+    [loadOrderCredentials, settledQuotaCredentialIds],
   );
 
+  const markSettled = useCallback((credentialId: string) => {
+    settledRef.current = new Set(settledRef.current).add(credentialId);
+    setSettledQuotaCredentialIds((current) => {
+      if (current.has(credentialId)) return current;
+      const next = new Set(current);
+      next.add(credentialId);
+      return next;
+    });
+  }, []);
+
   const loadQuota = useCallback(
-    async (credentialId: string): Promise<boolean> => {
+    async (credentialId: string, force = false): Promise<boolean> => {
+      if (!force && (settledRef.current.has(credentialId) || inFlightIdsRef.current.has(credentialId))) {
+        return false;
+      }
+      inFlightIdsRef.current.add(credentialId);
       setLoading((current) => ({ ...current, [credentialId]: true }));
       setErrors((current) => ({ ...current, [credentialId]: "" }));
       try {
-        const quota = await fetchCredentialQuota(secret, credentialId);
+        const cached = await loadCredentialQuotaOnce(secret, credentialId, force);
+        if (cached.error) {
+          setErrors((current) => ({ ...current, [credentialId]: cached.error || t("quota.failedToFetch") }));
+          return false;
+        }
+        const quota = cached.quota;
+        if (!quota) return false;
         setQuotaById((current) => ({ ...current, [credentialId]: quota }));
         if (typeof quota.credential_enabled === "boolean") {
           const credential = credentialsRef.current.find((item) => item.id === credentialId);
@@ -324,16 +367,12 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
         setErrors((current) => ({ ...current, [credentialId]: message }));
         return false;
       } finally {
+        inFlightIdsRef.current.delete(credentialId);
         setLoading((current) => ({ ...current, [credentialId]: false }));
-        setSettledQuotaCredentialIds((current) => {
-          if (current.has(credentialId)) return current;
-          const next = new Set(current);
-          next.add(credentialId);
-          return next;
-        });
+        markSettled(credentialId);
       }
     },
-    [secret],
+    [markSettled, secret, t],
   );
 
   const loadProxyUsage = useCallback(async () => {
@@ -345,33 +384,88 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
     }
   }, [secret]);
 
+  const runQuotaPass = useCallback(
+    async (force: boolean) => {
+      let changed = false;
+      if (force) {
+        const ids = loadOrderRef.current.map((item) => item.id);
+        for (const id of ids) {
+          if (cancelledRef.current) return null;
+          if (await loadQuota(id, true)) changed = true;
+        }
+      } else {
+        while (true) {
+          if (cancelledRef.current) return null;
+          const next = loadOrderRef.current.find(
+            (item) => !settledRef.current.has(item.id) && !inFlightIdsRef.current.has(item.id),
+          );
+          if (!next) break;
+          if (await loadQuota(next.id, false)) changed = true;
+        }
+      }
+      if (cancelledRef.current) return null;
+      return changed;
+    },
+    [loadQuota],
+  );
+
+  const ensureLoaded = useCallback(async () => {
+    if (passRunningRef.current) return;
+    if (loadOrderRef.current.length === 0) return;
+    if (loadOrderRef.current.every((item) => settledRef.current.has(item.id))) return;
+    passRunningRef.current = true;
+    setRefreshingAll(true);
+    try {
+      await loadProxyUsage();
+      if (cancelledRef.current) return;
+      const changed = await runQuotaPass(false);
+      if (changed) onMutated?.();
+    } catch (cause) {
+      if (!cancelledRef.current) {
+        onError(cause instanceof Error ? cause.message : t("quota.failedToRefresh"));
+      }
+    } finally {
+      passRunningRef.current = false;
+      if (!cancelledRef.current) setRefreshingAll(false);
+    }
+  }, [loadProxyUsage, onError, onMutated, runQuotaPass, t]);
+
   const refreshAll = useCallback(async () => {
-    if (refreshingRef.current) return;
-    refreshingRef.current = true;
+    if (loadOrderRef.current.length === 0) return;
+    cancelledRef.current = false;
+    passRunningRef.current = true;
+    inFlightIdsRef.current = new Set();
+    clearCachedQuota(loadOrderRef.current.map((item) => item.id));
+    settledRef.current = new Set();
+    setSettledQuotaCredentialIds(new Set());
     setRefreshingAll(true);
     setCountdown(60);
     try {
       await loadProxyUsage();
-      const changed = await runWithConcurrency(
-        sortedCredentials.map((item) => item.id),
-        (credentialId) => loadQuota(credentialId),
-      );
-      if (changed.some(Boolean)) {
-        onMutated?.();
-      }
+      if (cancelledRef.current) return;
+      const changed = await runQuotaPass(true);
+      if (changed) onMutated?.();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : t("quota.failedToRefresh"));
+      if (!cancelledRef.current) {
+        onError(cause instanceof Error ? cause.message : t("quota.failedToRefresh"));
+      }
     } finally {
-      refreshingRef.current = false;
-      setRefreshingAll(false);
+      passRunningRef.current = false;
+      if (!cancelledRef.current) setRefreshingAll(false);
     }
-  }, [sortedCredentials, loadQuota, loadProxyUsage, onError, onMutated]);
+  }, [loadProxyUsage, onError, onMutated, runQuotaPass, t]);
 
   refreshAllRef.current = refreshAll;
+  ensureLoadedRef.current = ensureLoaded;
 
   useEffect(() => {
-    void refreshAllRef.current();
-  }, [credentialIdsKey]);
+    cancelledRef.current = false;
+    void ensureLoadedRef.current();
+    return () => {
+      cancelledRef.current = true;
+      passRunningRef.current = false;
+    };
+  }, [eligibleIdsKey]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -393,6 +487,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
   useEffect(() => {
     if (!autoRefresh) return;
     const refreshTimer = window.setInterval(() => {
+      if (!quotaPassReadyRef.current || passRunningRef.current) return;
       void refreshAllRef.current();
     }, REFRESH_INTERVAL_MS);
     const countdownTimer = window.setInterval(() => {
@@ -457,19 +552,15 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
     if (!source || source.providerId !== target.providerId) return;
 
     const previousOrder = credentialOrderByProvider[target.providerId];
-    const savedOrder = previousOrder;
     const providerOrder = [...credentials]
       .filter((credential) => credential.providerId === target.providerId)
-      .sort((left, right) => {
-        if (savedOrder) {
-          const leftIndex = savedOrder.indexOf(left.id);
-          const rightIndex = savedOrder.indexOf(right.id);
-          if (leftIndex >= 0 && rightIndex >= 0 && leftIndex !== rightIndex) return leftIndex - rightIndex;
-        }
-        const priorityDiff = (right.priority ?? 0) - (left.priority ?? 0);
-        if (priorityDiff !== 0) return priorityDiff;
-        return (getConnectionLabel(left) || left.id).localeCompare(getConnectionLabel(right) || right.id);
-      });
+      .sort((left, right) =>
+        compareQuotaAccountOrder(left, right, {
+          providerKey: quotaProviderKey,
+          providerCounts,
+          providerOrder: previousOrder ? { [target.providerId]: previousOrder } : undefined,
+        }),
+      );
     const next = moveCredentialBefore(providerOrder, sourceId, target.id);
     if (next === providerOrder) return;
     const nextIds = next.map((credential) => credential.id);
@@ -541,7 +632,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
         onError(result.message || "No Codex reset credits available.");
         return;
       }
-      await loadQuota(credential.id).then((changed) => {
+      await loadQuota(credential.id, true).then((changed) => {
         if (changed) onMutated?.();
       });
     } catch (cause) {
@@ -563,9 +654,19 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
     return (
       <section className="quota-tracker-page">
         <div className="quota-tracker-empty">
-          <span className="material-symbols-outlined">cloud_off</span>
-          <h3>No Providers Connected</h3>
-          <p>Connect Codex, Claude, Copilot, or Antigravity accounts to track upstream quota limits.</p>
+          {accountsLoading ? (
+            <>
+              <span className="material-symbols-outlined animate-spin">progress_activity</span>
+              <h3>{t("quota.loadingAccounts")}</h3>
+              <p>{t("quota.loadingAccountsHint")}</p>
+            </>
+          ) : (
+            <>
+              <span className="material-symbols-outlined">cloud_off</span>
+              <h3>No Providers Connected</h3>
+              <p>Connect Codex, Claude, Copilot, or Antigravity accounts to track upstream quota limits.</p>
+            </>
+          )}
         </div>
       </section>
     );
@@ -744,10 +845,13 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
         </div>
       </div>
 
-      {!quotaDataReady ? (
+      {!quotaPassReady ? (
         <div className="quota-tracker-banner quota-tracker-order-hint">
           <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
-          Loading account quota data… account toggles will unlock when loading completes.
+          {t("quota.loadingQuotaProgress", {
+            current: quotaPassSettledCount,
+            total: loadOrderCredentials.length,
+          })}
         </div>
       ) : expiringFirst ? (
         <div className="quota-tracker-banner">
@@ -779,12 +883,17 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
             const visibleEntries = filterQuotasByVisibility(quotaKey, allEntries, quotaVisibility);
             const hiddenEntries = getHiddenQuotaRows(quotaKey, allEntries, quotaVisibility);
             const secondary = credential.email && credential.label && credential.email !== credential.label ? credential.email : null;
+            const connectionLabel = getConnectionLabel(credential) || credential.id;
             const isCodex = quotaKey === "codex" || credential.providerType === "codex";
             const resetCreditCount = getCodexResetCreditCount(quota);
             const isResettingLimit = resettingLimitId === credential.id;
             const renewalDate = formatRenewalDate(quota?.renews_at);
 
             const isQuotaAutoDisabled = quota?.quota_auto_disabled === true;
+            const isQuotaDataEmpty = Boolean(quota) && allEntries.length === 0;
+            const isAllQuotaRowsHidden = allEntries.length > 0 && visibleEntries.length === 0;
+            const isQuotaContentEmpty = isQuotaDataEmpty || isAllQuotaRowsHidden;
+            const isCardMuted = !credential.enabled || isQuotaAutoDisabled || isQuotaContentEmpty;
             const canReorder = !expiringFirst && (accountCountByProviderId[credential.providerId] || 0) > 1;
             const isDragging = draggingCredentialId === credential.id;
             const isDragOver = dragOverCredentialId === credential.id;
@@ -796,13 +905,16 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
                   "quota-tracker-card",
                   "quota-tracker-card-selectable",
                   !credential.enabled && "quota-tracker-card-inactive",
+                  isQuotaAutoDisabled && "quota-tracker-card-auto-paused",
+                  isQuotaContentEmpty && "quota-tracker-card-empty",
+                  isCardMuted && "quota-tracker-card-muted",
                   detailCredential?.id === credential.id && "quota-tracker-card-selected",
                   isDragging && "is-dragging",
                   isDragOver && "is-drag-over",
                 )}
                 role="button"
                 tabIndex={0}
-                aria-label={`View details for ${getConnectionLabel(credential) || credential.id}`}
+                aria-label={`View details for ${connectionLabel}`}
                 onDragOver={(event) => {
                   const source = credentials.find((item) => item.id === draggingCredentialId);
                   if (!reorderingProviderId && source && source.providerId === credential.providerId && source.id !== credential.id) {
@@ -858,11 +970,12 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
                       />
                       <div className="quota-tracker-card-titles">
                         <h3>{info.name}</h3>
-                        {getConnectionLabel(credential) ? <p>{getConnectionLabel(credential)}</p> : null}
-                        {isQuotaAutoDisabled ? (
-                          <p className="quota-tracker-card-email">Paused automatically — quota at 0%</p>
-                        ) : null}
-                        {secondary ? <p className="quota-tracker-card-email">{secondary}</p> : null}
+                        <div className="quota-tracker-card-meta">
+                          <span className="quota-tracker-card-account" title={connectionLabel}>{connectionLabel}</span>
+                          {secondary ? <span className="quota-tracker-card-secondary" title={secondary}>{secondary}</span> : null}
+                          {!credential.enabled ? <span className="quota-tracker-card-state">{t("quota.off")}</span> : null}
+                          {isQuotaAutoDisabled ? <span className="quota-tracker-card-state">{t("quota.autoPaused")}</span> : null}
+                        </div>
                       </div>
                     </div>
                     <Toggle
@@ -917,7 +1030,7 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
                       className="quota-tracker-icon-btn"
                       disabled={busy || rowBusy}
                       onClick={() => {
-                        void loadQuota(credential.id).then((changed) => {
+                        void loadQuota(credential.id, true).then((changed) => {
                           if (changed) onMutated?.();
                         });
                       }}
@@ -959,8 +1072,16 @@ export function QuotaTrackerView({ secret, credentials, onError, onNotice, onMut
                       <span className="material-symbols-outlined">error</span>
                       <p>{error}</p>
                     </div>
-                  ) : quota?.message && allEntries.length === 0 ? (
-                    <div className="quota-tracker-card-message">{quota.message}</div>
+                  ) : isQuotaDataEmpty ? (
+                    <div className="quota-tracker-card-empty-state">
+                      <span className="material-symbols-outlined">data_usage</span>
+                      <span>{quota?.message || t("quota.noQuotaData")}</span>
+                    </div>
+                  ) : isAllQuotaRowsHidden ? (
+                    <div className="quota-tracker-card-empty-state">
+                      <span className="material-symbols-outlined">visibility_off</span>
+                      <span>{t("quota.allQuotaRowsHidden")}</span>
+                    </div>
                   ) : (
                     usesQuotaStackedLayout(quotaKey) ? (
                       <QuotaStackedBar

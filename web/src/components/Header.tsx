@@ -57,6 +57,7 @@ export function Header({
           <IconButton icon="menu" label={t("nav.expandMenu")} className="header-menu-btn" onClick={onOpenNav} />
         ) : null}
         <div className="header-title-copy">
+          <p className="header-kicker">// CONTROL PLANE</p>
           <h1>
             <span className="material-symbols-outlined">{icon}</span>
             {title}

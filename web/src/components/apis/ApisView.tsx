@@ -23,7 +23,17 @@ import { EndpointRow } from "./EndpointRow";
 import { LanPortHelpModal } from "./LanPortHelpModal";
 import { SecurityWarning } from "./SecurityWarning";
 import { ApiModelAccessField } from "./ApiModelAccessField";
-import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage, ApiModelOption } from "./types";
+import { ApiKeyCredentialAccessField } from "./ApiKeyCredentialAccessField";
+import type {
+  ApiKeyCombo,
+  ApiKeyCredential,
+  ApiKeyFormData,
+  ApiKeyProvider,
+  ApiKeyRecord,
+  ApiKeyRoute,
+  ApiKeyUsage,
+  ApiModelOption,
+} from "./types";
 import {
   PROXY_ENDPOINTS,
   apiKeyToForm,
@@ -39,6 +49,10 @@ type Props = {
   secret: string;
   apiKeys: ApiKeyRecord[];
   modelOptions: ApiModelOption[];
+  providers: ApiKeyProvider[];
+  credentials: Record<string, ApiKeyCredential[]>;
+  routes: Record<string, ApiKeyRoute[]>;
+  combos: ApiKeyCombo[];
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onMutated?: () => void;
@@ -56,7 +70,7 @@ function compact(value: number) {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
-export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onMutated }: Props) {
+export function ApisView({ secret, apiKeys, modelOptions, providers, credentials, routes, combos, onError, onNotice, onMutated }: Props) {
   const { t } = useTranslation();
   useApiKeySecrets();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
@@ -762,6 +776,15 @@ export function ApisView({ secret, apiKeys, modelOptions, onError, onNotice, onM
                 onChange={(models) => setFormData({ ...formData, models })}
               />
             </Field>
+            <ApiKeyCredentialAccessField
+              value={formData.credential_ids}
+              models={formData.models}
+              providers={providers}
+              credentials={credentials}
+              routes={routes}
+              combos={combos}
+              onChange={(credentialIDs) => setFormData({ ...formData, credential_ids: credentialIDs })}
+            />
           </section>
         </form>
       </Modal>

@@ -32,6 +32,25 @@ var antigravityInternalModels = map[string]struct{}{
 	"gemini-2.5-pro":              {},
 }
 
+// antigravityKnownModels supplies stable display names for the current
+// account-facing Antigravity catalog when fetchAvailableModels omits a
+// displayName. The upstream response remains authoritative for availability;
+// this map never adds models that the signed-in account cannot use.
+var antigravityKnownModels = map[string]string{
+	"gemini-3-flash-agent":       "Gemini 3.5 Flash (High)",
+	"gemini-3.5-flash-low":       "Gemini 3.5 Flash (Medium)",
+	"gemini-3.5-flash-extra-low": "Gemini 3.5 Flash (Low)",
+	"gemini-pro-agent":           "Gemini 3.1 Pro (High)",
+	"gemini-3.1-pro-low":         "Gemini 3.1 Pro (Low)",
+	"claude-sonnet-4-6":          "Claude Sonnet 4.6 (Thinking)",
+	"claude-opus-4-6-thinking":   "Claude Opus 4.6 (Thinking)",
+	"gpt-oss-120b-medium":        "GPT-OSS 120B (Medium)",
+	"gemini-3-flash":             "Gemini 3 Flash",
+	"gemini-3.1-flash-image":     "Gemini 3.1 Flash (Image)",
+	"gemini-3-pro-agent":         "Gemini 3 Pro",
+	"gemini-3-pro-image":         "Gemini 3 Pro Image",
+}
+
 func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.Provider, credential store.Credential) ([]DiscoveredModel, error) {
 	token := credentialAccessToken(credential)
 	if token == "" {
@@ -77,10 +96,7 @@ func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.
 		if isInternal, _ := entry["isInternal"].(bool); isInternal {
 			continue
 		}
-		name := stringValue(firstValue(entry, "displayName", "display_name"))
-		if name == "" {
-			name = modelID
-		}
+		name := antigravityModelDisplayName(modelID, entry)
 		items = append(items, DiscoveredModel{
 			ID:           modelID,
 			Name:         name,
@@ -95,6 +111,16 @@ func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.
 		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity returned only internal models for this account"}
 	}
 	return items, nil
+}
+
+func antigravityModelDisplayName(modelID string, entry map[string]any) string {
+	if name := strings.TrimSpace(stringValue(firstValue(entry, "displayName", "display_name"))); name != "" {
+		return name
+	}
+	if name := antigravityKnownModels[modelID]; name != "" {
+		return name
+	}
+	return modelID
 }
 
 // antigravityModelCapabilities marks the image generation models, which take a

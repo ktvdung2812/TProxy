@@ -67,6 +67,7 @@ export function toggleApiKey(secret: string, key: ApiKeyRecord, enabled: boolean
     media_jobs: key.policy?.limits?.media_jobs || 0,
     budget_usd_per_day: key.policy?.limits?.budget_usd_per_day || 0,
     disable_model_mapping: key.policy?.disable_model_mapping === true,
+    credential_ids: [...(key.policy?.credential_ids || [])],
   });
 }
 

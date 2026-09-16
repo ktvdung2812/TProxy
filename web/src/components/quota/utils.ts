@@ -18,6 +18,49 @@ export function getConnectionLabel(credential: { label?: string; email?: string;
   return credential.label?.trim() || credential.email?.trim() || null;
 }
 
+export type QuotaAccountSortItem = {
+  id: string;
+  providerId: string;
+  enabled: boolean;
+  priority?: number;
+  label?: string;
+  email?: string;
+};
+
+export function compareQuotaAccountOrder<T extends QuotaAccountSortItem>(
+  a: T,
+  b: T,
+  options: {
+    providerKey: (item: T) => string;
+    providerCounts: Record<string, number>;
+    providerOrder?: Record<string, string[]>;
+    resetAtById?: Record<string, number>;
+  },
+): number {
+  const providerA = options.providerKey(a);
+  const providerB = options.providerKey(b);
+  if (a.providerId === b.providerId) {
+    if (options.resetAtById) {
+      const diff = (options.resetAtById[a.id] ?? Number.POSITIVE_INFINITY) - (options.resetAtById[b.id] ?? Number.POSITIVE_INFINITY);
+      if (diff !== 0) return diff;
+    }
+    const providerOrder = options.providerOrder?.[a.providerId];
+    if (providerOrder) {
+      const leftIndex = providerOrder.indexOf(a.id);
+      const rightIndex = providerOrder.indexOf(b.id);
+      if (leftIndex >= 0 && rightIndex >= 0 && leftIndex !== rightIndex) return leftIndex - rightIndex;
+    }
+    const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0);
+    if (priorityDiff !== 0) return priorityDiff;
+    return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
+  }
+  if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+  const countDiff = (options.providerCounts[providerB] || 0) - (options.providerCounts[providerA] || 0);
+  if (countDiff !== 0) return countDiff;
+  if (providerA !== providerB) return providerA.localeCompare(providerB);
+  return (getConnectionLabel(a) || a.id).localeCompare(getConnectionLabel(b) || b.id);
+}
+
 export function buildProviderCountMap<T>(
   items: T[],
   providerKey: (item: T) => string,

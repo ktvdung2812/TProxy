@@ -19,6 +19,9 @@ const antigravityCatalogue = `{"models":{
 	"gemini-3-flash":{"displayName":"Gemini 3 Flash","quotaInfo":{"remainingFraction":0.5}},
 	"gemini-3-pro-image":{"displayName":"Gemini 3 Pro Image"},
 	"claude-sonnet-4-6":{"displayName":"Claude Sonnet 4.6 (Thinking)"},
+	"claude-opus-4-6-thinking":{},
+	"gemini-3.5-flash-low":{},
+	"gpt-oss-120b-medium":{},
 	"internal-scratch":{"displayName":"Internal","isInternal":true},
 	"tab_flash_lite_preview":{"displayName":"Tab Completion"},
 	"gemini-2.5-pro":{"displayName":"Legacy Pro"},
@@ -79,7 +82,16 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 	for _, model := range models {
 		got[model.ID] = model
 	}
-	for _, want := range []string{"gemini-3-pro-agent", "gemini-3-flash", "gemini-3-pro-image", "claude-sonnet-4-6", "no-display-name"} {
+	for _, want := range []string{
+		"gemini-3-pro-agent",
+		"gemini-3-flash",
+		"gemini-3-pro-image",
+		"claude-sonnet-4-6",
+		"claude-opus-4-6-thinking",
+		"gemini-3.5-flash-low",
+		"gpt-oss-120b-medium",
+		"no-display-name",
+	} {
 		if _, ok := got[want]; !ok {
 			t.Errorf("model %q missing from discovery", want)
 		}
@@ -92,6 +104,15 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 	}
 	if got["gemini-3-flash"].Name != "Gemini 3 Flash" {
 		t.Errorf("display name = %q", got["gemini-3-flash"].Name)
+	}
+	for modelID, wantName := range map[string]string{
+		"claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
+		"gemini-3.5-flash-low":     "Gemini 3.5 Flash (Medium)",
+		"gpt-oss-120b-medium":      "GPT-OSS 120B (Medium)",
+	} {
+		if got[modelID].Name != wantName {
+			t.Errorf("model %q display name = %q, want %q", modelID, got[modelID].Name, wantName)
+		}
 	}
 	// A missing display name must not produce a blank row in the dashboard.
 	if got["no-display-name"].Name != "no-display-name" {

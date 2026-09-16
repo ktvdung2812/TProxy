@@ -150,10 +150,10 @@ export function OAuthModal({
   );
 
   const openAuthWindow = useCallback((url: string) => {
+    // With `noopener`, browsers may deliberately return null even after
+    // opening the authorization window. Retrying based on that value opens an
+    // unwanted second tab.
     popupRef.current = window.open(url, "tproxy-oauth", "width=600,height=720,noopener,noreferrer");
-    if (!popupRef.current) {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
   }, []);
 
   const handleStart = useCallback(async () => {

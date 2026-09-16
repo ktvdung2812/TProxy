@@ -2612,7 +2612,8 @@ func (s *Store) ExportConfig(ctx context.Context, base *config.Config) (*config.
 
 // ExportConfigWithOAuthTokens is the operator download. OAuth access and
 // refresh tokens are included so a file can be imported onto another machine
-// without the source master key. API keys and proxy URLs stay env placeholders.
+// without the source master key. API keys and secret proxy URLs stay env
+// placeholders; direct/none pools are written inline because they are not secrets.
 func (s *Store) ExportConfigWithOAuthTokens(ctx context.Context, base *config.Config) (*config.Config, error) {
 	return s.exportConfig(ctx, base, true)
 }
@@ -2634,7 +2635,13 @@ func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOA
 	}
 	for _, pool := range pools {
 		enabled := pool.Enabled
-		result.ProxyPools = append(result.ProxyPools, config.ProxyPoolConfig{ID: pool.ID, Name: pool.Name, URLEnv: "TPROXY_PROXY_" + exportToken(pool.ID), Enabled: &enabled})
+		exported := config.ProxyPoolConfig{ID: pool.ID, Name: pool.Name, Enabled: &enabled}
+		if config.IsDirectProxyURL(pool.URL) {
+			exported.URL = strings.ToLower(strings.TrimSpace(pool.URL))
+		} else {
+			exported.URLEnv = "TPROXY_PROXY_" + exportToken(pool.ID)
+		}
+		result.ProxyPools = append(result.ProxyPools, exported)
 	}
 	result.Providers = nil
 	providers, err := s.Providers(ctx)

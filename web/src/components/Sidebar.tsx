@@ -23,12 +23,12 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
         <div className="sidebar-brand-row">
           <NavLink className="sidebar-brand" to="/" onClick={() => onClose?.()} title="tproxy control center">
             <span className="brand-mark">
-              <span className="material-symbols-outlined">hub</span>
+              <span className="material-symbols-outlined">terminal</span>
             </span>
             {!collapsed && (
               <span className="sidebar-brand-text">
-                <span className="brand-name">tproxy</span>
-                <span className="brand-sub">{t("nav.controlCenter")}</span>
+                <span className="brand-name">TPROXY</span>
+                <span className="brand-sub">// {t("nav.controlCenter")}</span>
               </span>
             )}
           </NavLink>

@@ -251,8 +251,13 @@ export function ModelsView({
               const visibleRoutes = routableRoutes.slice(0, 4);
               const hiddenRouteCount = routableRoutes.length - visibleRoutes.length;
               const suggestedCount = routableRoutes.filter((route) => !route.saved).length;
+              const hasAvailableProvider = routableRoutes.length > 0;
               return (
-                <Card key={model.ID} pad="md" className="model-card">
+                <Card
+                  key={model.ID}
+                  pad="md"
+                  className={`model-card${!loadingDiscovery && !hasAvailableProvider ? " is-unavailable" : ""}`}
+                >
                   <div className="model-title">
                     <span className="model-icon">M</span>
                     <div>
