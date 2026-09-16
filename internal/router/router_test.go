@@ -182,6 +182,40 @@ func TestDisableFallbackStopsRawProxyAfterFirstFailure(t *testing.T) {
 	}
 }
 
+func TestRawProxyCredentialAllowlistRestrictsFailover(t *testing.T) {
+	var fallbackCalls atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"primary unavailable"}}`))
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"upstream-success"}`))
+	}))
+	defer fallback.Close()
+	dataStore := newStore(t, fallbackConfig(primary.URL, fallback.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.ProxyWithOptions(context.Background(), *model, "allowlist-raw", "/v1/images/generations", []byte(`{"model":"coder","prompt":"hello"}`), "application/json", router.RawProxyOptions{
+		Method:               http.MethodPost,
+		Headers:              make(http.Header),
+		RetryNetworkErrors:   true,
+		AllowedCredentialIDs: []string{"cred-failing"},
+	})
+	if err == nil {
+		t.Fatal("expected the restricted raw proxy request to fail")
+	}
+	if fallbackCalls.Load() != 0 {
+		t.Fatalf("restricted raw proxy dispatched to fallback %d times", fallbackCalls.Load())
+	}
+}
+
 func TestDisableFallbackStopsRawProxyWhenAdapterLacksRawSupport(t *testing.T) {
 	var secondaryCalls atomic.Int32
 	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -858,6 +892,64 @@ func TestDisabledRouteIsExcludedFromSelections(t *testing.T) {
 	}
 	if disabledCalls.Load() != 0 {
 		t.Fatalf("disabled route received %d requests", disabledCalls.Load())
+	}
+}
+
+func TestCredentialAllowlistRestrictsRotationAndFailover(t *testing.T) {
+	var primaryCalls atomic.Int32
+	var fallbackCalls atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"primary unavailable"}}`))
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"fallback","model":"fallback-upstream","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer fallback.Close()
+
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{ID: "primary", Type: "openai-compatible", BaseURL: primary.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "allowed", AuthType: "none"}, {ID: "unselected", AuthType: "none"}}},
+			{ID: "fallback", Type: "openai-compatible", BaseURL: fallback.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "fallback-credential", AuthType: "none"}}},
+		},
+		Models: []config.PublicModelConfig{{ID: "allowlist-model", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "primary-route", Provider: "primary", UpstreamModel: "primary-upstream", Priority: 100},
+			{ID: "fallback-route", Provider: "fallback", UpstreamModel: "fallback-upstream", Priority: 10},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "allowlist-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "allowlist-restricted",
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+		Metadata:  map[string]any{router.AllowedCredentialIDsMetadataKey: []string{"allowed"}},
+	})
+	if err == nil {
+		t.Fatal("expected the restricted request to fail")
+	}
+	if primaryCalls.Load() != 1 || fallbackCalls.Load() != 0 {
+		t.Fatalf("restricted request used primary=%d fallback=%d; want only the selected account", primaryCalls.Load(), fallbackCalls.Load())
+	}
+
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "allowlist-unrestricted",
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Credential.ID != "fallback-credential" || fallbackCalls.Load() != 1 {
+		t.Fatalf("unrestricted request selection=%+v fallback=%d", result.Selection, fallbackCalls.Load())
 	}
 }
 

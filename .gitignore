@@ -9,6 +9,7 @@
 /web/*.tsbuildinfo
 .env
 .env.run
+.env.local
 /config.yaml
 .config.dev.yaml
 models.dev.json
@@ -25,3 +26,4 @@ models.dev-catalog.json.new
 
 # Local agent/tooling workspace
 /.pi/
+opencode.json

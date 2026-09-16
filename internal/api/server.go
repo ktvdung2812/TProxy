@@ -636,10 +636,12 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 	}
 	retryNetworkErrors := !requiresIdempotencyForNetworkRetry(path) || idempotencyKey != ""
 	team := ""
+	var allowedCredentialIDs []string
 	if clientKey != nil {
 		team = clientKey.Policy.Team
+		allowedCredentialIDs = append([]string(nil), clientKey.Policy.CredentialIDs...)
 	}
-	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, Team: team, PinnedProvider: pinnedProvider})
+	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, AllowedCredentialIDs: allowedCredentialIDs, Team: team, PinnedProvider: pinnedProvider})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, providers.Code(err), err.Error(), requestID)
 		return
@@ -847,6 +849,9 @@ func attachClientPolicyMetadata(request *canonical.Request, key *store.APIKey) {
 		request.Metadata = map[string]any{}
 	}
 	request.Metadata["client_api_key_id"] = key.ID
+	if len(key.Policy.CredentialIDs) > 0 {
+		request.Metadata[router.AllowedCredentialIDsMetadataKey] = append([]string(nil), key.Policy.CredentialIDs...)
+	}
 	if key.Policy.Team != "" {
 		request.Metadata["team"] = key.Policy.Team
 	}
@@ -2485,6 +2490,10 @@ func (s *Server) adminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_model_selection", err.Error(), useClientRequestID(r))
 		return
 	}
+	if err := s.validateAPIKeyCredentialSelection(r.Context(), request.Policy.CredentialIDs); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_credential_selection", err.Error(), useClientRequestID(r))
+		return
+	}
 	id, key, err := s.store.CreateAPIKey(r.Context(), request.ID, request.Name, request.Models, request.Policy)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "api_key_create_failed", err.Error(), useClientRequestID(r))
@@ -2530,6 +2539,10 @@ func (s *Server) adminAPIKeyItem(w http.ResponseWriter, r *http.Request, id stri
 			writeError(w, http.StatusBadRequest, "invalid_model_selection", err.Error(), useClientRequestID(r))
 			return
 		}
+		if err := s.validateAPIKeyCredentialSelection(r.Context(), request.Policy.CredentialIDs); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_credential_selection", err.Error(), useClientRequestID(r))
+			return
+		}
 		if err := s.store.UpdateAPIKey(r.Context(), id, request.Name, request.Models, request.Enabled, request.Policy); err != nil {
 			writeError(w, http.StatusBadRequest, "api_key_update_failed", err.Error(), useClientRequestID(r))
 			return
@@ -2547,8 +2560,10 @@ func (s *Server) adminAPIKeyItem(w http.ResponseWriter, r *http.Request, id stri
 }
 
 const (
-	maxAPIKeyModels        = 2048
-	maxAPIKeyModelIDLength = 256
+	maxAPIKeyModels             = 2048
+	maxAPIKeyModelIDLength      = 256
+	maxAPIKeyCredentials        = 2048
+	maxAPIKeyCredentialIDLength = 256
 )
 
 func validateAPIKeyModelSelection(models []string) error {
@@ -2562,6 +2577,34 @@ func validateAPIKeyModelSelection(models []string) error {
 		}
 		if len(model) > maxAPIKeyModelIDLength {
 			return fmt.Errorf("model id cannot exceed %d bytes", maxAPIKeyModelIDLength)
+		}
+	}
+	return nil
+}
+
+func (s *Server) validateAPIKeyCredentialSelection(ctx context.Context, credentialIDs []string) error {
+	if len(credentialIDs) > maxAPIKeyCredentials {
+		return fmt.Errorf("credential_ids cannot contain more than %d entries", maxAPIKeyCredentials)
+	}
+	seen := make(map[string]struct{}, len(credentialIDs))
+	for index, credentialID := range credentialIDs {
+		credentialID = strings.TrimSpace(credentialID)
+		if credentialID == "" {
+			return errors.New("credential ids cannot be empty")
+		}
+		credentialIDs[index] = credentialID
+		if len(credentialID) > maxAPIKeyCredentialIDLength {
+			return fmt.Errorf("credential id cannot exceed %d bytes", maxAPIKeyCredentialIDLength)
+		}
+		if _, exists := seen[credentialID]; exists {
+			return fmt.Errorf("credential id %q is duplicated", credentialID)
+		}
+		seen[credentialID] = struct{}{}
+		if _, err := s.store.CredentialByID(ctx, credentialID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("credential id %q does not exist", credentialID)
+			}
+			return fmt.Errorf("verify credential id %q: %w", credentialID, err)
 		}
 	}
 	return nil
@@ -3080,6 +3123,7 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "config_import_failed", "configuration must be valid JSON or YAML", useClientRequestID(r))
 		return
 	}
+	next.PrepareImport()
 	if err = next.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, "config_invalid", err.Error(), useClientRequestID(r))
 		return

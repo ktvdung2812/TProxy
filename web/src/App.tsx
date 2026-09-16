@@ -116,7 +116,7 @@ type Snapshot = {
   combos: { id: string; display_name: string; enabled: boolean; capabilities: string[]; items: { public_model_id: string; route_target_id?: string }[] }[];
   routes: Record<string, Route[]>;
   credentials: Record<string, Credential[]>;
-  api_keys: { id: string; name: string; models: string[]; enabled: boolean; policy?: { limits?: Record<string, number>; endpoints?: string[]; team?: string } }[];
+  api_keys: { id: string; name: string; models: string[]; enabled: boolean; policy?: { limits?: Record<string, number>; endpoints?: string[]; credential_ids?: string[]; team?: string } }[];
   usage: {
     requests: number;
     errors: number;
@@ -273,6 +273,10 @@ function App() {
       if (loadTokenRef.current === token) setLoading(false);
     }
   }, [authHeaders, authState, logout, secret]);
+
+  const refreshSnapshot = useCallback(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -487,7 +491,19 @@ function App() {
               <Route path="/providers" element={<ProvidersPage />} />
               <Route path="/providers/:providerId" element={<ProvidersPage />} />
               <Route path="/proxy-pools" element={<ProxyPoolsPage />} />
-              <Route path="/quota" element={<QuotaPage />} />
+              <Route
+                path="/quota"
+                element={
+                  <QuotaTrackerView
+                    secret={secret}
+                    credentials={quotaCredentials}
+                    accountsLoading={loading}
+                    onError={setError}
+                    onNotice={setNotice}
+                    onMutated={refreshSnapshot}
+                  />
+                }
+              />
               <Route path="/free-tiers" element={<FreeTiersPage />} />
               <Route path="/usage" element={<UsagePage />} />
               <Route path="/token-saver" element={<TokenSaverPage />} />
@@ -505,10 +521,6 @@ function App() {
       </main>
     </div>
   );
-
-  function QuotaPage() {
-    return <QuotaTrackerView secret={secret} credentials={quotaCredentials} onError={setError} onNotice={setNotice} onMutated={() => void load()} />;
-  }
 
   function FreeTiersPage() {
     return <FreeTiersView secret={secret} onError={setError} />;
@@ -540,6 +552,10 @@ function App() {
         secret={secret}
         apiKeys={snapshot.api_keys || []}
         modelOptions={modelOptions}
+        providers={snapshot.providers || []}
+        credentials={snapshot.credentials || {}}
+        routes={snapshot.routes || {}}
+        combos={snapshot.combos || []}
         onError={setError}
         onNotice={setNotice}
         onMutated={() => void load()}

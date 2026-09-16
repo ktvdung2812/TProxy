@@ -57,26 +57,40 @@ func isGrokQuotaProviderType(providerType string) bool {
 	return providerType == "xai" || providerType == "grok-cli"
 }
 
+// quotaKeyAutoDisablesAtZero identifies account-wide quota windows. A session
+// window is typically the 5-hour allowance; the primary weekly window is the
+// other account-wide allowance. Either one being exhausted makes the
+// credential unavailable.
+func quotaKeyAutoDisablesAtZero(key string) bool {
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	return normalizedKey == "session" || normalizedKey == "weekly"
+}
+
 // QuotaAtZero reports whether routing quota is fully depleted (0% left).
-// A credential is depleted only when every routing-relevant window is empty.
-// Multi-window providers (e.g. Grok monthly + prepaid) stay routable while any
-// window still has remaining capacity.
+// An empty session (typically 5h) or primary weekly window immediately
+// depletes the credential. Other independent routing windows (e.g. Grok
+// monthly + prepaid) only deplete a credential when every window is empty.
 func QuotaAtZero(quota CredentialQuota) bool {
 	if len(quota.Quotas) == 0 {
 		return false
 	}
 	hasRoutingWindow := false
+	hasAvailableRoutingWindow := false
 	for key, entry := range quota.Quotas {
-		if !quotaKeyAffectsRouting(quota.ProviderType, key) {
-			continue
-		}
 		if entry.Unlimited || entry.Total <= 0 {
 			continue
 		}
+		remaining := QuotaEntryRemainingPercent(entry)
+		if quotaKeyAutoDisablesAtZero(key) && remaining <= QuotaDepletedAutoDisableThreshold {
+			return true
+		}
+		if !quotaKeyAffectsRouting(quota.ProviderType, key) {
+			continue
+		}
 		hasRoutingWindow = true
-		if QuotaEntryRemainingPercent(entry) > QuotaDepletedAutoDisableThreshold {
-			return false
+		if remaining > QuotaDepletedAutoDisableThreshold {
+			hasAvailableRoutingWindow = true
 		}
 	}
-	return hasRoutingWindow
+	return hasRoutingWindow && !hasAvailableRoutingWindow
 }

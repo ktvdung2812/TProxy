@@ -104,6 +104,66 @@ func TestValidateProxyPoolsAndBindings(t *testing.T) {
 	}
 }
 
+func TestPrepareImportResolvesMissingProxyURLEnvToDirect(t *testing.T) {
+	enabled := true
+	cfg := Config{
+		Database: DatabaseConfig{Driver: "sqlite"},
+		ProxyPools: []ProxyPoolConfig{{
+			ID: "direct-egress", Name: "Direct connection",
+			URLEnv: "TPROXY_PROXY_DIRECT_EGRESS", Enabled: &enabled,
+		}},
+		Combos: []ComboConfig{{ID: "4.5", DisplayName: "4.5", Enabled: true}},
+	}
+	cfg.PrepareImport()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("exported direct proxy pool should import: %v", err)
+	}
+	if cfg.ProxyPools[0].URL != "direct" {
+		t.Fatalf("proxy URL = %q", cfg.ProxyPools[0].URL)
+	}
+	if len(cfg.Combos) != 0 {
+		t.Fatalf("empty combos should be dropped: %+v", cfg.Combos)
+	}
+}
+
+func TestPrepareImportKeepsProxyURLFromEnv(t *testing.T) {
+	t.Setenv("TPROXY_PROXY_EGRESS", "socks5://127.0.0.1:1080")
+	cfg := Config{
+		Database:   DatabaseConfig{Driver: "sqlite"},
+		ProxyPools: []ProxyPoolConfig{{ID: "egress", URLEnv: "TPROXY_PROXY_EGRESS"}},
+	}
+	cfg.PrepareImport()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ProxyPools[0].URL != "socks5://127.0.0.1:1080" {
+		t.Fatalf("proxy URL = %q", cfg.ProxyPools[0].URL)
+	}
+}
+
+func TestValidateStillRequiresProxyURLWhenEnvIsMissing(t *testing.T) {
+	cfg := Config{
+		Database:   DatabaseConfig{Driver: "sqlite"},
+		ProxyPools: []ProxyPoolConfig{{ID: "egress", URLEnv: "TPROXY_MISSING_PROXY"}},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected missing proxy env to fail validation outside import")
+	}
+}
+
+func TestValidateAllowsCursorImportedOAuthWithoutProviderOAuth(t *testing.T) {
+	cfg := Config{
+		Database: DatabaseConfig{Driver: "sqlite"},
+		Providers: []ProviderConfig{{
+			ID: "cursor", Type: "cursor", Enabled: true,
+			Credentials: []CredentialConfig{{ID: "cursor-account", AuthType: "oauth", Secret: `{"access_token":"token"}`}},
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("imported cursor oauth credential should not require provider oauth: %v", err)
+	}
+}
+
 func TestProviderDefaultsForCodexAndClaude(t *testing.T) {
 	codex := ProviderConfig{ID: "codex", Type: "codex"}
 	ApplyProviderDefaults(&codex)

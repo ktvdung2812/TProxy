@@ -89,14 +89,17 @@ type RawResult struct {
 }
 
 type RawProxyOptions struct {
-	Method             string
-	Headers            http.Header
-	RetryNetworkErrors bool
-	DisableFallback    bool
-	ClientAPIKeyID     string
-	Team               string
-	PinnedProvider     string
+	Method               string
+	Headers              http.Header
+	RetryNetworkErrors   bool
+	DisableFallback      bool
+	ClientAPIKeyID       string
+	AllowedCredentialIDs []string
+	Team                 string
+	PinnedProvider       string
 }
+
+const AllowedCredentialIDsMetadataKey = "client_allowed_credential_ids"
 
 func New(dataStore *store.Store, registry *providers.Registry) *Router {
 	return &Router{
@@ -893,6 +896,9 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, requestID, path string, body []byte, contentType string, options RawProxyOptions) (*RawResult, error) {
 	start := time.Now()
 	rawRequestContext := canonical.Request{RequestID: requestID, PublicModelID: model.ID, Source: canonical.ProtocolOpenAI, Metadata: map[string]any{"capability": rawCapability(path), "path": path, "client_api_key_id": options.ClientAPIKeyID, "team": options.Team}}
+	if len(options.AllowedCredentialIDs) > 0 {
+		rawRequestContext.Metadata[AllowedCredentialIDsMetadataKey] = append([]string(nil), options.AllowedCredentialIDs...)
+	}
 	if options.PinnedProvider != "" {
 		rawRequestContext.Metadata["pinned_provider"] = options.PinnedProvider
 	}
@@ -1344,6 +1350,42 @@ func (r *Router) refreshAfterAuthError(ctx context.Context, selection Selection)
 	return credential, nil, true
 }
 
+func filterAllowedCredentials(credentials []store.Credential, metadata map[string]any) []store.Credential {
+	if metadata == nil {
+		return credentials
+	}
+	rawAllowed, restricted := metadata[AllowedCredentialIDsMetadataKey]
+	if !restricted {
+		return credentials
+	}
+	allowed := make(map[string]struct{})
+	switch values := rawAllowed.(type) {
+	case []string:
+		for _, credentialID := range values {
+			if credentialID = strings.TrimSpace(credentialID); credentialID != "" {
+				allowed[credentialID] = struct{}{}
+			}
+		}
+	case []any:
+		for _, value := range values {
+			credentialID, ok := value.(string)
+			if !ok {
+				continue
+			}
+			if credentialID = strings.TrimSpace(credentialID); credentialID != "" {
+				allowed[credentialID] = struct{}{}
+			}
+		}
+	}
+	filtered := make([]store.Credential, 0, len(credentials))
+	for _, credential := range credentials {
+		if _, ok := allowed[credential.ID]; ok {
+			filtered = append(filtered, credential)
+		}
+	}
+	return filtered
+}
+
 func asCredentialError(err error) error {
 	if err == nil {
 		return nil
@@ -1414,6 +1456,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		if errCredentials != nil {
 			return nil, errCredentials
 		}
+		credentials = filterAllowedCredentials(credentials, request.Metadata)
 		eligible := store.EligibleCredentials(credentials, now)
 		if len(eligible) == 0 {
 			// Nothing usable here: remember why so the final error names the real

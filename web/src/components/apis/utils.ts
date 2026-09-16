@@ -43,6 +43,7 @@ export function emptyApiKeyForm(): ApiKeyFormData {
     media_jobs: 0,
     budget_usd_per_day: 0,
     disable_model_mapping: false,
+    credential_ids: [],
   };
 }
 
@@ -61,6 +62,7 @@ export function apiKeyToForm(key: ApiKeyRecord): ApiKeyFormData {
     media_jobs: key.policy?.limits?.media_jobs || 0,
     budget_usd_per_day: key.policy?.limits?.budget_usd_per_day || 0,
     disable_model_mapping: key.policy?.disable_model_mapping === true,
+    credential_ids: [...(key.policy?.credential_ids || [])],
   };
 }
 
@@ -97,6 +99,7 @@ export function formToPayload(form: ApiKeyFormData, editing: boolean) {
       ...(endpoints.length ? { endpoints } : {}),
       ...(hasLimits ? { limits } : {}),
       ...(form.disable_model_mapping ? { disable_model_mapping: true } : {}),
+      ...(form.credential_ids.length ? { credential_ids: form.credential_ids } : {}),
     },
   };
 

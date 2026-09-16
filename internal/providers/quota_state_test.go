@@ -23,8 +23,13 @@ func TestQuotaAtZero(t *testing.T) {
 		"weekly":  {Name: "Weekly", Used: 100, Total: 100, Remaining: 0},
 	}
 	quota.ProviderType = "codex"
+	if !QuotaAtZero(quota) {
+		t.Fatal("expected empty weekly quota to disable the credential even when session quota remains")
+	}
+
+	quota.Quotas["weekly"] = QuotaEntry{Name: "Weekly", Used: 99, Total: 100, Remaining: 1}
 	if QuotaAtZero(quota) {
-		t.Fatal("codex session with remaining quota should stay routable when weekly is empty")
+		t.Fatal("expected credential to recover when both session and weekly quota remain")
 	}
 
 	quota.Quotas = map[string]QuotaEntry{

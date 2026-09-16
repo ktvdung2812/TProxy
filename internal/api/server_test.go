@@ -599,6 +599,30 @@ func TestWebFetchBlocksLoopback(t *testing.T) {
 	}
 }
 
+func TestAdminCreateAPIKeyRejectsUnknownCredentialSelection(t *testing.T) {
+	cfg := &config.Config{
+		Security: config.SecurityConfig{ManagementSecretEnv: "TPROXY_TEST_MANAGEMENT"},
+		Providers: []config.ProviderConfig{{
+			ID: "provider", Type: "openai-compatible", BaseURL: "http://127.0.0.1:1", Enabled: true,
+			Credentials: []config.CredentialConfig{{ID: "known-credential", AuthType: "none"}},
+		}},
+	}
+	dataStore := apiTestStore(t, cfg)
+	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/api-keys", bytes.NewBufferString(`{"name":"restricted","models":["*"],"policy":{"credential_ids":["missing-credential"]}}`))
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(request)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "invalid_credential_selection") {
+		t.Fatalf("unexpected body=%s", recorder.Body.String())
+	}
+}
+
 func TestResponsesWebSocketUsesClientAuthAndRewritesModel(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -1750,6 +1774,30 @@ func TestConfigurationExportIncludesOAuthTokensAndImportRestoresThem(t *testing.
 	}
 	if credentials[0].Status == "auth_required" {
 		t.Fatalf("imported oauth status = %q", credentials[0].Status)
+	}
+}
+
+func TestConfigurationImportAcceptsExportedDirectProxyPool(t *testing.T) {
+	destCfg := &config.Config{Server: config.ServerConfig{AllowLocalWithoutKey: true}}
+	destStore := apiTestStore(t, destCfg)
+	destHandler := NewServer(destCfg, destStore, router.New(destStore, providers.NewRegistry())).Handler()
+	body := `{"Database":{"Driver":"sqlite"},"ProxyPools":[{"id":"direct-egress","name":"Direct connection","url_env":"TPROXY_PROXY_DIRECT_EGRESS","enabled":true}],"Providers":[{"id":"cursor","type":"cursor","name":"Cursor IDE","base_url":"https://api2.cursor.sh","enabled":true,"credentials":[{"id":"cursor-account","auth_type":"oauth","secret":"{\"access_token\":\"cursor-token\"}"}]}],"Combos":[{"id":"4.5","display_name":"4.5","enabled":true,"items":null}]}`
+	importRequest := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", strings.NewReader(body))
+	importRequest.RemoteAddr = "127.0.0.1:1234"
+	importRequest.Header.Set("Content-Type", "application/json")
+	withDefaultManagementAuth(importRequest)
+	importRecorder := httptest.NewRecorder()
+	destHandler.ServeHTTP(importRecorder, importRequest)
+	if importRecorder.Code != http.StatusOK {
+		t.Fatalf("direct proxy import status=%d body=%s", importRecorder.Code, importRecorder.Body.String())
+	}
+	pool, err := destStore.ProxyPool(context.Background(), "direct-egress")
+	if err != nil || pool.URL != "direct" || pool.Name != "Direct connection" {
+		t.Fatalf("imported pool=%+v err=%v", pool, err)
+	}
+	credentials, err := destStore.Credentials(context.Background(), "cursor")
+	if err != nil || len(credentials) != 1 || credentials[0].ID != "cursor-account" {
+		t.Fatalf("imported cursor credential = %+v err=%v", credentials, err)
 	}
 }
 
