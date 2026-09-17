@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -88,14 +89,17 @@ type RawResult struct {
 }
 
 type RawProxyOptions struct {
-	Method             string
-	Headers            http.Header
-	RetryNetworkErrors bool
-	DisableFallback    bool
-	ClientAPIKeyID     string
-	Team               string
-	PinnedProvider     string
+	Method               string
+	Headers              http.Header
+	RetryNetworkErrors   bool
+	DisableFallback      bool
+	ClientAPIKeyID       string
+	AllowedCredentialIDs []string
+	Team                 string
+	PinnedProvider       string
 }
+
+const AllowedCredentialIDsMetadataKey = "client_allowed_credential_ids"
 
 func New(dataStore *store.Store, registry *providers.Registry) *Router {
 	return &Router{
@@ -892,6 +896,9 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, requestID, path string, body []byte, contentType string, options RawProxyOptions) (*RawResult, error) {
 	start := time.Now()
 	rawRequestContext := canonical.Request{RequestID: requestID, PublicModelID: model.ID, Source: canonical.ProtocolOpenAI, Metadata: map[string]any{"capability": rawCapability(path), "path": path, "client_api_key_id": options.ClientAPIKeyID, "team": options.Team}}
+	if len(options.AllowedCredentialIDs) > 0 {
+		rawRequestContext.Metadata[AllowedCredentialIDsMetadataKey] = append([]string(nil), options.AllowedCredentialIDs...)
+	}
 	if options.PinnedProvider != "" {
 		rawRequestContext.Metadata["pinned_provider"] = options.PinnedProvider
 	}
@@ -1343,6 +1350,42 @@ func (r *Router) refreshAfterAuthError(ctx context.Context, selection Selection)
 	return credential, nil, true
 }
 
+func filterAllowedCredentials(credentials []store.Credential, metadata map[string]any) []store.Credential {
+	if metadata == nil {
+		return credentials
+	}
+	rawAllowed, restricted := metadata[AllowedCredentialIDsMetadataKey]
+	if !restricted {
+		return credentials
+	}
+	allowed := make(map[string]struct{})
+	switch values := rawAllowed.(type) {
+	case []string:
+		for _, credentialID := range values {
+			if credentialID = strings.TrimSpace(credentialID); credentialID != "" {
+				allowed[credentialID] = struct{}{}
+			}
+		}
+	case []any:
+		for _, value := range values {
+			credentialID, ok := value.(string)
+			if !ok {
+				continue
+			}
+			if credentialID = strings.TrimSpace(credentialID); credentialID != "" {
+				allowed[credentialID] = struct{}{}
+			}
+		}
+	}
+	filtered := make([]store.Credential, 0, len(credentials))
+	for _, credential := range credentials {
+		if _, ok := allowed[credential.ID]; ok {
+			filtered = append(filtered, credential)
+		}
+	}
+	return filtered
+}
+
 func asCredentialError(err error) error {
 	if err == nil {
 		return nil
@@ -1366,6 +1409,11 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 	policyLimited := false
 	modelCooldownLimited := false
 	failoverSkipped := false
+	providerBlocked := false
+	capabilityUnsupported := false
+	proxyExhausted := false
+	routesConsidered := 0
+	var outlook credentialOutlook
 	now := time.Now()
 	for _, route := range routes {
 		if !route.Enabled {
@@ -1374,8 +1422,15 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		if !routeMatches(route, request) {
 			continue
 		}
+		routesConsidered++
 		provider, errProvider := r.store.Provider(ctx, route.ProviderID)
-		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" || provider.Status == "auth_required" || provider.Status == "cooldown" {
+		// Provider status is a cached summary of the last health sync and can lag
+		// behind reality, so treat it as advisory: only a provider that is
+		// actually switched off is skipped here. Credential eligibility below is
+		// the real gate, which keeps a stale auth_required or cooldown status from
+		// hiding credentials that work right now.
+		if errProvider != nil || !provider.Enabled || provider.Status == "disabled" {
+			providerBlocked = true
 			continue
 		}
 		if !r.breakerAllows(model.ID, provider.ID) {
@@ -1386,6 +1441,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			continue
 		}
 		if !r.providerSupports(*provider, request) {
+			capabilityUnsupported = true
 			continue
 		}
 		withinPolicy, policyErr := r.providerWithinPolicy(ctx, *provider, request)
@@ -1400,7 +1456,15 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		if errCredentials != nil {
 			return nil, errCredentials
 		}
+		credentials = filterAllowedCredentials(credentials, request.Metadata)
 		eligible := store.EligibleCredentials(credentials, now)
+		if len(eligible) == 0 {
+			// Nothing usable here: remember why so the final error names the real
+			// cause instead of a bare "no_available_credential", and give an
+			// account-level cooldown the same short grace model-level ones get.
+			outlook.observe(credentials, now)
+			eligible = r.waitForCredentialCooldown(ctx, credentials, now)
+		}
 		beforeModelCooldown := len(eligible)
 		eligible = r.filterModelCooldowns(ctx, eligible, route.UpstreamModel, now)
 		if beforeModelCooldown > 0 && len(eligible) == 0 {
@@ -1417,6 +1481,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 				return nil, proxyErr
 			}
 			if !proxyAvailable {
+				proxyExhausted = true
 				continue
 			}
 			selections = append(selections, selection)
@@ -1436,6 +1501,18 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 				Message: fmt.Sprintf("all credentials are temporarily rate-limited for %s; retry shortly or use another model", model.ID),
 			}
 		}
+		if outlook.cooldown {
+			wait := time.Until(outlook.cooldownUntil)
+			if wait < time.Second {
+				wait = time.Second
+			}
+			return nil, &providers.ProviderError{
+				Status:     http.StatusTooManyRequests,
+				Code:       "upstream_rate_limited",
+				RetryAfter: strconv.Itoa(int(math.Ceil(wait.Seconds()))),
+				Message:    fmt.Sprintf("every credential for %s is cooling down after an upstream failure; the next one frees up in %s", model.ID, wait.Round(time.Second)),
+			}
+		}
 		if failoverSkipped {
 			return nil, &providers.ProviderError{
 				Status:  http.StatusServiceUnavailable,
@@ -1443,7 +1520,60 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 				Message: fmt.Sprintf("every provider in the priority chain for %s has been disabled by repeated failures; they will be probed again automatically", model.ID),
 			}
 		}
-		return nil, fmt.Errorf("no_available_credential: %s", model.ID)
+		if outlook.authRequired {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "credential_auth_required",
+				Message: fmt.Sprintf("every credential for %s needs to be re-authorized; sign in again from the dashboard", model.ID),
+			}
+		}
+		if outlook.disabled {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "no_enabled_credential",
+				Message: fmt.Sprintf("every credential for %s is disabled; enable one from the dashboard", model.ID),
+			}
+		}
+		if proxyExhausted {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "proxy_unavailable",
+				Message: fmt.Sprintf("no enabled proxy pool is available for the credentials serving %s", model.ID),
+			}
+		}
+		if routesConsidered > 0 && !outlook.configured && !providerBlocked && !capabilityUnsupported {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "no_credential_configured",
+				Message: fmt.Sprintf("no credential is configured for the providers serving %s", model.ID),
+			}
+		}
+		if capabilityUnsupported {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusBadGateway,
+				Code:    "capability_unsupported",
+				Message: fmt.Sprintf("no provider routed to %s supports %s requests", model.ID, requestCapability(request)),
+			}
+		}
+		if providerBlocked {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusServiceUnavailable,
+				Code:    "provider_unavailable",
+				Message: fmt.Sprintf("every provider routed to %s is disabled or needs attention", model.ID),
+			}
+		}
+		if routesConsidered == 0 {
+			return nil, &providers.ProviderError{
+				Status:  http.StatusBadGateway,
+				Code:    "no_route",
+				Message: fmt.Sprintf("no enabled provider route is configured for %s", model.ID),
+			}
+		}
+		return nil, &providers.ProviderError{
+			Status:  http.StatusServiceUnavailable,
+			Code:    "no_available_credential",
+			Message: fmt.Sprintf("no provider is currently able to serve %s", model.ID),
+		}
 	}
 	selections = r.preferSession(model.ID, request.SessionID, selections)
 	return selections, nil
@@ -1483,13 +1613,76 @@ func (r *Router) providerWithinPolicy(ctx context.Context, provider store.Provid
 	return true, nil
 }
 
-func (r *Router) providerSupports(provider store.Provider, request canonical.Request) bool {
-	capability := "text"
+// requestCapability is the capability a request asks for, defaulting to text.
+func requestCapability(request canonical.Request) string {
 	if request.Metadata != nil {
 		if value, exists := request.Metadata["capability"]; exists && strings.TrimSpace(fmt.Sprint(value)) != "" {
-			capability = strings.TrimSpace(fmt.Sprint(value))
+			return strings.TrimSpace(fmt.Sprint(value))
 		}
 	}
+	return "text"
+}
+
+// credentialOutlook records why a provider contributed no usable credential, so
+// a failed selection can report the real cause instead of a bare
+// "no_available_credential" that clients see as a plain 502.
+type credentialOutlook struct {
+	configured    bool
+	cooldown      bool
+	cooldownUntil time.Time
+	authRequired  bool
+	disabled      bool
+}
+
+func (o *credentialOutlook) observe(credentials []store.Credential, now time.Time) {
+	for _, credential := range credentials {
+		o.configured = true
+		switch {
+		case !credential.Enabled || credential.Status == "disabled":
+			o.disabled = true
+		case credential.Status == "auth_required":
+			o.authRequired = true
+		case !credential.CooldownUntil.IsZero() && credential.CooldownUntil.After(now):
+			o.cooldown = true
+			if o.cooldownUntil.IsZero() || credential.CooldownUntil.Before(o.cooldownUntil) {
+				o.cooldownUntil = credential.CooldownUntil
+			}
+		}
+	}
+}
+
+// waitForCredentialCooldown gives account-level cooldowns the same short grace
+// filterModelCooldowns gives model-level ones: when every credential is benched
+// but one comes back within the retry wait budget, waiting beats failing the
+// request. It returns the credentials that are usable again, if any.
+func (r *Router) waitForCredentialCooldown(ctx context.Context, credentials []store.Credential, now time.Time) []store.Credential {
+	retry := r.retrySettings()
+	if retry.MaxWait <= 0 {
+		return nil
+	}
+	var waitable []store.Credential
+	var waitUntil time.Time
+	for _, credential := range credentials {
+		if !credential.Enabled || credential.Status == "auth_required" || credential.Status == "disabled" {
+			continue
+		}
+		until := credential.CooldownUntil
+		if until.IsZero() || !until.After(now) || until.Sub(now) > retry.MaxWait {
+			continue
+		}
+		waitable = append(waitable, credential)
+		if waitUntil.IsZero() || until.Before(waitUntil) {
+			waitUntil = until
+		}
+	}
+	if len(waitable) == 0 || !retry.waitForCooldown(ctx, waitUntil, now) {
+		return nil
+	}
+	return store.EligibleCredentials(waitable, time.Now())
+}
+
+func (r *Router) providerSupports(provider store.Provider, request canonical.Request) bool {
+	capability := requestCapability(request)
 	for _, supported := range r.registry.Capabilities(provider.Type) {
 		if supported == "*" || supported == capability {
 			return true

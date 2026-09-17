@@ -335,6 +335,79 @@ func TestProxyPoolSecretsAreEncryptedAndBindingsAreTracked(t *testing.T) {
 	}
 }
 
+func TestExportDirectProxyPoolRoundTripsWithoutEnv(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "direct-proxy.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	enabled := true
+	cfg := &config.Config{
+		ProxyPools: []config.ProxyPoolConfig{
+			{ID: "direct-egress", Name: "Direct connection", URL: "direct", Enabled: &enabled},
+			{ID: "egress", Name: "Primary", URL: "http://user:password@proxy.example.com:8080", Enabled: &enabled},
+		},
+	}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	exported, err := dataStore.ExportConfigWithOAuthTokens(context.Background(), &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported.ProxyPools) != 2 {
+		t.Fatalf("exported pools=%+v", exported.ProxyPools)
+	}
+	var direct, secret config.ProxyPoolConfig
+	for _, pool := range exported.ProxyPools {
+		switch pool.ID {
+		case "direct-egress":
+			direct = pool
+		case "egress":
+			secret = pool
+		}
+	}
+	if direct.URL != "direct" || direct.URLEnv != "" {
+		t.Fatalf("direct pool should export inline URL: %+v", direct)
+	}
+	if secret.URL != "" || secret.URLEnv != "TPROXY_PROXY_EGRESS" {
+		t.Fatalf("secret pool should stay an env placeholder: %+v", secret)
+	}
+
+	destKey, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destEncryptor, err := security.NewEncryptor(destKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, err := OpenSQLite(filepath.Join(t.TempDir(), "dest-proxy.db"), destEncryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dest.Close()
+	exported.PrepareImport()
+	if err = exported.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err = dest.Seed(context.Background(), exported); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := dest.ProxyPool(context.Background(), "direct-egress")
+	if err != nil || imported.URL != "direct" {
+		t.Fatalf("imported direct pool=%+v err=%v", imported, err)
+	}
+}
+
 func TestSnapshotAndExportRedactProviderConfigurationSecrets(t *testing.T) {
 	key, err := security.GenerateMasterKey()
 	if err != nil {
@@ -1744,5 +1817,53 @@ func TestRecordConfigVersionSuppressesDuplicates(t *testing.T) {
 	}
 	if len(versions) != 2 {
 		t.Fatalf("a real configuration change produced %d rows, want 2", len(versions))
+	}
+}
+
+func TestSyncProviderHealthKeepsProviderUsableWithOneBrokenCredential(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "health.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: "http://127.0.0.1:1", Enabled: true, Credentials: []config.CredentialConfig{
+		{ID: "credential-a", AuthType: "none"},
+		{ID: "credential-b", AuthType: "none"},
+	}}}}
+	if err = dataStore.Seed(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.MarkCredentialAuthRequired(context.Background(), "credential-a", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SyncProviderHealth(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := dataStore.Provider(context.Background(), "provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Status != "degraded" {
+		t.Fatalf("status = %q want degraded while a healthy credential remains", provider.Status)
+	}
+	if err = dataStore.MarkCredentialAuthRequired(context.Background(), "credential-b", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	if err = dataStore.SyncProviderHealth(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	if provider, err = dataStore.Provider(context.Background(), "provider"); err != nil {
+		t.Fatal(err)
+	}
+	if provider.Status != "auth_required" {
+		t.Fatalf("status = %q want auth_required once every credential needs re-authorization", provider.Status)
 	}
 }

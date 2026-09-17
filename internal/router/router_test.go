@@ -182,6 +182,40 @@ func TestDisableFallbackStopsRawProxyAfterFirstFailure(t *testing.T) {
 	}
 }
 
+func TestRawProxyCredentialAllowlistRestrictsFailover(t *testing.T) {
+	var fallbackCalls atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"primary unavailable"}}`))
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"upstream-success"}`))
+	}))
+	defer fallback.Close()
+	dataStore := newStore(t, fallbackConfig(primary.URL, fallback.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.ProxyWithOptions(context.Background(), *model, "allowlist-raw", "/v1/images/generations", []byte(`{"model":"coder","prompt":"hello"}`), "application/json", router.RawProxyOptions{
+		Method:               http.MethodPost,
+		Headers:              make(http.Header),
+		RetryNetworkErrors:   true,
+		AllowedCredentialIDs: []string{"cred-failing"},
+	})
+	if err == nil {
+		t.Fatal("expected the restricted raw proxy request to fail")
+	}
+	if fallbackCalls.Load() != 0 {
+		t.Fatalf("restricted raw proxy dispatched to fallback %d times", fallbackCalls.Load())
+	}
+}
+
 func TestDisableFallbackStopsRawProxyWhenAdapterLacksRawSupport(t *testing.T) {
 	var secondaryCalls atomic.Int32
 	secondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -861,6 +895,64 @@ func TestDisabledRouteIsExcludedFromSelections(t *testing.T) {
 	}
 }
 
+func TestCredentialAllowlistRestrictsRotationAndFailover(t *testing.T) {
+	var primaryCalls atomic.Int32
+	var fallbackCalls atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"primary unavailable"}}`))
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"fallback","model":"fallback-upstream","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer fallback.Close()
+
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{
+			{ID: "primary", Type: "openai-compatible", BaseURL: primary.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "allowed", AuthType: "none"}, {ID: "unselected", AuthType: "none"}}},
+			{ID: "fallback", Type: "openai-compatible", BaseURL: fallback.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "fallback-credential", AuthType: "none"}}},
+		},
+		Models: []config.PublicModelConfig{{ID: "allowlist-model", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "primary-route", Provider: "primary", UpstreamModel: "primary-upstream", Priority: 100},
+			{ID: "fallback-route", Provider: "fallback", UpstreamModel: "fallback-upstream", Priority: 10},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "allowlist-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "allowlist-restricted",
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+		Metadata:  map[string]any{router.AllowedCredentialIDsMetadataKey: []string{"allowed"}},
+	})
+	if err == nil {
+		t.Fatal("expected the restricted request to fail")
+	}
+	if primaryCalls.Load() != 1 || fallbackCalls.Load() != 0 {
+		t.Fatalf("restricted request used primary=%d fallback=%d; want only the selected account", primaryCalls.Load(), fallbackCalls.Load())
+	}
+
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{
+		RequestID: "allowlist-unrestricted",
+		Messages:  []canonical.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Credential.ID != "fallback-credential" || fallbackCalls.Load() != 1 {
+		t.Fatalf("unrestricted request selection=%+v fallback=%d", result.Selection, fallbackCalls.Load())
+	}
+}
+
 func TestComboFallsBackAcrossOrderedPublicModelsAndRewritesComboID(t *testing.T) {
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1113,5 +1205,119 @@ func TestResolveAutoModelPrefersFastCodingModel(t *testing.T) {
 	}
 	if result.Response.Model != "auto/coding:fast" {
 		t.Fatalf("response model=%s", result.Response.Model)
+	}
+}
+
+func TestAllCredentialCooldownsReturnRateLimitedError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be called when every credential is cooling down")
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "credential-a", AuthType: "none"},
+			{ID: "credential-b", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	for _, credentialID := range []string{"credential-a", "credential-b"} {
+		if err := dataStore.SetCooldown(context.Background(), credentialID, "upstream_rate_limited", "usage limit reached", time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "credential-cooldown", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected error when every credential is cooling down")
+	}
+	var providerErr *providers.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %T %v want *providers.ProviderError", err, err)
+	}
+	if providerErr.Status != http.StatusTooManyRequests || providerErr.Code != "upstream_rate_limited" {
+		t.Fatalf("status/code = %d/%q want %d/upstream_rate_limited", providerErr.Status, providerErr.Code, http.StatusTooManyRequests)
+	}
+	if providerErr.RetryAfter == "" {
+		t.Fatal("expected a Retry-After hint so clients back off instead of reconnecting")
+	}
+}
+
+func TestAllCredentialsAuthRequiredReportsReauthorization(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream should not be called when every credential needs re-authorization")
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "credential-a", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	if err := dataStore.MarkCredentialAuthRequired(context.Background(), "credential-a", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "credential-auth", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected error when every credential needs re-authorization")
+	}
+	var providerErr *providers.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %T %v want *providers.ProviderError", err, err)
+	}
+	if providerErr.Status != http.StatusServiceUnavailable || providerErr.Code != "credential_auth_required" {
+		t.Fatalf("status/code = %d/%q want %d/credential_auth_required", providerErr.Status, providerErr.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestStaleProviderStatusDoesNotHideHealthyCredential(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"stale","model":"upstream-a","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "provider", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "credential-broken", AuthType: "none"},
+			{ID: "credential-healthy", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-a", Provider: "provider", UpstreamModel: "upstream-a", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	if err := dataStore.MarkCredentialAuthRequired(context.Background(), "credential-broken", "oauth_provider_unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	// A provider left marked auth_required by an older health sync must not take
+	// its still-working credentials out of the pool.
+	if err := dataStore.SetProviderHealth(context.Background(), "provider", "auth_required", "OAuth authorization is required", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "stale-provider-status", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Selection.Credential.ID != "credential-healthy" {
+		t.Fatalf("credential = %q want credential-healthy", result.Selection.Credential.ID)
 	}
 }

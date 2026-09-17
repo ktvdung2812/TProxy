@@ -92,12 +92,13 @@ export function ProvidersView({
 
   const awaitingProviderResolution = useMemo(() => {
     if (!selectedId) return false;
+    if (resolved) return false;
     if (snapshotLoading) return true;
     if (!presetsLoaded) {
       return resolveProviderSlug(selectedId, providers, []) === null;
     }
     return false;
-  }, [selectedId, snapshotLoading, presetsLoaded, providers]);
+  }, [selectedId, snapshotLoading, presetsLoaded, providers, resolved]);
 
   if (awaitingProviderResolution) {
     return (

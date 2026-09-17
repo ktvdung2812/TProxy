@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Select, Toggle } from "../ui";
 import { CooldownTimer } from "./CooldownTimer";
@@ -22,10 +22,10 @@ import { ProviderLogo } from "./ProviderLogo";
 import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, reorderProviderCredentials, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
 import {
   fetchCredentialProxyUsage,
-  fetchCredentialQuota,
   type CredentialProxyUsage,
   type CredentialQuota,
 } from "../quota/api";
+import { loadCredentialQuotaOnce } from "../quota/quotaOnce";
 import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
 import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByPriority, formatCredentialAddedAt, formatServicePlanLabel, moveCredentialBefore, type Credential, type ModelAlias, type Provider } from "./types";
 
@@ -59,11 +59,19 @@ function providerSupportsUpstreamQuota(providerId: string, presets: NinerouterPr
   return Boolean(presets.find((preset) => preset.id === providerId)?.supports_quota);
 }
 
-function quotaBadgesFromQuota(quota: CredentialQuota | null | undefined): Array<{
+type QuotaBadge = {
   key: string;
   label: string;
   tone: "success" | "warning" | "error" | "info" | "default";
-}> {
+};
+
+type QuotaView = {
+  badges: QuotaBadge[];
+  plan: string;
+  message: string;
+};
+
+function quotaBadgesFromQuota(quota: CredentialQuota | null | undefined): QuotaBadge[] {
   if (!quota?.quotas) return [];
   return Object.entries(quota.quotas).map(([key, entry]) => {
     const name = (entry.name || key).trim();
@@ -240,10 +248,17 @@ export function ProviderDetail({
   const [showKiroOAuth, setShowKiroOAuth] = useState(false);
   const [proxyPools, setProxyPools] = useState<ProxyPoolOption[]>([]);
   const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
+  const [quotaById, setQuotaById] = useState<Record<string, QuotaView>>({});
+  const [quotaBusyById, setQuotaBusyById] = useState<Record<string, boolean>>({});
+  const [settledQuotaIds, setSettledQuotaIds] = useState<Set<string>>(() => new Set());
   const supportsUpstreamQuota = useMemo(
     () => providerSupportsUpstreamQuota(provider.ID, presets),
     [provider.ID, presets],
   );
+  const passRunningRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const inFlightIdsRef = useRef(new Set<string>());
+  const ensureLoadedRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     setCredentialOrder(null);
@@ -255,6 +270,18 @@ export function ProviderDetail({
     setSelectedCredentialIds((current) => {
       const next = current.filter((id) => available.has(id));
       return next.length === current.length ? current : next;
+    });
+    setQuotaById((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    setQuotaBusyById((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    setSettledQuotaIds((current) => {
+      const next = new Set([...current].filter((id) => available.has(id)));
+      return next.size === current.size ? current : next;
     });
   }, [credentials]);
 
@@ -353,6 +380,110 @@ export function ProviderDetail({
       cancelled = true;
     };
   }, [secret, credentials]);
+
+  const credentialIdsKey = useMemo(
+    () => credentials.map((credential) => credential.id).slice().sort().join("\u0000"),
+    [credentials],
+  );
+  const loadOrderIds = useMemo(
+    () => sortedCredentials.map((credential) => credential.id),
+    [sortedCredentials],
+  );
+  const loadOrderRef = useRef(loadOrderIds);
+  loadOrderRef.current = loadOrderIds;
+  const settledRef = useRef(settledQuotaIds);
+  settledRef.current = settledQuotaIds;
+
+  const quotaDataReady =
+    !supportsUpstreamQuota || loadOrderIds.every((id) => settledQuotaIds.has(id));
+  const quotaPassSettledCount = loadOrderIds.filter((id) => settledQuotaIds.has(id)).length;
+
+  const markSettled = useCallback((credentialId: string) => {
+    settledRef.current = new Set(settledRef.current).add(credentialId);
+    setSettledQuotaIds((current) => {
+      if (current.has(credentialId)) return current;
+      const next = new Set(current);
+      next.add(credentialId);
+      return next;
+    });
+  }, []);
+
+  const loadQuota = useCallback(
+    async (credentialId: string, silent = true, force = false) => {
+      if (!supportsUpstreamQuota) return;
+      if (!force && (settledRef.current.has(credentialId) || inFlightIdsRef.current.has(credentialId))) return;
+      inFlightIdsRef.current.add(credentialId);
+      setQuotaBusyById((current) => ({ ...current, [credentialId]: true }));
+      try {
+        const cached = await loadCredentialQuotaOnce(secret, credentialId, force);
+        if (cached.error) {
+          setQuotaById((current) => ({
+            ...current,
+            [credentialId]: { badges: [], plan: "", message: cached.error || "Quota check failed" },
+          }));
+          if (!silent) onError(cached.error);
+          return;
+        }
+        const quota = cached.quota;
+        if (!quota) return;
+        const badges = quotaBadgesFromQuota(quota);
+        const message = quota.message || "";
+        setQuotaById((current) => ({
+          ...current,
+          [credentialId]: {
+            badges,
+            plan: formatServicePlanLabel(quota.plan),
+            message,
+          },
+        }));
+        if (!silent && message && badges.length === 0) {
+          onNotice(`${credentialId}: ${message}`);
+        }
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Quota check failed";
+        setQuotaById((current) => ({
+          ...current,
+          [credentialId]: { badges: [], plan: "", message },
+        }));
+        if (!silent) onError(message);
+      } finally {
+        inFlightIdsRef.current.delete(credentialId);
+        setQuotaBusyById((current) => ({ ...current, [credentialId]: false }));
+        markSettled(credentialId);
+      }
+    },
+    [markSettled, onError, onNotice, secret, supportsUpstreamQuota],
+  );
+
+  const ensureLoaded = useCallback(async () => {
+    if (!supportsUpstreamQuota || passRunningRef.current) return;
+    if (loadOrderRef.current.length === 0) return;
+    if (loadOrderRef.current.every((id) => settledRef.current.has(id))) return;
+    passRunningRef.current = true;
+    try {
+      while (true) {
+        if (cancelledRef.current) return;
+        const nextId = loadOrderRef.current.find(
+          (id) => !settledRef.current.has(id) && !inFlightIdsRef.current.has(id),
+        );
+        if (!nextId) break;
+        await loadQuota(nextId, true, false);
+      }
+    } finally {
+      passRunningRef.current = false;
+    }
+  }, [loadQuota, supportsUpstreamQuota]);
+
+  ensureLoadedRef.current = ensureLoaded;
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    void ensureLoadedRef.current();
+    return () => {
+      cancelledRef.current = true;
+      passRunningRef.current = false;
+    };
+  }, [credentialIdsKey, supportsUpstreamQuota, provider.ID]);
 
   const handleHealth = async () => {
     setHealthBusy(true);
@@ -584,7 +715,15 @@ export function ProviderDetail({
                 </span>
               ) : null}
             </div>
-            {sortedCredentials.length > 1 ? (
+            {supportsUpstreamQuota && !quotaDataReady && loadOrderIds.length > 0 ? (
+              <p className="connections-order-hint">
+                <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
+                {t("quota.loadingQuotaProgress", {
+                  current: quotaPassSettledCount,
+                  total: loadOrderIds.length,
+                })}
+              </p>
+            ) : sortedCredentials.length > 1 ? (
               <p className="connections-order-hint">
                 <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
                 Drag accounts into the order tproxy should try them. The first account is used first.
@@ -652,6 +791,11 @@ export function ProviderDetail({
                   selected={selectedCredentialIds.includes(cred.id)}
                   onSelectedChange={toggleCredentialSelected}
                   supportsUpstreamQuota={supportsUpstreamQuota}
+                  quotaBusy={Boolean(quotaBusyById[cred.id])}
+                  quotaPlan={quotaById[cred.id]?.plan || ""}
+                  quotaBadges={quotaById[cred.id]?.badges || []}
+                  quotaMessage={quotaById[cred.id]?.message || ""}
+                  onRefreshQuota={() => loadQuota(cred.id, false, true)}
                   proxyUsage={proxyUsageById[cred.id]}
                   supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
                   onEdit={(c) => setEditingCredential(c)}
@@ -837,6 +981,11 @@ function ConnectionRow({
   selected,
   onSelectedChange,
   supportsUpstreamQuota,
+  quotaBusy,
+  quotaPlan,
+  quotaBadges,
+  quotaMessage,
+  onRefreshQuota,
   proxyUsage,
   supportsOAuth,
   onDeleted,
@@ -862,6 +1011,11 @@ function ConnectionRow({
   selected: boolean;
   onSelectedChange: (credentialId: string, selected: boolean) => void;
   supportsUpstreamQuota: boolean;
+  quotaBusy: boolean;
+  quotaPlan: string;
+  quotaBadges: QuotaBadge[];
+  quotaMessage: string;
+  onRefreshQuota: () => void | Promise<void>;
   proxyUsage?: CredentialProxyUsage;
   supportsOAuth: boolean;
   onEdit: (credential: Credential) => void;
@@ -881,10 +1035,6 @@ function ConnectionRow({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [quotaBusy, setQuotaBusy] = useState(false);
-  const [servicePlan, setServicePlan] = useState("");
-  const [quotaBadges, setQuotaBadges] = useState<Array<{ key: string; label: string; tone: "success" | "warning" | "error" | "info" | "default" }>>([]);
-  const [quotaMessage, setQuotaMessage] = useState("");
   const status = credentialStatusLabel(credential);
   const authIcon = credential.auth_type === "oauth" ? "lock_person" : credential.auth_type === "none" ? "lock_open" : "key";
   const hasProxy = (credential.proxy_pool_ids?.length ?? 0) > 0;
@@ -892,37 +1042,6 @@ function ConnectionRow({
   const needsReAuth = credential.status === "auth_required" && credential.auth_type === "oauth";
   const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
   const connectionTitle = credential.email || credential.label || credential.id;
-
-  const loadQuota = async (silent = false) => {
-    if (!supportsUpstreamQuota) return;
-    setQuotaBusy(true);
-    try {
-      const quota = await fetchCredentialQuota(secret, credential.id);
-      const badges = quotaBadgesFromQuota(quota);
-      setQuotaBadges(badges);
-      setServicePlan(formatServicePlanLabel(quota.plan));
-      setQuotaMessage(quota.message || "");
-      if (!silent && quota.message && badges.length === 0) {
-        onNotice(`${credential.id}: ${quota.message}`);
-      }
-    } catch (cause) {
-      setQuotaBadges([]);
-      setServicePlan("");
-      setQuotaMessage(cause instanceof Error ? cause.message : "Quota check failed");
-      if (!silent) {
-        onError(cause instanceof Error ? cause.message : "Quota check failed");
-      }
-    } finally {
-      setQuotaBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!supportsUpstreamQuota) return;
-    void loadQuota(true);
-    // Intentionally refresh when credential identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supportsUpstreamQuota, credential.id, secret]);
 
   const handleToggle = async () => {
     setBusy(true);
@@ -1032,13 +1151,13 @@ function ConnectionRow({
         />
       </label>
       <span
-        className={`connection-plan-badge${servicePlan ? "" : " connection-plan-badge--fallback"}`}
-        title={servicePlan ? `Service plan: ${servicePlan}` : credential.auth_type}
+        className={`connection-plan-badge${quotaPlan ? "" : " connection-plan-badge--fallback"}`}
+        title={quotaPlan ? `Service plan: ${quotaPlan}` : credential.auth_type}
       >
-        {supportsUpstreamQuota && quotaBusy && !servicePlan ? (
+        {supportsUpstreamQuota && quotaBusy && !quotaPlan ? (
           <span className="connection-plan-badge-loading" aria-hidden="true">…</span>
-        ) : servicePlan ? (
-          servicePlan
+        ) : quotaPlan ? (
+          quotaPlan
         ) : (
           <span className="material-symbols-outlined">{authIcon}</span>
         )}
@@ -1104,7 +1223,7 @@ function ConnectionRow({
             variant="ghost"
             size="sm"
             icon="donut_large"
-            onClick={() => void loadQuota(false)}
+            onClick={() => void onRefreshQuota()}
             loading={quotaBusy}
             aria-label="Refresh quota"
             title="Refresh upstream quota / balance"

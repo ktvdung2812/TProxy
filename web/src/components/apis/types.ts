@@ -10,6 +10,7 @@ export type ApiKeyLimits = {
 export type ApiKeyPolicy = {
   limits?: ApiKeyLimits;
   endpoints?: string[];
+  credential_ids?: string[];
   team?: string;
   disable_model_mapping?: boolean;
 };
@@ -46,6 +47,7 @@ export type ApiKeyFormData = {
   media_jobs: number;
   budget_usd_per_day: number;
   disable_model_mapping: boolean;
+  credential_ids: string[];
 };
 
 export type ApiModelOption = {
@@ -59,4 +61,28 @@ export type ProxyEndpoint = {
   methods: string[];
   description: string;
   capability?: string;
+};
+
+export type ApiKeyProvider = {
+  ID: string;
+  Name: string;
+  Enabled: boolean;
+};
+
+export type ApiKeyCredential = {
+  id: string;
+  label: string;
+  email?: string;
+  enabled: boolean;
+};
+
+export type ApiKeyRoute = {
+  ID: string;
+  ProviderID: string;
+  Enabled: boolean;
+};
+
+export type ApiKeyCombo = {
+  id: string;
+  items: { public_model_id: string; route_target_id?: string }[];
 };
