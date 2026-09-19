@@ -3171,7 +3171,9 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		// address makes the authorize request fail before consent. Its
 		// configured redirect (config.ClaudeRedirectURL) is used instead, and
 		// the operator pastes the code the callback page displays.
-		if provider.Type != "claude" && request.RedirectURL == "" {
+		// Devin is the same: app.devin.ai rejects unregistered redirect URIs,
+		// so its headless PKCE flow (cli_pkce_marker=1) is used instead.
+		if provider.Type != "claude" && provider.Type != "devin" && request.RedirectURL == "" {
 			hasConfiguredRedirect := provider.OAuth != nil && strings.TrimSpace(provider.OAuth.RedirectURL) != ""
 			if !hasConfiguredRedirect {
 				callbackURL, callbackErr := defaultOAuthCallbackURL(r)

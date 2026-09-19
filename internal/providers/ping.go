@@ -140,6 +140,7 @@ func pingMaxTokens(provider store.Provider, modelID string) int {
 		strings.Contains(lowerModel, "glm") ||
 		provider.Type == "cline" ||
 		provider.Type == "clinepass" ||
+		provider.Type == "devin" ||
 		strings.Contains(lowerModel, "kimi") ||
 		strings.Contains(lowerModel, "claude") ||
 		strings.Contains(lowerModel, "deepseek") {

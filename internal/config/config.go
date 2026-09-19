@@ -805,6 +805,18 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		if provider.BaseURL == "" {
 			provider.BaseURL = "https://api2.cursor.sh"
 		}
+	case "devin":
+		if provider.Name == "" {
+			provider.Name = "Devin AI"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://server.codeium.com"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		// Headless PKCE manual-code flow — no loopback listener.
+		provider.OAuth.ListenForCallback = false
 	case "qoder":
 		if provider.Name == "" {
 			provider.Name = "Qoder"
@@ -1102,7 +1114,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}
@@ -1246,7 +1258,7 @@ func validateProxyURL(value string) error {
 
 func validateOAuth(providerID, providerType string, oauth *OAuthConfig) error {
 	hasTokenEndpoint := strings.TrimSpace(oauth.TokenURL) != "" || strings.TrimSpace(oauth.DiscoveryURL) != ""
-	if !hasTokenEndpoint && providerType != "kimchi" && !isCustomDeviceFlow(oauth.DeviceFlow) {
+	if !hasTokenEndpoint && providerType != "kimchi" && providerType != "devin" && !isCustomDeviceFlow(oauth.DeviceFlow) {
 		return fmt.Errorf("provider %q oauth token-url or discovery-url is required", providerID)
 	}
 	if oauthRequiresClientID(providerType, oauth) && strings.TrimSpace(oauth.ClientIDEnv) == "" && strings.TrimSpace(oauth.ClientID) == "" {

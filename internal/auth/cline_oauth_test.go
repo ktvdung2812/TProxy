@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,54 @@ func TestClineBrowserOAuthStart(t *testing.T) {
 	}
 	if !strings.Contains(started.AuthorizationURL, "client_type=extension") {
 		t.Fatalf("authorization url = %q", started.AuthorizationURL)
+	}
+}
+
+func TestClineBrowserOAuthEphemeralCallback(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{
+		"accessToken":  "ephemeral-access",
+		"refreshToken": "ephemeral-refresh",
+		"email":        "cline@example.com",
+		"expiresAt":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+	code := base64.StdEncoding.EncodeToString(payload)
+
+	cfg := &config.Config{Providers: []config.ProviderConfig{{ID: "cline", Type: "cline", Enabled: true, OAuth: &config.OAuthConfig{}}}}
+	dataStore, _ := newAuthStore(t, cfg)
+	manager := NewManager(dataStore, http.DefaultClient)
+	defer manager.Close()
+
+	started, err := manager.StartAuthorization(context.Background(), StartRequest{
+		ProviderID:   "cline",
+		CredentialID: "cline-account",
+		Mode:         "browser",
+		RedirectURL:  "http://127.0.0.1:28120/api/admin/oauth/callback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorization, err := url.Parse(started.AuthorizationURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := authorization.Query().Get("callback_url")
+	parsedCallback, err := url.Parse(callback)
+	if err != nil || parsedCallback.Port() == "28120" || parsedCallback.Port() == "" {
+		t.Fatalf("callback url = %q", callback)
+	}
+	// AuthKit redirects with only ?code= — no state — and the per-session
+	// listener must still bind and consume the flow.
+	response, err := http.Get(callback + "?code=" + url.QueryEscape(code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("callback status=%d", response.StatusCode)
+	}
+	status, err := manager.SessionStatus(started.SessionID)
+	if err != nil || status.Status != "complete" {
+		t.Fatalf("status=%+v err=%v", status, err)
 	}
 }
 

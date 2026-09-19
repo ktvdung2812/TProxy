@@ -163,6 +163,9 @@ func staticDiscoveryModels(provider store.Provider) []DiscoveredModel {
 	if provider.Type == "clinepass" || provider.ID == "clinepass" {
 		return clinepassStaticModelEntries(provider)
 	}
+	if provider.Type == "devin" || provider.ID == "devin" {
+		return devinStaticModelEntries(provider)
+	}
 	switch provider.ID {
 	case "glm", "glm-cn":
 		return glmStaticModelEntries(provider)

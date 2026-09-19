@@ -410,7 +410,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		return rollback(errors.New("provider id and type are required"))
 	}
 	switch providerCfg.Type {
-	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 	default:
 		return rollback(fmt.Errorf("unsupported provider type %q", providerCfg.Type))
 	}
@@ -2079,6 +2079,11 @@ func decodeProviderConfig(raw string, provider *Provider) {
 			provider.OAuth = &config.OAuthConfig{}
 		}
 		config.NormalizeClaudeOAuth(provider.OAuth)
+	}
+	// Devin rows persisted before OAuth support carry "oauth":null — the
+	// headless PKCE flow needs no fields, only a non-nil config.
+	if provider.Type == "devin" && provider.OAuth == nil {
+		provider.OAuth = &config.OAuthConfig{}
 	}
 }
 

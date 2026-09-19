@@ -42,6 +42,21 @@ func TestCursorPeriodUsageEntrySoftFails(t *testing.T) {
 	}
 }
 
+// Connect may serialize percent/cycle fields as strings or use snake_case
+// keys; both must still produce the monthly window and renewal date.
+func TestCursorPeriodUsageEntryStringFields(t *testing.T) {
+	entry, renewsAt := cursorPeriodUsageEntry(map[string]any{
+		"billing_cycle_end": "1787340562000",
+		"planUsage":         map[string]any{"totalPercentUsed": "42.5"},
+	})
+	if entry == nil || entry.Used != 42.5 || entry.Remaining != 57.5 {
+		t.Fatalf("entry = %+v", entry)
+	}
+	if renewsAt == "" || entry.ResetAt != renewsAt {
+		t.Fatalf("renewal = %q entry = %+v", renewsAt, entry)
+	}
+}
+
 func TestCursorEpochMillis(t *testing.T) {
 	if got := cursorEpochMillis("1787340562000"); got != float64(1787340562000) {
 		t.Fatalf("millis = %v", got)

@@ -128,6 +128,7 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"kilocode":             {"text", "vision", "tools", "reasoning"},
 		"gitlab":               {"text", "tools", "reasoning"},
 		"kimchi":               {"text", "vision", "tools", "reasoning"},
+		"devin":                {"text", "vision", "tools", "reasoning"},
 	}
 	items := append([]string(nil), capabilities[providerType]...)
 	return items
@@ -143,7 +144,7 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
 		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cursor": "cursor", "cline": "openai", "clinepass": "openai",
-		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai",
+		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai", "devin": "devin",
 	}
 	// Antigravity is absent: it serves a real catalogue through
 	// fetchAvailableModels, the same endpoint the quota tracker uses.
@@ -189,6 +190,9 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 	}
 	if provider.Type == "kiro" {
 		return discoverKiroModels(ctx, r, provider, credential)
+	}
+	if provider.Type == "devin" {
+		return discoverDevinModels(ctx, r, provider, credential)
 	}
 	if shouldSkipModelDiscovery(provider) {
 		if items := staticDiscoveryModels(provider); len(items) > 0 {
@@ -318,6 +322,7 @@ func NewRegistry() *Registry {
 		"gitlab":               &openAIAdapter{client: client},
 		"kimchi":               &openAIAdapter{client: client},
 		"cursor":               &cursorAdapter{client: client},
+		"devin":                &devinAdapter{client: client},
 	}}
 }
 
@@ -657,7 +662,9 @@ func buildOpenAIBody(request canonical.Request) map[string]any {
 func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (*canonical.Response, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	request.Stream = false
-	response, err := postOpenAIChat(ctx, a.client, provider, correlationHeaders(authHeaders(provider, credential), request.RequestID), openAIBody(provider, request))
+	headers := correlationHeaders(authHeaders(provider, credential), request.RequestID)
+	applyOpenCodeHeaders(headers, provider, request)
+	response, err := postOpenAIChat(ctx, a.client, provider, headers, openAIBody(provider, request))
 	if err != nil {
 		return nil, &ProviderError{Status: 0, Code: "upstream_network", Err: err}
 	}
@@ -695,6 +702,7 @@ func (a *openAIAdapter) ExecuteStream(ctx context.Context, provider store.Provid
 		body["stream_options"] = map[string]any{"include_usage": true}
 	}
 	headers := correlationHeaders(authHeaders(provider, credential), request.RequestID)
+	applyOpenCodeHeaders(headers, provider, request)
 	headers.Set("Accept", "text/event-stream")
 	response, err := postOpenAIChat(ctx, a.client, provider, headers, body)
 	if err != nil {

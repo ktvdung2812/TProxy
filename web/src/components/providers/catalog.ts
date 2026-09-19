@@ -71,6 +71,7 @@ export const ALL_PROVIDER_TYPES = [
   "kilocode",
   "gitlab",
   "kimchi",
+  "devin",
 ] as const;
 
 const CATALOG: Record<string, ProviderTypeInfo> = {
@@ -492,6 +493,22 @@ const CATALOG: Record<string, ProviderTypeInfo> = {
     supportsOAuth: true,
     defaultBaseUrl: "https://api.cline.bot/api/v1",
   },
+  devin: {
+    type: "devin",
+    name: "Devin AI",
+    icon: "smart_toy",
+    textIcon: "DV",
+    category: "apikey",
+    listSection: "apikey",
+    color: "#000000",
+    description:
+      "Devin CLI subscription via Connect+protobuf API (server.codeium.com). Sign in via browser OAuth, or paste the windsurf_api_key from ~/.local/share/devin/credentials.toml.",
+    website: "https://devin.ai",
+    apiKeyUrl: "https://app.devin.ai",
+    defaultAuthType: "api_key",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://server.codeium.com",
+  },
 };
 
 /** Lookup provider type metadata. Returns a generic fallback for unknown types. */
@@ -553,7 +570,7 @@ export function providerDetailPath(slug: string): string {
 
 /** Providers whose OAuth callback may omit the state query parameter. */
 export function allowsStatelessOAuthCallback(type: string): boolean {
-  return type === "cline" || type === "clinepass" || type === "kimchi";
+  return type === "cline" || type === "clinepass" || type === "kimchi" || type === "devin";
 }
 
 /** Extract OAuth code from a pasted Cline AuthKit callback URL. */

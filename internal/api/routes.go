@@ -191,6 +191,10 @@ var ingressClientHeaderNames = []string{
 	"version",
 	"session_id",
 	"chatgpt-account-id",
+	"x-opencode-session",
+	"x-opencode-request",
+	"x-opencode-project",
+	"x-opencode-client",
 }
 
 func captureIngressClientHeaders(r *http.Request, request *canonical.Request) {

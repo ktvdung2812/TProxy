@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -14,18 +15,44 @@ import (
 	"github.com/tproxy/tproxy/internal/store"
 )
 
-var antigravityImportantModels = []string{
-	"gemini-3-flash-agent",
-	"gemini-3.5-flash-low",
-	"gemini-3.5-flash-extra-low",
-	"gemini-pro-agent",
-	"gemini-3.1-pro-low",
-	"claude-sonnet-4-6",
-	"claude-opus-4-6-thinking",
-	"gpt-oss-120b-medium",
-	"gemini-3-flash",
-	"gemini-3.1-flash-image",
-	"gemini-3-pro-image",
+// antigravityTierName resolves the plan label from loadCodeAssist. currentTier
+// is an object — its name is the display label ("Antigravity", "Google AI
+// Pro"); when only an id is present, look the id up in allowedTiers/paidTier
+// rather than stringifying the map.
+func antigravityTierName(subscription map[string]any) string {
+	if tier, ok := subscription["currentTier"].(map[string]any); ok {
+		if name := strings.TrimSpace(stringValue(tier["name"])); name != "" {
+			return name
+		}
+		if id := strings.TrimSpace(stringValue(tier["id"])); id != "" {
+			if name := antigravityTierDisplayName(subscription, id); name != "" {
+				return name
+			}
+			return id
+		}
+	}
+	if plan := strings.TrimSpace(stringValue(subscription["plan"])); plan != "" {
+		return plan
+	}
+	if current, ok := subscription["currentTier"].(string); ok {
+		return strings.TrimSpace(current)
+	}
+	return ""
+}
+
+// antigravityTierDisplayName maps a tier id to its display name via the
+// allowedTiers list or the paidTier upsell block.
+func antigravityTierDisplayName(subscription map[string]any, id string) string {
+	for _, raw := range toAnySlice(subscription["allowedTiers"]) {
+		tier, _ := raw.(map[string]any)
+		if stringValue(tier["id"]) == id {
+			return strings.TrimSpace(stringValue(tier["name"]))
+		}
+	}
+	if paid, ok := subscription["paidTier"].(map[string]any); ok && stringValue(paid["id"]) == id {
+		return strings.TrimSpace(stringValue(paid["name"]))
+	}
+	return ""
 }
 
 func (r *Registry) antigravityQuota(ctx context.Context, credential store.Credential) (CredentialQuota, error) {
@@ -50,12 +77,7 @@ func (r *Registry) antigravityQuota(ctx context.Context, credential store.Creden
 		if projectID == "" {
 			projectID = antigravityProjectFromValues(subscription)
 		}
-		result.Plan = stringValue(firstValue(subscription, "currentTier", "plan"))
-		if tier, ok := subscription["currentTier"].(map[string]any); ok {
-			if name := stringValue(tier["name"]); name != "" {
-				result.Plan = name
-			}
-		}
+		result.Plan = antigravityTierName(subscription)
 	}
 	body := map[string]any{}
 	if projectID != "" {
@@ -84,7 +106,12 @@ func (r *Registry) antigravityQuota(ctx context.Context, credential store.Creden
 		return result, nil
 	}
 	models, _ := data["models"].(map[string]any)
-	for _, modelKey := range antigravityImportantModels {
+	modelKeys := make([]string, 0, len(models))
+	for modelKey := range models {
+		modelKeys = append(modelKeys, modelKey)
+	}
+	sort.Strings(modelKeys)
+	for _, modelKey := range modelKeys {
 		raw, ok := models[modelKey].(map[string]any)
 		if !ok {
 			continue

@@ -63,6 +63,8 @@ const QUOTA_PROVIDER_TYPES = new Set([
   "kimi",
   "kimi-coding",
   "deepseek",
+  "devin",
+  "opencode-go",
 ]);
 
 function quotaProviderKey(item: Pick<CredentialRow, "providerId" | "providerType">): string {

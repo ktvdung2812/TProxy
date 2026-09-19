@@ -29,6 +29,8 @@ func (r *Registry) credentialQuotaByPreset(ctx context.Context, provider store.P
 		return r.qoderQuota(ctx, credential), true
 	case "codebuddy-cn":
 		return r.codebuddyCNQuota(ctx, credential), true
+	case "cline", "clinepass":
+		return r.clineQuota(ctx, provider, credential), true
 	case "gemini-cli":
 		return r.geminiCLIQuota(ctx, credential), true
 	case "github":
@@ -44,6 +46,9 @@ func (r *Registry) credentialQuotaByPreset(ctx context.Context, provider store.P
 	// Public api.x.ai keys use a different billing track and are excluded.
 	if isGrokCLIQuotaProvider(provider) {
 		return r.grokCLIQuota(ctx, provider, credential), true
+	}
+	if isOpenCodeGoQuotaProvider(provider) {
+		return r.opencodeGoQuota(ctx, provider, credential), true
 	}
 	return CredentialQuota{}, false
 }
@@ -338,18 +343,28 @@ func (r *Registry) vercelGatewayQuota(ctx context.Context, credential store.Cred
 		result.Message = "Invalid Vercel AI Gateway credits response"
 		return result
 	}
-	balance := float64(numberValue(payload["balance"]))
-	totalUsed := float64(numberValue(payload["total_used"]))
+	balance := glmQuotaFloat(payload["balance"])
+	totalUsed := glmQuotaFloat(payload["total_used"])
 	const monthlyCredit = 5.0
 	if balance <= 0 && totalUsed <= 0 {
 		result.Message = "Vercel AI Gateway connected. No credit allocation found."
 		return result
 	}
+	// Topped-up balances exceed the $5 monthly grant; clamp the meter instead
+	// of reporting >100% remaining.
+	remaining := (balance / monthlyCredit) * 100
+	if remaining > 100 {
+		remaining = 100
+	}
+	used := monthlyCredit - balance
+	if used < 0 {
+		used = 0
+	}
 	result.Quotas["Remaining (USD)"] = QuotaEntry{
 		Name:      "Remaining (USD)",
-		Used:      monthlyCredit - balance,
+		Used:      used,
 		Total:     monthlyCredit,
-		Remaining: (balance / monthlyCredit) * 100,
+		Remaining: remaining,
 	}
 	return result
 }
@@ -358,13 +373,15 @@ func (r *Registry) vercelGatewayQuota(ctx context.Context, credential store.Cred
 //
 //	GET /v1/billing                 — monthly allotment in cents (monthlyLimit/used)
 //	GET /v1/billing?format=credits  — weekly productUsage %, on-demand, prepaid
-//	GET /v1/user?include=subscription — plan tier
+//	GET /v1/user?include=subscription — plan tier, principal type
+//	GET /v1/settings                — subscription_tier_display (plan name as x.ai shows it)
 //
 // Values are protobuf-json style `{ "val": number }` or plain numbers.
 const (
 	grokCLIBillingCreditsURL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
 	grokCLIBillingPlainURL   = "https://cli-chat-proxy.grok.com/v1/billing"
 	grokCLIUserURL           = "https://cli-chat-proxy.grok.com/v1/user?include=subscription"
+	grokCLISettingsURL       = "https://cli-chat-proxy.grok.com/v1/settings"
 	grokCLIVersion           = "0.2.99"
 )
 
@@ -403,14 +420,18 @@ func (r *Registry) grokCLIQuota(ctx context.Context, provider store.Provider, cr
 	creditsCh := make(chan fetchResult, 1)
 	plainCh := make(chan fetchResult, 1)
 	userCh := make(chan fetchResult, 1)
+	settingsCh := make(chan fetchResult, 1)
 	go func() { creditsCh <- fetch(grokCLIBillingCreditsURL) }()
 	go func() { plainCh <- fetch(grokCLIBillingPlainURL) }()
 	go func() { userCh <- fetch(grokCLIUserURL) }()
+	go func() { settingsCh <- fetch(grokCLISettingsURL) }()
 	credits := <-creditsCh
 	plain := <-plainCh
 	userFetch := <-userCh
+	settingsFetch := <-settingsCh
 
-	// Auth failure on either billing endpoint is fatal.
+	// Auth failure on either billing endpoint is fatal. A 401/403 on the
+	// user or settings probe only costs the plan overlay, not the quota data.
 	for _, fr := range []fetchResult{credits, plain} {
 		if fr.err != nil {
 			continue
@@ -434,7 +455,7 @@ func (r *Registry) grokCLIQuota(ctx context.Context, provider store.Provider, cr
 		return result
 	}
 
-	var creditsPayload, plainPayload, userPayload map[string]any
+	var creditsPayload, plainPayload, userPayload, settingsPayload map[string]any
 	if credits.err == nil && credits.status >= 200 && credits.status < 300 {
 		_ = json.Unmarshal(credits.body, &creditsPayload)
 	}
@@ -444,15 +465,25 @@ func (r *Registry) grokCLIQuota(ctx context.Context, provider store.Provider, cr
 	if userFetch.err == nil && userFetch.status >= 200 && userFetch.status < 300 {
 		_ = json.Unmarshal(userFetch.body, &userPayload)
 	}
+	if settingsFetch.err == nil && settingsFetch.status >= 200 && settingsFetch.status < 300 {
+		_ = json.Unmarshal(settingsFetch.body, &settingsPayload)
+	}
 	if creditsPayload == nil && plainPayload == nil {
 		result.Message = "Invalid Grok CLI billing response"
 		return result
 	}
 
-	plan, quotas, message := parseGrokCLIBillingMerged(creditsPayload, plainPayload, userPayload)
+	plan, quotas, message := parseGrokCLIBillingMerged(creditsPayload, plainPayload, userPayload, settingsPayload)
 	result.Plan = plan
 	result.Quotas = quotas
 	result.Message = message
+	// The monthly billing end is the renewal date for $ plans; unified-billing
+	// accounts renew when their weekly pool resets.
+	if monthly, ok := quotas["monthly"]; ok && monthly.ResetAt != "" {
+		result.RenewsAt = monthly.ResetAt
+	} else if weekly, ok := quotas["weekly"]; ok {
+		result.RenewsAt = weekly.ResetAt
+	}
 	return result
 }
 
@@ -484,16 +515,17 @@ func grokCLIQuotaHeaders(accessToken string, credential store.Credential) http.H
 // parseGrokCLIBilling is a compatibility wrapper that treats a single payload
 // as the credits-format body (used by unit tests and simpler call sites).
 func parseGrokCLIBilling(billing, user map[string]any) (plan string, quotas map[string]QuotaEntry, message string) {
-	return parseGrokCLIBillingMerged(billing, nil, user)
+	return parseGrokCLIBillingMerged(billing, nil, user, nil)
 }
 
 // parseGrokCLIBillingMerged maps cli-chat-proxy billing responses into dashboard
 // quota windows.
 //
-//	credits — GET /v1/billing?format=credits (productUsage %, on-demand, prepaid, weekly period)
-//	plain   — GET /v1/billing (monthlyLimit/used in cents for SuperGrok / GrokPro)
-//	user    — GET /v1/user?include=subscription (plan tier)
-func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string, quotas map[string]QuotaEntry, message string) {
+//	credits  — GET /v1/billing?format=credits (productUsage %, on-demand, prepaid, weekly period)
+//	plain    — GET /v1/billing (monthlyLimit/used in cents for SuperGrok / GrokPro)
+//	user     — GET /v1/user?include=subscription (plan tier, principal type)
+//	settings — GET /v1/settings (subscription_tier_display)
+func parseGrokCLIBillingMerged(credits, plain, user, settings map[string]any) (plan string, quotas map[string]QuotaEntry, message string) {
 	quotas = map[string]QuotaEntry{}
 	creditsCfg := grokCLIConfig(credits)
 	plainCfg := grokCLIConfig(plain)
@@ -503,7 +535,7 @@ func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string
 	if len(primaryCfg) == 0 {
 		primaryCfg = plainCfg
 	}
-	plan = resolveGrokCLIPlan(user, primaryCfg)
+	plan = resolveGrokCLIPlan(user, primaryCfg, settings)
 	tier := grokCLISubscriptionTier(user, primaryCfg)
 	subscriptionAccess := tier != "" && !strings.EqualFold(tier, "free") && !strings.EqualFold(tier, "none") && !strings.EqualFold(tier, "null")
 
@@ -532,83 +564,77 @@ func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string
 		}
 	}
 
-	// 2) Product usage bars from format=credits.
-	//    Live GrokPro shape: productUsage: [{product:"GrokBuild", usagePercent:1}, ...]
+	// 2) Unified-billing pool from format=credits.
+	//    Live shape: productUsage: [{product:"GrokBuild", usagePercent:1}, ...]
+	//    plus creditUsagePercent — the combined pool meter across API, Build,
+	//    Chat, and anything else xAI declines to itemize.
 	//
-	//    These are slices of ONE weekly allowance, not separate allowances: the
-	//    x.ai usage page renders them as segments of a single bar whose total is
-	//    their sum (e.g. Build 95% + Voice 2% + Chat 1% = 98% of the week used).
-	//    Reporting each as its own 0-100 window overstated the account badly —
-	//    a barely-touched product still read as ~100% free while the shared pool
-	//    was nearly gone, and routing kept picking an account with 2% left.
-	productPeriodEnd := weeklyPeriodEnd
-	if products, ok := creditsCfg["productUsage"].([]any); ok {
-		weeklyUsed := 0.0
-		hasWeekly := false
-		for _, raw := range products {
-			item, _ := raw.(map[string]any)
-			if item == nil {
-				continue
-			}
-			product := strings.TrimSpace(stringValue(firstValue(item, "product", "name", "id")))
-			if product == "" {
-				continue
-			}
-			// Skip entries with no usagePercent — e.g. GrokChat without a meter.
-			if !hasProtoField(item, "usagePercent", "usage_percent", "percent") {
-				continue
-			}
-			usedPct := unwrapProtoVal(firstValue(item, "usagePercent", "usage_percent", "percent"))
-			if usedPct < 0 {
-				usedPct = 0
-			}
-			if usedPct > 100 {
-				usedPct = 100
-			}
-			weeklyUsed += usedPct
-			hasWeekly = true
-			// Kept for display only; grokProductBreakdownKey is excluded from
-			// the routing gate so the same usage is not counted twice.
-			key := grokProductBreakdownKey(product)
-			quotas[key] = QuotaEntry{
-				Name:      product,
-				Used:      usedPct,
-				Total:     100,
-				Remaining: 100 - usedPct,
-				ResetAt:   productPeriodEnd,
-			}
+	//    The product entries are slices of ONE allowance, not separate
+	//    allowances: the x.ai usage page renders them as segments of a single
+	//    bar whose total is their sum (e.g. Build 95% + Voice 2% + Chat 1% =
+	//    98% of the week used). Reporting each as its own 0-100 window
+	//    overstated the account badly — a barely-touched product still read as
+	//    ~100% free while the shared pool was nearly gone, and routing kept
+	//    picking an account with 2% left.
+	//
+	//    A unified-billing account at zero usage omits both fields entirely, so
+	//    a parseable currentPeriod (or the unified flag) without usage data
+	//    means a full pool, not a missing meter.
+	products, _ := creditsCfg["productUsage"].([]any)
+	if len(products) == 0 {
+		products, _ = plainCfg["productUsage"].([]any)
+	}
+	productSum := 0.0
+	hasProducts := false
+	for _, raw := range products {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
 		}
-		if hasWeekly {
-			if weeklyUsed > 100 {
-				weeklyUsed = 100
-			}
-			quotas["weekly"] = QuotaEntry{
-				Name:      "Weekly limit",
-				Used:      weeklyUsed,
-				Total:     100,
-				Remaining: 100 - weeklyUsed,
-				ResetAt:   productPeriodEnd,
-			}
+		product := strings.TrimSpace(stringValue(firstValue(item, "product", "name", "id")))
+		if product == "" {
+			continue
+		}
+		// Skip entries with no usagePercent — e.g. GrokChat without a meter.
+		if !hasProtoField(item, "usagePercent", "usage_percent", "percent") {
+			continue
+		}
+		usedPct := grokCLIClampPercent(unwrapProtoVal(firstValue(item, "usagePercent", "usage_percent", "percent")))
+		productSum += usedPct
+		hasProducts = true
+		// Kept for display only; grokProductBreakdownKey is excluded from
+		// the routing gate so the same usage is not counted twice.
+		key := grokProductBreakdownKey(product)
+		quotas[key] = QuotaEntry{
+			Name:      product,
+			Used:      usedPct,
+			Total:     100,
+			Remaining: 100 - usedPct,
+			ResetAt:   weeklyPeriodEnd,
 		}
 	}
-
-	// Overall credit usage percent — only when no monthly $ or product bars.
-	if _, hasMonthly := quotas["monthly"]; !hasMonthly && !hasGrokCLIProductQuota(quotas) {
-		if hasProtoField(creditsCfg, "creditUsagePercent", "credit_usage_percent") {
-			usedPct := unwrapProtoVal(firstValue(creditsCfg, "creditUsagePercent", "credit_usage_percent"))
-			if usedPct < 0 {
-				usedPct = 0
-			}
-			if usedPct > 100 {
-				usedPct = 100
-			}
-			quotas["credits_pct"] = QuotaEntry{
-				Name:      "Credits",
-				Used:      usedPct,
-				Total:     100,
-				Remaining: 100 - usedPct,
-				ResetAt:   weeklyPeriodEnd,
-			}
+	hasCombined := hasProtoField(creditsCfg, "creditUsagePercent", "credit_usage_percent") ||
+		hasProtoField(plainCfg, "creditUsagePercent", "credit_usage_percent")
+	combinedCfg := creditsCfg
+	if !hasProtoField(combinedCfg, "creditUsagePercent", "credit_usage_percent") {
+		combinedCfg = plainCfg
+	}
+	unifiedPool := hasCombined || hasProducts ||
+		grokCLICurrentPeriod(creditsCfg) != nil || creditsCfg["isUnifiedBillingUser"] == true
+	if unifiedPool {
+		poolUsed := productSum
+		if hasCombined {
+			poolUsed = grokCLIClampPercent(unwrapProtoVal(firstValue(combinedCfg, "creditUsagePercent", "credit_usage_percent")))
+		}
+		if poolUsed > 100 {
+			poolUsed = 100
+		}
+		quotas["weekly"] = QuotaEntry{
+			Name:      grokCLIPoolName(grokCLIPeriodType(creditsCfg)),
+			Used:      poolUsed,
+			Total:     100,
+			Remaining: 100 - poolUsed,
+			ResetAt:   weeklyPeriodEnd,
 		}
 	}
 
@@ -676,8 +702,13 @@ func parseGrokCLIBillingMerged(credits, plain, user map[string]any) (plan string
 		appendGrokCLICreditBag(quotas, bag, monthlyPeriodEnd)
 	}
 
+	if weekly, ok := quotas["weekly"]; ok && weekly.Remaining <= 0 && grokCLITopUpActive(primaryCfg) {
+		message = "Pool limit reached; auto top-up is enabled, so paid usage may continue."
+	}
 	if len(quotas) == 0 {
-		if subscriptionAccess {
+		if grokCLIPrincipalIsTeam(user) {
+			message = "Grok team billing is not exposed per user; personal usage windows are unavailable."
+		} else if subscriptionAccess {
 			message = "Subscription access is active; Grok does not expose a numeric included quota."
 		} else {
 			message = "Grok Build connected, but no credit allotment was returned. Free promo may be exhausted."
@@ -698,19 +729,79 @@ func grokCLIConfig(payload map[string]any) map[string]any {
 
 func grokCLIPeriodEnd(config, root map[string]any) string {
 	if config != nil {
-		if end := parseResetAt(firstValue(config, "billingPeriodEnd", "billing_period_end", "resetAt", "resetsAt", "periodEnd")); end != "" {
+		// currentPeriod bounds the active allowance window; the flat
+		// billingPeriodEnd can lag behind it.
+		if end := parseResetAt(grokCLICurrentPeriod(config)["end"]); end != "" {
 			return end
 		}
-		if currentPeriod, ok := config["currentPeriod"].(map[string]any); ok {
-			if end := parseResetAt(currentPeriod["end"]); end != "" {
-				return end
-			}
+		if end := parseResetAt(firstValue(config, "billingPeriodEnd", "billing_period_end", "resetAt", "resetsAt", "periodEnd")); end != "" {
+			return end
 		}
 	}
 	if root != nil {
 		return parseResetAt(firstValue(root, "billingPeriodEnd", "billing_period_end", "resetAt", "resetsAt", "periodEnd"))
 	}
 	return ""
+}
+
+// grokCLICurrentPeriod returns the currentPeriod object or nil.
+func grokCLICurrentPeriod(config map[string]any) map[string]any {
+	period, _ := config["currentPeriod"].(map[string]any)
+	return period
+}
+
+// grokCLIPeriodType reads currentPeriod.type, e.g. USAGE_PERIOD_TYPE_WEEKLY.
+func grokCLIPeriodType(config map[string]any) string {
+	return strings.ToUpper(stringValue(grokCLICurrentPeriod(config)["type"]))
+}
+
+// grokCLIPoolName labels the unified-billing pool by its real period. Unified
+// accounts are weekly today; the label stays honest if xAI moves the window.
+func grokCLIPoolName(periodType string) string {
+	switch {
+	case strings.Contains(periodType, "WEEK"):
+		return "Weekly limit"
+	case strings.Contains(periodType, "DAY"), strings.Contains(periodType, "DAILY"):
+		return "Daily limit"
+	case strings.Contains(periodType, "MONTH"):
+		return "Monthly limit"
+	case periodType != "":
+		return "Usage limit"
+	default:
+		return "Weekly limit"
+	}
+}
+
+func grokCLIClampPercent(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+// grokCLITopUpActive reports whether auto top-up is armed (e.g.
+// TOP_UP_METHOD_SAVED_PAYMENT_METHOD) rather than unset or disabled.
+func grokCLITopUpActive(config map[string]any) bool {
+	method := strings.ToUpper(strings.TrimSpace(stringValue(firstValue(config, "topUpMethod", "top_up_method"))))
+	return method != "" && !strings.Contains(method, "NONE") && !strings.Contains(method, "UNSPECIFIED")
+}
+
+// grokCLIPrincipalIsTeam reports whether the credential belongs to a team
+// principal rather than an individual user.
+func grokCLIPrincipalIsTeam(user map[string]any) bool {
+	if user == nil {
+		return false
+	}
+	if pt := strings.ToUpper(strings.TrimSpace(stringValue(user["principalType"]))); pt != "" && pt != "USER" {
+		return true
+	}
+	if tid := strings.TrimSpace(stringValue(user["teamId"])); tid != "" && !strings.EqualFold(tid, "null") {
+		return true
+	}
+	return false
 }
 
 // grokCLIMonthlyAllotment extracts monthly limit/used.
@@ -753,15 +844,6 @@ const grokProductBreakdownPrefix = "product_"
 
 func grokProductBreakdownKey(product string) string {
 	return grokProductBreakdownPrefix + strings.ToLower(product)
-}
-
-func hasGrokCLIProductQuota(quotas map[string]QuotaEntry) bool {
-	for key := range quotas {
-		if strings.HasPrefix(key, grokProductBreakdownPrefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func appendGrokCLICreditBag(quotas map[string]QuotaEntry, bag map[string]any, periodEnd string) {
@@ -826,7 +908,13 @@ func grokCLICreditBags(root, config map[string]any) []map[string]any {
 	return bags
 }
 
-func resolveGrokCLIPlan(user, config map[string]any) string {
+func resolveGrokCLIPlan(user, config, settings map[string]any) string {
+	// /v1/settings carries the plan name exactly as x.ai displays it
+	// ("SuperGrok", "SuperGrok Heavy"), while /v1/user only exposes the
+	// internal tier code ("GrokPro").
+	if display := grokCLIPlanDisplay(settings); display != "" {
+		return display
+	}
 	tier := grokCLISubscriptionTier(user, config)
 	if tier != "" {
 		// Keep camelCase tiers like "GrokPro" readable; split snake/kebab only.
@@ -855,13 +943,25 @@ func resolveGrokCLIPlan(user, config map[string]any) string {
 	return "Grok Build"
 }
 
+// grokCLIPlanDisplay reads the display-ready plan name from /v1/settings.
+func grokCLIPlanDisplay(settings map[string]any) string {
+	if settings == nil {
+		return ""
+	}
+	display := strings.TrimSpace(stringValue(firstValue(settings, "subscription_tier_display", "subscriptionTierDisplay")))
+	if strings.EqualFold(display, "null") || strings.EqualFold(display, "none") {
+		return ""
+	}
+	return display
+}
+
 func grokCLISubscriptionTier(user, config map[string]any) string {
 	if user != nil {
 		if tier := strings.TrimSpace(stringValue(firstValue(user, "subscriptionTier", "subscription_tier"))); tier != "" {
 			return tier
 		}
 		if sub, ok := user["subscription"].(map[string]any); ok {
-			if tier := strings.TrimSpace(stringValue(sub["tier"])); tier != "" {
+			if tier := strings.TrimSpace(stringValue(firstValue(sub, "tier", "name", "display_name", "product_name"))); tier != "" {
 				return tier
 			}
 		}
@@ -990,14 +1090,15 @@ func (r *Registry) qoderQuota(ctx context.Context, credential store.Credential) 
 		result.Message = "Invalid Qoder quota response"
 		return result
 	}
-	credits := float64(numberValue(firstValue(payload, "credits", "remaining_credits", "availableCredits")))
-	if credits > 0 {
-		result.Quotas["Credits"] = QuotaEntry{
-			Name:      "Credits",
-			Used:      0,
-			Total:     credits,
-			Remaining: 100,
+	// A credits field present at zero is an exhausted balance, not missing
+	// data: report it as a depleted window so the credential pauses.
+	if hasProtoField(payload, "credits", "remaining_credits", "availableCredits") {
+		credits := glmQuotaFloat(firstValue(payload, "credits", "remaining_credits", "availableCredits"))
+		entry := QuotaEntry{Name: "Credits", Used: 0, Total: credits, Remaining: 100}
+		if credits <= 0 {
+			entry = QuotaEntry{Name: "Credits", Used: 1, Total: 1, Remaining: 0}
 		}
+		result.Quotas["Credits"] = entry
 	}
 	if len(result.Quotas) == 0 {
 		result.Message = "Qoder connected. No quota data returned."

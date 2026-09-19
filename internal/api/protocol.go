@@ -464,7 +464,7 @@ func useClientRequestID(r *http.Request) string {
 }
 
 func sessionIDFromRequest(r *http.Request) string {
-	for _, header := range []string{"X-Session-ID", "Session_id", "X-Client-Request-Id", "Conversation-ID"} {
+	for _, header := range []string{"X-Session-ID", "Session_id", "X-Client-Request-Id", "Conversation-ID", "X-Opencode-Session"} {
 		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
 			return value
 		}
