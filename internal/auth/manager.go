@@ -457,7 +457,7 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		if provider.Type == "xai" || provider.Type == "kimi" || provider.Type == "qwen" || provider.Type == "qoder" ||
 			provider.Type == "kilocode" || provider.Type == "codebuddy-cn" || provider.Type == "kiro" {
 			mode = "device"
-		} else if isClineProvider(provider.Type) || provider.Type == "kimchi" || provider.Type == "iflow" || provider.Type == "gitlab" || oauthConfig.AuthorizationURL != "" {
+		} else if isClineProvider(provider.Type) || provider.Type == "kimchi" || provider.Type == "iflow" || provider.Type == "gitlab" || provider.Type == "devin" || oauthConfig.AuthorizationURL != "" {
 			mode = "browser"
 		} else {
 			mode = "device"
@@ -487,11 +487,15 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		if redirectURL == "" {
 			redirectURL = strings.TrimSpace(oauthConfig.RedirectURL)
 		}
-		if redirectURL == "" {
+		// Devin's headless PKCE flow (cli_pkce_marker=1) needs no redirect URI —
+		// the user pastes the displayed code back manually.
+		if redirectURL == "" && provider.Type != "devin" {
 			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("OAuth redirect URL is required")}
 		}
-		if err := validateRedirectURL(redirectURL); err != nil {
-			return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: err}
+		if redirectURL != "" {
+			if err := validateRedirectURL(redirectURL); err != nil {
+				return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: err}
+			}
 		}
 		state, stateErr := oauthState()
 		if stateErr != nil {
@@ -507,6 +511,15 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 		item.verifier = verifier
 		switch provider.Type {
 		case "cline", "clinepass":
+			// Cline's AuthKit callback carries only ?code= — no state round-
+			// trip — so the session is bound through a dedicated loopback
+			// listener, the same pattern the Cline CLI uses per login.
+			if parsed, parseErr := url.Parse(redirectURL); parseErr == nil && isLoopbackHost(parsed.Hostname()) {
+				if callbackURL, listenErr := m.startEphemeralCallback(item); listenErr == nil {
+					item.redirectURL = callbackURL
+					redirectURL = callbackURL
+				}
+			}
 			response.AuthorizationURL = clineAuthorizationURL(redirectURL)
 		case "iflow":
 			clientID := m.clientID(*oauthConfig)
@@ -522,6 +535,8 @@ func (m *Manager) StartAuthorization(ctx context.Context, request StartRequest) 
 				return StartResponse{}, &Error{code: "oauth_configuration_invalid", err: errors.New("GitLab OAuth requires gitlab_client_id in provider config")}
 			}
 			response.AuthorizationURL = gitlabAuthorizationURL(gitlabCfg, redirectURL, item.state, pkceChallenge(verifier))
+		case "devin":
+			response.AuthorizationURL = devinAuthorizationURL(pkceChallenge(verifier), item.state)
 		case "claude":
 			response.AuthorizationURL = claudeAuthorizationURL(item.state, verifier, redirectURL, m.clientID(*oauthConfig), oauthConfig.Scopes)
 		default:
@@ -670,8 +685,26 @@ func (m *Manager) startLocalCallback(item *session) error {
 	if err != nil {
 		return &Error{code: "oauth_callback_unavailable", err: errors.New("OAuth callback port is unavailable")}
 	}
+	m.serveSessionCallback(item, listener, parsed.Path)
+	return nil
+}
+
+// startEphemeralCallback binds a one-off loopback listener on a free port and
+// returns the callback URL to offer the provider. Providers whose OAuth server
+// does not round-trip a state parameter (Cline AuthKit sends only ?code=) still
+// get an unambiguous session binding: the port itself is the capability.
+func (m *Manager) startEphemeralCallback(item *session) (string, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", &Error{code: "oauth_callback_unavailable", err: errors.New("OAuth callback port is unavailable")}
+	}
+	m.serveSessionCallback(item, listener, "/callback")
+	return "http://" + listener.Addr().String() + "/callback", nil
+}
+
+func (m *Manager) serveSessionCallback(item *session, listener net.Listener, path string) {
 	mux := http.NewServeMux()
-	mux.HandleFunc(parsed.Path, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		state, code, providerError, parseErr := localCallbackValues(r)
 		if parseErr != nil {
 			http.Error(w, "Invalid OAuth callback", http.StatusBadRequest)
@@ -679,10 +712,6 @@ func (m *Manager) startLocalCallback(item *session) error {
 		}
 		if providerError != "" {
 			_, rejectErr := m.rejectSessionCallback(item, state, providerError)
-			if Code(rejectErr) == "invalid_state" {
-				http.Error(w, rejectErr.Error(), http.StatusBadRequest)
-				return
-			}
 			http.Error(w, rejectErr.Error(), http.StatusBadRequest)
 			return
 		}
@@ -705,7 +734,6 @@ func (m *Manager) startLocalCallback(item *session) error {
 			m.failSession(item, "oauth_callback_unavailable")
 		}
 	}()
-	return nil
 }
 
 func localCallbackValues(r *http.Request) (state, code, providerError string, err error) {
@@ -820,6 +848,8 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	case "gitlab":
 		gitlabCfg := gitlabOAuthFromProvider(*provider, m.clientID(*oauthConfig), m.clientSecret(*oauthConfig))
 		token, err = m.exchangeGitlabCode(ctx, gitlabCfg, code, redirectURL, verifier)
+	case "devin":
+		token, err = m.exchangeDevinCode(ctx, code, verifier)
 	default:
 		token, err = m.exchangeCode(ctx, *oauthConfig, code, tokenState, verifier, redirectURL)
 	}
@@ -1624,8 +1654,15 @@ func oauthHTTPError(data []byte, status int, refresh bool) error {
 	permanent := false
 	var raw map[string]any
 	if json.Unmarshal(data, &raw) == nil {
-		if value := stringValue(raw["error"]); value != "" {
-			code = normalizeOAuthErrorCode(value)
+		switch errValue := raw["error"].(type) {
+		case string:
+			if value := strings.TrimSpace(errValue); value != "" {
+				code = normalizeOAuthErrorCode(value)
+			}
+		case map[string]any:
+			if value := stringValue(firstValue(errValue, "code", "error")); value != "" {
+				code = normalizeOAuthErrorCode(value)
+			}
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(code)) {

@@ -159,7 +159,7 @@ func renderOpenAI(response *canonical.Response, requestID, clientModel string) m
 	if clientModel != "" {
 		model = clientModel
 	}
-	return map[string]any{"id": nonEmpty(response.ID, requestID), "object": "chat.completion", "created": time.Now().Unix(), "model": model, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": nonEmpty(response.FinishReason, "stop")}}, "usage": map[string]any{"prompt_tokens": response.Usage.InputTokens, "completion_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
+	return map[string]any{"id": nonEmpty(response.ID, requestID), "object": "chat.completion", "created": time.Now().Unix(), "model": model, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": nonEmpty(response.FinishReason, "stop")}}, "usage": response.Usage.OpenAIUsage(false)}
 }
 
 func renderResponses(response *canonical.Response, requestID, clientModel string) map[string]any {
@@ -169,7 +169,7 @@ func renderResponses(response *canonical.Response, requestID, clientModel string
 	if clientModel != "" {
 		model = clientModel
 	}
-	return map[string]any{"id": nonEmpty(response.ID, "resp_"+requestID), "object": "response", "created_at": time.Now().Unix(), "model": model, "status": "completed", "output": output, "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.InputTokens + response.Usage.OutputTokens}}
+	return map[string]any{"id": nonEmpty(response.ID, "resp_"+requestID), "object": "response", "created_at": time.Now().Unix(), "model": model, "status": "completed", "output": output, "usage": response.Usage.OpenAIUsage(true)}
 }
 
 func renderClaude(response *canonical.Response, requestID, clientModel string) map[string]any {
@@ -186,7 +186,7 @@ func renderGemini(response *canonical.Response) map[string]any {
 	if text := stringValue(response.Content); text != "" {
 		parts = append(parts, map[string]any{"text": text})
 	}
-	return map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": parts}, "finishReason": strings.ToUpper(nonEmpty(response.FinishReason, "STOP"))}}, "usageMetadata": map[string]any{"promptTokenCount": response.Usage.InputTokens, "candidatesTokenCount": response.Usage.OutputTokens, "totalTokenCount": response.Usage.InputTokens + response.Usage.OutputTokens}}
+	return map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": parts}, "finishReason": strings.ToUpper(nonEmpty(response.FinishReason, "STOP"))}}, "usageMetadata": map[string]any{"promptTokenCount": response.Usage.InputTokens, "candidatesTokenCount": max(0, response.Usage.OutputTokens-response.Usage.ReasoningTokens), "thoughtsTokenCount": response.Usage.ReasoningTokens, "cachedContentTokenCount": response.Usage.CachedTokens, "totalTokenCount": response.Usage.InputTokens + response.Usage.OutputTokens}}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -285,11 +285,7 @@ func writeOpenAIStream(w http.ResponseWriter, r *http.Request, events <-chan can
 			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finishReason}},
 		}
 		if usage != nil {
-			payload["usage"] = map[string]any{
-				"prompt_tokens":     usage.InputTokens,
-				"completion_tokens": usage.OutputTokens,
-				"total_tokens":      usage.InputTokens + usage.OutputTokens,
-			}
+			payload["usage"] = usage.OpenAIUsage(false)
 		}
 		data, _ := json.Marshal(payload)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
@@ -345,13 +341,22 @@ func writeGeminiStream(w http.ResponseWriter, r *http.Request, events <-chan can
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher, _ := w.(http.Flusher)
+	var usage *canonical.Usage
 	for event := range events {
+		if event.Usage != nil {
+			copyUsage := *event.Usage
+			usage = &copyUsage
+		}
 		if event.Type == canonical.EventTextDelta {
 			data, _ := json.Marshal(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": event.Text}}}}}})
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 		}
 		if event.Type == canonical.EventMessageEnd {
-			data, _ := json.Marshal(map[string]any{"candidates": []any{map[string]any{"finishReason": strings.ToUpper(nonEmpty(event.FinishReason, "STOP"))}}})
+			payload := map[string]any{"candidates": []any{map[string]any{"finishReason": strings.ToUpper(nonEmpty(event.FinishReason, "STOP"))}}}
+			if usage != nil {
+				payload["usageMetadata"] = map[string]any{"promptTokenCount": usage.InputTokens, "candidatesTokenCount": max(0, usage.OutputTokens-usage.ReasoningTokens), "thoughtsTokenCount": usage.ReasoningTokens, "cachedContentTokenCount": usage.CachedTokens, "totalTokenCount": usage.InputTokens + usage.OutputTokens}
+			}
+			data, _ := json.Marshal(payload)
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			if flusher != nil {
 				flusher.Flush()
@@ -463,12 +468,37 @@ func useClientRequestID(r *http.Request) string {
 	return security.NewID("req_")
 }
 
-func sessionIDFromRequest(r *http.Request) string {
-	for _, header := range []string{"X-Session-ID", "Session_id", "X-Client-Request-Id", "Conversation-ID"} {
+func sessionIDFromRequest(r *http.Request, bodies ...map[string]any) string {
+	for _, header := range []string{"X-Session-ID", "Session_id", "Conversation-ID", "X-Conversation-ID", "X-Opencode-Session"} {
 		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
 			return value
 		}
 	}
+	for _, body := range bodies {
+		for _, key := range []string{"prompt_cache_key", "session_id", "conversation_id"} {
+			if value := strings.TrimSpace(stringValue(body[key])); value != "" {
+				return value
+			}
+		}
+		if metadata, ok := body["metadata"].(map[string]any); ok {
+			if value := strings.TrimSpace(stringValue(metadata["session_id"])); value != "" {
+				return value
+			}
+			if value := strings.TrimSpace(stringValue(metadata["user_id"])); value != "" {
+				var object map[string]any
+				if json.Unmarshal([]byte(value), &object) == nil {
+					if id := stringValue(object["session_id"]); id != "" {
+						return id
+					}
+				}
+				if index := strings.LastIndex(value, "_session_"); index >= 0 {
+					return value[index+len("_session_"):]
+				}
+				return value
+			}
+		}
+	}
 	return ""
 }
+
 func statusText(status int) string { return strconv.Itoa(status) }

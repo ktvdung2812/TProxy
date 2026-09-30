@@ -281,7 +281,8 @@ export function OAuthModal({
         oauthError = parsed.searchParams.get("error");
         oauthErrorDescription = parsed.searchParams.get("error_description");
       } catch {
-        // Not a URL — Claude OAuth often shows a copyable "authorization_code#state".
+        // Not a URL — Claude OAuth often shows a copyable "authorization_code#state",
+        // and Devin's headless PKCE flow displays a bare code to paste.
         if (providerType === "claude" || trimmed.includes("#")) {
           const hashIdx = trimmed.indexOf("#");
           if (hashIdx >= 0) {
@@ -291,6 +292,8 @@ export function OAuthModal({
             code = trimmed;
             oauthState = "";
           }
+        } else if (providerType === "devin") {
+          code = trimmed;
         }
       }
 
@@ -407,7 +410,9 @@ export function OAuthModal({
                 ? "After sign-in, paste the full URL from authkit.cline.bot (for example .../device?code=...)."
                 : providerType === "claude"
                   ? "After authorization, paste the full callback URL from the address bar, or the authorization code Claude shows (format: code#state)."
-                  : "After authorization, copy the full URL from your browser address bar."}
+                  : providerType === "devin"
+                    ? "After sign-in, paste the authorization code Devin shows in the browser."
+                    : "After authorization, copy the full URL from your browser address bar."}
             </p>
             <Input
               placeholder={
@@ -415,9 +420,11 @@ export function OAuthModal({
                   ? "https://authkit.cline.bot/device?user_code=...&code=..."
                   : providerType === "claude"
                     ? "http://localhost:…/callback?code=…&state=…  or  code#state"
-                    : allowsStatelessOAuthCallback(providerType)
-                      ? "http://localhost:1455/auth/callback?code=..."
-                      : "http://localhost:1455/auth/callback?code=...&state=..."
+                    : providerType === "devin"
+                      ? "Paste the authorization code…"
+                      : allowsStatelessOAuthCallback(providerType)
+                        ? "http://localhost:1455/auth/callback?code=..."
+                        : "http://localhost:1455/auth/callback?code=...&state=..."
               }
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}

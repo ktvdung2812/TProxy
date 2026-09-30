@@ -610,6 +610,218 @@ func TestAllModelCooldownsReturnRateLimitedError(t *testing.T) {
 	}
 }
 
+func TestModelAtCapacityBenchesProviderRouteWithoutFlaggingCredential(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Selected model is at capacity. Please try a different model."}}`))
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "chatgpt", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{
+			{ID: "cred-a", AuthType: "none"},
+			{ID: "cred-b", AuthType: "none"},
+		}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route", Provider: "chatgpt", UpstreamModel: "saturated", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "capacity-1", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected capacity error")
+	}
+	var providerErr *providers.ProviderError
+	if !errors.As(err, &providerErr) || providerErr.Code != providers.CodeUpstreamModelAtCapacity {
+		t.Fatalf("error = %v, want %s", err, providers.CodeUpstreamModelAtCapacity)
+	}
+	// The shared pair bench is set after the first attempt, so the second
+	// credential on the same provider must not probe the saturated model.
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 — saturated pair should not be probed per account", calls.Load())
+	}
+	for _, credentialID := range []string{"cred-a", "cred-b"} {
+		credential, credErr := dataStore.CredentialByID(context.Background(), credentialID)
+		if credErr != nil {
+			t.Fatal(credErr)
+		}
+		if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() || credential.LastErrorCode != "" {
+			t.Fatalf("credential %s was flagged for an upstream capacity condition: %+v", credentialID, credential)
+		}
+		if until, untilErr := dataStore.ModelCooldownUntil(context.Background(), credentialID, "saturated", time.Now()); untilErr != nil || !until.IsZero() {
+			t.Fatalf("credential %s model cooldown = %v, %v; want none", credentialID, until, untilErr)
+		}
+	}
+	// While the pair bench is active the route is skipped entirely: no new
+	// upstream call, just a 429 telling the client to retry shortly.
+	_, err = requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "capacity-2", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected error while capacity bench is active")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 — benched route was probed again", calls.Load())
+	}
+	if !errors.As(err, &providerErr) || providerErr.Status != http.StatusTooManyRequests {
+		t.Fatalf("second error = %v, want 429", err)
+	}
+}
+
+func TestModelAtCapacityFailsOverAndKeepsProviderUnbenchedForOtherRequests(t *testing.T) {
+	var saturatedCalls atomic.Int32
+	saturated := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saturatedCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Selected model is at capacity. Please try a different model."}}`))
+	}))
+	defer saturated.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ok","model":"upstream-success","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer healthy.Close()
+	dataStore := newStore(t, fallbackConfig(saturated.URL, healthy.URL))
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "coder", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		result, executeErr := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: fmt.Sprintf("capacity-failover-%d", index), Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+		if executeErr != nil {
+			t.Fatal(executeErr)
+		}
+		if result.Selection.Provider.ID != "success" {
+			t.Fatalf("selected provider=%q want success", result.Selection.Provider.ID)
+		}
+	}
+	// First request probed the saturated model once; the shared bench made the
+	// second request skip that route entirely.
+	if saturatedCalls.Load() != 1 {
+		t.Fatalf("saturated upstream calls = %d, want 1", saturatedCalls.Load())
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "cred-failing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() {
+		t.Fatalf("credential was flagged for upstream capacity: %+v", credential)
+	}
+}
+
+func TestModelAtCapacityLeavesCredentialEligibleForOtherModels(t *testing.T) {
+	var saturatedCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload["model"] == "saturated" {
+			saturatedCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Selected model is at capacity. Please try a different model."}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"ok","model":%q,"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`, payload["model"])
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "chatgpt", Type: "openai-compatible", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route-saturated", Provider: "chatgpt", UpstreamModel: "saturated", Priority: 100},
+			{ID: "route-available", Provider: "chatgpt", UpstreamModel: "available", Priority: 50},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := requestRouter.Execute(context.Background(), *model, canonical.Request{RequestID: "capacity-sibling", Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The bench lives on the saturated pair only; the same account still serves
+	// the sibling model on the same provider.
+	if result.Selection.Route.UpstreamModel != "available" {
+		t.Fatalf("selected upstream=%q want available", result.Selection.Route.UpstreamModel)
+	}
+	if saturatedCalls.Load() != 1 {
+		t.Fatalf("saturated calls = %d, want 1", saturatedCalls.Load())
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() {
+		t.Fatalf("credential was flagged for upstream capacity: %+v", credential)
+	}
+}
+
+func TestMidStreamResponseFailedAtCapacityBenchesPairWithoutFlaggingCredential(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"type":"response.failed","response":{"error":{"code":"model_at_capacity","message":"Selected model is at capacity. Please try a different model."}}}`)
+	}))
+	defer upstream.Close()
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{ID: "chatgpt", Type: "codex", BaseURL: upstream.URL, Enabled: true, Credentials: []config.CredentialConfig{{ID: "credential", AuthType: "none"}}}},
+		Models: []config.PublicModelConfig{{ID: "model-alias", Enabled: true, Routes: []config.RouteTargetConfig{
+			{ID: "route", Provider: "chatgpt", UpstreamModel: "saturated", Priority: 100},
+		}}},
+	}
+	dataStore := newStore(t, cfg)
+	requestRouter := router.New(dataStore, providers.NewRegistry())
+	model, err := requestRouter.Resolve(context.Background(), "model-alias", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := requestRouter.ExecuteStream(context.Background(), *model, canonical.Request{RequestID: "capacity-stream", Stream: true, Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streamErr error
+	for event := range stream.Events {
+		if event.Type == canonical.EventError {
+			streamErr = event.Err
+		}
+	}
+	var providerErr *providers.ProviderError
+	if !errors.As(streamErr, &providerErr) || providerErr.Code != providers.CodeUpstreamModelAtCapacity {
+		t.Fatalf("stream error = %v, want %s", streamErr, providers.CodeUpstreamModelAtCapacity)
+	}
+	credential, err := dataStore.CredentialByID(context.Background(), "credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.Status != "healthy" || !credential.CooldownUntil.IsZero() || credential.LastErrorCode != "" {
+		t.Fatalf("credential was flagged for upstream capacity: %+v", credential)
+	}
+	if until, untilErr := dataStore.ModelCooldownUntil(context.Background(), "credential", "saturated", time.Now()); untilErr != nil || !until.IsZero() {
+		t.Fatalf("model cooldown = %v, %v; want none", until, untilErr)
+	}
+	// The shared bench applies to the next request: the route is skipped
+	// without another probe against the saturated upstream model.
+	_, err = requestRouter.ExecuteStream(context.Background(), *model, canonical.Request{RequestID: "capacity-stream-2", Stream: true, Messages: []canonical.Message{{Role: "user", Content: "hello"}}})
+	if err == nil {
+		t.Fatal("expected error while capacity bench is active")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1 — benched route was probed again", calls.Load())
+	}
+}
+
 func TestNotFoundFallsBackAndSkipsCooledUpstreamModel(t *testing.T) {
 	var firstCalls atomic.Int32
 	var secondCalls atomic.Int32

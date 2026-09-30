@@ -42,6 +42,9 @@ func (r *Router) orderCredentials(ctx context.Context, providerID, routeKey stri
 		return credentials, nil
 	}
 	policy := r.rotationPolicyForProvider(providerID)
+	if ordered := r.measuredOrder(policy.strategy, credentials); ordered != nil {
+		return ordered, nil
+	}
 	ordered, touch := orderCredentialsByStrategy(policy.strategy, credentials, credentialOrderContext{
 		routeKey:              routeKey,
 		priority:              priority,

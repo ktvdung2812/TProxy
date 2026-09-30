@@ -58,3 +58,20 @@ export function importCliproxyAuth(secret: string, payload: unknown, dryRun = fa
   const query = dryRun ? "?dry_run=true" : "";
   return adminFetch<ImportCliproxyResult>(secret, `/api/admin/import/cliproxyapi${query}`, "POST", payload);
 }
+
+export type ImportSub2apiResult = {
+  ok: boolean;
+  dry_run: boolean;
+  counts: {
+    providers: number;
+    credentials: number;
+    proxy_pools: number;
+  };
+  warnings: string[];
+  errors: string[];
+};
+
+export function importSub2apiExport(secret: string, payload: unknown, dryRun = false) {
+  const query = dryRun ? "?dry_run=true" : "";
+  return adminFetch<ImportSub2apiResult>(secret, `/api/admin/import/sub2api${query}`, "POST", payload);
+}

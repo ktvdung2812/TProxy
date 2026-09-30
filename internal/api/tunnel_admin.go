@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/tproxy/tproxy/internal/store"
 	"github.com/tproxy/tproxy/internal/tunnel"
@@ -24,25 +24,29 @@ func (a tunnelSettingsAdapter) LoadSettings(ctx context.Context) (tunnel.Setting
 	return tunnel.SettingsSnapshot{
 		Enabled:          settings.Enabled,
 		TunnelURL:        settings.TunnelURL,
+		TunnelToken:      settings.TunnelToken,
+		TunnelHostname:   settings.TunnelHostname,
 		TailscaleEnabled: settings.TailscaleEnabled,
 		TailscaleURL:     settings.TailscaleURL,
 	}, nil
 }
 
-func (a tunnelSettingsAdapter) SaveCloudflare(ctx context.Context, enabled bool, tunnelURL string) error {
+func (a tunnelSettingsAdapter) SaveCloudflare(ctx context.Context, enabled bool, token, hostname string) error {
 	settings, err := a.store.TunnelSettings(ctx)
 	if err != nil {
-		settings = store.DefaultTunnelSettings()
+		return err
 	}
 	settings.Enabled = enabled
-	settings.TunnelURL = tunnelURL
+	settings.TunnelToken = token
+	settings.TunnelHostname = hostname
+	settings.TunnelURL = tunnel.CloudflareTunnelURL(hostname)
 	return a.store.SaveTunnelSettings(ctx, settings)
 }
 
 func (a tunnelSettingsAdapter) SaveTailscale(ctx context.Context, enabled bool, tunnelURL string) error {
 	settings, err := a.store.TunnelSettings(ctx)
 	if err != nil {
-		settings = store.DefaultTunnelSettings()
+		return err
 	}
 	settings.TailscaleEnabled = enabled
 	settings.TailscaleURL = tunnelURL
@@ -98,13 +102,28 @@ func (s *Server) adminTunnel(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
 			return
 		}
-		result, err := s.tunnel.Enable(r.Context(), s.clientFacingPort())
+		var payload struct {
+			Token    string `json:"token"`
+			Hostname string `json:"hostname"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20<<10)).Decode(&payload); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", "provide a JSON object with a tunnel token and hostname", useClientRequestID(r))
+			return
+		}
+		if strings.TrimSpace(payload.Hostname) == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "hostname is required", useClientRequestID(r))
+			return
+		}
+		result, err := s.tunnel.Enable(r.Context(), s.clientFacingPort(), payload.Token, payload.Hostname)
 		if err != nil {
+			if errors.Is(err, tunnel.ErrInvalidConfig) {
+				writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "tunnel_enable_failed", err.Error(), useClientRequestID(r))
 			return
 		}
 		s.tunnel.ConfigureMonitoringFromSettings(r.Context())
-		time.Sleep(8 * time.Second)
 		writeJSON(w, http.StatusOK, result)
 	case "/api/admin/tunnel/disable":
 		if r.Method != http.MethodPost {
@@ -167,7 +186,8 @@ func (s *Server) adminTunnel(w http.ResponseWriter, r *http.Request) {
 			}
 			settings, err := s.store.TunnelSettings(r.Context())
 			if err != nil {
-				settings = store.DefaultTunnelSettings()
+				writeError(w, http.StatusInternalServerError, "tunnel_settings_failed", err.Error(), useClientRequestID(r))
+				return
 			}
 			settings.TunnelDashboardAccess = *payload.TunnelDashboardAccess
 			if err := s.store.SaveTunnelSettings(r.Context(), settings); err != nil {

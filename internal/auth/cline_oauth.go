@@ -102,7 +102,9 @@ func decodeClineCallbackCode(code string) (map[string]any, error) {
 	if padding != 4 {
 		base64Code += strings.Repeat("=", padding)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(base64Code)
+	// AuthKit emits URL-safe base64 ("-", "_"); normalizing to the standard
+	// alphabet keeps the single decoder — neither marker exists there.
+	decoded, err := base64.StdEncoding.DecodeString(strings.NewReplacer("-", "+", "_", "/").Replace(base64Code))
 	if err != nil {
 		return nil, err
 	}

@@ -87,6 +87,85 @@ func TestClaudeSessionWindowGatesRouting(t *testing.T) {
 	}
 }
 
+// The extra_usage and spend meters only become windows when enabled — a
+// disabled block carries null meters that must not read as usable quota.
+func TestClaudePaidWindowsRequireEnablement(t *testing.T) {
+	quotas := map[string]QuotaEntry{}
+	appendClaudePaidWindows(quotas, map[string]any{
+		"extra_usage": map[string]any{"is_enabled": false, "utilization": nil},
+		"spend":       map[string]any{"enabled": false, "percent": 0},
+	})
+	if len(quotas) != 0 {
+		t.Fatalf("disabled meters = %+v", quotas)
+	}
+
+	appendClaudePaidWindows(quotas, map[string]any{
+		"extra_usage": map[string]any{"is_enabled": true, "utilization": 25.0},
+		"spend":       map[string]any{"enabled": true, "percent": 100.0, "spend_limit_reached": true},
+	})
+	if extra := quotas["extra_usage"]; extra.Used != 25 || extra.Remaining != 75 {
+		t.Fatalf("extra_usage = %+v", extra)
+	}
+	if spend := quotas["spend"]; spend.Used != 100 || spend.Remaining != 0 {
+		t.Fatalf("spend = %+v", spend)
+	}
+}
+
+// The flat limits[] array is an alternate shape carrying the same windows; it
+// fills keys the object shape left out without overwriting it.
+func TestClaudeLimitWindowsFillMissingKeys(t *testing.T) {
+	quotas := map[string]QuotaEntry{
+		"session": {Name: "session", Used: 87, Total: 100, Remaining: 13},
+	}
+	appendClaudeLimitWindows(quotas, map[string]any{
+		"limits": []any{
+			map[string]any{"kind": "session", "percent": 50, "resets_at": "2026-08-14T10:00:00Z"},
+			map[string]any{"kind": "weekly_all", "percent": 35, "resets_at": "2026-08-20T10:00:00Z"},
+			map[string]any{"kind": "unknown_meter", "percent": 10},
+		},
+	})
+	if session := quotas["session"]; session.Used != 87 {
+		t.Fatalf("limits overwrote session: %+v", session)
+	}
+	weekly, ok := quotas["weekly"]
+	if !ok || weekly.Used != 35 || weekly.Remaining != 65 || weekly.ResetAt != "2026-08-20T10:00:00Z" {
+		t.Fatalf("weekly = %+v", weekly)
+	}
+	if _, ok := quotas["unknown_meter"]; ok {
+		t.Fatal("unrecognized limit kinds must be skipped")
+	}
+}
+
+func TestClaudePlanFromProfile(t *testing.T) {
+	pro := claudePlanFromProfile(map[string]any{
+		"account": map[string]any{"has_claude_pro": true, "has_claude_max": false},
+		"organization": map[string]any{
+			"organization_type":   "claude_pro",
+			"subscription_status": "active",
+		},
+	})
+	if pro != "Claude Pro" {
+		t.Fatalf("plan = %q", pro)
+	}
+	canceled := claudePlanFromProfile(map[string]any{
+		"organization": map[string]any{
+			"organization_type":   "claude_pro",
+			"subscription_status": "canceled",
+		},
+	})
+	if canceled != "Claude Pro (canceled)" {
+		t.Fatalf("plan = %q", canceled)
+	}
+	if got := claudePlanFromProfile(map[string]any{
+		"account": map[string]any{"has_claude_max": true},
+	}); got != "Claude Max" {
+		t.Fatalf("plan = %q", got)
+	}
+	if got := claudePlanFromProfile(map[string]any{}); got != "" {
+		t.Fatalf("plan = %q", got)
+	}
+}
+
 func TestClaudeUsageThrottleExpires(t *testing.T) {
 	now := time.Now()
 	setClaudeUsageThrottle("cred-throttle", now.Add(time.Minute))

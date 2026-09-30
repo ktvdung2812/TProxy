@@ -76,6 +76,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "monitoring",
     i18nKey: "nav.monitoring",
     routes: [
+      {id:"operations",path:"/operations",i18nKey:"operations.title",icon:"monitor_heart"},
       {
         id: "usage",
         path: "/usage",
@@ -106,6 +107,7 @@ export const NAV_SECTIONS: NavSection[] = [
     id: "developer",
     i18nKey: "nav.developer",
     routes: [
+      {id:"diagnostics",path:"/diagnostics",i18nKey:"diagnostics.title",icon:"transform"},
       {
         id: "apis",
         path: "/apis",

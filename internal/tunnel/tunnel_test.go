@@ -14,27 +14,16 @@ import (
 	"time"
 )
 
-func TestCloudflareQuickTunnelURL(t *testing.T) {
-	tests := map[string]string{
-		"canonical quick tunnel": "https://example.trycloudflare.com",
-		"normalizes casing":      "https://EXAMPLE.TRYCLOUDFLARE.COM/",
-		"rejects relay host":     "https://rabc123.abc-tunnel.us",
-		"rejects a path":         "https://example.trycloudflare.com/v1",
-		"rejects HTTP":           "http://example.trycloudflare.com",
+func TestCloudflareTunnelURL(t *testing.T) {
+	for _, raw := range []string{"api.example.com", "https://api.example.com", " https://API.EXAMPLE.COM/ "} {
+		if got := CloudflareTunnelURL(raw); got != "https://api.example.com" {
+			t.Errorf("CloudflareTunnelURL(%q) = %q", raw, got)
+		}
 	}
-	for name, raw := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := CloudflareQuickTunnelURL(raw)
-			if name == "canonical quick tunnel" || name == "normalizes casing" {
-				if got != "https://example.trycloudflare.com" {
-					t.Fatalf("CloudflareQuickTunnelURL(%q) = %q", raw, got)
-				}
-				return
-			}
-			if got != "" {
-				t.Fatalf("CloudflareQuickTunnelURL(%q) = %q, want empty", raw, got)
-			}
-		})
+	for _, raw := range []string{"", "http://api.example.com", "https://api.example.com/v1", "api.example.com:443", "https://api.example.com:", "https://user:pass@api.example.com", "api.example.com?x=y", "api.example.com?", "api.example.com#fragment", "api.example.com#", "*.example.com", "localhost", "127.0.0.1", "[::1]", "foo.trycloudflare.com", "bad..example.com", "-bad.example.com", "bad_.example.com", "api.example.com/%2f"} {
+		if got := CloudflareTunnelURL(raw); got != "" {
+			t.Errorf("CloudflareTunnelURL(%q) = %q, want rejected", raw, got)
+		}
 	}
 }
 
@@ -94,23 +83,6 @@ func TestCloudflaredDownloadRequiresImmutablePinAndChecksum(t *testing.T) {
 	}
 }
 
-func TestQuickTunnelReadinessRequiresURLAndConnection(t *testing.T) {
-	state := &quickTunnelReadiness{}
-	if url, registered := state.snapshot(); url != "" || registered {
-		t.Fatalf("initial readiness = (%q, %v)", url, registered)
-	}
-	state.markRegistered()
-	if url, registered := state.snapshot(); url != "" || !registered {
-		t.Fatalf("registered-only readiness = (%q, %v)", url, registered)
-	}
-	if !state.setURL("https://example.trycloudflare.com") {
-		t.Fatal("first URL update was not accepted")
-	}
-	if url, registered := state.snapshot(); url != "https://example.trycloudflare.com" || !registered {
-		t.Fatalf("ready state = (%q, %v)", url, registered)
-	}
-}
-
 func TestGenerateShortID(t *testing.T) {
 	id := GenerateShortID()
 	if len(id) != 6 {
@@ -121,7 +93,7 @@ func TestGenerateShortID(t *testing.T) {
 func TestSaveAndLoadState(t *testing.T) {
 	dir := t.TempDir()
 	layout := NewDataLayout(dir)
-	state := State{ShortID: "abc123", TunnelURL: "https://foo.trycloudflare.com"}
+	state := State{ShortID: "abc123", TunnelURL: "https://api.example.com"}
 	if err := SaveState(layout.StateFile, state); err != nil {
 		t.Fatal(err)
 	}
@@ -305,9 +277,7 @@ func TestCloudflaredPortPatternIsAnchoredToLoopback(t *testing.T) {
 	}
 }
 
-// A connector inherited from a previous tproxy run must be adopted, not
-// recreated: recreating hands out a new quick-tunnel URL and silently breaks
-// every client already pointed at the old one.
+// Probe only the configured named hostname when adopting a connector.
 func TestStoredTunnelReachableProbesRecordedURL(t *testing.T) {
 	var served string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -319,16 +289,16 @@ func TestStoredTunnelReachableProbesRecordedURL(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{layout: NewDataLayout(dir)}
 
-	// A non-Cloudflare URL must never be treated as our quick tunnel.
-	if svc.storedTunnelReachable(context.Background(), SettingsSnapshot{TunnelURL: server.URL}) {
-		t.Error("only trycloudflare.com URLs may be adopted")
+	// Ignore legacy state and do not probe an unconfigured or non-HTTPS origin.
+	if svc.storedTunnelReachable(context.Background(), SettingsSnapshot{TunnelURL: server.URL, TunnelHostname: server.URL}) {
+		t.Error("only configured HTTPS hostnames may be adopted")
 	}
 	if served != "" {
 		t.Errorf("unexpected probe of %q", served)
 	}
 
-	// An unreachable but well-formed quick tunnel must report false.
-	if svc.storedTunnelReachable(context.Background(), SettingsSnapshot{TunnelURL: "https://gone.trycloudflare.com"}) {
+	// Legacy quick tunnels cannot be adopted.
+	if svc.storedTunnelReachable(context.Background(), SettingsSnapshot{TunnelHostname: "gone.trycloudflare.com"}) {
 		t.Error("an unreachable tunnel must not be adopted")
 	}
 }

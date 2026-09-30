@@ -208,6 +208,7 @@ export type SaveCredentialBody = {
     weight?: number;
     enabled?: boolean;
     proxy_pools?: string[];
+    metadata?: Record<string, unknown>;
   };
 };
 

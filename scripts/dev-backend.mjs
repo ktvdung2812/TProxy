@@ -26,7 +26,7 @@ const publicPort = process.env.TPROXY_PUBLIC_PORT || "28120";
 writeFileSync(join(root, ".config.dev.yaml"), rewriteServerPort(readFileSync(config, "utf8"), backendPort), "utf8");
 
 process.env.TPROXY_PUBLIC_PORT = publicPort;
-// Do not automatically reopen an internet-facing quick tunnel in development.
+// Do not automatically reopen an internet-facing Cloudflare Tunnel in development.
 // Enable it manually from APIs → Tunnel after the local dashboard is ready.
 process.env.TPROXY_SKIP_TUNNEL_AUTO = "1";
 

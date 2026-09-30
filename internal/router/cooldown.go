@@ -236,3 +236,49 @@ func parseRetryAfter(now time.Time, raw string, max time.Duration) (time.Time, b
 func credentialCooldownUntil(now time.Time, settings CooldownSettings, err error, backoffCount int) time.Time {
 	return settings.ComputeUntilWithReason(now, providers.Status(err), providers.RetryAfter(err), providers.Reason(err), backoffCount)
 }
+
+func modelCapacityKey(providerID, upstreamModel string) string {
+	return providerID + "\x00" + upstreamModel
+}
+
+// markModelAtCapacity benches a provider/model pair for the shared 429 window
+// after the upstream reported that model at capacity. Capacity is a
+// provider-side condition shared by every account, so the bench lives on the
+// pair instead of flagging whichever credential happened to observe it.
+func (r *Router) markModelAtCapacity(providerID, upstreamModel string, now time.Time) {
+	if providerID == "" || upstreamModel == "" {
+		return
+	}
+	until := applyJitter(r.cooldowns.Status429, r.cooldowns.Max, now)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.modelCapacity == nil {
+		r.modelCapacity = make(map[string]time.Time)
+	}
+	r.modelCapacity[modelCapacityKey(providerID, upstreamModel)] = until
+}
+
+// modelCapacityUntil reports when the shared capacity bench for a
+// provider/model pair ends, lazily evicting expired entries.
+func (r *Router) modelCapacityUntil(providerID, upstreamModel string, now time.Time) (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := modelCapacityKey(providerID, upstreamModel)
+	until, ok := r.modelCapacity[key]
+	if !ok {
+		return time.Time{}, false
+	}
+	if !until.After(now) {
+		delete(r.modelCapacity, key)
+		return time.Time{}, false
+	}
+	return until, true
+}
+
+// clearModelAtCapacity lifts the shared bench: a successful dispatch means
+// upstream capacity for the pair has returned.
+func (r *Router) clearModelAtCapacity(providerID, upstreamModel string) {
+	r.mu.Lock()
+	delete(r.modelCapacity, modelCapacityKey(providerID, upstreamModel))
+	r.mu.Unlock()
+}

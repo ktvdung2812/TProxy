@@ -59,6 +59,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - **Auto-combo resolution** — zero-config presets such as `auto`, `auto/coding:fast`, `auto/reasoning:pro`.
 - **Fusion routing** — parallel execution across models with arena-style ranking.
 - **Session affinity** — sticky routing with configurable TTL.
+- **Measured scheduling** — latency/TTFT, current load, errors, and recent quota drive the latency-aware, capacity-aware, health-first, least-used, and quota-aware strategies.
 
 ### Protocol compatibility
 
@@ -74,7 +75,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - First-party OAuth profiles: **Codex**, **Claude**, **Kimi**, **xAI**, **Antigravity** (Google Cloud Code), **Copilot**, **Cursor**, **Kiro**, and more.
 - API-key providers: Tavily search, ElevenLabs audio, image/video aliases, opt-in HTTP plugins.
 - **Encrypted proxy pools** (HTTP/S, SOCKS5) bound per provider or credential.
-- **9router / CLIProxyAPI import** helpers for migrating existing setups.
+- **9router / CLIProxyAPI / sub2api import** helpers for migrating existing setups. In Providers → Import data, select a sub2api accounts JSON export; Preview validates it without saving. OpenAI OAuth accounts become Codex credentials, including separate members of a shared Team workspace, refresh tokens, and token expiry. Scheduling settings are retained as sub2api metadata.
 
 ### Operations & governance
 
@@ -82,7 +83,9 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - **Teams** with scoped limits and cost aggregation.
 - **Token Saver** compression pipeline (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** per provider (OPEN / DEGRADED / CLOSED).
-- **Tunnel exposure** — Cloudflare quick tunnel and Tailscale integration from the dashboard.
+- **Account capacity** — concurrent-request limits, bounded queues with timeouts, and account expiry, editable per connection.
+- **Operational monitoring** — five-minute attempt metrics, p95 latency/TTFT, queue time, cache usage, and deduplicated alerts for quota, authentication, expiry, errors, and unavailable routes.
+- **Tunnel exposure** — Cloudflare Tunnel with your own token and hostname, plus Tailscale integration from the dashboard.
 - **Retention policies** for usage events, request logs, audit trails, and OAuth sessions.
 - **Config export/import** (YAML/JSON including OAuth tokens; API keys stay env placeholders) plus encrypted OAuth bundle backup/restore.
 
@@ -185,9 +188,18 @@ under **Settings** before enabling LAN, remote, or tunnel access).
 | **Dashboard** | Overview — gateway status, API keys, quick links |
 | **Routing** | PPM (public models), Combos, Protocol mapping (Claude/Codex codegen) |
 | **Infrastructure** | Providers, Health overview, Proxy pools |
-| **Monitoring** | Usage, Token Saver, Quota Tracker |
-| **Developer** | API endpoint reference, Chat playground, CLI Tools setup guides |
+| **Monitoring** | Operations, Usage, Token Saver, Quota Tracker |
+| **Developer** | Translation diagnostics, API endpoint reference, Chat playground, CLI Tools setup guides |
 | **System** | Logs & audit, Settings (rotation, retention, backup) |
+
+### Account controls and diagnostics
+
+- **Quota Tracker** offers refresh and clear-cooldown actions per account or for selected accounts; use the provider filter and select visible accounts for provider batches. Clearing cooldown preserves usage history and manual disable state. Upstream quota reset uses one available **Codex reset credit** per account, with confirmation and retry deduplication. Other providers support refresh and cooldown clearing. Results distinguish an applied action from a failed quota refresh.
+- **Providers → Edit connection** configures credential metadata: `max_concurrent_requests` (default `0`, unlimited), `max_queue_size` (default `16`), `queue_timeout_ms` (default `5000`), and optional `account_expires_at` (RFC3339). Queue size or timeout `0` rejects immediately when busy. Imported sub2api concurrency and account expiry are honored unless explicitly overridden. Account expiry is separate from OAuth token expiry.
+- **Translation diagnostics** previews OpenAI/Responses/Claude/Gemini input as a canonical request and the target provider body. It runs offline, redacts secrets, and does not load credentials, save prompts, or apply account-specific headers. API: `POST /api/admin/diagnostics/translate`. Operational metrics: `GET /api/admin/operations`; scoped quota actions: `POST /api/admin/quota/actions` (up to 100 explicit credential IDs).
+- **Usage** includes cache reads, cache writes, and reasoning. Input totals include cache tokens; output totals include reasoning, so these details must not be added again. TTFT is measured at the first content delta; non-streaming requests have no TTFT sample.
+
+Responses WebSocket continuations accept `previous_response_id`, inherit omitted settings, and reconstruct prior input/output for stateless upstreams. Send a stable `X-Session-ID` (or `session_id`, `conversation_id`, or `prompt_cache_key`) to resume across connections. History is isolated by API key/team/session, held only in memory for 15 minutes, and bounded to 128 responses / 32 MiB total / 2 MiB per context. On expiry or server restart, resend full input without `previous_response_id`; `reset: true` starts a fresh context. Routing observations and active alerts also reset on restart; usage metrics remain in SQLite.
 
 ---
 
@@ -488,7 +500,9 @@ Model:     <your public model ID or alias>
 
 **CLI Tools** — the dashboard includes setup guides for popular coding CLIs (environment exports, config file patches, and copy-paste scripts).
 
-**Remote access** — from **APIs → Tunnel**, enable a direct Cloudflare Quick Tunnel. It returns a temporary `https://&lt;random&gt;.trycloudflare.com` origin; that URL changes when the tunnel restarts, so update remote clients after a reconnect. For a permanent hostname, use a Cloudflare named tunnel with a domain you control or a reverse proxy with TLS in front of port `28120`.
+**Remote access** — from **APIs → Cloudflare → Enable**, enter your Cloudflare Tunnel token and a domain you control (for example `api.example.com`). Create the tunnel in your Cloudflare account first, then add a published application route for that hostname to the HTTP service shown in the dialog (normally `http://127.0.0.1:28120`). Paste only the token after `--token` from the connector install command, not a Cloudflare API token or the whole command. tproxy stores the tunnel token encrypted with its master key and reconnects using the same hostname. Clients use `https://api.example.com/v1`. Disabling retains the configuration; leave the token blank when enabling again to reuse it. Existing Quick Tunnels must be configured with a token and hostname before they can be enabled again.
+
+For `npm run dev`, start Vite with `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=api.example.com` to allow your hostname through its host check. Production serves the dashboard directly and does not need this setting.
 
 ---
 

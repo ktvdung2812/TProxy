@@ -42,6 +42,16 @@ func quotaKeyAffectsRouting(providerType, key string) bool {
 	if isGrokQuotaProviderType(normalizedType) {
 		return normalizedKey != "review"
 	}
+	// Devin's daily and weekly windows are both hard account limits — a spent
+	// weekly window blocks requests until reset, so it is not display-only.
+	if normalizedType == "devin" {
+		return true
+	}
+	// OpenCode Go's 5-hour, weekly and monthly windows are all hard dollar caps —
+	// a spent window blocks paid models until it resets.
+	if normalizedType == "opencode-go" {
+		return true
+	}
 	if strings.Contains(normalizedKey, "weekly") || strings.Contains(normalizedKey, "review") {
 		return false
 	}
@@ -61,9 +71,46 @@ func isGrokQuotaProviderType(providerType string) bool {
 // window is typically the 5-hour allowance; the primary weekly window is the
 // other account-wide allowance. Either one being exhausted makes the
 // credential unavailable.
-func quotaKeyAutoDisablesAtZero(key string) bool {
+func quotaKeyAutoDisablesAtZero(providerType, key string) bool {
 	normalizedKey := strings.ToLower(strings.TrimSpace(key))
-	return normalizedKey == "session" || normalizedKey == "weekly"
+	if normalizedKey == "session" || normalizedKey == "weekly" {
+		return true
+	}
+	normalizedType := strings.ToLower(strings.TrimSpace(providerType))
+	// OpenCode Go's monthly cap only resets at subscription renewal, so a spent
+	// month dead-stops the credential just like a spent session window.
+	if normalizedType == "opencode-go" && normalizedKey == "monthly" {
+		return true
+	}
+	// Devin's daily ACU window blocks requests until reset just like its
+	// weekly one, so an empty daily meter depletes the credential too.
+	return normalizedType == "devin" && normalizedKey == "daily"
+}
+
+// quotaRescuedByCredit reports whether a paid-usage meter with remaining
+// capacity keeps the credential serving after the included windows empty:
+// Claude extra usage / spend meters and Grok prepaid + on-demand headroom bill
+// usage past the plan windows instead of hard-stopping the account.
+func quotaRescuedByCredit(quota CredentialQuota) bool {
+	var keys []string
+	switch strings.ToLower(strings.TrimSpace(quota.ProviderType)) {
+	case "claude":
+		keys = []string{"extra_usage", "spend"}
+	case "xai", "grok-cli":
+		keys = []string{"prepaid", "on_demand"}
+	default:
+		return false
+	}
+	for _, key := range keys {
+		entry, ok := quota.Quotas[key]
+		if !ok || entry.Unlimited || entry.Total <= 0 {
+			continue
+		}
+		if QuotaEntryRemainingPercent(entry) > QuotaDepletedAutoDisableThreshold {
+			return true
+		}
+	}
+	return false
 }
 
 // QuotaAtZero reports whether routing quota is fully depleted (0% left).
@@ -74,6 +121,7 @@ func QuotaAtZero(quota CredentialQuota) bool {
 	if len(quota.Quotas) == 0 {
 		return false
 	}
+	rescued := quotaRescuedByCredit(quota)
 	hasRoutingWindow := false
 	hasAvailableRoutingWindow := false
 	for key, entry := range quota.Quotas {
@@ -81,7 +129,7 @@ func QuotaAtZero(quota CredentialQuota) bool {
 			continue
 		}
 		remaining := QuotaEntryRemainingPercent(entry)
-		if quotaKeyAutoDisablesAtZero(key) && remaining <= QuotaDepletedAutoDisableThreshold {
+		if quotaKeyAutoDisablesAtZero(quota.ProviderType, key) && remaining <= QuotaDepletedAutoDisableThreshold && !rescued {
 			return true
 		}
 		if !quotaKeyAffectsRouting(quota.ProviderType, key) {

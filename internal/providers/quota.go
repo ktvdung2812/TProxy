@@ -59,6 +59,10 @@ var quotaSupportedTypes = map[string]bool{
 	"kimi":              true,
 	"kimi-coding":       true,
 	"ollama":            true,
+	"devin":             true,
+	"cline":             true,
+	"clinepass":         true,
+	"opencode-go":       true,
 }
 
 // SupportsQuota reports whether a provider type or preset ID has an upstream quota probe.
@@ -103,6 +107,10 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		return r.cursorQuota(ctx, provider, credential), nil
 	case "antigravity":
 		return r.antigravityQuota(ctx, credential)
+	case "devin":
+		return r.devinQuota(ctx, provider, credential), nil
+	case "cline", "clinepass":
+		return r.clineQuota(ctx, provider, credential), nil
 	case "xai":
 		// Grok CLI subscription billing (not public api.x.ai pay-as-you-go keys).
 		if isGrokCLIQuotaProvider(provider) {
@@ -135,9 +143,9 @@ func (r *Registry) codexQuota(ctx context.Context, provider store.Provider, cred
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return result, &ProviderError{Code: "quota_parse_failed", Message: "invalid Codex usage response", Err: err}
 	}
-	result.Plan = stringValue(firstValue(payload, "plan_type", "plan"))
+	result.Plan = codexPlanName(stringValue(firstValue(payload, "plan_type", "plan")))
 	if summary, ok := payload["summary"].(map[string]any); ok && result.Plan == "" {
-		result.Plan = stringValue(summary["plan"])
+		result.Plan = codexPlanName(stringValue(summary["plan"]))
 	}
 	normal := firstValue(payload, "rate_limit", "rate_limits")
 	if snapshot, ok := normal.(map[string]any); ok {
@@ -286,6 +294,25 @@ func (r *Registry) quotaGET(ctx context.Context, target string, headers http.Hea
 	return body, response.StatusCode, nil
 }
 
+// codexPlanName title-cases the wham plan_type ("free", "plus", "pro",
+// "team", ...) so the dashboard shows a label rather than the raw enum.
+func codexPlanName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	})
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+	}
+	return strings.Join(parts, " ")
+}
+
 func appendCodexWindows(quotas map[string]QuotaEntry, prefix string, snapshot map[string]any) {
 	rateLimit := snapshot
 	if nested, ok := snapshot["rate_limit"].(map[string]any); ok {
@@ -379,6 +406,12 @@ func parseResetAt(value any) string {
 		}
 		if parsed, err := time.Parse(time.RFC3339, typed); err == nil {
 			return parsed.UTC().Format(time.RFC3339)
+		}
+		// Kiro's nextDateReset lands as US "M/D/YYYY"; a bare date is UTC-midnight.
+		for _, layout := range []string{"1/2/2006", "2006-01-02"} {
+			if parsed, err := time.Parse(layout, typed); err == nil {
+				return parsed.UTC().Format(time.RFC3339)
+			}
 		}
 		return typed
 	case float64:

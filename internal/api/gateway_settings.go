@@ -25,8 +25,12 @@ func (s *Server) loadGatewaySettings(ctx context.Context) {
 }
 
 func (s *Server) managementClientAllowed(r *http.Request) bool {
-	if s.managementRequestViaTunnel(r) {
-		return s.tunnelDashboardAccessAllowed(r)
+	policy, viaTunnel, err := s.managementTunnelPolicy(r)
+	if err != nil {
+		return false
+	}
+	if viaTunnel {
+		return policy.TunnelDashboardAccess
 	}
 	if security.IsLoopback(r) {
 		return true
@@ -50,36 +54,51 @@ func (s *Server) isLocalManagementRequest(r *http.Request) bool {
 // Host matching is local provenance: an internet client cannot change the
 // request's Host after the connector has selected the configured public URL.
 func (s *Server) managementRequestViaTunnel(r *http.Request) bool {
-	if r == nil || strings.TrimSpace(r.Host) == "" {
-		return false
-	}
-	settings, err := s.store.TunnelSettings(r.Context())
-	if err != nil {
-		return false
-	}
-	requestURL, parseErr := url.Parse("//" + strings.TrimSpace(r.Host))
-	if parseErr != nil {
-		return false
-	}
-	requestHost := strings.ToLower(strings.TrimSuffix(requestURL.Hostname(), "."))
-	if requestHost == "" {
-		return false
-	}
-	for _, raw := range []string{settings.TunnelURL, settings.TailscaleURL} {
-		parsed, parseErr := url.Parse(strings.TrimSpace(raw))
-		if parseErr == nil && strings.EqualFold(requestHost, strings.TrimSuffix(parsed.Hostname(), ".")) {
-			return true
-		}
-	}
-	return false
+	_, viaTunnel, err := s.managementTunnelPolicy(r)
+	// If the policy cannot be loaded, classify the request as tunnel traffic so
+	// callers fail closed instead of granting the loopback exception.
+	return err != nil || viaTunnel
 }
 
 func (s *Server) tunnelDashboardAccessAllowed(r *http.Request) bool {
-	if !s.managementRequestViaTunnel(r) {
-		return true
+	policy, viaTunnel, err := s.managementTunnelPolicy(r)
+	return err == nil && (!viaTunnel || policy.TunnelDashboardAccess)
+}
+
+func (s *Server) managementTunnelPolicy(r *http.Request) (store.TunnelAccessPolicy, bool, error) {
+	if r == nil {
+		return store.TunnelAccessPolicy{}, false, nil
 	}
-	settings, err := s.store.TunnelSettings(r.Context())
-	return err == nil && settings.TunnelDashboardAccess
+	policy, err := s.store.TunnelAccessPolicy(r.Context())
+	if err != nil {
+		return store.TunnelAccessPolicy{}, false, err
+	}
+	requestHost := normalizedHostname(r.Host)
+	if requestHost == "" {
+		return policy, false, nil
+	}
+	for _, raw := range []string{policy.TunnelURL, policy.TailscaleURL, policy.TunnelHostname} {
+		if requestHost == normalizedHostname(raw) {
+			return policy, true, nil
+		}
+	}
+	return policy, false, nil
+}
+
+func normalizedHostname(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parseValue := raw
+	if !strings.Contains(raw, "://") && !strings.HasPrefix(raw, "//") {
+		parseValue = "//" + raw
+	}
+	parsed, err := url.Parse(parseValue)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
 }
 
 func (s *Server) tunnelDashboard(next http.Handler) http.Handler {

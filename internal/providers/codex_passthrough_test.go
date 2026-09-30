@@ -89,3 +89,96 @@ func TestCodexNormalizeReasoningMapsMaxAndUltra(t *testing.T) {
 		t.Fatalf("ultra should fall back to low, got %#v", ultraReasoning["effort"])
 	}
 }
+
+func codexLiteRequest(raw map[string]any) canonical.Request {
+	return canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.6-sol",
+		Raw:           raw,
+		Metadata: map[string]any{
+			"client_headers": map[string]string{"x-openai-internal-codex-responses-lite": "true"},
+		},
+	}
+}
+
+func TestCodexResponsesLiteSetsReasoningContext(t *testing.T) {
+	request := codexLiteRequest(map[string]any{
+		"model":     "gpt-5.6-sol",
+		"input":     "hi",
+		"reasoning": map[string]any{"effort": "high"},
+	})
+	body := codexBody(request)
+	applyCodexResponsesLiteContext(body, request)
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if reasoning["context"] != "all_turns" {
+		t.Fatalf("reasoning.context = %#v", reasoning["context"])
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("effort = %#v", reasoning["effort"])
+	}
+}
+
+func TestCodexNonLiteOmitsReasoningContext(t *testing.T) {
+	request := canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "gpt-5.5",
+		Raw: map[string]any{
+			"model":     "gpt-5.5",
+			"input":     "hi",
+			"reasoning": map[string]any{"effort": "high", "context": "all_turns"},
+		},
+	}
+	body := codexBody(request)
+	applyCodexResponsesLiteContext(body, request)
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if _, exists := reasoning["context"]; exists {
+		t.Fatalf("non-lite reasoning must omit context: %#v", reasoning)
+	}
+}
+
+func TestCodexBodyMergesOpenAIReasoningObject(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolOpenAI,
+		UpstreamModel: "gpt-5.5",
+		Raw:           map[string]any{"model": "gpt-5.5"},
+		Reasoning:     map[string]any{"effort": "high"},
+	})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("effort = %#v", reasoning)
+	}
+	if _, leaked := body["effort"]; leaked {
+		t.Fatalf("reasoning fields must not leak to top level: %#v", body)
+	}
+}
+
+func TestCodexBodyPicksUpRawReasoningEffort(t *testing.T) {
+	body := codexBody(canonical.Request{
+		Source:        canonical.ProtocolOpenAI,
+		UpstreamModel: "gpt-5.5",
+		Raw:           map[string]any{"model": "gpt-5.5", "reasoning_effort": "xhigh"},
+	})
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if reasoning["effort"] != "xhigh" {
+		t.Fatalf("effort = %#v", reasoning)
+	}
+	if _, leaked := body["reasoning_effort"]; leaked {
+		t.Fatalf("reasoning_effort should be consumed: %#v", body)
+	}
+}
+
+func TestCodexResponsesLiteRecreatesReasoning(t *testing.T) {
+	// effort=none deletes reasoning, but the lite contract still requires
+	// reasoning.context on the wire.
+	request := codexLiteRequest(map[string]any{
+		"model":     "gpt-5.6-sol",
+		"input":     "hi",
+		"reasoning": map[string]any{"effort": "none"},
+	})
+	body := codexBody(request)
+	applyCodexResponsesLiteContext(body, request)
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok || reasoning["context"] != "all_turns" {
+		t.Fatalf("reasoning = %#v", body["reasoning"])
+	}
+}

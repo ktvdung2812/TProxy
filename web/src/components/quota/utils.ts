@@ -105,6 +105,12 @@ export function quotaKeyAffectsRouting(providerType: string, key: string) {
   // Grok has no session window, so its weekly allowance is the real limit
   // rather than an auxiliary one.
   if (isGrokQuotaProviderType(normalizedType)) return normalizedKey !== "review";
+  // Devin's daily and weekly windows are both hard account limits — a spent
+  // weekly window blocks requests until reset, so it is not display-only.
+  if (normalizedType === "devin") return true;
+  // OpenCode Go's 5-hour, weekly and monthly windows are all hard dollar caps —
+  // a spent window blocks paid models until it resets.
+  if (normalizedType === "opencode-go") return true;
   if (AUXILIARY_QUOTA_KEY.test(normalizedKey)) return false;
   if (normalizedType === "codex") return normalizedKey === "session";
   return true;

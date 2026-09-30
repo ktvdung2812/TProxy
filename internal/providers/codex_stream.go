@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
 )
@@ -33,12 +35,7 @@ func isModelAtCapacity(code, message string) bool {
 // (or error) event, which ChatGPT nests either at the top level or under the
 // response object.
 func codexFailedError(raw map[string]any) (code, message string) {
-	errorPayload, _ := raw["error"].(map[string]any)
-	if errorPayload == nil {
-		if response, _ := raw["response"].(map[string]any); response != nil {
-			errorPayload, _ = response["error"].(map[string]any)
-		}
-	}
+	errorPayload := codexFailedErrorPayload(raw)
 	if errorPayload != nil {
 		code = stringValue(errorPayload["code"])
 		message = stringValue(errorPayload["message"])
@@ -50,6 +47,76 @@ func codexFailedError(raw map[string]any) (code, message string) {
 		message = stringValue(raw["message"])
 	}
 	return code, message
+}
+
+// codexFailedErrorPayload locates the nested error object a response.failed
+// event carries either at the top level or under the response object.
+func codexFailedErrorPayload(raw map[string]any) map[string]any {
+	if errorPayload, _ := raw["error"].(map[string]any); errorPayload != nil {
+		return errorPayload
+	}
+	if response, _ := raw["response"].(map[string]any); response != nil {
+		if errorPayload, _ := response["error"].(map[string]any); errorPayload != nil {
+			return errorPayload
+		}
+	}
+	return nil
+}
+
+var codexRetryAfterRe = regexp.MustCompile(`(?i)try again in\s*(\d+(?:\.\d+)?)\s*(ms|seconds?|s)`)
+
+// codexFailedRetryAfter converts the upstream delay hint into a Retry-After
+// delta-seconds string. Rate-limit messages embed "try again in X s"; quota
+// errors carry a resets_at unix timestamp (codex-rs Error.resets_at).
+func codexFailedRetryAfter(code, message string, errorPayload map[string]any) string {
+	switch strings.ToLower(code) {
+	case "rate_limit_exceeded", "slow_down":
+		if match := codexRetryAfterRe.FindStringSubmatch(message); len(match) == 3 {
+			if value, err := strconv.ParseFloat(match[1], 64); err == nil && value > 0 {
+				if match[2] == "ms" {
+					value /= 1000
+				}
+				if value > 0 {
+					return strconv.FormatFloat(value, 'f', -1, 64)
+				}
+			}
+		}
+	}
+	if errorPayload != nil {
+		if resetsAt := int64(numberValue(errorPayload["resets_at"])); resetsAt > 0 {
+			if delta := resetsAt - time.Now().Unix(); delta > 0 {
+				return strconv.FormatInt(delta, 10)
+			}
+		}
+	}
+	return ""
+}
+
+// classifyCodexFailedError maps a response.failed error onto router-visible
+// semantics, mirroring codex-rs's classification (codex-api sse/responses.rs):
+// per-request failures stay 4xx so they neither retry nor fail over, while
+// rate-limit, quota and overload conditions become retryable statuses that
+// trigger credential failover and cooldown.
+func classifyCodexFailedError(code, message string, errorPayload map[string]any) *ProviderError {
+	if isModelAtCapacity(code, message) {
+		return &ProviderError{Status: http.StatusTooManyRequests, Code: CodeUpstreamModelAtCapacity, Message: message}
+	}
+	switch strings.ToLower(code) {
+	case "context_length_exceeded":
+		return &ProviderError{Status: http.StatusBadRequest, Code: "context_length_exceeded", Message: message}
+	case "insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded":
+		return &ProviderError{Status: http.StatusTooManyRequests, Code: "upstream_quota_exceeded", Message: message, RetryAfter: codexFailedRetryAfter(code, message, errorPayload)}
+	case "usage_not_included":
+		return &ProviderError{Status: http.StatusForbidden, Code: "usage_not_included", Message: message}
+	case "rate_limit_exceeded", "slow_down":
+		return &ProviderError{Status: http.StatusTooManyRequests, Code: strings.ToLower(code), Message: message, RetryAfter: codexFailedRetryAfter(code, message, errorPayload)}
+	case "server_is_overloaded":
+		return &ProviderError{Status: http.StatusServiceUnavailable, Code: "server_is_overloaded", Message: message}
+	case "invalid_prompt", "bio_policy", "misalignment_policy_violation", "cyber_policy":
+		return &ProviderError{Status: http.StatusBadRequest, Code: strings.ToLower(code), Message: message}
+	default:
+		return &ProviderError{Status: http.StatusBadGateway, Code: "upstream_response_failed", Message: message}
+	}
 }
 
 // ModelAtCapacitySSE inspects a Responses API response.failed SSE payload and
@@ -316,10 +383,7 @@ func translateCodexEvent(raw map[string]any, state *codexStreamState) []canonica
 		if message == "" {
 			message = "Codex upstream response failed"
 		}
-		if isModelAtCapacity(code, message) {
-			return []canonical.Event{{Type: canonical.EventError, Err: &ProviderError{Status: http.StatusTooManyRequests, Code: CodeUpstreamModelAtCapacity, Message: message}}}
-		}
-		return []canonical.Event{{Type: canonical.EventError, Err: &ProviderError{Status: 502, Code: "upstream_response_failed", Message: message}}}
+		return []canonical.Event{{Type: canonical.EventError, Err: classifyCodexFailedError(code, message, codexFailedErrorPayload(raw))}}
 	}
 
 	return nil

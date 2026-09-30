@@ -1,0 +1,44 @@
+{
+  "name": "tproxy-models",
+  "displayName": "TProxy Models",
+  "description": "Use models routed through tproxy in VS Code Chat via the Language Model Chat Provider API.",
+  "version": "0.0.1",
+  "publisher": "tproxy",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.104"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "language-models"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "tproxy",
+        "displayName": "TProxy",
+        "managementCommand": "tproxy.manage"
+      }
+    ],
+    "commands": [
+      {
+        "command": "tproxy.manage",
+        "title": "Manage TProxy"
+      }
+    ],
+    "configuration": {
+      "title": "TProxy",
+      "properties": {
+        "tproxy.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:28120",
+          "markdownDescription": "Base URL of the tproxy gateway."
+        }
+      }
+    }
+  }
+}

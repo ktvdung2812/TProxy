@@ -2786,6 +2786,15 @@ button:disabled,
 .quota-tracker-card-head-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0;
 }
+.quota-tracker-card-select {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+.quota-tracker-card-select:disabled { cursor: not-allowed; }
 .quota-tracker-drag-handle,
 .connection-drag-handle {
   display: inline-flex;
@@ -2912,6 +2921,16 @@ button:disabled,
 .quota-reset-modal-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
 .quota-reset-modal-table th, .quota-reset-modal-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-subtle); text-align: left; }
 .quota-reset-modal-table th { font-size: 11px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
+.quota-bulk-results { display: grid; gap: 8px; max-height: 60vh; overflow: auto; }
+.quota-bulk-result { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--color-border-subtle); border-radius: 10px; }
+.quota-bulk-result > .material-symbols-outlined { font-size: 18px; flex: 0 0 auto; }
+.quota-bulk-result > div { display: grid; gap: 3px; min-width: 0; }
+.quota-bulk-result strong { color: var(--color-text-main); font-size: 12px; overflow-wrap: anywhere; }
+.quota-bulk-result span:not(.material-symbols-outlined) { color: var(--color-text-muted); font-size: 12px; }
+.quota-bulk-result-ok > .material-symbols-outlined { color: var(--color-success); }
+.quota-bulk-result-error > .material-symbols-outlined { color: var(--color-danger); }
+.quota-account-modal-section-head .quota-tracker-icon-btn,
+.quota-account-modal-section-head .quota-tracker-reset-btn { flex: 0 0 auto; }
 .quota-account-modal-body { display: grid; gap: 18px; }
 .quota-account-modal-footer { display: flex; justify-content: flex-end; width: 100%; }
 .quota-account-modal-hero {

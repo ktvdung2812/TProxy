@@ -68,7 +68,7 @@ func (r *Registry) cursorQuota(ctx context.Context, provider store.Provider, cre
 		result.Quotas[entry.Name] = *entry
 	}
 	// Plan name lives on a separate endpoint; soft-fail, it only costs the label.
-	result.Plan = r.cursorMembershipPlan(ctx, quotaHeaders)
+	result.Plan = codexPlanName(r.cursorMembershipPlan(ctx, quotaHeaders))
 	if len(result.Quotas) == 0 {
 		result.Message = "Cursor connected. No quota windows returned."
 	}
@@ -79,12 +79,13 @@ func (r *Registry) cursorQuota(ctx context.Context, provider store.Provider, cre
 // monthly entry. billingCycleStart/End are epoch milliseconds encoded as
 // strings; spend figures are cents.
 func cursorPeriodUsageEntry(payload map[string]any) (*QuotaEntry, string) {
-	renewsAt := parseResetAt(cursorEpochMillis(payload["billingCycleEnd"]))
+	renewsAt := parseResetAt(cursorEpochMillis(firstValue(payload, "billingCycleEnd", "billing_cycle_end", "billingPeriodEnd")))
 	planUsage, _ := payload["planUsage"].(map[string]any)
 	if planUsage == nil {
 		return nil, renewsAt
 	}
-	used := float64(numberValue(planUsage["totalPercentUsed"]))
+	// totalPercentUsed can arrive as a JSON number or a numeric string.
+	used := glmQuotaFloat(firstValue(planUsage, "totalPercentUsed", "percentUsed", "total_percent_used"))
 	if used < 0 {
 		used = 0
 	}

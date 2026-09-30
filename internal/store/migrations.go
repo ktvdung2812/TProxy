@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 21
+const sqliteCurrentSchemaVersion = 22
 
 type sqliteMigration struct {
 	version int
@@ -61,6 +61,7 @@ var sqliteMigrations = []sqliteMigration{
 	}},
 	{version: 20, apply: migrateCredentialCreatedAt},
 	{version: 21, apply: migrateAPIKeyModelDefaults},
+	{version: 22, apply: migrateOperationalUsage},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -368,4 +369,19 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return sqliteSchemaVersion(ctx, s.db)
+}
+
+func migrateOperationalUsage(ctx context.Context, tx *sql.Tx) error {
+	for _, column := range []struct{ name, definition string }{
+		{"cache_creation_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"ttft_ms", "INTEGER"},
+		{"queue_ms", "INTEGER NOT NULL DEFAULT 0"},
+		{"routing_reason", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := addColumnIfMissing(ctx, tx, "usage_events", column.name, "ALTER TABLE usage_events ADD COLUMN "+column.name+" "+column.definition); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_usage_created_provider ON usage_events(created_at,provider_id)`)
+	return err
 }

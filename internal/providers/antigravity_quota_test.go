@@ -45,6 +45,83 @@ func TestAntigravityQuotaEntryRejectsInvalidFractions(t *testing.T) {
 	}
 }
 
+// currentTier is an object: its name is the label, and an id-only tier is
+// resolved through allowedTiers/paidTier instead of stringifying the map.
+func TestAntigravityTierName(t *testing.T) {
+	named := antigravityTierName(map[string]any{
+		"currentTier": map[string]any{"id": "free-tier", "name": "Antigravity"},
+	})
+	if named != "Antigravity" {
+		t.Fatalf("plan=%q", named)
+	}
+	idOnly := antigravityTierName(map[string]any{
+		"currentTier":  map[string]any{"id": "g1-pro-tier"},
+		"allowedTiers": []any{map[string]any{"id": "free-tier", "name": "Antigravity"}},
+		"paidTier":     map[string]any{"id": "g1-pro-tier", "name": "Google AI Pro"},
+	})
+	if idOnly != "Google AI Pro" {
+		t.Fatalf("plan=%q", idOnly)
+	}
+	if got := antigravityTierName(map[string]any{"plan": "Teams"}); got != "Teams" {
+		t.Fatalf("plan=%q", got)
+	}
+	if got := antigravityTierName(map[string]any{}); got != "" {
+		t.Fatalf("plan=%q", got)
+	}
+}
+
+// The quota probe reports every model the account can use, not a curated
+// subset — new models must surface without a code change.
+func TestAntigravityQuotaIteratesAllModels(t *testing.T) {
+	registry := NewRegistry()
+	registry.client = &http.Client{Transport: antigravityQuotaRoundTripper(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.String() {
+		case "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist":
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header),
+				Body: io.NopCloser(strings.NewReader(`{
+					"currentTier": {"id": "free-tier", "name": "Antigravity"},
+					"cloudaicompanionProject": "proj-1"
+				}`)),
+			}, nil
+		case "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels":
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header),
+				Body: io.NopCloser(strings.NewReader(`{"models": {
+					"brand-new-model": {"displayName": "New Model", "quotaInfo": {"remainingFraction": 0.5}},
+					"internal-one": {"isInternal": true, "quotaInfo": {"remainingFraction": 1}},
+					"no-quota": {"displayName": "Legacy"},
+					"gemini-3-flash": {"quotaInfo": {"remainingFraction": "0.25", "resetTime": "2026-09-20T00:00:00Z"}}
+				}}`)),
+			}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL)
+			return nil, nil
+		}
+	})}
+
+	quota, err := registry.antigravityQuota(t.Context(), store.Credential{
+		ID:         "cred-1",
+		ProviderID: "antigravity",
+		OAuthToken: &store.OAuthToken{AccessToken: "tok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quota.Plan != "Antigravity" {
+		t.Fatalf("plan=%q", quota.Plan)
+	}
+	if len(quota.Quotas) != 2 {
+		t.Fatalf("quotas=%+v", quota.Quotas)
+	}
+	if entry := quota.Quotas["brand-new-model"]; entry.Name != "New Model" || entry.Remaining != 50 {
+		t.Fatalf("new model=%+v", entry)
+	}
+	if entry := quota.Quotas["gemini-3-flash"]; entry.Used != 750 || entry.ResetAt != "2026-09-20T00:00:00Z" {
+		t.Fatalf("flash=%+v", entry)
+	}
+}
+
 func TestGeminiCLIQuotaUsesStoredProjectAndStringFraction(t *testing.T) {
 	var calls atomic.Int32
 	registry := NewRegistry()

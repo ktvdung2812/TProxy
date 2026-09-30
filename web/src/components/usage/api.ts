@@ -40,6 +40,7 @@ export type UsageStats = {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalCachedTokens: number;
+  totalCacheCreationTokens?: number;
   totalCost: number;
   byProvider: Record<string, UsageBucketEntry>;
   byModel: Record<string, UsageBucketEntry>;
@@ -60,6 +61,10 @@ export type UsageChartPoint = {
 };
 
 export type UsageEvent = {
+  cache_creation_tokens: number;
+  ttft_ms: number | null;
+  queue_ms: number;
+  routing_reason?: string;
   request_id: string;
   client_api_key_id?: string;
   public_model_id: string;

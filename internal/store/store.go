@@ -146,23 +146,27 @@ type APIKey struct {
 }
 
 type UsageEvent struct {
-	RequestID        string    `json:"request_id"`
-	ClientAPIKeyID   string    `json:"client_api_key_id,omitempty"`
-	PublicModelID    string    `json:"public_model_id"`
-	ProviderID       string    `json:"provider_id"`
-	UpstreamModel    string    `json:"upstream_model"`
-	CredentialID     string    `json:"credential_id"`
-	Attempt          int       `json:"attempt"`
-	Status           int       `json:"status"`
-	InputTokens      int       `json:"input_tokens"`
-	OutputTokens     int       `json:"output_tokens"`
-	ReasoningTokens  int       `json:"reasoning_tokens"`
-	CachedTokens     int       `json:"cached_tokens"`
-	TokensSaved      int       `json:"tokens_saved"`
-	EstimatedCostUSD float64   `json:"estimated_cost_usd"`
-	LatencyMS        int64     `json:"latency_ms"`
-	ErrorCode        string    `json:"error_code,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	CacheCreationTokens int       `json:"cache_creation_tokens"`
+	TTFTMS              *int64    `json:"ttft_ms"`
+	QueueMS             int64     `json:"queue_ms"`
+	RoutingReason       string    `json:"routing_reason,omitempty"`
+	RequestID           string    `json:"request_id"`
+	ClientAPIKeyID      string    `json:"client_api_key_id,omitempty"`
+	PublicModelID       string    `json:"public_model_id"`
+	ProviderID          string    `json:"provider_id"`
+	UpstreamModel       string    `json:"upstream_model"`
+	CredentialID        string    `json:"credential_id"`
+	Attempt             int       `json:"attempt"`
+	Status              int       `json:"status"`
+	InputTokens         int       `json:"input_tokens"`
+	OutputTokens        int       `json:"output_tokens"`
+	ReasoningTokens     int       `json:"reasoning_tokens"`
+	CachedTokens        int       `json:"cached_tokens"`
+	TokensSaved         int       `json:"tokens_saved"`
+	EstimatedCostUSD    float64   `json:"estimated_cost_usd"`
+	LatencyMS           int64     `json:"latency_ms"`
+	ErrorCode           string    `json:"error_code,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type RequestLog struct {
@@ -309,6 +313,9 @@ VALUES(?,?,?,?,?,'unknown','','',?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=exc
 					return rollback(fmt.Errorf("encrypt credential %s: %w", credentialCfg.ID, err))
 				}
 			}
+			if err = ValidateAdmissionMetadata(credentialCfg.Metadata); err != nil {
+				return rollback(err)
+			}
 			metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
 			if credentialCfg.Weight <= 0 {
 				credentialCfg.Weight = 1
@@ -410,7 +417,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		return rollback(errors.New("provider id and type are required"))
 	}
 	switch providerCfg.Type {
-	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi":
+	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 	default:
 		return rollback(fmt.Errorf("unsupported provider type %q", providerCfg.Type))
 	}
@@ -427,6 +434,9 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 			if err != nil {
 				return rollback(err)
 			}
+		}
+		if err = ValidateAdmissionMetadata(credentialCfg.Metadata); err != nil {
+			return rollback(err)
 		}
 		metadata, _ := json.Marshal(redactPersistedMetadata(credentialMetadata(credentialCfg)))
 		if credentialCfg.Weight <= 0 {
@@ -649,15 +659,17 @@ func (s *Store) SaveCredential(ctx context.Context, providerID string, credentia
 		return fmt.Errorf("unsupported auth type %q", credentialCfg.AuthType)
 	}
 	metadata := credentialMetadata(credentialCfg)
+	if err := ValidateAdmissionMetadata(metadata); err != nil {
+		return err
+	}
 	if existing, err := s.CredentialByID(ctx, credentialCfg.ID); err == nil {
-		if len(credentialCfg.Metadata) == 0 {
-			for key, value := range existing.Metadata {
-				if _, has := metadata[key]; !has {
-					metadata[key] = value
-				}
+		// Partial metadata updates preserve auth and import metadata.
+		for key, value := range existing.Metadata {
+			if _, has := metadata[key]; !has {
+				metadata[key] = value
 			}
 		}
-		if credentialCfg.Enabled != nil && *credentialCfg.Enabled {
+		if credentialCfg.Enabled != nil {
 			metadata = quotaAutoDisabledMetadata(metadata, false)
 		}
 	}
@@ -990,7 +1002,7 @@ ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_hash=excluded.key_hash,mode
 }
 
 func (s *Store) SetCredentialEnabled(ctx context.Context, credentialID string, enabled bool) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET enabled=? WHERE id=?`, boolInt(enabled), credentialID)
+	result, err := s.db.ExecContext(ctx, `UPDATE credentials SET enabled=?,metadata_json=json_remove(metadata_json,'$.quota_auto_disabled','$.quota_auto_disabled_at') WHERE id=?`, boolInt(enabled), credentialID)
 	if err != nil {
 		return err
 	}
@@ -2080,6 +2092,11 @@ func decodeProviderConfig(raw string, provider *Provider) {
 		}
 		config.NormalizeClaudeOAuth(provider.OAuth)
 	}
+	// Devin rows persisted before OAuth support carry "oauth":null — the
+	// headless PKCE flow needs no fields, only a non-nil config.
+	if provider.Type == "devin" && provider.OAuth == nil {
+		provider.OAuth = &config.OAuthConfig{}
+	}
 }
 
 func credentialMetadata(credential config.CredentialConfig) map[string]any {
@@ -2113,7 +2130,7 @@ func decodeCredentialMetadata(credential *Credential) {
 }
 
 func (s *Store) AddUsage(ctx context.Context, event UsageEvent) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheCreationTokens, event.TTFTMS, event.QueueMS, event.RoutingReason, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -2342,7 +2359,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 		return nil, 0, err
 	}
 
-	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	listArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.db.QueryContext(ctx, listQuery, listArgs...)
 	if err != nil {
@@ -2354,7 +2371,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, 0, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -2370,7 +2387,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2379,7 +2396,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -2475,22 +2492,23 @@ type ProxyPoolSummary struct {
 	UsageCount   int        `json:"usage_count"`
 }
 type CredentialSummary struct {
-	ID                  string     `json:"id"`
-	Label               string     `json:"label"`
-	Email               string     `json:"email,omitempty"`
-	AuthType            string     `json:"auth_type"`
-	Status              string     `json:"status"`
-	Priority            int        `json:"priority"`
-	Weight              int        `json:"weight"`
-	Enabled             bool       `json:"enabled"`
-	CooldownUntil       *time.Time `json:"cooldown_until,omitempty"`
-	LastErrorCode       string     `json:"last_error_code,omitempty"`
-	LastError           string     `json:"last_error,omitempty"`
-	ProxyPoolIDs        []string   `json:"proxy_pool_ids,omitempty"`
-	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
-	LastValidatedAt     *time.Time `json:"last_validated_at,omitempty"`
-	ConsecutiveUseCount int        `json:"consecutive_use_count,omitempty"`
-	CreatedAt           *time.Time `json:"created_at,omitempty"`
+	Admission           AdmissionPolicy `json:"admission"`
+	ID                  string          `json:"id"`
+	Label               string          `json:"label"`
+	Email               string          `json:"email,omitempty"`
+	AuthType            string          `json:"auth_type"`
+	Status              string          `json:"status"`
+	Priority            int             `json:"priority"`
+	Weight              int             `json:"weight"`
+	Enabled             bool            `json:"enabled"`
+	CooldownUntil       *time.Time      `json:"cooldown_until,omitempty"`
+	LastErrorCode       string          `json:"last_error_code,omitempty"`
+	LastError           string          `json:"last_error,omitempty"`
+	ProxyPoolIDs        []string        `json:"proxy_pool_ids,omitempty"`
+	LastUsedAt          *time.Time      `json:"last_used_at,omitempty"`
+	LastValidatedAt     *time.Time      `json:"last_validated_at,omitempty"`
+	ConsecutiveUseCount int             `json:"consecutive_use_count,omitempty"`
+	CreatedAt           *time.Time      `json:"created_at,omitempty"`
 }
 type UsageSummary struct {
 	Requests         int     `json:"requests"`
@@ -2589,7 +2607,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 				lastValidated = &value
 			}
 			snapshot.Credentials[provider.ID] = append(snapshot.Credentials[provider.ID], CredentialSummary{
-				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status,
+				ID: c.ID, Label: c.Label, Email: c.Email, AuthType: c.AuthType, Status: c.Status, Admission: CredentialAdmission(c.Metadata),
 				Priority: c.Priority, Weight: c.Weight, Enabled: c.Enabled, CooldownUntil: cooldown,
 				LastErrorCode: c.LastErrorCode, LastError: c.LastError, ProxyPoolIDs: c.ProxyPoolIDs, LastUsedAt: lastUsed,
 				LastValidatedAt: lastValidated, ConsecutiveUseCount: c.ConsecutiveUseCount, CreatedAt: createdAt,
@@ -2917,7 +2935,7 @@ func normalizeAPIKeyModels(models []string) []string {
 func EligibleCredentials(creds []Credential, now time.Time) []Credential {
 	items := make([]Credential, 0, len(creds))
 	for _, c := range creds {
-		if c.Enabled && c.Status != "auth_required" && c.Status != "disabled" && (c.CooldownUntil.IsZero() || !c.CooldownUntil.After(now)) {
+		if c.Enabled && !AccountExpired(c, now) && c.Status != "auth_required" && c.Status != "disabled" && (c.CooldownUntil.IsZero() || !c.CooldownUntil.After(now)) {
 			items = append(items, c)
 		}
 	}

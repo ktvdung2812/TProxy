@@ -2,7 +2,9 @@ package tunnel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,8 +24,17 @@ func ProbeURLAlive(ctx context.Context, baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
+	}
+	// A user-owned hostname may still route to a different website or an access
+	// login page. Only our health response proves that it reaches tproxy.
+	var health struct {
+		Status  string `json:"status"`
+		Service string `json:"service"`
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&health) == nil && health.Status == "ok" && health.Service == "tproxy"
 }
 
 func WaitForHealth(ctx context.Context, baseURL string, cancelled func() bool) error {

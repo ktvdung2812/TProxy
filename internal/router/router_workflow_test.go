@@ -219,7 +219,7 @@ func workflowTestStore(t *testing.T) *store.Store {
 	return dataStore
 }
 
-func TestWrapEventsBenchesCredentialOnMidStreamModelCapacity(t *testing.T) {
+func TestWrapEventsBenchesProviderRouteOnMidStreamModelCapacity(t *testing.T) {
 	dataStore := workflowTestStore(t)
 	requestRouter := New(dataStore, providers.NewRegistry())
 	input := make(chan canonical.Event, 2)
@@ -237,16 +237,17 @@ func TestWrapEventsBenchesCredentialOnMidStreamModelCapacity(t *testing.T) {
 	if len(usage) != 1 || usage[0].Status != 429 || usage[0].ErrorCode != providers.CodeUpstreamModelAtCapacity {
 		t.Fatalf("capacity stream usage=%+v", usage)
 	}
-	until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now())
-	if err != nil {
-		t.Fatal(err)
+	// Capacity is a provider-side condition: the pair gets a shared bench while
+	// the credential itself is never flagged.
+	if until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now()); err != nil || !until.IsZero() {
+		t.Fatalf("credential model cooldown = %v, %v; want none", until, err)
 	}
-	if until.IsZero() {
-		t.Fatal("model at capacity mid-stream did not bench the credential for the model")
+	if _, benched := requestRouter.modelCapacityUntil(selection.Provider.ID, selection.Route.UpstreamModel, time.Now()); !benched {
+		t.Fatal("model at capacity mid-stream did not bench the provider/model pair")
 	}
 }
 
-func TestWrapEventsBenchesCredentialOnPassthroughCapacityFailure(t *testing.T) {
+func TestWrapEventsBenchesProviderRouteOnPassthroughCapacityFailure(t *testing.T) {
 	dataStore := workflowTestStore(t)
 	requestRouter := New(dataStore, providers.NewRegistry())
 	input := make(chan canonical.Event, 1)
@@ -267,12 +268,11 @@ func TestWrapEventsBenchesCredentialOnPassthroughCapacityFailure(t *testing.T) {
 	if len(usage) != 1 || usage[0].Status != 429 || usage[0].ErrorCode != providers.CodeUpstreamModelAtCapacity {
 		t.Fatalf("passthrough capacity usage=%+v", usage)
 	}
-	until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now())
-	if err != nil {
-		t.Fatal(err)
+	if until, err := dataStore.ModelCooldownUntil(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, time.Now()); err != nil || !until.IsZero() {
+		t.Fatalf("credential model cooldown = %v, %v; want none", until, err)
 	}
-	if until.IsZero() {
-		t.Fatal("passthrough response.failed at capacity did not bench the credential for the model")
+	if _, benched := requestRouter.modelCapacityUntil(selection.Provider.ID, selection.Route.UpstreamModel, time.Now()); !benched {
+		t.Fatal("passthrough response.failed at capacity did not bench the provider/model pair")
 	}
 }
 

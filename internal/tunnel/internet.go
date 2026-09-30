@@ -15,7 +15,7 @@ var internetProbeTargets = []string{
 	"1.1.1.1:443",
 	"8.8.8.8:443",
 	"9.9.9.9:443",
-	"api.trycloudflare.com:443",
+	"api.cloudflare.com:443",
 	"controlplane.tailscale.com:443",
 }
 

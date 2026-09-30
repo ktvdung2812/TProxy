@@ -1,7 +1,9 @@
 package providers
 
 import (
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
 )
@@ -128,6 +130,104 @@ func TestTranslateCodexResponseFailedAtCapacity(t *testing.T) {
 	}
 	if providerErr.Message != "Selected model is at capacity. Please try a different model." {
 		t.Fatalf("message = %q", providerErr.Message)
+	}
+}
+
+func TestTranslateCodexResponseFailedRateLimitCarriesRetryAfter(t *testing.T) {
+	state := newCodexStreamState(nil)
+	events := translateCodexEvent(map[string]any{
+		"type": "response.failed",
+		"response": map[string]any{
+			"error": map[string]any{
+				"code":    "rate_limit_exceeded",
+				"message": "Rate limit reached. Please try again in 3.5s.",
+			},
+		},
+	}, state)
+	if len(events) != 1 || events[0].Type != canonical.EventError {
+		t.Fatalf("events = %#v", events)
+	}
+	providerErr, ok := events[0].Err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", events[0].Err)
+	}
+	if providerErr.Status != 429 || providerErr.Code != "rate_limit_exceeded" {
+		t.Fatalf("rate limit error = %d %q", providerErr.Status, providerErr.Code)
+	}
+	if providerErr.RetryAfter != "3.5" {
+		t.Fatalf("RetryAfter = %q, want 3.5", providerErr.RetryAfter)
+	}
+}
+
+func TestTranslateCodexResponseFailedQuotaUsesResetsAt(t *testing.T) {
+	state := newCodexStreamState(nil)
+	resetsAt := float64(time.Now().Unix() + 600)
+	events := translateCodexEvent(map[string]any{
+		"type": "response.failed",
+		"response": map[string]any{
+			"error": map[string]any{
+				"code":      "insufficient_quota",
+				"message":   "You have insufficient quota for this operation.",
+				"resets_at": resetsAt,
+			},
+		},
+	}, state)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v", events)
+	}
+	providerErr, ok := events[0].Err.(*ProviderError)
+	if !ok {
+		t.Fatalf("err = %#v", events[0].Err)
+	}
+	if providerErr.Status != 429 || providerErr.Code != "upstream_quota_exceeded" {
+		t.Fatalf("quota error = %d %q", providerErr.Status, providerErr.Code)
+	}
+	if providerErr.RetryAfter == "" {
+		t.Fatal("expected RetryAfter from resets_at")
+	}
+	delta, err := strconv.ParseFloat(providerErr.RetryAfter, 64)
+	if err != nil || delta <= 0 || delta > 600 {
+		t.Fatalf("RetryAfter = %q", providerErr.RetryAfter)
+	}
+}
+
+func TestTranslateCodexResponseFailedClassification(t *testing.T) {
+	cases := []struct {
+		name       string
+		code       string
+		wantStatus int
+		wantCode   string
+	}{
+		{"context window", "context_length_exceeded", 400, "context_length_exceeded"},
+		{"usage not included", "usage_not_included", 403, "usage_not_included"},
+		{"overloaded", "server_is_overloaded", 503, "server_is_overloaded"},
+		{"invalid prompt", "invalid_prompt", 400, "invalid_prompt"},
+		{"bio policy", "bio_policy", 400, "bio_policy"},
+		{"cyber policy", "cyber_policy", 400, "cyber_policy"},
+		{"misalignment", "misalignment_policy_violation", 400, "misalignment_policy_violation"},
+		{"slow down", "slow_down", 429, "slow_down"},
+		{"credit balance", "credit_balance_exhausted", 429, "upstream_quota_exceeded"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := newCodexStreamState(nil)
+			events := translateCodexEvent(map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{
+					"error": map[string]any{"code": tc.code, "message": "boom"},
+				},
+			}, state)
+			if len(events) != 1 {
+				t.Fatalf("events = %#v", events)
+			}
+			providerErr, ok := events[0].Err.(*ProviderError)
+			if !ok {
+				t.Fatalf("err = %#v", events[0].Err)
+			}
+			if providerErr.Status != tc.wantStatus || providerErr.Code != tc.wantCode {
+				t.Fatalf("%s = %d %q, want %d %q", tc.code, providerErr.Status, providerErr.Code, tc.wantStatus, tc.wantCode)
+			}
+		})
 	}
 }
 

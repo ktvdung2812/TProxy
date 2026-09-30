@@ -318,6 +318,22 @@ func TestOAuthProviderErrorCodeCannotExposeSecretText(t *testing.T) {
 	}
 }
 
+func TestOAuthNestedErrorCode(t *testing.T) {
+	// OpenAI-style errors nest the machine code: {"error":{"code":"refresh_token_reused",...}}
+	err := oauthHTTPError([]byte(`{"error":{"message":"token was already used","type":"invalid_request_error","code":"refresh_token_reused"}}`), http.StatusUnauthorized, true)
+	if Code(err) != "refresh_token_reused" {
+		t.Fatalf("nested error code = %q, want refresh_token_reused", Code(err))
+	}
+	if !IsPermanent(err) {
+		t.Fatal("refresh_token_reused on refresh should be permanent")
+	}
+	// Unknown nested codes still normalize away.
+	err = oauthHTTPError([]byte(`{"error":{"code":"internal-secret-code"}}`), http.StatusBadRequest, true)
+	if Code(err) != "oauth_provider_unavailable" {
+		t.Fatalf("unknown nested code = %q, want oauth_provider_unavailable", Code(err))
+	}
+}
+
 func TestOAuthExtraParamsCannotOverrideProtocolFields(t *testing.T) {
 	authorization := authorizationURL(config.OAuthConfig{
 		AuthorizationURL: "https://login.example/authorize",
