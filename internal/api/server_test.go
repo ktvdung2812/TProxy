@@ -438,7 +438,7 @@ func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T)
 	dataStore := apiTestStore(t, cfg)
 	if err := dataStore.SaveTunnelSettings(ctx, store.TunnelSettings{
 		Enabled:               true,
-		TunnelURL:             "https://example.trycloudflare.com",
+		TunnelURL:             "https://api.example.com",
 		TunnelDashboardAccess: false,
 	}); err != nil {
 		t.Fatal(err)
@@ -447,7 +447,7 @@ func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T)
 	server := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry()))
 	defer server.Close()
 
-	dashboard := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/dashboard/", nil)
+	dashboard := httptest.NewRequest(http.MethodGet, "https://api.example.com/dashboard/", nil)
 	dashboard.RemoteAddr = "127.0.0.1:1234"
 	dashboardRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(dashboardRecorder, dashboard)
@@ -455,7 +455,7 @@ func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T)
 		t.Fatalf("disabled tunnel dashboard status=%d body=%s", dashboardRecorder.Code, dashboardRecorder.Body.String())
 	}
 
-	disabled := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	disabled := httptest.NewRequest(http.MethodGet, "https://api.example.com/api/admin/snapshot", nil)
 	disabled.RemoteAddr = "127.0.0.1:1234"
 	withDefaultManagementAuth(disabled)
 	disabledRecorder := httptest.NewRecorder()
@@ -466,12 +466,12 @@ func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T)
 
 	if err := dataStore.SaveTunnelSettings(ctx, store.TunnelSettings{
 		Enabled:               true,
-		TunnelURL:             "https://example.trycloudflare.com",
+		TunnelURL:             "https://api.example.com",
 		TunnelDashboardAccess: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	requiresEnvSecret := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	requiresEnvSecret := httptest.NewRequest(http.MethodGet, "https://api.example.com/api/admin/snapshot", nil)
 	requiresEnvSecret.RemoteAddr = "127.0.0.1:1234"
 	withDefaultManagementAuth(requiresEnvSecret)
 	requiresEnvSecretRecorder := httptest.NewRecorder()
@@ -490,7 +490,7 @@ func TestTunnelDashboardRequiresExplicitAccessAndEnvironmentSecret(t *testing.T)
 		t.Fatalf("tunnel accepted bootstrap password with env secret: %d body=%s", legacyPasswordRecorder.Code, legacyPasswordRecorder.Body.String())
 	}
 
-	withEnvSecret := httptest.NewRequest(http.MethodGet, "https://example.trycloudflare.com/api/admin/snapshot", nil)
+	withEnvSecret := httptest.NewRequest(http.MethodGet, "https://api.example.com/api/admin/snapshot", nil)
 	withEnvSecret.RemoteAddr = "127.0.0.1:1234"
 	withEnvSecret.Header.Set("Authorization", "Bearer tunnel-only-secret")
 	withEnvSecretRecorder := httptest.NewRecorder()

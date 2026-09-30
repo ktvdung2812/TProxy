@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,8 @@ import (
 )
 
 type Router struct {
+	accountMu             sync.Mutex
+	accounts              map[string]*AccountRuntime
 	store                 *store.Store
 	registry              *providers.Registry
 	refresher             CredentialRefresher
@@ -49,6 +52,7 @@ type Router struct {
 	sessionTTL            time.Duration
 	sessions              map[string]sessionBinding
 	providerStreams       map[string]int
+	modelCapacity         map[string]time.Time
 	pricing               *pricing.Catalog
 	modelsRegistry        *pricing.ModelsRegistry
 	circuitBreakers       *resilience.Registry
@@ -65,11 +69,14 @@ type sessionBinding struct {
 }
 
 type Selection struct {
-	Model      store.PublicModel
-	Route      store.RouteTarget
-	Provider   store.Provider
-	Credential store.Credential
-	Attempt    int
+	QueueMS       int64
+	RoutingReason string
+	StartedAt     time.Time
+	Model         store.PublicModel
+	Route         store.RouteTarget
+	Provider      store.Provider
+	Credential    store.Credential
+	Attempt       int
 }
 
 type Result struct {
@@ -107,6 +114,7 @@ func New(dataStore *store.Store, registry *providers.Registry) *Router {
 		cooldowns: CooldownSettingsFromConfig(config.CooldownConfig{}), strategy: StrategyRoundRobin,
 		stickyRoundRobinLimit: defaultStickyRoundRobinLimit, providerStrategies: map[string]store.ProviderRotationStrategy{},
 		sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int),
+		modelCapacity:   make(map[string]time.Time),
 		circuitBreakers: resilience.NewRegistry(),
 		arena:           intelligence.NewArena(),
 	}
@@ -354,6 +362,7 @@ func (r *Router) SyncAccountRotationSettings(ctx context.Context) error {
 func (r *Router) ResetRotationRuntimeState() {
 	r.mu.Lock()
 	r.rotation = make(map[string]int)
+	r.modelCapacity = make(map[string]time.Time)
 	r.mu.Unlock()
 }
 
@@ -560,7 +569,7 @@ func (r *Router) checkCredentialHealth(ctx context.Context, provider store.Provi
 		if status == 401 || status == 403 {
 			_ = r.store.MarkCredentialAuthRequired(ctx, credential.ID, providers.Code(err))
 		} else {
-			r.setCredentialCooldown(ctx, credential.ID, "", err)
+			r.setCredentialCooldown(ctx, provider.ID, credential.ID, "", err)
 		}
 		return err
 	}
@@ -575,6 +584,7 @@ func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, c
 		return quota, err
 	}
 	if len(quota.Quotas) > 0 {
+		r.observeQuota(credential.ID, quota)
 		depleted := providers.QuotaAtZero(quota)
 		if changed, syncErr := r.store.SyncCredentialQuotaState(ctx, credential, depleted); syncErr == nil && changed {
 			_ = r.store.SyncProviderHealth(ctx, provider.ID)
@@ -606,14 +616,18 @@ func (r *Router) CodexResetCredits(ctx context.Context, provider store.Provider,
 
 // ConsumeCodexResetCredit spends one Codex reset credit for a credential.
 func (r *Router) ConsumeCodexResetCredit(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CodexResetConsumeResult, error) {
-	return r.registry.ConsumeCodexResetCredit(ctx, provider, credential, "")
+	return r.ConsumeCodexResetCreditWithID(ctx, provider, credential, "")
+}
+
+func (r *Router) ConsumeCodexResetCreditWithID(ctx context.Context, provider store.Provider, credential store.Credential, id string) (providers.CodexResetConsumeResult, error) {
+	return r.registry.ConsumeCodexResetCredit(ctx, provider, credential, id)
 }
 
 func (r *Router) DiscoverCredentialModels(ctx context.Context, provider store.Provider, credential store.Credential) ([]providers.DiscoveredModel, error) {
 	items, err := r.registry.DiscoverModels(ctx, provider, credential)
 	if err != nil {
 		if credential.ID != "" {
-			r.setCredentialCooldown(ctx, credential.ID, "", err)
+			r.setCredentialCooldown(ctx, provider.ID, credential.ID, "", err)
 		}
 		_ = r.store.SyncProviderHealth(ctx, provider.ID)
 		return nil, err
@@ -661,11 +675,20 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if !r.breakerAllows(model.ID, selection.Provider.ID) {
 			continue
 		}
+		if _, benched := r.modelCapacityUntil(selection.Provider.ID, selection.Route.UpstreamModel, time.Now()); benched {
+			// An earlier attempt in this request already found this pair
+			// saturated; don't probe the same upstream model with another
+			// account.
+			if lastErr == nil {
+				lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: providers.CodeUpstreamModelAtCapacity, Message: fmt.Sprintf("upstream model %s is at capacity on provider %s", selection.Route.UpstreamModel, selection.Provider.ID)}
+			}
+			continue
+		}
 		credentialsTried++
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -677,6 +700,15 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			lastErr = errAdapter
 			if disableFallback(request) {
 				return nil, lastErr
+			}
+			continue
+		}
+		releaseAccount, admissionErr := r.admitSelection(ctx, &selection, selections[index+1:], disableFallback(request))
+		if admissionErr != nil {
+			credentialsTried--
+			lastErr = admissionErr
+			if ctx.Err() != nil || disableFallback(request) {
+				return nil, admissionErr
 			}
 			continue
 		}
@@ -697,14 +729,16 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			}
 			response, errExecute = adapter.Execute(ctx, selection.Provider, selection.Credential, request)
 		}
+		releaseAccount()
+		r.recordAccount(selection, outcomeStatus(errExecute), nil)
 		if errExecute == nil {
-			r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
+			r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID)
 			r.clearSuccessfulCooldown(ctx, selection)
 			r.recordProviderSuccess(model.ID, selection.Provider.ID)
 			if r.arena != nil {
 				r.arena.RecordOutcome(selection.Credential, true)
 			}
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, CacheCreationTokens: response.Usage.CacheCreationTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			if model.RewriteResponseModel {
 				response.Model = model.ID
 			}
@@ -713,10 +747,10 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		lastErr = errExecute
 		status := providers.Status(errExecute)
 		code := providers.Code(errExecute)
-		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 		fallback := shouldFallbackStatus(status)
 		if fallback {
-			r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
+			r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 		}
 		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
 		if r.arena != nil {
@@ -756,11 +790,17 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		if !r.breakerAllows(model.ID, selection.Provider.ID) {
 			continue
 		}
+		if _, benched := r.modelCapacityUntil(selection.Provider.ID, selection.Route.UpstreamModel, time.Now()); benched {
+			if lastErr == nil {
+				lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: providers.CodeUpstreamModelAtCapacity, Message: fmt.Sprintf("upstream model %s is at capacity on provider %s", selection.Route.UpstreamModel, selection.Provider.ID)}
+			}
+			continue
+		}
 		credentialsTried++
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -775,9 +815,19 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			}
 			continue
 		}
+		releaseAccount, admissionErr := r.admitSelection(ctx, &selection, selections[index+1:], disableFallback(request))
+		if admissionErr != nil {
+			credentialsTried--
+			lastErr = admissionErr
+			if ctx.Err() != nil || disableFallback(request) {
+				return nil, admissionErr
+			}
+			continue
+		}
 		if !r.acquireProviderStream(selection.Provider) {
+			releaseAccount()
 			lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "provider_concurrency_limit", Message: fmt.Sprintf("provider %s concurrent stream limit is reached", selection.Provider.ID)}
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: http.StatusTooManyRequests, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: http.StatusTooManyRequests, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -803,13 +853,15 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			errExecute = validateStreamResult(events, errExecute)
 		}
 		if errExecute != nil {
+			releaseAccount()
+			r.recordAccount(selection, outcomeStatus(errExecute), nil)
 			r.releaseProviderStream(selection.Provider)
 			lastErr = errExecute
 			status, code := providers.Status(errExecute), providers.Code(errExecute)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 			fallback := shouldFallbackStatus(status)
 			if fallback {
-				r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
+				r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 			}
 			r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
 			if disableFallback(request) {
@@ -820,8 +872,8 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			}
 			return nil, errExecute
 		}
-		r.bindSession(model.ID, request.SessionID, selection.Credential.ID)
-		wrapped := r.wrapEvents(ctx, model, selection, request, start, events, func() { r.releaseProviderStream(selection.Provider) })
+		r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID)
+		wrapped := r.wrapEvents(ctx, model, selection, request, start, events, func() { releaseAccount(); r.releaseProviderStream(selection.Provider) })
 		return &StreamResult{Selection: selection, Events: wrapped}, nil
 	}
 	if lastErr == nil {
@@ -883,6 +935,11 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 	if id == "" {
 		id = job.ID
 	}
+	release, _, admissionErr := r.acquireAccount(ctx, selection.Credential, true)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	defer release()
 	raw, err := rawAdapter.Proxy(ctx, *provider, selection.Credential, providers.RawRequest{Method: http.MethodGet, Path: "/v1/videos/" + url.PathEscape(id), Headers: http.Header{"X-Request-ID": []string{job.ID}}})
 	if err != nil {
 		return nil, err
@@ -915,10 +972,16 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 		if !r.breakerAllows(model.ID, selection.Provider.ID) {
 			continue
 		}
+		if _, benched := r.modelCapacityUntil(selection.Provider.ID, selection.Route.UpstreamModel, time.Now()); benched {
+			if lastErr == nil {
+				lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: providers.CodeUpstreamModelAtCapacity, Message: fmt.Sprintf("upstream model %s is at capacity on provider %s", selection.Route.UpstreamModel, selection.Provider.ID)}
+			}
+			continue
+		}
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if options.DisableFallback {
 				return nil, lastErr
 			}
@@ -941,6 +1004,14 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			}
 			continue
 		}
+		releaseAccount, admissionErr := r.admitSelection(ctx, &selection, selections[index+1:], options.DisableFallback)
+		if admissionErr != nil {
+			lastErr = admissionErr
+			if ctx.Err() != nil || options.DisableFallback {
+				return nil, admissionErr
+			}
+			continue
+		}
 		requestBody := rewriteRequestModel(body, contentType, selection.Route.UpstreamModel)
 		rawRequest := providers.RawRequest{Method: options.Method, Path: path, Body: requestBody, ContentType: contentType, Headers: options.Headers.Clone()}
 		raw, errProxy := rawAdapter.Proxy(ctx, selection.Provider, selection.Credential, rawRequest)
@@ -954,19 +1025,21 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 				errProxy = asCredentialError(refreshErr)
 			}
 		}
+		releaseAccount()
+		r.recordAccount(selection, outcomeStatus(errProxy), nil)
 		if errProxy == nil {
 			if model.RewriteResponseModel && strings.Contains(strings.ToLower(raw.ContentType), "json") {
 				raw.Body = rewriteResponseModel(raw.Body, model.ID)
 			}
 			r.clearSuccessfulCooldown(ctx, selection)
 			r.recordProviderSuccess(model.ID, selection.Provider.ID)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			return &RawResult{Selection: selection, Response: raw}, nil
 		}
 		lastErr = errProxy
 		status, code := providers.Status(errProxy), providers.Code(errProxy)
 		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errProxy)
-		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 		if status == 0 && !options.RetryNetworkErrors {
 			if options.DisableFallback {
 				return nil, errProxy
@@ -980,7 +1053,7 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			fallback = true
 		}
 		if fallback {
-			r.setCredentialCooldown(ctx, selection.Credential.ID, selection.Route.UpstreamModel, errProxy)
+			r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errProxy)
 		}
 		if options.DisableFallback {
 			return nil, errProxy
@@ -1161,8 +1234,25 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 		errorCode := ""
 		errorMessage := ""
 		var usage canonical.Usage
+		var ttft *int64
 	stream:
-		for event := range input {
+		for {
+			var event canonical.Event
+			select {
+			case <-ctx.Done():
+				status = 499
+				errorCode = "client_canceled"
+				break stream
+			case next, ok := <-input:
+				if !ok {
+					break stream
+				}
+				event = next
+			}
+			if ttft == nil && firstContentEvent(event) {
+				elapsed := time.Since(selection.StartedAt).Milliseconds()
+				ttft = &elapsed
+			}
 			if ctx.Err() != nil {
 				status = 499
 				errorCode = "client_canceled"
@@ -1229,6 +1319,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 				}
 			}
 		}
+		r.recordAccount(selection, status, ttft)
 		switch {
 		case status == 200:
 			r.clearSuccessfulCooldown(context.Background(), selection)
@@ -1239,21 +1330,24 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 			r.recordProviderFailure(model.ID, selection.Provider.ID, status, fmt.Errorf("%s", errorCode))
 			if errorCode == providers.CodeUpstreamModelAtCapacity {
 				// The stream had already started, so failover was impossible —
-				// but bench this credential for the model so the next request
-				// tries a different route instead of repeating the failing
-				// stream.
+				// but bench this provider/model pair briefly so the next
+				// request tries a different route instead of repeating the
+				// failing stream against a saturated upstream model.
 				if errorMessage == "" {
 					errorMessage = "Selected model is at capacity"
 				}
-				r.setCredentialCooldown(context.Background(), selection.Credential.ID, selection.Route.UpstreamModel, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: errorCode, Message: errorMessage})
+				r.setCredentialCooldown(context.Background(), selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: errorCode, Message: errorMessage})
 			}
 		}
-		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, CacheCreationTokens: usage.CacheCreationTokens, TTFTMS: ttft, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
 	}()
 	return out
 }
 
 func mergeCanonicalUsage(current, update canonical.Usage) canonical.Usage {
+	if update.CacheCreationTokens != 0 {
+		current.CacheCreationTokens = update.CacheCreationTokens
+	}
 	if update.InputTokens != 0 {
 		current.InputTokens = update.InputTokens
 	}
@@ -1415,6 +1509,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 	routesConsidered := 0
 	var outlook credentialOutlook
 	now := time.Now()
+	retry := r.retrySettings()
 	for _, route := range routes {
 		if !route.Enabled {
 			continue
@@ -1452,6 +1547,16 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			policyLimited = true
 			continue
 		}
+		if until, benched := r.modelCapacityUntil(provider.ID, route.UpstreamModel, now); benched {
+			// The upstream reported this model at capacity for the whole
+			// provider. Waiting out a bench that ends within the wait budget
+			// beats probing a saturated model with another account.
+			if until.Sub(now) > retry.MaxWait || !retry.waitForCooldown(ctx, until, now) {
+				modelCooldownLimited = true
+				continue
+			}
+			now = time.Now()
+		}
 		credentials, errCredentials := r.store.Credentials(ctx, provider.ID)
 		if errCredentials != nil {
 			return nil, errCredentials
@@ -1484,6 +1589,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 				proxyExhausted = true
 				continue
 			}
+			selection.RoutingReason = r.rotationPolicyForProvider(provider.ID).strategy
 			selections = append(selections, selection)
 		}
 	}
@@ -1575,7 +1681,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			Message: fmt.Sprintf("no provider is currently able to serve %s", model.ID),
 		}
 	}
-	selections = r.preferSession(model.ID, request.SessionID, selections)
+	selections = r.preferSession(model.ID, routingSessionID(request), selections)
 	return selections, nil
 }
 
@@ -1862,6 +1968,7 @@ func (r *Router) preferSession(modelID, sessionID string, selections []Selection
 	}
 	for index, selection := range selections {
 		if selection.Credential.ID == binding.CredentialID {
+			selection.RoutingReason = "session-affinity"
 			result := make([]Selection, 0, len(selections))
 			result = append(result, selection)
 			result = append(result, selections[:index]...)
@@ -1880,6 +1987,22 @@ func (r *Router) bindSession(modelID, sessionID, credentialID string) {
 	defer r.mu.Unlock()
 	if !r.sessionAffinity {
 		return
+	}
+	if len(r.sessions) >= 4096 {
+		now := time.Now()
+		oldest := ""
+		for key, binding := range r.sessions {
+			if !binding.ExpiresAt.After(now) {
+				delete(r.sessions, key)
+				continue
+			}
+			if oldest == "" || binding.ExpiresAt.Before(r.sessions[oldest].ExpiresAt) {
+				oldest = key
+			}
+		}
+		if len(r.sessions) >= 4096 {
+			delete(r.sessions, oldest)
+		}
 	}
 	r.sessions[modelID+":"+sessionID] = sessionBinding{CredentialID: credentialID, ExpiresAt: time.Now().Add(r.sessionTTL)}
 }
@@ -2038,6 +2161,8 @@ func shouldFallbackStatus(status int) bool {
 }
 
 func (r *Router) clearSuccessfulCooldown(ctx context.Context, selection Selection) {
+	// A successful dispatch means upstream capacity for the pair has returned.
+	r.clearModelAtCapacity(selection.Provider.ID, selection.Route.UpstreamModel)
 	if selection.Credential.ID == "" {
 		return
 	}
@@ -2053,12 +2178,24 @@ func (r *Router) retrySettings() RetrySettings {
 	return r.retry
 }
 
-func (r *Router) setCredentialCooldown(ctx context.Context, credentialID, upstreamModel string, err error) {
-	if credentialID == "" || err == nil {
+func (r *Router) setCredentialCooldown(ctx context.Context, providerID, credentialID, upstreamModel string, err error) {
+	if err == nil {
 		return
 	}
 	status := providers.Status(err)
 	if r.cooldowns.SkipCooldown(status) {
+		return
+	}
+	if providers.Code(err) == providers.CodeUpstreamModelAtCapacity {
+		// "Selected model is at capacity" is a provider-side condition shared
+		// by every account on the provider. Bench the pair briefly instead of
+		// flagging the credential that happened to observe it, and probe again
+		// on the same account after the window rather than escalating a
+		// per-account backoff for a congestion the account did not cause.
+		r.markModelAtCapacity(providerID, upstreamModel, time.Now())
+		return
+	}
+	if credentialID == "" {
 		return
 	}
 	count := 0
@@ -2103,4 +2240,13 @@ func (r *Router) filterModelCooldowns(ctx context.Context, credentials []store.C
 		return waitable
 	}
 	return filtered
+}
+
+func routingSessionID(request canonical.Request) string {
+	if request.SessionID == "" {
+		return ""
+	}
+	// JSON tuple avoids ambiguous separators and includes authenticated ownership.
+	encoded, _ := json.Marshal([]string{requestClientAPIKeyID(request), fmt.Sprint(request.Metadata["team"]), request.SessionID})
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }

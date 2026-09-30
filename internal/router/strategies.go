@@ -78,8 +78,8 @@ func sortByRecency(credentials []store.Credential, mostRecentFirst bool) []store
 func sortByWeightAsc(credentials []store.Credential) []store.Credential {
 	ordered := append([]store.Credential(nil), credentials...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		left := credentials[i].Weight
-		right := credentials[j].Weight
+		left := ordered[i].Weight
+		right := ordered[j].Weight
 		if left <= 0 {
 			left = 1
 		}
@@ -87,7 +87,7 @@ func sortByWeightAsc(credentials []store.Credential) []store.Credential {
 			right = 1
 		}
 		if left == right {
-			return credentials[i].ID < credentials[j].ID
+			return ordered[i].ID < ordered[j].ID
 		}
 		return left < right
 	})
@@ -97,12 +97,12 @@ func sortByWeightAsc(credentials []store.Credential) []store.Credential {
 func sortQuotaHealthy(credentials []store.Credential) []store.Credential {
 	ordered := append([]store.Credential(nil), credentials...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		leftDepleted := store.QuotaAutoDisabled(credentials[i].Metadata)
-		rightDepleted := store.QuotaAutoDisabled(credentials[j].Metadata)
+		leftDepleted := store.QuotaAutoDisabled(ordered[i].Metadata)
+		rightDepleted := store.QuotaAutoDisabled(ordered[j].Metadata)
 		if leftDepleted != rightDepleted {
 			return !leftDepleted
 		}
-		return credentials[i].Priority > credentials[j].Priority
+		return ordered[i].Priority > ordered[j].Priority
 	})
 	return ordered
 }
@@ -113,18 +113,18 @@ func sortQuotaHealthy(credentials []store.Credential) []store.Credential {
 func sortExpiringFirst(credentials []store.Credential) []store.Credential {
 	ordered := append([]store.Credential(nil), credentials...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		left, leftOK := store.QuotaRenewsAt(credentials[i].Metadata)
-		right, rightOK := store.QuotaRenewsAt(credentials[j].Metadata)
+		left, leftOK := store.QuotaRenewsAt(ordered[i].Metadata)
+		right, rightOK := store.QuotaRenewsAt(ordered[j].Metadata)
 		if leftOK != rightOK {
 			return leftOK
 		}
 		if leftOK && !left.Equal(right) {
 			return left.Before(right)
 		}
-		if credentials[i].Priority != credentials[j].Priority {
-			return credentials[i].Priority > credentials[j].Priority
+		if ordered[i].Priority != ordered[j].Priority {
+			return ordered[i].Priority > ordered[j].Priority
 		}
-		return credentials[i].ID < credentials[j].ID
+		return ordered[i].ID < ordered[j].ID
 	})
 	return ordered
 }
@@ -136,10 +136,10 @@ func orderTaskAware(credentials []store.Credential, taskHint string) []store.Cre
 	}
 	ordered := append([]store.Credential(nil), credentials...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		left := taskAwareScore(credentials[i], hint)
-		right := taskAwareScore(credentials[j], hint)
+		left := taskAwareScore(ordered[i], hint)
+		right := taskAwareScore(ordered[j], hint)
 		if left == right {
-			return credentials[i].ID < credentials[j].ID
+			return ordered[i].ID < ordered[j].ID
 		}
 		return left > right
 	})

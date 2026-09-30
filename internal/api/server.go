@@ -29,6 +29,7 @@ import (
 	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/import9router"
 	"github.com/tproxy/tproxy/internal/importcliproxy"
+	"github.com/tproxy/tproxy/internal/importsub2api"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/router"
 	"github.com/tproxy/tproxy/internal/security"
@@ -56,6 +57,9 @@ type requestLogState struct {
 }
 
 type Server struct {
+	operations       operationalState
+	responseSessions responseSessions
+	quotaResets      quotaResetState
 	// cfg is swapped wholesale by /api/admin/reload and /api/admin/config/import
 	// while other requests are reading it, so it is only ever replaced, never
 	// mutated in place. Use currentConfig/setConfig.
@@ -138,6 +142,8 @@ func (s *Server) StartBackground(ctx context.Context) {
 	s.auth.Start(ctx)
 	backgroundCtx, cancel := context.WithCancel(ctx)
 	s.backgroundCancel = cancel
+	s.backgroundWG.Add(1)
+	go func() { defer s.backgroundWG.Done(); s.runOperationalMonitor(backgroundCtx) }()
 	interval, err := time.ParseDuration(s.currentConfig().Retention.CleanupInterval)
 	if err != nil || interval <= 0 {
 		interval = time.Hour
@@ -1160,7 +1166,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		state.PublicModelID = model.ID
 	}
 	if request.SessionID == "" {
-		request.SessionID = sessionIDFromRequest(r)
+		request.SessionID = sessionIDFromRequest(r, request.Raw)
 	}
 	liveTracked := false
 	defer func() {
@@ -1601,6 +1607,12 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminAPIKeySecrets(w, r)
 	case "/api/admin/usage":
 		s.adminUsage(w, r)
+	case "/api/admin/operations":
+		s.adminOperations(w, r)
+	case "/api/admin/diagnostics/translate":
+		s.adminTranslatePreview(w, r)
+	case "/api/admin/quota/actions":
+		s.adminQuotaActions(w, r)
 	case "/api/admin/quota/summary":
 		s.adminQuotaSummary(w, r)
 	case "/api/admin/quota/credential-usage":
@@ -1677,6 +1689,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminRoutingStrategies(w, r)
 	case "/api/admin/import/cliproxyapi":
 		s.adminImportCliproxyAPI(w, r)
+	case "/api/admin/import/sub2api":
+		s.adminImportSub2API(w, r)
 	case "/api/admin/config/export":
 		s.adminConfigExport(w, r)
 	case "/api/admin/config/import":
@@ -2785,7 +2799,7 @@ func (s *Server) adminCodexResetCredits(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusOK, credits)
 		return
 	}
-	result, consumeErr := s.router.ConsumeCodexResetCredit(r.Context(), *provider, credential)
+	result, consumeErr := s.consumeQuotaReset(r.Context(), *provider, credential, r.Header.Get("Idempotency-Key"))
 	if consumeErr != nil {
 		status := providers.Status(consumeErr)
 		if status == 0 {
@@ -3044,6 +3058,12 @@ func (s *Server) adminImport9router(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminImportCliproxyAPI(w http.ResponseWriter, r *http.Request) {
 	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
 		return importcliproxy.Import(ctx, s.store, data, importcliproxy.Options{DryRun: dryRun})
+	})
+}
+
+func (s *Server) adminImportSub2API(w http.ResponseWriter, r *http.Request) {
+	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
+		return importsub2api.Import(ctx, s.store, data, importsub2api.Options{DryRun: dryRun})
 	})
 }
 

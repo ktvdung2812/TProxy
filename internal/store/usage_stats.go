@@ -8,30 +8,32 @@ import (
 )
 
 type UsageBucketEntry struct {
-	Requests         int     `json:"requests"`
-	PromptTokens     int     `json:"promptTokens"`
-	CompletionTokens int     `json:"completionTokens"`
-	CachedTokens     int     `json:"cachedTokens"`
-	Cost             float64 `json:"cost"`
-	RawModel         string  `json:"rawModel,omitempty"`
-	Provider         string  `json:"provider,omitempty"`
-	ConnectionID     string  `json:"connectionId,omitempty"`
-	AccountName      string  `json:"accountName,omitempty"`
-	KeyName          string  `json:"keyName,omitempty"`
-	APIKeyKey        string  `json:"apiKeyKey,omitempty"`
-	Endpoint         string  `json:"endpoint,omitempty"`
-	LastUsed         string  `json:"lastUsed,omitempty"`
+	CacheCreationTokens int     `json:"cacheCreationTokens"`
+	Requests            int     `json:"requests"`
+	PromptTokens        int     `json:"promptTokens"`
+	CompletionTokens    int     `json:"completionTokens"`
+	CachedTokens        int     `json:"cachedTokens"`
+	Cost                float64 `json:"cost"`
+	RawModel            string  `json:"rawModel,omitempty"`
+	Provider            string  `json:"provider,omitempty"`
+	ConnectionID        string  `json:"connectionId,omitempty"`
+	AccountName         string  `json:"accountName,omitempty"`
+	KeyName             string  `json:"keyName,omitempty"`
+	APIKeyKey           string  `json:"apiKeyKey,omitempty"`
+	Endpoint            string  `json:"endpoint,omitempty"`
+	LastUsed            string  `json:"lastUsed,omitempty"`
 }
 
 type UsageRecentRequest struct {
-	RequestID        string `json:"requestId,omitempty"`
-	Timestamp        string `json:"timestamp"`
-	Model            string `json:"model"`
-	Provider         string `json:"provider"`
-	PromptTokens     int    `json:"promptTokens"`
-	CompletionTokens int    `json:"completionTokens"`
-	CachedTokens     int    `json:"cachedTokens"`
-	Status           string `json:"status"`
+	CacheCreationTokens int    `json:"cacheCreationTokens"`
+	RequestID           string `json:"requestId,omitempty"`
+	Timestamp           string `json:"timestamp"`
+	Model               string `json:"model"`
+	Provider            string `json:"provider"`
+	PromptTokens        int    `json:"promptTokens"`
+	CompletionTokens    int    `json:"completionTokens"`
+	CachedTokens        int    `json:"cachedTokens"`
+	Status              string `json:"status"`
 }
 
 type CredentialUsageSummary struct {
@@ -41,21 +43,22 @@ type CredentialUsageSummary struct {
 }
 
 type UsageStatsPayload struct {
-	TotalRequests         int                               `json:"totalRequests"`
-	TotalPromptTokens     int                               `json:"totalPromptTokens"`
-	TotalCompletionTokens int                               `json:"totalCompletionTokens"`
-	TotalCachedTokens     int                               `json:"totalCachedTokens"`
-	TotalCost             float64                           `json:"totalCost"`
-	ByProvider            map[string]UsageBucketEntry       `json:"byProvider"`
-	ByModel               map[string]UsageBucketEntry       `json:"byModel"`
-	ByAccount             map[string]UsageBucketEntry       `json:"byAccount"`
-	ByCredential          map[string]CredentialUsageSummary `json:"byCredential"`
-	ByAPIKey              map[string]UsageBucketEntry       `json:"byApiKey"`
-	ByEndpoint            map[string]UsageBucketEntry       `json:"byEndpoint"`
-	RecentRequests        []UsageRecentRequest              `json:"recentRequests"`
-	ActiveRequests        []any                             `json:"activeRequests"`
-	Pending               map[string]any                    `json:"pending"`
-	ErrorProvider         string                            `json:"errorProvider"`
+	TotalCacheCreationTokens int                               `json:"totalCacheCreationTokens"`
+	TotalRequests            int                               `json:"totalRequests"`
+	TotalPromptTokens        int                               `json:"totalPromptTokens"`
+	TotalCompletionTokens    int                               `json:"totalCompletionTokens"`
+	TotalCachedTokens        int                               `json:"totalCachedTokens"`
+	TotalCost                float64                           `json:"totalCost"`
+	ByProvider               map[string]UsageBucketEntry       `json:"byProvider"`
+	ByModel                  map[string]UsageBucketEntry       `json:"byModel"`
+	ByAccount                map[string]UsageBucketEntry       `json:"byAccount"`
+	ByCredential             map[string]CredentialUsageSummary `json:"byCredential"`
+	ByAPIKey                 map[string]UsageBucketEntry       `json:"byApiKey"`
+	ByEndpoint               map[string]UsageBucketEntry       `json:"byEndpoint"`
+	RecentRequests           []UsageRecentRequest              `json:"recentRequests"`
+	ActiveRequests           []any                             `json:"activeRequests"`
+	Pending                  map[string]any                    `json:"pending"`
+	ErrorProvider            string                            `json:"errorProvider"`
 }
 
 type UsageChartPoint struct {
@@ -111,7 +114,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		Pending:        map[string]any{"byModel": map[string]int{}, "byAccount": map[string]any{}},
 	}
 
-	query := `SELECT public_model_id, provider_id, upstream_model, credential_id, client_api_key_id, status, input_tokens, output_tokens, cached_tokens, estimated_cost_usd, created_at FROM usage_events`
+	query := `SELECT public_model_id, provider_id, upstream_model, credential_id, client_api_key_id, status, input_tokens, output_tokens, cached_tokens, cache_creation_tokens, estimated_cost_usd, created_at FROM usage_events`
 	args := []any{}
 	if !since.IsZero() {
 		query += ` WHERE created_at >= ?`
@@ -129,10 +132,10 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 	for rows.Next() {
 		var (
 			publicModelID, providerID, upstreamModel, credentialID, clientAPIKeyID, created string
-			status, inputTokens, outputTokens, cachedTokens                                 int
+			status, inputTokens, outputTokens, cachedTokens, cacheCreationTokens            int
 			cost                                                                            float64
 		)
-		if err := rows.Scan(&publicModelID, &providerID, &upstreamModel, &credentialID, &clientAPIKeyID, &status, &inputTokens, &outputTokens, &cachedTokens, &cost, &created); err != nil {
+		if err := rows.Scan(&publicModelID, &providerID, &upstreamModel, &credentialID, &clientAPIKeyID, &status, &inputTokens, &outputTokens, &cachedTokens, &cacheCreationTokens, &cost, &created); err != nil {
 			return UsageStatsPayload{}, err
 		}
 		createdAt, _ := time.Parse(time.RFC3339Nano, created)
@@ -143,9 +146,11 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		stats.TotalPromptTokens += inputTokens
 		stats.TotalCompletionTokens += outputTokens
 		stats.TotalCachedTokens += cachedTokens
+		stats.TotalCacheCreationTokens += cacheCreationTokens
 		stats.TotalCost += cost
 
 		addUsageBucket(stats.ByProvider, providerID, inputTokens, outputTokens, cachedTokens, cost, createdAt, func(entry *UsageBucketEntry) {
+			entry.CacheCreationTokens += cacheCreationTokens
 			entry.Provider = providerName
 		})
 
@@ -154,6 +159,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 			modelKey = fmt.Sprintf("%s (%s)", rawModel, providerID)
 		}
 		addUsageBucket(stats.ByModel, modelKey, inputTokens, outputTokens, cachedTokens, cost, createdAt, func(entry *UsageBucketEntry) {
+			entry.CacheCreationTokens += cacheCreationTokens
 			entry.RawModel = rawModel
 			entry.Provider = providerName
 		})
@@ -162,6 +168,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 			accountName := lookupName(lookups.CredentialName, credentialID, fmt.Sprintf("Account %s...", shortID(credentialID)))
 			accountKey := fmt.Sprintf("%s (%s - %s)", rawModel, providerID, accountName)
 			addUsageBucket(stats.ByAccount, accountKey, inputTokens, outputTokens, cachedTokens, cost, createdAt, func(entry *UsageBucketEntry) {
+				entry.CacheCreationTokens += cacheCreationTokens
 				entry.RawModel = rawModel
 				entry.Provider = providerName
 				entry.ConnectionID = credentialID
@@ -182,6 +189,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		}
 		akMapKey := fmt.Sprintf("%s|%s|%s", apiKeyKey, rawModel, providerID)
 		addUsageBucket(stats.ByAPIKey, akMapKey, inputTokens, outputTokens, cachedTokens, cost, createdAt, func(entry *UsageBucketEntry) {
+			entry.CacheCreationTokens += cacheCreationTokens
 			entry.RawModel = rawModel
 			entry.Provider = providerName
 			entry.KeyName = keyName
@@ -191,6 +199,7 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 		if upstreamModel != "" {
 			endpointKey := fmt.Sprintf("%s|%s|%s", upstreamModel, rawModel, providerID)
 			addUsageBucket(stats.ByEndpoint, endpointKey, inputTokens, outputTokens, cachedTokens, cost, createdAt, func(entry *UsageBucketEntry) {
+				entry.CacheCreationTokens += cacheCreationTokens
 				entry.Endpoint = upstreamModel
 				entry.RawModel = rawModel
 				entry.Provider = providerName
@@ -203,13 +212,14 @@ func (s *Store) UsageStats(ctx context.Context, since time.Time, lookups UsageLo
 			if _, seen := recentSeen[dedupeKey]; !seen {
 				recentSeen[dedupeKey] = struct{}{}
 				stats.RecentRequests = append(stats.RecentRequests, UsageRecentRequest{
-					Timestamp:        createdAt.UTC().Format(time.RFC3339Nano),
-					Model:            rawModel,
-					Provider:         providerName,
-					PromptTokens:     inputTokens,
-					CompletionTokens: outputTokens,
-					CachedTokens:     cachedTokens,
-					Status:           usageStatusLabel(status),
+					Timestamp:           createdAt.UTC().Format(time.RFC3339Nano),
+					Model:               rawModel,
+					Provider:            providerName,
+					PromptTokens:        inputTokens,
+					CompletionTokens:    outputTokens,
+					CachedTokens:        cachedTokens,
+					CacheCreationTokens: cacheCreationTokens,
+					Status:              usageStatusLabel(status),
 				})
 			}
 		}
@@ -482,7 +492,7 @@ func (s *Store) RecentUsageRequests(ctx context.Context, limit int, lookups Usag
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT request_id, created_at, public_model_id, upstream_model, provider_id, input_tokens, output_tokens, reasoning_tokens, cached_tokens, status
+SELECT request_id, created_at, public_model_id, upstream_model, provider_id, input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_creation_tokens, status
 FROM usage_events
 ORDER BY created_at DESC
 LIMIT ?`, limit)
@@ -494,22 +504,23 @@ LIMIT ?`, limit)
 	items := make([]UsageRecentRequest, 0, limit)
 	for rows.Next() {
 		var requestID, createdAt, publicModelID, upstreamModel, providerID string
-		var inputTokens, outputTokens, reasoningTokens, cachedTokens, status int
-		if err := rows.Scan(&requestID, &createdAt, &publicModelID, &upstreamModel, &providerID, &inputTokens, &outputTokens, &reasoningTokens, &cachedTokens, &status); err != nil {
+		var inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheCreationTokens, status int
+		if err := rows.Scan(&requestID, &createdAt, &publicModelID, &upstreamModel, &providerID, &inputTokens, &outputTokens, &reasoningTokens, &cachedTokens, &cacheCreationTokens, &status); err != nil {
 			return nil, err
 		}
 		if inputTokens == 0 && outputTokens == 0 {
 			continue
 		}
 		items = append(items, UsageRecentRequest{
-			RequestID:        requestID,
-			Timestamp:        createdAt,
-			Model:            usageDisplayModel(publicModelID, upstreamModel, providerID),
-			Provider:         lookupName(lookups.ProviderNames, providerID, providerID),
-			PromptTokens:     inputTokens,
-			CompletionTokens: outputTokens,
-			CachedTokens:     cachedTokens,
-			Status:           usageStatusLabel(status),
+			RequestID:           requestID,
+			Timestamp:           createdAt,
+			Model:               usageDisplayModel(publicModelID, upstreamModel, providerID),
+			Provider:            lookupName(lookups.ProviderNames, providerID, providerID),
+			PromptTokens:        inputTokens,
+			CompletionTokens:    outputTokens,
+			CachedTokens:        cachedTokens,
+			CacheCreationTokens: cacheCreationTokens,
+			Status:              usageStatusLabel(status),
 		})
 	}
 	return items, rows.Err()

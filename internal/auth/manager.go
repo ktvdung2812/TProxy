@@ -1654,8 +1654,15 @@ func oauthHTTPError(data []byte, status int, refresh bool) error {
 	permanent := false
 	var raw map[string]any
 	if json.Unmarshal(data, &raw) == nil {
-		if value := stringValue(raw["error"]); value != "" {
-			code = normalizeOAuthErrorCode(value)
+		switch errValue := raw["error"].(type) {
+		case string:
+			if value := strings.TrimSpace(errValue); value != "" {
+				code = normalizeOAuthErrorCode(value)
+			}
+		case map[string]any:
+			if value := stringValue(firstValue(errValue, "code", "error")); value != "" {
+				code = normalizeOAuthErrorCode(value)
+			}
 		}
 	}
 	switch strings.ToLower(strings.TrimSpace(code)) {

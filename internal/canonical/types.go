@@ -44,11 +44,14 @@ type Request struct {
 	Raw           map[string]any   `json:"raw,omitempty"`
 }
 
+// InputTokens includes cached input; CachedTokens and CacheCreationTokens are subsets.
+// OutputTokens includes reasoning; ReasoningTokens is a subset.
 type Usage struct {
-	InputTokens     int `json:"input_tokens"`
-	OutputTokens    int `json:"output_tokens"`
-	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
-	CachedTokens    int `json:"cached_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+	CachedTokens        int `json:"cached_tokens,omitempty"`
 }
 
 type Response struct {
@@ -76,21 +79,39 @@ const (
 	EventMessageEnd     EventType = "message_end"
 	EventResponsesSSE   EventType = "responses_sse"
 	EventError          EventType = "error"
+	// EventUpstreamHeaders carries response headers captured from the upstream
+	// HTTP response before the body stream begins (for example Codex's
+	// x-codex-turn-state sticky-routing token and rate-limit header family).
+	// Writers that cannot surface headers ignore it.
+	EventUpstreamHeaders EventType = "upstream_headers"
 )
 
 type Event struct {
-	Type               EventType      `json:"type"`
-	ID                 string         `json:"id,omitempty"`
-	Model              string         `json:"model,omitempty"`
-	Text               string         `json:"text,omitempty"`
-	Reasoning          string         `json:"reasoning,omitempty"`
-	ReasoningEncrypted string         `json:"reasoning_encrypted,omitempty"`
-	ReasoningItemID    string         `json:"reasoning_item_id,omitempty"`
-	ToolCall           map[string]any `json:"tool_call,omitempty"`
-	Media              any            `json:"media,omitempty"`
-	Usage              *Usage         `json:"usage,omitempty"`
-	FinishReason       string         `json:"finish_reason,omitempty"`
-	SSEEvent           string         `json:"sse_event,omitempty"`
-	SSEData            []byte         `json:"sse_data,omitempty"`
-	Err                error          `json:"-"`
+	Type               EventType         `json:"type"`
+	ID                 string            `json:"id,omitempty"`
+	Model              string            `json:"model,omitempty"`
+	Text               string            `json:"text,omitempty"`
+	Reasoning          string            `json:"reasoning,omitempty"`
+	ReasoningEncrypted string            `json:"reasoning_encrypted,omitempty"`
+	ReasoningItemID    string            `json:"reasoning_item_id,omitempty"`
+	ToolCall           map[string]any    `json:"tool_call,omitempty"`
+	Media              any               `json:"media,omitempty"`
+	Usage              *Usage            `json:"usage,omitempty"`
+	FinishReason       string            `json:"finish_reason,omitempty"`
+	SSEEvent           string            `json:"sse_event,omitempty"`
+	SSEData            []byte            `json:"sse_data,omitempty"`
+	UpstreamHeaders    map[string]string `json:"-"`
+	Err                error             `json:"-"`
+}
+
+func (u Usage) OpenAIUsage(responses bool) map[string]any {
+	input, output, details := "prompt_tokens", "completion_tokens", "prompt_tokens_details"
+	outputDetails := "completion_tokens_details"
+	if responses {
+		input, output, details, outputDetails = "input_tokens", "output_tokens", "input_tokens_details", "output_tokens_details"
+	}
+	return map[string]any{input: u.InputTokens, output: u.OutputTokens, "total_tokens": u.InputTokens + u.OutputTokens, details: map[string]any{"cached_tokens": u.CachedTokens, "cache_creation_tokens": u.CacheCreationTokens}, outputDetails: map[string]any{"reasoning_tokens": u.ReasoningTokens}}
+}
+func (u Usage) ClaudeUsage() map[string]any {
+	return map[string]any{"input_tokens": max(0, u.InputTokens-u.CachedTokens-u.CacheCreationTokens), "output_tokens": u.OutputTokens, "cache_read_input_tokens": u.CachedTokens, "cache_creation_input_tokens": u.CacheCreationTokens}
 }

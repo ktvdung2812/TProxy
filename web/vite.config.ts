@@ -19,8 +19,8 @@ export default defineConfig({
     host: devBindHost,
     port: publicPort,
     strictPort: true,
-    // The direct Cloudflare quick-tunnel hostname is forwarded as Host.
-    allowedHosts: [".trycloudflare.com", "localhost", "127.0.0.1"],
+    // For a Cloudflare hostname, set __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS.
+    allowedHosts: ["localhost", "127.0.0.1"],
     hmr: {
       // "localhost" resolves to ::1 first on macOS while the dev server binds a
       // single IPv4 address, so the HMR socket is refused even though the page

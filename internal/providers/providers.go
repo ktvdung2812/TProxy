@@ -835,10 +835,27 @@ func codexBody(request canonical.Request) map[string]any {
 	if request.ToolChoice != nil {
 		body["tool_choice"] = codexToolChoice(request.ToolChoice, shortMap)
 	}
-	codexNormalizeReasoning(body)
-	for key, value := range request.Reasoning {
-		body[key] = value
+	// Merge client reasoning settings into body["reasoning"] before
+	// normalization: request.Reasoning carries the OpenAI-protocol reasoning
+	// object, and Raw may hold a top-level reasoning_effort (OpenAI clients and
+	// the Claude→OpenAI translation above). Writing them flat at top level would
+	// both drop the effort and leak unknown params upstream.
+	if len(request.Reasoning) > 0 {
+		reasoning, _ := body["reasoning"].(map[string]any)
+		if reasoning == nil {
+			reasoning = map[string]any{}
+		}
+		for key, value := range request.Reasoning {
+			reasoning[key] = value
+		}
+		body["reasoning"] = reasoning
 	}
+	if _, ok := body["reasoning_effort"]; !ok {
+		if effort := request.Raw["reasoning_effort"]; effort != nil {
+			body["reasoning_effort"] = effort
+		}
+	}
+	codexNormalizeReasoning(body)
 	// Codex /responses rejects requests unless store is explicitly false.
 	body["store"] = false
 	delete(body, "previous_response_id")
@@ -874,6 +891,25 @@ func codexNormalizeReasoning(body map[string]any) {
 	effort = bridge.CodexWireReasoningEffort(effort)
 	body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
 	body["include"] = []any{"reasoning.encrypted_content"}
+}
+
+// applyCodexResponsesLiteContext enforces the upstream Responses Lite contract:
+// requests carrying X-OpenAI-Internal-Codex-Responses-Lite must set
+// reasoning.context to "all_turns" (codex-rs build_reasoning emits the field
+// only for responses-lite models). Runs after codexNormalizeReasoning, which
+// rebuilds the reasoning map and would otherwise drop the key — and recreates
+// the map for the effort=none path that deletes reasoning entirely.
+func applyCodexResponsesLiteContext(body map[string]any, request canonical.Request) {
+	value := strings.TrimSpace(clientHeadersFromRequest(request)["x-openai-internal-codex-responses-lite"])
+	if value == "" || strings.EqualFold(value, "false") || value == "0" {
+		return
+	}
+	reasoning, _ := body["reasoning"].(map[string]any)
+	if reasoning == nil {
+		reasoning = map[string]any{}
+		body["reasoning"] = reasoning
+	}
+	reasoning["context"] = "all_turns"
 }
 
 func codexToolChoice(toolChoice any, shortMap map[string]string) any {
@@ -1009,6 +1045,7 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 func (a *codexAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
 	ctx = withCredentialProxy(ctx, credential)
 	body := codexBody(request)
+	applyCodexResponsesLiteContext(body, request)
 	return a.streamResponses(ctx, provider, credential, request, body, codexHeaders(provider, credential, true, request))
 }
 
@@ -1023,6 +1060,9 @@ func (a *codexAdapter) streamResponses(ctx context.Context, provider store.Provi
 		return nil, upstreamError(response)
 	}
 	out := make(chan canonical.Event, 16)
+	if headers := codexRelayableResponseHeaders(response.Header); len(headers) > 0 {
+		out <- canonical.Event{Type: canonical.EventUpstreamHeaders, UpstreamHeaders: headers}
+	}
 	go func() {
 		defer close(out)
 		defer response.Body.Close()
@@ -1043,6 +1083,32 @@ func (a *codexAdapter) streamResponses(ctx context.Context, provider store.Provi
 		parseCodexSSE(ctx, response.Body, out, reverseMap)
 	}()
 	return out, nil
+}
+
+// codexRelayableResponseHeaders picks the upstream response headers the Codex
+// CLI consumes on a direct connection: the x-codex-* family (turn-state sticky
+// routing token, rate-limit windows, credits, promo), the upstream request id,
+// and the effective model markers. Relaying them keeps the CLI's turn routing
+// loading and quota display working through the proxy.
+func codexRelayableResponseHeaders(header http.Header) map[string]string {
+	var result map[string]string
+	for name := range header {
+		key := strings.ToLower(name)
+		relay := strings.HasPrefix(key, "x-codex-") ||
+			key == "x-request-id" ||
+			key == "openai-model" ||
+			key == "x-openai-model" ||
+			key == "x-reasoning-included" ||
+			key == "x-models-etag"
+		if !relay {
+			continue
+		}
+		if result == nil {
+			result = map[string]string{}
+		}
+		result[key] = header.Get(name)
+	}
+	return result
 }
 
 func parseCodexSSE(ctx context.Context, body io.Reader, out chan<- canonical.Event, reverseToolNames map[string]string) {
@@ -1118,12 +1184,21 @@ func codexEventsFromJSON(out chan<- canonical.Event, raw map[string]any, reverse
 
 func parseResponsesUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
-	return canonical.Usage{
-		InputTokens:     numberValue(firstValue(usage, "input_tokens", "prompt_tokens")),
-		OutputTokens:    numberValue(firstValue(usage, "output_tokens", "completion_tokens")),
-		ReasoningTokens: numberValue(firstValue(usage, "reasoning_tokens")),
-		CachedTokens:    parseUsageCachedTokens(usage),
+	result := canonical.Usage{
+		InputTokens:         numberValue(firstValue(usage, "input_tokens", "prompt_tokens")),
+		OutputTokens:        numberValue(firstValue(usage, "output_tokens", "completion_tokens")),
+		ReasoningTokens:     numberValue(firstValue(usage, "reasoning_tokens")),
+		CachedTokens:        parseUsageCachedTokens(usage),
+		CacheCreationTokens: parseUsageCacheCreationTokens(usage),
 	}
+	// Upstream Responses API nests reasoning tokens under
+	// output_tokens_details.reasoning_tokens (codex-rs ResponseCompletedUsage).
+	if result.ReasoningTokens == 0 {
+		if details, ok := usage["output_tokens_details"].(map[string]any); ok {
+			result.ReasoningTokens = numberValue(details["reasoning_tokens"])
+		}
+	}
+	return result
 }
 
 func parseUsageCachedTokens(usage map[string]any) int {
@@ -1844,9 +1919,10 @@ func marshalString(value any) string { data, _ := json.Marshal(value); return st
 func parseOpenAIUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
 	result := canonical.Usage{
-		InputTokens:  numberValue(firstValue(usage, "prompt_tokens", "input_tokens")),
-		OutputTokens: numberValue(firstValue(usage, "completion_tokens", "output_tokens")),
-		CachedTokens: parseUsageCachedTokens(usage),
+		InputTokens:         numberValue(firstValue(usage, "prompt_tokens", "input_tokens")),
+		OutputTokens:        numberValue(firstValue(usage, "completion_tokens", "output_tokens")),
+		CachedTokens:        parseUsageCachedTokens(usage),
+		CacheCreationTokens: parseUsageCacheCreationTokens(usage),
 	}
 	if details, ok := usage["completion_tokens_details"].(map[string]any); ok {
 		result.ReasoningTokens = numberValue(details["reasoning_tokens"])
@@ -1855,11 +1931,15 @@ func parseOpenAIUsage(value any) canonical.Usage {
 }
 func parseClaudeUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
-	return canonical.Usage{InputTokens: numberValue(usage["input_tokens"]), OutputTokens: numberValue(usage["output_tokens"]), CachedTokens: numberValue(usage["cache_read_input_tokens"])}
+	cached, created := numberValue(usage["cache_read_input_tokens"]), numberValue(usage["cache_creation_input_tokens"])
+	return canonical.Usage{InputTokens: numberValue(usage["input_tokens"]) + cached + created, OutputTokens: numberValue(usage["output_tokens"]), CachedTokens: cached, CacheCreationTokens: created}
 }
 
 // mergeStreamUsage preserves fields omitted from partial stream usage chunks.
 func mergeStreamUsage(current, update canonical.Usage) canonical.Usage {
+	if update.CacheCreationTokens > 0 {
+		current.CacheCreationTokens = update.CacheCreationTokens
+	}
 	if update.InputTokens > 0 {
 		current.InputTokens = update.InputTokens
 	}
@@ -1878,7 +1958,7 @@ func parseGeminiUsage(value any) canonical.Usage {
 	usage, _ := value.(map[string]any)
 	return canonical.Usage{
 		InputTokens:     numberValue(usage["promptTokenCount"]),
-		OutputTokens:    numberValue(usage["candidatesTokenCount"]),
+		OutputTokens:    numberValue(usage["candidatesTokenCount"]) + numberValue(usage["thoughtsTokenCount"]),
 		ReasoningTokens: numberValue(usage["thoughtsTokenCount"]),
 		CachedTokens:    numberValue(usage["cachedContentTokenCount"]),
 	}
@@ -1915,4 +1995,18 @@ func Reason(err error) string {
 		return providerErr.Reason
 	}
 	return ""
+}
+
+func parseUsageCacheCreationTokens(usage map[string]any) int {
+	if value := numberValue(firstValue(usage, "cache_creation_tokens", "cache_creation_input_tokens")); value > 0 {
+		return value
+	}
+	for _, key := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		if details, ok := usage[key].(map[string]any); ok {
+			if value := numberValue(details["cache_creation_tokens"]); value > 0 {
+				return value
+			}
+		}
+	}
+	return 0
 }

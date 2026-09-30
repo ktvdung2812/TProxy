@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,7 +49,6 @@ var cloudflaredPinnedBinarySHA256 = map[string]string{
 	"windows/amd64": "8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841",
 }
 
-var quickTunnelURLPattern = regexp.MustCompile(`https://([a-z0-9-]+)\.trycloudflare\.com`)
 var cloudflaredConnectionIndexPattern = regexp.MustCompile(`\bconnIndex=([0-9]+)\b`)
 
 type DownloadStatus struct {
@@ -68,34 +66,6 @@ type Cloudflared struct {
 	download         DownloadStatus
 	connections      map[string]struct{}
 	connectionSerial int
-}
-
-type quickTunnelReadiness struct {
-	mu         sync.Mutex
-	url        string
-	registered bool
-}
-
-func (r *quickTunnelReadiness) setURL(url string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if url == "" || url == r.url {
-		return false
-	}
-	r.url = url
-	return true
-}
-
-func (r *quickTunnelReadiness) markRegistered() {
-	r.mu.Lock()
-	r.registered = true
-	r.mu.Unlock()
-}
-
-func (r *quickTunnelReadiness) snapshot() (url string, registered bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.url, r.registered
 }
 
 func NewCloudflared(layout DataLayout) *Cloudflared {
@@ -548,47 +518,63 @@ func killCloudflaredByPort(port int) {
 	_ = exec.Command("pkill", "-f", cloudflaredPortPattern(port)).Run()
 }
 
-func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURLUpdate func(string)) (string, error) {
+func (c *Cloudflared) SpawnTunnel(ctx context.Context, localPort int, token string) error {
 	binary, err := c.Ensure(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
+	return c.spawnTunnel(ctx, binary, localPort, token)
+}
+
+func (c *Cloudflared) spawnTunnel(ctx context.Context, binary string, localPort int, token string) error {
 	configDir, err := os.MkdirTemp("", "tproxy-cloudflared-")
 	if err != nil {
-		return "", err
+		return err
 	}
 	configPath := filepath.Join(configDir, "config.yml")
-	if err := os.WriteFile(configPath, []byte("# quick-tunnel config placeholder\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("# Ingress is managed in Cloudflare.\n{}\n"), 0o600); err != nil {
 		_ = os.RemoveAll(configDir)
-		return "", err
+		return err
 	}
 
-	// Do not bind cloudflared to the admin request context. The API request
-	// naturally ends once the URL is returned, whereas the connector must keep
-	// running until it is explicitly disabled or exits unexpectedly.
+	tokenPath := filepath.Join(configDir, "token")
+	if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
+		_ = os.RemoveAll(configDir)
+		return err
+	}
+
+	// The connector outlives the admin request. Keep the token out of process
+	// arguments and environment logs; remove the private file once it is read.
 	cmd := exec.Command(binary,
-		"tunnel", "--url", fmt.Sprintf("http://127.0.0.1:%d", localPort),
-		"--config", configPath,
-		"--no-autoupdate",
-		"--retries", "99",
+		"tunnel", "--config", configPath, "--no-autoupdate",
+		"--retries", "99", "--protocol", TunnelProtocol(),
+		"run", "--token-file", tokenPath,
 	)
-	cmd.Env = append(os.Environ(), "TUNNEL_TRANSPORT_PROTOCOL="+QuickTunnelProtocol())
+	for _, env := range os.Environ() {
+		// TUNNEL_TOKEN takes precedence over --token-file in cloudflared.
+		if !strings.HasPrefix(env, "TUNNEL_TOKEN=") && !strings.HasPrefix(env, "TUNNEL_TOKEN_FILE=") {
+			cmd.Env = append(cmd.Env, env)
+		}
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = os.RemoveAll(configDir)
-		return "", err
+		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		_ = os.RemoveAll(configDir)
-		return "", err
+		return err
 	}
 	if err := cmd.Start(); err != nil {
 		_ = os.RemoveAll(configDir)
-		return "", err
+		return err
 	}
-	if cmd.Process != nil {
-		_ = savePID(c.layout.CloudflaredPID, cmd.Process.Pid)
+	if err := savePID(c.layout.CloudflaredPID, cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = os.RemoveAll(configDir)
+		return err
 	}
 
 	c.mu.Lock()
@@ -597,18 +583,16 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 	c.resetConnectionsLocked()
 	c.mu.Unlock()
 
-	type result struct {
-		url string
-		err error
-	}
-	done := make(chan result, 1)
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	var readyOnce sync.Once
 	logTail := &strings.Builder{}
 	var tailMu sync.Mutex
 
 	appendLog := func(chunk string) {
 		tailMu.Lock()
 		defer tailMu.Unlock()
-		logTail.WriteString(chunk)
+		logTail.WriteString(strings.ReplaceAll(chunk, token, "[REDACTED]"))
 		if logTail.Len() > 4000 {
 			trimmed := logTail.String()
 			logTail.Reset()
@@ -616,38 +600,13 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 		}
 	}
 
-	parseURL := func(message string) string {
-		matches := quickTunnelURLPattern.FindAllStringSubmatch(message, -1)
-		for i := len(matches) - 1; i >= 0; i-- {
-			if len(matches[i]) > 1 && matches[i][1] != "api" {
-				return matches[i][0]
-			}
-		}
-		return ""
-	}
-
-	readiness := &quickTunnelReadiness{}
-	var readyOnce sync.Once
-	markReady := func() {
-		url, registered := readiness.snapshot()
-		if url != "" && registered {
-			readyOnce.Do(func() {
-				done <- result{url: url}
-			})
-		}
-	}
 	handleLine := func(line string) {
 		appendLog(line + "\n")
 		c.observeTunnelConnectionLog(line)
 		if strings.Contains(strings.ToLower(line), "registered tunnel connection") &&
 			!strings.Contains(strings.ToLower(line), "unregistered tunnel connection") {
-			readiness.markRegistered()
+			readyOnce.Do(func() { close(ready) })
 		}
-		url := parseURL(line)
-		if readiness.setURL(url) && onURLUpdate != nil {
-			onURLUpdate(url)
-		}
-		markReady()
 	}
 
 	var logReaders sync.WaitGroup
@@ -671,39 +630,38 @@ func (c *Cloudflared) SpawnQuickTunnel(ctx context.Context, localPort int, onURL
 		if wasCurrent {
 			_ = os.Remove(c.layout.CloudflaredPID)
 		}
-		resolvedURL, registered := readiness.snapshot()
-		if resolvedURL == "" || !registered {
-			tailMu.Lock()
-			tail := strings.TrimSpace(logTail.String())
-			tailMu.Unlock()
-			if tail == "" {
-				tail = "(empty)"
+		tailMu.Lock()
+		tail := strings.TrimSpace(logTail.String())
+		tailMu.Unlock()
+		done <- fmt.Errorf("cloudflared exited: %v; log: %s", err, tail)
+		select {
+		case <-ready:
+			if handler != nil {
+				handler()
 			}
-			done <- result{err: fmt.Errorf("cloudflared exited before tunnel connection was ready: %v; log: %s", err, tail)}
-			return
+		default:
 		}
-		if handler != nil {
-			handler()
-		}
+
 	}()
 
 	select {
 	case <-ctx.Done():
 		c.Kill(localPort)
-		return "", ctx.Err()
-	case res := <-done:
-		if res.err != nil {
-			c.Kill(localPort)
-			return "", res.err
-		}
-		log.Printf("[tunnel] cloudflared URL: %s", res.url)
-		return res.url, nil
+		return ctx.Err()
+	case err := <-done:
+		c.Kill(localPort)
+		return err
+	case <-ready:
+		// cloudflared reads the token once and reconnects using memory. Removing
+		// it now also avoids leaving plaintext behind if tproxy itself crashes.
+		_ = os.Remove(tokenPath)
+		return nil
 	case <-time.After(90 * time.Second):
 		c.Kill(localPort)
 		tailMu.Lock()
 		tail := strings.TrimSpace(logTail.String())
 		tailMu.Unlock()
-		return "", fmt.Errorf("quick tunnel timed out; last log: %s", tail)
+		return fmt.Errorf("Cloudflare Tunnel timed out; last log: %s", tail)
 	}
 }
 

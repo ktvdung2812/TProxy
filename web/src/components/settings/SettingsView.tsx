@@ -389,7 +389,7 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
             </div>
           </div>
           <p className="settings-hint">
-            Dùng cho CLI Tools như Cursor — endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel, reverse proxy). Ví dụ: <code>https://abc.trycloudflare.com</code>
+            Dùng cho CLI Tools như Cursor — endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel, reverse proxy). Ví dụ: <code>https://api.example.com</code>
           </p>
           <div className="settings-kv-row">
             <span>{t("settings.remoteManagement")}</span>

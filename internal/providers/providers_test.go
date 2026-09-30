@@ -135,7 +135,7 @@ func TestGeminiStreamEmitsUsageBeforeFinalMessageEnd(t *testing.T) {
 		}
 		index++
 	}
-	if usage.InputTokens != 13 || usage.OutputTokens != 5 || usage.ReasoningTokens != 1 {
+	if usage.InputTokens != 13 || usage.OutputTokens != 6 || usage.ReasoningTokens != 1 {
 		t.Fatalf("usage = %+v", usage)
 	}
 	if usageIndex < 0 || endIndex < 0 || usageIndex >= endIndex {
@@ -174,7 +174,7 @@ func TestAnthropicStreamMergesMessageStartAndDeltaUsage(t *testing.T) {
 		}
 		index++
 	}
-	if usage.InputTokens != 17 || usage.OutputTokens != 8 || usage.CachedTokens != 6 {
+	if usage.InputTokens != 23 || usage.OutputTokens != 8 || usage.CachedTokens != 6 {
 		t.Fatalf("usage = %+v", usage)
 	}
 	if usageEvents < 2 || endIndex < 0 {
@@ -846,6 +846,45 @@ func TestParseResponsesUsageIncludesCachedTokens(t *testing.T) {
 	})
 	if usage.InputTokens != 120 || usage.OutputTokens != 40 || usage.CachedTokens != 80 {
 		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestParseResponsesUsageReadsNestedReasoningTokens(t *testing.T) {
+	usage := parseResponsesUsage(map[string]any{
+		"input_tokens":  200,
+		"output_tokens": 60,
+		"output_tokens_details": map[string]any{
+			"reasoning_tokens": 25,
+		},
+	})
+	if usage.ReasoningTokens != 25 {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
+func TestCodexRelayableResponseHeaders(t *testing.T) {
+	header := http.Header{
+		"X-Codex-Turn-State":           []string{"ts-abc"},
+		"X-Codex-Primary-Used-Percent": []string{"42"},
+		"X-Request-Id":                 []string{"req_1"},
+		"Openai-Model":                 []string{"gpt-5.6"},
+		"Content-Type":                 []string{"text/event-stream"},
+		"Cf-Ray":                       []string{"ray-1"},
+	}
+	got := codexRelayableResponseHeaders(header)
+	want := map[string]string{
+		"x-codex-turn-state":           "ts-abc",
+		"x-codex-primary-used-percent": "42",
+		"x-request-id":                 "req_1",
+		"openai-model":                 "gpt-5.6",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("headers = %#v", got)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("headers[%q] = %q, want %q (all: %#v)", key, got[key], value, got)
+		}
 	}
 }
 

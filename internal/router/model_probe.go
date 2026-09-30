@@ -167,6 +167,11 @@ func (r *Router) ChatWithCredential(ctx context.Context, providerID, credentialI
 		MaxTokens:     1024,
 		Messages:      messages,
 	}
+	release, _, admissionErr := r.acquireAccount(ctx, prepared, true)
+	if admissionErr != nil {
+		return CredentialChatResult{}, admissionErr
+	}
+	defer release()
 	response, err := adapter.Execute(ctx, *provider, prepared, request)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {

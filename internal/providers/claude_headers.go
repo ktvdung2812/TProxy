@@ -32,6 +32,28 @@ var codexClientAllowedHeaders = map[string]bool{
 	"version":            true,
 	"session_id":         true,
 	"chatgpt-account-id": true,
+	// Upstream Codex CLI session/turn contract (codex-rs core client +
+	// codex-api session headers). Forwarded verbatim so chatgpt.com sees the
+	// same turn identity and metadata it would on a direct connection.
+	"session-id":                             true,
+	"thread-id":                              true,
+	"x-client-request-id":                    true,
+	"openai-beta":                            true,
+	"openai-organization":                    true,
+	"openai-project":                         true,
+	"x-codex-installation-id":                true,
+	"x-codex-routing-hint":                   true,
+	"x-codex-turn-state":                     true,
+	"x-codex-turn-metadata":                  true,
+	"x-codex-parent-thread-id":               true,
+	"x-codex-window-id":                      true,
+	"x-codex-beta-features":                  true,
+	"x-openai-subagent":                      true,
+	"x-openai-memgen-request":                true,
+	"x-openai-internal-codex-residency":      true,
+	"x-openai-internal-codex-responses-lite": true,
+	"x-responsesapi-include-timing-metrics":  true,
+	"x-oai-attestation":                      true,
 }
 
 func splitHeaderList(value string) []string {

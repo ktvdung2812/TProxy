@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { RequestLog } from "../../hooks/useRequestLogStream";
 import { checkCredentialHealth } from "../providers/api";
 import { getProviderTypeInfo } from "../providers/catalog";
@@ -52,6 +53,11 @@ type Props = {
   toggling?: boolean;
   accountToggleReady?: boolean;
   onQuotaUpdated?: (quota: CredentialQuota) => void;
+  onClearCooldown?: () => void;
+  clearingCooldown?: boolean;
+  resetCreditCount?: number;
+  resettingQuota?: boolean;
+  onResetQuota?: () => void;
   refreshCountdown?: number;
 };
 
@@ -91,8 +97,14 @@ export function QuotaAccountDetailModal({
   toggling = false,
   accountToggleReady = true,
   onQuotaUpdated,
+  onClearCooldown,
+  clearingCooldown = false,
+  resetCreditCount = 0,
+  resettingQuota = false,
+  onResetQuota,
   refreshCountdown,
 }: Props) {
+  const { t } = useTranslation();
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState("");
@@ -404,11 +416,36 @@ export function QuotaAccountDetailModal({
               className="quota-tracker-icon-btn"
               disabled={quotaLoading}
               onClick={() => void refreshQuota()}
-              aria-label="Refresh quota"
-              title="Refresh quota"
+              aria-label={t("quota.refreshQuota")}
+              title={t("quota.refreshQuota")}
             >
               <span className={cn("material-symbols-outlined", quotaLoading && "animate-spin")}>refresh</span>
             </button>
+            {onClearCooldown ? (
+              <button
+                type="button"
+                className="quota-tracker-icon-btn"
+                disabled={clearingCooldown}
+                onClick={onClearCooldown}
+                aria-label={t("quota.clearCooldownRecheck")}
+                title={t("quota.clearCooldownRecheck")}
+              >
+                <span className={cn("material-symbols-outlined", clearingCooldown && "animate-spin")}>restart_alt</span>
+              </button>
+            ) : null}
+            {resetCreditCount > 0 && onResetQuota ? (
+              <button
+                type="button"
+                className="quota-tracker-reset-btn quota-tracker-reset-btn-active"
+                disabled={resettingQuota}
+                onClick={onResetQuota}
+                aria-label={t("quota.useResetCredit", { count: resetCreditCount })}
+                title={t("quota.useResetCredit", { count: resetCreditCount })}
+              >
+                <span className={cn("material-symbols-outlined", resettingQuota && "animate-spin")}>{resettingQuota ? "progress_activity" : "restart_alt"}</span>
+                <span>{resetCreditCount}</span>
+              </button>
+            ) : null}
           </div>
           {entries.length > 0 ? (
             usesQuotaRingLayout(quotaKey) ? (

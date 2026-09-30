@@ -41,7 +41,10 @@ export type ModelAlias = {
   enabled: boolean;
 };
 
+export type AdmissionPolicy = { max_concurrent_requests: number; max_queue_size: number; queue_timeout_ms: number; account_expires_at?: string };
+
 export type Credential = {
+  admission?: AdmissionPolicy;
   id: string;
   label: string;
   email?: string;

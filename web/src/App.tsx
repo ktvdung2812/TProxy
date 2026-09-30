@@ -26,6 +26,8 @@ import { useChatModels } from "./components/chat/useChatModels";
 import { ProvidersView } from "./components/providers/ProvidersView";
 import { ProviderLogo } from "./components/providers/ProviderLogo";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
+import { OperationsView } from "./components/operations/OperationsView";
+import { DiagnosticsView } from "./components/diagnostics/DiagnosticsView";
 import { UsageView } from "./components/usage/UsageView";
 import { TokenSaverView } from "./components/token-saver/TokenSaverView";
 import { FreeTiersView } from "./components/free-tiers/FreeTiersView";
@@ -506,6 +508,8 @@ function App() {
               />
               <Route path="/free-tiers" element={<FreeTiersPage />} />
               <Route path="/usage" element={<UsagePage />} />
+              <Route path="/operations" element={<OperationsView secret={secret}/>} />
+              <Route path="/diagnostics" element={<DiagnosticsView secret={secret}/>} />
               <Route path="/token-saver" element={<TokenSaverPage />} />
               <Route path="/apis" element={<ApisPage />} />
               <Route path="/chat" element={<ChatPage />} />

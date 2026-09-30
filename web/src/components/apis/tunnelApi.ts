@@ -4,6 +4,9 @@ export type TunnelDownloadStatus = {
 };
 
 export type CloudflareTunnelStatus = {
+  hostname?: string;
+  tokenConfigured: boolean;
+  serviceUrl: string;
   enabled: boolean;
   settingsEnabled: boolean;
   tunnelUrl?: string;
@@ -81,8 +84,11 @@ export function fetchTunnelStatus(secret: string) {
   return adminFetch<TunnelStatusResponse>(secret, "/api/admin/tunnel/status", { cache: "no-store" });
 }
 
-export function enableTunnel(secret: string) {
-  return adminFetch<EnableTunnelResponse>(secret, "/api/admin/tunnel/enable", { method: "POST" });
+export function enableTunnel(secret: string, hostname: string, token: string) {
+  return adminFetch<EnableTunnelResponse>(secret, "/api/admin/tunnel/enable", {
+    method: "POST",
+    body: JSON.stringify({ hostname, token }),
+  });
 }
 
 export function disableTunnel(secret: string) {
@@ -112,14 +118,13 @@ export async function pingHealth(baseUrl: string): Promise<boolean> {
   const target = `${baseUrl.replace(/\/+$/, "")}/healthz`;
   try {
     const response = await fetch(target, { mode: "cors", cache: "no-store", signal: AbortSignal.timeout(8000) });
-    if (response.ok) return true;
+    if (!response.ok) return false;
+    const payload: unknown = await response.json();
+    if (typeof payload !== "object" || payload === null) return false;
+    const health = payload as { status?: unknown; service?: unknown };
+    return health.status === "ok" && health.service === "tproxy";
   } catch {
-    // CORS or network error — fall through to opaque probe.
-  }
-  try {
-    await fetch(target, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(8000) });
-    return true;
-  } catch {
+    // CORS, network, or JSON errors cannot confirm a healthy tproxy endpoint.
     return false;
   }
 }

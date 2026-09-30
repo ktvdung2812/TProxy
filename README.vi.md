@@ -58,6 +58,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - **Auto-combo** — preset không cần cấu hình như `auto`, `auto/coding:fast`, `auto/reasoning:pro`.
 - **Fusion routing** — thực thi song song trên nhiều model với xếp hạng kiểu arena.
 - **Session affinity** — định tuyến sticky với TTL có thể cấu hình.
+- **Lập lịch theo số liệu thực** — độ trễ/TTFT, tải hiện tại, tỷ lệ lỗi và quota gần nhất được dùng cho các chiến lược latency-aware, capacity-aware, health-first, least-used và quota-aware.
 
 ### Tương thích giao thức
 
@@ -73,7 +74,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - OAuth profile: **Codex**, **Claude**, **Kimi**, **xAI**, **Antigravity** (Google Cloud Code), **Copilot**, **Cursor**, **Kiro** và nhiều hơn nữa.
 - Provider API-key: Tavily search, ElevenLabs audio, image/video aliases, HTTP plugin tùy chọn.
 - **Proxy pool mã hóa** (HTTP/S, SOCKS5) gắn với từng provider hoặc credential.
-- **9router / CLIProxyAPI import** hỗ trợ di chuyển từ các thiết lập hiện có.
+- **9router / CLIProxyAPI / sub2api import** hỗ trợ di chuyển từ các thiết lập hiện có. Trong Providers → Import data, chọn tệp JSON export accounts của sub2api; Preview kiểm tra mà không lưu dữ liệu. Tài khoản OpenAI OAuth được nhập thành credential Codex, giữ riêng từng thành viên trong cùng workspace Team, refresh token và thời hạn token. Các thiết lập lập lịch được giữ dưới dạng metadata sub2api.
 
 ### Vận hành & quản trị
 
@@ -81,13 +82,24 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - **Teams** với giới hạn phạm vi và tổng hợp chi phí.
 - **Token Saver** pipeline nén (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** cho từng provider (OPEN / DEGRADED / CLOSED).
-- **Tunnel** — Cloudflare quick tunnel và tích hợp Tailscale từ dashboard.
+- **Giới hạn tài khoản** — số request đồng thời, hàng đợi có giới hạn và timeout, thời hạn sử dụng tài khoản; chỉnh riêng cho từng kết nối.
+- **Giám sát vận hành** — số liệu trong 5 phút, p95 độ trễ/TTFT, thời gian chờ, token cache và cảnh báo quota, xác thực, hết hạn, tỷ lệ lỗi, route không khả dụng.
+- **Tunnel** — Cloudflare Tunnel dùng token và tên miền riêng, cùng tích hợp Tailscale từ dashboard. Cấu hình tại **APIs → Cloudflare → Bật**: nhập token sau `--token` trong lệnh cài connector của Cloudflare và tên miền đã khai báo. Trong **Cloudflare → Tunnels → Routes**, trỏ ứng dụng công khai của tên miền về dịch vụ HTTP hiển thị trong hộp thoại (mặc định `http://127.0.0.1:28120`). Token được mã hóa; tắt/bật lại hoặc khởi động lại vẫn dùng cùng tên miền. Để trống token để dùng lại token đã lưu. Quick Tunnel cũ cần cấu hình token và tên miền trước khi bật lại. Khi chạy `npm run dev`, đặt `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=api.example.com` để Vite chấp nhận tên miền riêng.
 - **Chính sách lưu giữ** cho usage event, request log, audit trail và OAuth session.
 - **Xuất/nhập cấu hình** (YAML/JSON kèm token OAuth; API key vẫn là biến môi trường) cùng backup/khôi phục OAuth bundle mã hóa.
 
 ### Trung tâm điều khiển (Dashboard)
 
 Dashboard React nhúng được phục vụ từ cùng một tiến trình — không cần triển khai frontend riêng. Quản lý provider, model, key, log và cài đặt từ trình duyệt.
+
+### Điều khiển quota và chẩn đoán
+
+- **Quota Tracker** có nút làm mới quota, xóa cooldown cho từng tài khoản hoặc nhóm đã chọn. Lọc provider rồi chọn các tài khoản đang hiển thị để thao tác theo provider. Xóa cooldown giữ nguyên lịch sử sử dụng và trạng thái tắt thủ công. Reset quota upstream dùng một **reset credit Codex** còn hiệu lực cho mỗi tài khoản, có xác nhận và chống thực thi trùng khi thử lại. Provider khác hỗ trợ làm mới/xóa cooldown. Kết quả phân biệt rõ thao tác đã áp dụng với lỗi tải lại quota.
+- **Providers → Edit connection** chỉnh metadata: `max_concurrent_requests` (mặc định `0`, không giới hạn), `max_queue_size` (mặc định `16`), `queue_timeout_ms` (mặc định `5000`), `account_expires_at` (tùy chọn, RFC3339). Queue size hoặc timeout bằng `0` từ chối ngay khi bận. Concurrency và hạn tài khoản nhập từ sub2api được áp dụng nếu chưa ghi đè. Hạn tài khoản tách biệt với hạn token OAuth.
+- **Chẩn đoán chuyển đổi** xem trước request OpenAI/Responses/Claude/Gemini, dạng canonical và payload gửi provider. Chạy offline, che secret, không nạp credential, không lưu prompt và không áp dụng header riêng của tài khoản. API: `POST /api/admin/diagnostics/translate`. Số liệu vận hành: `GET /api/admin/operations`; thao tác quota: `POST /api/admin/quota/actions` (tối đa 100 credential ID chỉ định rõ).
+- **Usage** theo dõi cache đọc, cache ghi và reasoning. Tổng input đã bao gồm token cache; tổng output đã bao gồm reasoning, không cộng lại các phần này. TTFT tính từ delta nội dung đầu tiên; request không stream không có mẫu TTFT.
+
+Responses WebSocket hỗ trợ `previous_response_id`, kế thừa thiết lập bị lược bỏ và ghép lại input/output trước đó cho upstream không lưu trạng thái. Gửi `X-Session-ID` ổn định (hoặc `session_id`, `conversation_id`, `prompt_cache_key`) để nối tiếp qua kết nối mới. Lịch sử được tách theo API key/team/session, chỉ giữ trong bộ nhớ 15 phút, tối đa 128 phản hồi / 32 MiB tổng / 2 MiB mỗi ngữ cảnh. Khi hết hạn hoặc khởi động lại server, gửi lại input đầy đủ và bỏ `previous_response_id`; `reset: true` bắt đầu ngữ cảnh mới. Quan sát định tuyến và cảnh báo đang hoạt động cũng bắt đầu lại sau restart; số liệu usage vẫn lưu trong SQLite.
 
 ---
 

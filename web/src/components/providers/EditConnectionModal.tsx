@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { checkCredentialHealth, saveCredential, type ProxyPoolOption } from "./api";
-import type { Credential } from "./types";
+import type { AdmissionPolicy, Credential } from "./types";
 
 type Props = {
   open: boolean;
@@ -25,6 +25,7 @@ type Props = {
  */
 export function EditConnectionModal({ open, providerId, credential, proxyPools, secret, onClose, onSaved }: Props) {
   const { t } = useTranslation();
+  const [admission, setAdmission] = useState<AdmissionPolicy>({max_concurrent_requests:0,max_queue_size:16,queue_timeout_ms:5000});
   const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
   const [priority, setPriority] = useState(0);
@@ -46,6 +47,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
       setPriority(credential.priority ?? 0);
       setWeight(credential.weight ?? 1);
       setEnabled(credential.enabled);
+      setAdmission(credential.admission ?? {max_concurrent_requests:0,max_queue_size:16,queue_timeout_ms:5000});
       setNewSecret("");
       setProxyPoolIds(credential.proxy_pool_ids || []);
       setTestResult(null);
@@ -92,6 +94,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
           weight,
           enabled,
           proxy_pools: proxyPoolIds,
+          metadata: { ...admission },
         },
       });
       onSaved?.();
@@ -128,6 +131,20 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
             <Input type="number" min={1} value={weight} onChange={(e) => setWeight(Number(e.target.value))} />
           </Field>
         </div>
+        <div className="inline-fields">
+          <Field label={t("operations.concurrency")} hint={t("operations.unlimitedHint")}>
+            <Input aria-label={t("operations.concurrency")} type="number" min={0} max={10000} value={admission.max_concurrent_requests} onChange={e=>setAdmission({...admission,max_concurrent_requests:Number(e.target.value)})}/>
+          </Field>
+          <Field label={t("operations.queueSize")}>
+            <Input aria-label={t("operations.queueSize")} type="number" min={0} max={1000} value={admission.max_queue_size} onChange={e=>setAdmission({...admission,max_queue_size:Number(e.target.value)})}/>
+          </Field>
+          <Field label={t("operations.queueTimeout")}>
+            <Input aria-label={t("operations.queueTimeout")} type="number" min={0} max={120000} value={admission.queue_timeout_ms} onChange={e=>setAdmission({...admission,queue_timeout_ms:Number(e.target.value)})}/>
+          </Field>
+        </div>
+        <Field label={t("operations.expiry")} hint="RFC3339 · 2026-12-31T23:59:59+07:00">
+          <Input aria-label={t("operations.expiry")} value={admission.account_expires_at ?? ""} onChange={e=>setAdmission({...admission,account_expires_at:e.target.value})}/>
+        </Field>
         {isOAuth && (
           <Field label="Account email">
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="account@example.com" />

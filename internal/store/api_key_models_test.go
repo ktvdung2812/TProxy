@@ -78,17 +78,24 @@ func TestAPIKeyModelMigrationPreservesLegacyEmptyListAsAllModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`
-CREATE TABLE api_keys (
- id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', key_hash TEXT NOT NULL UNIQUE,
- models_json TEXT NOT NULL DEFAULT '[]', policy_json TEXT NOT NULL DEFAULT '{}',
- enabled INTEGER NOT NULL DEFAULT 1, last_used_at TEXT NOT NULL DEFAULT ''
-);
-INSERT INTO api_keys(id,name,key_hash,models_json) VALUES('legacy','Legacy','hash','[]');
-PRAGMA user_version=20;`); err != nil {
-		_ = db.Close()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	for _, migration := range sqliteMigrations {
+		if migration.version <= 20 {
+			if err = migration.apply(context.Background(), tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err = tx.Exec(`INSERT INTO api_keys(id,name,key_hash,models_json) VALUES('legacy','Legacy','hash','[]'); PRAGMA user_version=20;`); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}

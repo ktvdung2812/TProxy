@@ -187,8 +187,7 @@ func WriteClaudeStream(w http.ResponseWriter, events <-chan canonical.Event, req
 			finish := openAIFinishToClaude(nonEmpty(event.FinishReason, "stop"), len(state.toolCalls) > 0)
 			usage := map[string]any{"output_tokens": 0}
 			if state.usage != nil {
-				usage["input_tokens"] = state.usage.InputTokens
-				usage["output_tokens"] = state.usage.OutputTokens
+				usage = state.usage.ClaudeUsage()
 			}
 			send("message_delta", map[string]any{
 				"type":  "message_delta",
@@ -408,10 +407,7 @@ func RenderClaudeResponse(response *canonical.Response, requestID string) map[st
 		"model":       response.Model,
 		"content":     blocks,
 		"stop_reason": openAIFinishToClaude(nonEmpty(response.FinishReason, "stop"), len(response.ToolCalls) > 0),
-		"usage": map[string]any{
-			"input_tokens":  response.Usage.InputTokens,
-			"output_tokens": response.Usage.OutputTokens,
-		},
+		"usage":       response.Usage.ClaudeUsage(),
 	}
 }
 
@@ -438,10 +434,6 @@ func RenderOpenAIResponse(response *canonical.Response, requestID string) map[st
 			"message":       message,
 			"finish_reason": claudeStopToOpenAI(nonEmpty(response.FinishReason, "stop")),
 		}},
-		"usage": map[string]any{
-			"prompt_tokens":     response.Usage.InputTokens,
-			"completion_tokens": response.Usage.OutputTokens,
-			"total_tokens":      response.Usage.InputTokens + response.Usage.OutputTokens,
-		},
+		"usage": response.Usage.OpenAIUsage(false),
 	}
 }

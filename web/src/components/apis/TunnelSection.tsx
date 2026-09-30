@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { Button, ConfirmDialog, Input, Modal, Toggle } from "../ui";
+import { Button, ConfirmDialog, Field, Input, Modal, Toggle } from "../ui";
 import { SecurityWarning } from "./SecurityWarning";
 import {
   checkTailscale,
@@ -27,7 +27,6 @@ type Props = {
 
 const STATUS_POLL_MS = 5000;
 const PING_INTERVAL_MS = 3000;
-const PING_MAX_MS = 120000;
 const MISS_THRESHOLD = 3;
 
 type EndpointTunnelRowProps = {
@@ -105,19 +104,21 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const [tsLoading, setTsLoading] = useState(false);
   const [tunnelProgress, setTunnelProgress] = useState("");
   const [tsProgress, setTsProgress] = useState("");
-  const [clientTunnelReachable, setClientTunnelReachable] = useState(false);
+  const [clientTunnelHealth, setClientTunnelHealth] = useState({ url: "", reachable: false });
   const [clientTsReachable, setClientTsReachable] = useState(false);
   const [tunnelStatusMessage, setTunnelStatusMessage] = useState<string | null>(null);
   const [tsStatusMessage, setTsStatusMessage] = useState<string | null>(null);
   const [tsAuthUrl, setTsAuthUrl] = useState("");
   const [tsInstalled, setTsInstalled] = useState<boolean | null>(null);
   const [showEnableModal, setShowEnableModal] = useState(false);
+  const [tunnelToken, setTunnelToken] = useState("");
+  const [tunnelHostname, setTunnelHostname] = useState("");
   const [showDisableModal, setShowDisableModal] = useState(false);
   const [showDisableTsModal, setShowDisableTsModal] = useState(false);
   const [showTsModal, setShowTsModal] = useState(false);
   const tunnelMissRef = useRef(0);
   const tsMissRef = useRef(0);
-  const tunnelEverReachableRef = useRef(false);
+  const tunnelEverReachableRef = useRef("");
 
   const syncStatus = useCallback(async () => {
     try {
@@ -125,8 +126,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       setTunnel(data.tunnel);
       setTailscale(data.tailscale);
       if (data.tunnel.reachable) {
-        tunnelEverReachableRef.current = true;
-        setClientTunnelReachable(true);
+        tunnelEverReachableRef.current = data.tunnel.publicUrl || data.tunnel.tunnelUrl || "";
         tunnelMissRef.current = 0;
       }
       if (data.tailscale.reachable) {
@@ -167,8 +167,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
   const tunnelPublicUrl = tunnel?.publicUrl || tunnel?.tunnelUrl || "";
   const tsUrl = tailscale?.tunnelUrl || "";
 
-  const tunnelHealthy =
-    Boolean(tunnel?.connected || tunnel?.reachable || clientTunnelReachable);
+  const tunnelHealthy = Boolean(
+    tunnel?.reachable ||
+    (clientTunnelHealth.reachable && clientTunnelHealth.url === tunnelPublicUrl),
+  );
   const tsHealthy = Boolean(tailscale?.running || tailscale?.reachable || clientTsReachable);
 
   useEffect(() => {
@@ -179,20 +181,25 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
   useEffect(() => {
     if (!tunnelEnabled && !tsEnabled) return;
+    let active = true;
     const probe = async () => {
       if (tunnelEnabled && tunnelPublicUrl) {
         const ok = await pingAnyHealth(tunnel?.publicUrl, tunnel?.tunnelUrl);
+        if (!active) return;
         if (ok) {
           tunnelMissRef.current = 0;
-          tunnelEverReachableRef.current = true;
-          setClientTunnelReachable(true);
+          tunnelEverReachableRef.current = tunnelPublicUrl;
+          setClientTunnelHealth({ url: tunnelPublicUrl, reachable: true });
         } else {
           tunnelMissRef.current += 1;
-          if (tunnelMissRef.current >= MISS_THRESHOLD) setClientTunnelReachable(false);
+          if (tunnelMissRef.current >= MISS_THRESHOLD) {
+            setClientTunnelHealth({ url: tunnelPublicUrl, reachable: false });
+          }
         }
       }
       if (tsEnabled && tsUrl) {
         const ok = await pingHealth(tsUrl);
+        if (!active) return;
         if (ok) {
           tsMissRef.current = 0;
           setClientTsReachable(true);
@@ -204,28 +211,23 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     };
     void probe();
     const timer = setInterval(() => void probe(), PING_INTERVAL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, [tunnelEnabled, tsEnabled, tunnelPublicUrl, tsUrl, tunnel?.publicUrl, tunnel?.tunnelUrl]);
 
-  const waitForTunnel = async (publicUrl?: string, directUrl?: string) => {
-    const start = Date.now();
-    while (Date.now() - start < PING_MAX_MS) {
-      await new Promise((resolve) => setTimeout(resolve, PING_INTERVAL_MS));
-      if (await pingAnyHealth(publicUrl, directUrl)) {
-        setClientTunnelReachable(true);
-        return true;
-      }
-      try {
-        const status = await fetchTunnelStatus(secret);
-        if (status.tunnel.reachable || status.tunnel.connected) {
-          setClientTunnelReachable(true);
-          return true;
-        }
-      } catch {
-        // keep waiting
-      }
-    }
-    return false;
+  const openCloudflare = () => {
+    setTunnelHostname(tunnel?.hostname || "");
+    setTunnelToken("");
+    setTunnelStatusMessage(null);
+    setShowEnableModal(true);
+  };
+
+  const closeCloudflare = () => {
+    if (tunnelLoading) return;
+    setTunnelToken("");
+    setShowEnableModal(false);
   };
 
   const handleEnableTunnel = async () => {
@@ -234,7 +236,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
       return;
     }
-    setShowEnableModal(false);
+    if (!tunnelHostname.trim() || (!tunnelToken.trim() && !tunnel?.tokenConfigured)) return;
     setTunnelLoading(true);
     setTunnelStatusMessage(null);
     setTunnelProgress(t("apis.tunnel.creating"));
@@ -244,7 +246,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         try {
           const status = await fetchTunnelStatus(secret);
           if (status.download.downloading) {
-            setTunnelProgress(`Downloading cloudflared... ${status.download.progress}%`);
+            setTunnelProgress(t("apis.tunnel.downloading"));
           }
         } catch {
           // ignore
@@ -253,20 +255,23 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
       }
     })();
     try {
-      const result = await enableTunnel(secret);
+      const result = await enableTunnel(secret, tunnelHostname.trim(), tunnelToken.trim());
       if (!result.success) {
         setTunnelStatusMessage(result.error || t("apis.tunnel.failedEnable"));
         return;
       }
-      await waitForTunnel(result.publicUrl, result.tunnelUrl);
+      setTunnelToken("");
+      setShowEnableModal(false);
+      setClientTunnelHealth({ url: "", reachable: false });
+      tunnelEverReachableRef.current = "";
       onNotice(t("apis.tunnel.enabled"));
-      await syncStatus();
     } catch (error) {
       setTunnelStatusMessage(error instanceof Error ? error.message : t("apis.tunnel.failedEnable"));
     } finally {
       polling = false;
       setTunnelLoading(false);
       setTunnelProgress("");
+      await syncStatus();
     }
   };
 
@@ -275,8 +280,9 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     try {
       await disableTunnel(secret);
       setShowDisableModal(false);
-      setClientTunnelReachable(false);
-      tunnelEverReachableRef.current = false;
+      setClientTunnelHealth({ url: "", reachable: false });
+      setTunnelStatusMessage(null);
+      tunnelEverReachableRef.current = "";
       onNotice(t("apis.tunnel.disabled"));
       await syncStatus();
     } catch (error) {
@@ -409,7 +415,18 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
           onCopy={copy}
           statusText={tunnelStatusMessage}
           statusTone="error"
-          trailing={<Button size="sm" onClick={() => setShowEnableModal(true)}>Enable</Button>}
+          trailing={
+            <>
+              {tunnelEnabled ? (
+                <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
+              ) : (
+                <Button size="sm" onClick={openCloudflare}>{t("apis.tunnel.enable")}</Button>
+              )}
+              {tunnelEnabled ? (
+                <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
+              ) : null}
+            </>
+          }
         />
       );
     }
@@ -428,10 +445,10 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
                   setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
                   return;
                 }
-                setShowEnableModal(true);
+                openCloudflare();
               }}
             >
-              Enable
+              {t("apis.tunnel.enable")}
             </Button>
           }
         />
@@ -446,7 +463,31 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
-          trailing={<PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />}
+          trailing={
+            <>
+              <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
+              <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
+            </>
+          }
+        />
+      );
+    }
+    if (tunnel?.connected) {
+      return (
+        <EndpointTunnelRow
+          label={t("apis.tunnel.tunnel")}
+          active
+          copyId="tunnel_url"
+          copied={copied}
+          onCopy={copy}
+          statusText={t("apis.tunnel.hostnameUnreachable")}
+          statusTone="warn"
+          trailing={
+            <>
+              <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
+              <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
+            </>
+          }
         />
       );
     }
@@ -457,11 +498,11 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         copyId="tunnel_url"
         copied={copied}
         onCopy={copy}
-        statusText={tunnelEverReachableRef.current ? t("apis.tunnel.tunnelReconnecting") : t("apis.tunnel.tunnelChecking")}
+        statusText={tunnelEverReachableRef.current === tunnelPublicUrl ? t("apis.tunnel.tunnelReconnecting") : t("apis.tunnel.tunnelChecking")}
         statusTone="warn"
         trailing={
           <>
-            <Button size="sm" variant="outline" onClick={() => setShowEnableModal(true)}>Reconnect</Button>
+            <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.reconnect")}</Button>
             <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
           </>
         }
@@ -565,23 +606,56 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
 
       {tunnelEnabled || tsEnabled ? (
         <div className="endpoint-row tunnel-dashboard-row">
-          <span className={tunnelDashboardAccess ? "endpoint-row-badge active" : "endpoint-row-badge"}>Dashboard</span>
+          <span className={tunnelDashboardAccess ? "endpoint-row-badge active" : "endpoint-row-badge"}>{t("apis.tunnel.dashboard")}</span>
           <label className="tunnel-dashboard-toggle">
             <Toggle checked={tunnelDashboardAccess} onChange={() => void handleDashboardAccess(!tunnelDashboardAccess)} />
-            <span>Allow dashboard via tunnel</span>
+            <span>{t("apis.tunnel.allowDashboard")}</span>
           </label>
         </div>
       ) : null}
 
-      <Modal open={showEnableModal} title={t("apis.tunnel.enableCloudflareTitle")} onClose={() => setShowEnableModal(false)}>
-        <p className="modal-copy">
-          Expose tproxy with a direct Cloudflare Quick Tunnel. Cloudflare assigns a temporary <code>*.trycloudflare.com</code> URL,
-          which changes whenever the tunnel reconnects. Requires outbound port 7844; setup may take 10–30 seconds.
-        </p>
-        <div className="modal-actions">
-          <Button onClick={() => void handleEnableTunnel()}>Start tunnel</Button>
-          <Button variant="ghost" onClick={() => setShowEnableModal(false)}>Cancel</Button>
-        </div>
+      <Modal open={showEnableModal} title={t("apis.tunnel.enableCloudflareTitle")} onClose={closeCloudflare}>
+        <form onSubmit={(event) => { event.preventDefault(); void handleEnableTunnel(); }}>
+          <p className="modal-copy">{t("apis.tunnel.cloudflareDesc")}</p>
+          <div style={{ display: "grid", gap: 16 }}>
+            <Field label={t("apis.tunnel.hostname")} hint={t("apis.tunnel.hostnameHint")} required>
+              <Input
+                aria-label={t("apis.tunnel.hostname")}
+                value={tunnelHostname}
+                onChange={(event) => setTunnelHostname(event.target.value)}
+                placeholder="api.example.com"
+                autoCapitalize="none"
+                spellCheck={false}
+                disabled={tunnelLoading}
+                required
+              />
+            </Field>
+            <Field label={t("apis.tunnel.token")} hint={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenHint" : "apis.tunnel.tokenHint")} required={!tunnel?.tokenConfigured}>
+              <Input
+                aria-label={t("apis.tunnel.token")}
+                type="password"
+                value={tunnelToken}
+                onChange={(event) => setTunnelToken(event.target.value)}
+                placeholder={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenPlaceholder" : "apis.tunnel.tokenPlaceholder")}
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                disabled={tunnelLoading}
+                required={!tunnel?.tokenConfigured}
+              />
+            </Field>
+          </div>
+          <p className="modal-copy">{t("apis.tunnel.routeHint")} <code>{tunnel?.serviceUrl || "http://127.0.0.1:28120"}</code></p>
+          <p className="modal-copy">
+            <a href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">{t("apis.tunnel.openCloudflare")}</a>
+          </p>
+          {tunnelStatusMessage ? <p className="modal-copy" role="alert">{tunnelStatusMessage}</p> : null}
+          {tunnelLoading ? <p className="modal-copy" role="status">{tunnelProgress}</p> : null}
+          <div className="modal-actions">
+            <Button type="submit" loading={tunnelLoading} disabled={!tunnelHostname.trim() || (!tunnelToken.trim() && !tunnel?.tokenConfigured)}>{t("apis.tunnel.startTunnel")}</Button>
+            <Button type="button" variant="ghost" disabled={tunnelLoading} onClick={closeCloudflare}>{t("common.cancel")}</Button>
+          </div>
+        </form>
       </Modal>
 
       <ConfirmDialog

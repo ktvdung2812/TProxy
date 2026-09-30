@@ -19,6 +19,9 @@ type EnableResult struct {
 }
 
 type Status struct {
+	Hostname        string `json:"hostname,omitempty"`
+	TokenConfigured bool   `json:"tokenConfigured"`
+	ServiceURL      string `json:"serviceUrl"`
 	Enabled         bool   `json:"enabled"`
 	SettingsEnabled bool   `json:"settingsEnabled"`
 	TunnelURL       string `json:"tunnelUrl,omitempty"`
@@ -32,13 +35,15 @@ type Status struct {
 type SettingsSnapshot struct {
 	Enabled          bool
 	TunnelURL        string
+	TunnelToken      string
+	TunnelHostname   string
 	TailscaleEnabled bool
 	TailscaleURL     string
 }
 
 type SettingsStore interface {
 	LoadSettings(ctx context.Context) (SettingsSnapshot, error)
-	SaveCloudflare(ctx context.Context, enabled bool, tunnelURL string) error
+	SaveCloudflare(ctx context.Context, enabled bool, token, hostname string) error
 	SaveTailscale(ctx context.Context, enabled bool, tunnelURL string) error
 	OnPublicURL(ctx context.Context, publicURL string) error
 }
@@ -50,6 +55,7 @@ type Service struct {
 	tailscale   *Tailscale
 	settings    SettingsStore
 
+	cloudflareOpMu   sync.Mutex
 	mu               sync.Mutex
 	cancelled        bool
 	spawnInProgress  bool
@@ -122,25 +128,39 @@ func (s *Service) IsTailscaleReconnecting() bool {
 	return s.tailscaleSpawnInProgress
 }
 
-func (s *Service) persistCloudflareTunnel(ctx context.Context, state State) {
-	if err := SaveState(s.layout.StateFile, state); err != nil {
-		log.Printf("[tunnel] save state warning: %v", err)
-	}
-	if err := s.settings.SaveCloudflare(ctx, true, state.TunnelURL); err != nil {
-		log.Printf("[tunnel] save settings warning: %v", err)
-	}
-	if publicURL := CloudflareQuickTunnelURL(state.TunnelURL); publicURL != "" {
-		if err := s.settings.OnPublicURL(ctx, publicURL); err != nil {
-			log.Printf("[tunnel] save public URL warning: %v", err)
-		}
-	}
+// Enable uses saved credentials when token is empty, including during recovery.
+// The hostname route must already exist in the user's Cloudflare account.
+func (s *Service) Enable(ctx context.Context, localPort int, token, hostname string) (EnableResult, error) {
+	return s.enable(ctx, localPort, token, hostname, false)
 }
 
-func (s *Service) Enable(ctx context.Context, localPort int) (EnableResult, error) {
+func (s *Service) enable(ctx context.Context, localPort int, token, hostname string, resume bool) (EnableResult, error) {
+	s.cloudflareOpMu.Lock()
+	defer s.cloudflareOpMu.Unlock()
+
+	settings, err := s.settings.LoadSettings(ctx)
+	if err != nil {
+		return EnableResult{}, err
+	}
+	// A queued recovery must not undo a manual disable while waiting for the lock.
+	if resume && !settings.Enabled {
+		return EnableResult{}, fmt.Errorf("tunnel cancelled")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		token = settings.TunnelToken
+	}
+	if hostname == "" {
+		hostname = settings.TunnelHostname
+	}
+	if err := validateCloudflareConfig(token, hostname); err != nil {
+		return EnableResult{}, err
+	}
+	publicURL := CloudflareTunnelURL(hostname)
+	hostname = strings.TrimPrefix(publicURL, "https://")
 	if localPort <= 0 {
 		localPort = s.localPort
 	}
-	log.Printf("[tunnel] enable start (port=%d)", localPort)
 
 	s.mu.Lock()
 	s.cancelled = false
@@ -154,93 +174,75 @@ func (s *Service) Enable(ctx context.Context, localPort int) (EnableResult, erro
 	}()
 	s.installUnexpectedExitHandler()
 
-	cancelled := func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.cancelled
-	}
-
-	if s.cloudflared.IsRunning() && s.cloudflared.IsConnected() {
-		state, _ := LoadState(s.layout.StateFile)
-		if state != nil && state.TunnelURL != "" {
-			publicURL := CloudflareQuickTunnelURL(state.TunnelURL)
-			log.Printf("[tunnel] already running, reuse: %s", state.TunnelURL)
-			return EnableResult{
-				Success:        true,
-				TunnelURL:      state.TunnelURL,
-				ShortID:        state.ShortID,
-				PublicURL:      publicURL,
-				AlreadyRunning: true,
-			}, nil
-		}
-		log.Printf("[tunnel] cloudflared is connected but tunnel state is missing; recreating")
-	} else if s.cloudflared.IsRunning() {
-		log.Printf("[tunnel] cloudflared is running without an active Cloudflare connection; recreating")
+	if settings.Enabled && settings.TunnelToken == token && settings.TunnelHostname == hostname && s.cloudflared.IsRunning() && s.cloudflared.IsConnected() {
+		return EnableResult{Success: true, TunnelURL: publicURL, PublicURL: publicURL, AlreadyRunning: true}, nil
 	}
 
 	s.cloudflared.Kill(localPort)
-	if cancelled() {
-		return EnableResult{}, fmt.Errorf("tunnel cancelled")
+	// Persist the hostname BEFORE starting: dashboard access must be protected
+	// as soon as Cloudflare begins forwarding requests to this instance.
+	if err := s.settings.SaveCloudflare(ctx, settings.Enabled, token, hostname); err != nil {
+		return EnableResult{}, err
 	}
-
+	restoreSettings := func(startErr error) error {
+		// A failed replacement must not discard the previous credentials. The
+		// request may have been cancelled, but recovery still needs its settings.
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.settings.SaveCloudflare(restoreCtx, settings.Enabled, settings.TunnelToken, settings.TunnelHostname); err != nil {
+			return fmt.Errorf("%w; restore previous Cloudflare Tunnel settings: %v", startErr, err)
+		}
+		return startErr
+	}
+	if err := s.cloudflared.SpawnTunnel(ctx, localPort, token); err != nil {
+		return EnableResult{}, restoreSettings(err)
+	}
+	if err := s.settings.SaveCloudflare(ctx, true, token, hostname); err != nil {
+		s.cloudflared.Kill(localPort)
+		return EnableResult{}, restoreSettings(err)
+	}
 	state, _ := LoadState(s.layout.StateFile)
 	shortID := ""
 	if state != nil {
 		shortID = state.ShortID
 	}
-
-	onURLUpdate := func(url string) {
-		if cancelled() {
-			return
-		}
-		publicURL := CloudflareQuickTunnelURL(url)
-		if publicURL == "" {
-			log.Printf("[tunnel] ignored invalid quick-tunnel URL update: %q", url)
-			return
-		}
-		log.Printf("[tunnel] url updated: %s", publicURL)
-		s.persistCloudflareTunnel(context.Background(), State{ShortID: shortID, TunnelURL: publicURL})
+	if err := SaveState(s.layout.StateFile, State{ShortID: shortID, TunnelURL: publicURL}); err != nil {
+		log.Printf("[tunnel] save state warning: %v", err)
 	}
-
-	tunnelURL, err := s.cloudflared.SpawnQuickTunnel(ctx, localPort, onURLUpdate)
-	if err != nil {
-		if !strings.Contains(err.Error(), "cloudflared killed") && !strings.Contains(err.Error(), "tunnel cancelled") {
-			log.Printf("[tunnel] enable error: %v", err)
-		}
-		return EnableResult{}, err
+	if err := s.settings.OnPublicURL(ctx, publicURL); err != nil {
+		log.Printf("[tunnel] save public URL warning: %v", err)
 	}
-	if cancelled() {
-		return EnableResult{}, fmt.Errorf("tunnel cancelled")
-	}
-
-	publicURL := CloudflareQuickTunnelURL(tunnelURL)
-	if publicURL == "" {
-		s.cloudflared.Kill(localPort)
-		return EnableResult{}, fmt.Errorf("cloudflared returned an invalid Cloudflare quick-tunnel URL")
-	}
-	s.persistCloudflareTunnel(context.Background(), State{ShortID: shortID, TunnelURL: publicURL})
-
-	log.Printf("[tunnel] connector registered publicUrl=%s (public DNS may take a few moments)", publicURL)
-	return EnableResult{Success: true, TunnelURL: publicURL, ShortID: shortID, PublicURL: publicURL}, nil
+	log.Printf("[tunnel] connector registered publicUrl=%s", publicURL)
+	return EnableResult{Success: true, TunnelURL: publicURL, PublicURL: publicURL}, nil
 }
 
 func (s *Service) Disable(ctx context.Context) error {
+	s.cloudflareOpMu.Lock()
+	defer s.cloudflareOpMu.Unlock()
 	log.Printf("[tunnel] disable")
 	s.mu.Lock()
 	s.cancelled = true
 	port := s.activeLocalPort
+	if port <= 0 {
+		port = s.localPort
+	}
 	s.activeLocalPort = 0
-	s.spawnInProgress = false
 	s.mu.Unlock()
 
 	s.cloudflared.SetUnexpectedExitHandler(nil)
 	s.cloudflared.Kill(port)
 
+	settings, err := s.settings.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
 	state, _ := LoadState(s.layout.StateFile)
 	if state != nil {
-		_ = SaveState(s.layout.StateFile, State{ShortID: state.ShortID, TunnelURL: ""})
+		_ = SaveState(s.layout.StateFile, State{ShortID: state.ShortID})
 	}
-	return s.settings.SaveCloudflare(ctx, false, "")
+	// Retain the credentials and hostname so the user can re-enable the same
+	// tunnel, and requests from other connectors still obey dashboard policy.
+	return s.settings.SaveCloudflare(ctx, false, settings.TunnelToken, settings.TunnelHostname)
 }
 
 func (s *Service) Status(ctx context.Context) (Status, error) {
@@ -248,36 +250,22 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	state, _ := LoadState(s.layout.StateFile)
-	shortID := ""
-	tunnelURL := ""
-	if state != nil {
-		shortID = state.ShortID
-		tunnelURL = state.TunnelURL
+	publicURL := CloudflareTunnelURL(settings.TunnelHostname)
+	status := Status{
+		Hostname:        settings.TunnelHostname,
+		TokenConfigured: settings.TunnelToken != "",
+		ServiceURL:      fmt.Sprintf("http://127.0.0.1:%d", s.localPort),
+		SettingsEnabled: settings.Enabled && settings.TunnelToken != "" && publicURL != "",
 	}
-	publicURL := CloudflareQuickTunnelURL(tunnelURL)
-	running := false
-	connected := false
-	reachable := false
-	if settings.Enabled {
-		running = s.cloudflared.IsRunning()
-		connected = s.cloudflared.IsConnected()
-		if publicURL != "" && ProbeURLAlive(ctx, publicURL) {
-			reachable = true
-		} else if tunnelURL != "" && ProbeURLAlive(ctx, tunnelURL) {
-			reachable = true
-		}
+	if status.SettingsEnabled {
+		status.TunnelURL = publicURL
+		status.PublicURL = publicURL
+		status.Running = s.cloudflared.IsRunning()
+		status.Connected = s.cloudflared.IsConnected()
+		status.Reachable = ProbeURLAlive(ctx, publicURL)
+		status.Enabled = status.Running && (status.Connected || status.Reachable)
 	}
-	return Status{
-		Enabled:         settings.Enabled && running && connected,
-		SettingsEnabled: settings.Enabled,
-		TunnelURL:       tunnelURL,
-		ShortID:         shortID,
-		PublicURL:       publicURL,
-		Running:         running,
-		Connected:       connected,
-		Reachable:       reachable,
-	}, nil
+	return status, nil
 }
 
 type TailscaleStatus struct {

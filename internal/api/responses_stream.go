@@ -388,11 +388,7 @@ func (w *responsesStreamWriter) sendCompleted() map[string]any {
 		"error":      nil,
 	}
 	if w.usage != nil {
-		response["usage"] = map[string]any{
-			"input_tokens":  w.usage.InputTokens,
-			"output_tokens": w.usage.OutputTokens,
-			"total_tokens":  w.usage.InputTokens + w.usage.OutputTokens,
-		}
+		response["usage"] = w.usage.OpenAIUsage(true)
 	}
 	return w.emit("response.completed", map[string]any{"response": response})
 }
@@ -502,6 +498,14 @@ func writeResponsesStream(w http.ResponseWriter, r *http.Request, events <-chan 
 	}
 	for event := range events {
 		switch event.Type {
+		case canonical.EventUpstreamHeaders:
+			// Relay upstream response headers (turn-state, rate limits, model)
+			// before the first body write so the Codex CLI sees the same
+			// contract it would on a direct connection.
+			for name, value := range event.UpstreamHeaders {
+				w.Header().Set(name, value)
+			}
+			continue
 		case canonical.EventResponsesSSE:
 			sendPassthrough(event.SSEEvent, event.SSEData)
 			continue

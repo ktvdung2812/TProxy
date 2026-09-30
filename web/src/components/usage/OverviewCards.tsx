@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Card } from "../ui";
 import { fmt, fmtCompact, fmtCost } from "./utils";
 import type { UsageStats } from "./api";
@@ -19,6 +20,7 @@ function UsageCount({ value, className = "" }: { value: number; className?: stri
 }
 
 export function OverviewCards({ stats }: Props) {
+  const {t}=useTranslation();
   return (
     <div className="usage-overview-grid">
       <Card pad="md" className="usage-stat-card">
@@ -32,6 +34,7 @@ export function OverviewCards({ stats }: Props) {
       <Card pad="md" className="usage-stat-card">
         <span className="usage-stat-label">Cached Tokens</span>
         <UsageCount value={stats.totalCachedTokens} className="usage-stat-info" />
+        <small className="usage-stat-hint">{t("operations.cacheWrite")}: {fmt(stats.totalCacheCreationTokens ?? 0)}</small>
       </Card>
       <Card pad="md" className="usage-stat-card">
         <span className="usage-stat-label">Output Tokens</span>

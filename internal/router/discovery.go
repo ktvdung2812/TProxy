@@ -189,7 +189,7 @@ func (r *Router) discoverProviderModelsFromUpstream(ctx context.Context, provide
 		if discoverErr != nil {
 			lastErr = discoverErr
 			if credential.ID != "" {
-				r.setCredentialCooldown(ctx, credential.ID, "", discoverErr)
+				r.setCredentialCooldown(ctx, provider.ID, credential.ID, "", discoverErr)
 			}
 			continue
 		}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Modal, Select } from "../ui";
 import { fetchUsageEvents } from "./api";
@@ -19,6 +20,7 @@ type Props = {
 const PAGE_SIZE = 20;
 
 export function RequestDetailsTab({ secret, providers, providerNames, onError }: Props) {
+  const {t}=useTranslation();
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -146,6 +148,10 @@ export function RequestDetailsTab({ secret, providers, providerNames, onError }:
             <div><span>Attempt</span>{selected.attempt}</div>
             <div><span>Status</span>{selected.status}</div>
             <div><span>Latency</span>{selected.latency_ms} ms</div>
+            <div><span>{t("operations.firstToken")}</span>{selected.ttft_ms == null ? "—" : `${selected.ttft_ms} ms`}</div>
+            <div><span>{t("operations.queue")}</span>{selected.queue_ms ?? 0} ms</div>
+            <div><span>{t("operations.reason")}</span>{selected.routing_reason || "—"}</div>
+            <div><span>{t("operations.cacheWrite")}</span>{fmt(selected.cache_creation_tokens ?? 0)}</div>
             <div><span>Input tokens</span>{fmt(selected.input_tokens)}</div>
             <div><span>Output tokens</span>{fmt(selected.output_tokens)}</div>
             <div><span>Reasoning tokens</span>{fmt(selected.reasoning_tokens)}</div>

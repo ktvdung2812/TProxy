@@ -140,16 +140,22 @@ export function fetchCodexResetCredits(secret: string, credentialId: string) {
   );
 }
 
+const pendingResetRequests = new Map<string, string>();
+
 export function consumeCodexResetCredit(secret: string, credentialId: string) {
+  const requestId = pendingResetRequests.get(credentialId) ?? crypto.randomUUID();
+  pendingResetRequests.set(credentialId, requestId);
   return fetch(`/api/admin/credentials/${encodeURIComponent(credentialId)}/codex-reset-credits`, {
     method: "POST",
     headers: {
+      "Idempotency-Key": requestId,
       ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
     },
   }).then(async (response) => {
     const data = (await response.json().catch(() => ({}))) as CodexResetConsumeResult & {
       error?: { message?: string };
     };
+    if (data.ok || data.no_credit) pendingResetRequests.delete(credentialId);
     if (response.status === 409 && data.no_credit) {
       return data;
     }
@@ -204,4 +210,18 @@ export function sendAccountChat(
       error: typeof data.error === "string" ? data.error : data.error?.message,
     } as AccountChatResult;
   });
+}
+
+export type QuotaActionResult = {credential_id:string;ok:boolean;action_applied:boolean;error?:string;quota?:CredentialQuota};
+const pendingBulkRequests = new Map<string,string>();
+export async function runQuotaActions(secret:string, action:"refresh"|"clear-cooldown"|"reset-upstream", ids:string[]) {
+ const scope=JSON.stringify([action,...[...ids].sort()]);
+ const requestId=pendingBulkRequests.get(scope) ?? crypto.randomUUID();
+ if(action==="reset-upstream")pendingBulkRequests.set(scope,requestId);
+ const response=await fetch("/api/admin/quota/actions",{method:"POST",headers:{"Content-Type":"application/json",...(secret?{Authorization:`Bearer ${secret}`}:{})},body:JSON.stringify({action,credential_ids:ids,request_id:requestId})});
+ const data=await response.json();
+ if(!response.ok)throw new Error(data?.error?.message||`HTTP ${response.status}`);
+ const results=data.results as QuotaActionResult[];
+ if(results.every(item=>item.ok))pendingBulkRequests.delete(scope);
+ return results;
 }

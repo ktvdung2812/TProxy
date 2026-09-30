@@ -89,6 +89,14 @@ func (s *Service) runDeferredStartup(ctx context.Context) {
 		log.Printf("[tunnel] startup settings load failed: %v", err)
 		return
 	}
+	if settings.Enabled && (settings.TunnelToken == "" || CloudflareTunnelURL(settings.TunnelHostname) == "") {
+		// Quick tunnels from older versions cannot be resumed as named tunnels.
+		log.Printf("[tunnel] configure a Cloudflare Tunnel token and hostname to re-enable")
+		if err := s.Disable(ctx); err != nil {
+			log.Printf("[tunnel] disable legacy tunnel: %v", err)
+		}
+		settings.Enabled = false
+	}
 	if settings.Enabled && !s.autoResumed {
 		s.autoResumed = true
 		log.Printf("[tunnel] auto-resuming cloudflare tunnel")
@@ -107,19 +115,8 @@ func (s *Service) runDeferredStartup(ctx context.Context) {
 // storedTunnelReachable probes the public URL we last recorded. It is the only
 // health signal available for a connector this process did not spawn.
 func (s *Service) storedTunnelReachable(ctx context.Context, settings SettingsSnapshot) bool {
-	candidates := []string{}
-	if state, _ := LoadState(s.layout.StateFile); state != nil && state.TunnelURL != "" {
-		candidates = append(candidates, state.TunnelURL)
-	}
-	if settings.TunnelURL != "" {
-		candidates = append(candidates, settings.TunnelURL)
-	}
-	for _, candidate := range candidates {
-		if url := CloudflareQuickTunnelURL(candidate); url != "" && ProbeURLAlive(ctx, url) {
-			return true
-		}
-	}
-	return false
+	publicURL := CloudflareTunnelURL(settings.TunnelHostname)
+	return publicURL != "" && ProbeURLAlive(ctx, publicURL)
 }
 
 func (s *Service) loadSettingsWithRetry(ctx context.Context, attempts int) (SettingsSnapshot, error) {
@@ -168,7 +165,7 @@ var forceRestartReasons = map[string]struct{}{
 
 func (s *Service) safeRestartTunnel(ctx context.Context, reason string) {
 	settings, err := s.settings.LoadSettings(ctx)
-	if err != nil || !settings.Enabled {
+	if err != nil || !settings.Enabled || settings.TunnelToken == "" || CloudflareTunnelURL(settings.TunnelHostname) == "" {
 		return
 	}
 	s.mu.Lock()
@@ -185,9 +182,8 @@ func (s *Service) safeRestartTunnel(ctx context.Context, reason string) {
 	}
 	if running {
 		// A connector inherited from a previous tproxy run still serves traffic, but
-		// we no longer read its logs so IsConnected stays false. Recreating it would
-		// hand out a brand-new quick-tunnel URL and break every client already
-		// configured with the old one — so adopt it while its URL answers.
+		// we no longer read its logs so IsConnected stays false. Adopt it while
+		// its configured public hostname answers to avoid interrupting traffic.
 		if !s.cloudflared.OwnsProcess() && s.storedTunnelReachable(ctx, settings) {
 			log.Printf("[tunnel] adopting healthy cloudflared from a previous run (%s)", reason)
 			return
@@ -208,8 +204,11 @@ func (s *Service) safeRestartTunnel(ctx context.Context, reason string) {
 		return
 	}
 
+	s.mu.Lock()
+	port := s.activeLocalPort
+	s.mu.Unlock()
 	log.Printf("[tunnel] safeRestart (%s)", reason)
-	if _, err := s.Enable(ctx, s.activeLocalPort); err != nil {
+	if _, err := s.enable(ctx, port, "", "", true); err != nil {
 		if !stringsContainsAny(err.Error(), "cloudflared killed", "tunnel cancelled") {
 			log.Printf("[tunnel] restart failed: %v", err)
 		}

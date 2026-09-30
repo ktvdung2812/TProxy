@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
 import { storeApiKeySecretsFrom9routerBackup } from "../../lib/apiKeySecrets";
-import { import9routerBackup, importCliproxyAuth } from "./api";
+import { import9routerBackup, importCliproxyAuth, importSub2apiExport } from "./api";
 import { detectImportSource, type ImportSource } from "./utils";
 
 type Props = {
@@ -36,6 +36,14 @@ const SOURCES: Array<{
     description:
       "Import OAuth credentials exported from the CLIProxyAPI auth directory.",
     patterns: ["codex-*.json", "claude-*.json", "xai-*.json"],
+  },
+  {
+    id: "sub2api",
+    label: "sub2api",
+    title: "import.sourceSub2apiTitle",
+    description:
+      "import.sourceSub2apiDesc",
+    patterns: ["*_sub2api_accounts.json", "*-sub2api-accounts.json", "accounts-export.json"],
   },
 ];
 
@@ -75,6 +83,13 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
         `${counts.combos ?? 0} combos`,
       ].join(" · ");
     }
+    if (nextSource === "sub2api") {
+      return [
+        `${counts.providers ?? 0} providers`,
+        `${counts.credentials ?? 0} credentials`,
+        `${counts.proxy_pools ?? 0} proxy pools`,
+      ].join(" · ");
+    }
     return [`${counts.providers ?? 0} providers`, `${counts.credentials ?? 0} credentials`].join(" · ");
   };
 
@@ -93,7 +108,9 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
       const result =
         nextSource === "9router"
           ? await import9routerBackup(secret, payload, dryRun)
-          : await importCliproxyAuth(secret, payload, dryRun);
+          : nextSource === "sub2api"
+            ? await importSub2apiExport(secret, payload, dryRun)
+            : await importCliproxyAuth(secret, payload, dryRun);
       const summary = formatSummary(nextSource, result.counts as Record<string, number>);
       setLastSummary(summary);
       setSelectedFile(file);
@@ -104,11 +121,9 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
         onError?.(result.errors?.join("\n") || t("import.failed"));
         return;
       }
-      onNotice?.(
-        dryRun
-          ? `Preview ready: ${summary}`
-          : `Imported ${nextSource === "9router" ? "9router backup" : "CLIProxyAPI auth"}: ${summary}`,
-      );
+      const sourceLabel =
+        nextSource === "9router" ? "9router backup" : nextSource === "sub2api" ? "sub2api export" : "CLIProxyAPI auth";
+      onNotice?.(dryRun ? `Preview ready: ${summary}` : `Imported ${sourceLabel}: ${summary}`);
       if (!dryRun) {
         if (nextSource === "9router") {
           storeApiKeySecretsFrom9routerBackup(payload);
@@ -195,8 +210,8 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
       </div>
 
       <div className="import-modal-panel">
-        <h4>{active.title}</h4>
-        <p>{active.description}</p>
+        <h4>{t(active.title)}</h4>
+        <p>{t(active.description)}</p>
         <div className="import-modal-patterns">
           {active.patterns.map((pattern) => (
             <code key={pattern}>{pattern}</code>

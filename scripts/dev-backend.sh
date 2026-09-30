@@ -31,7 +31,7 @@ awk -v backend_port="${BACKEND_PORT}" '
 ' config.yaml > .config.dev.yaml
 
 export TPROXY_PUBLIC_PORT="${PUBLIC_PORT}"
-# Do not automatically reopen an internet-facing quick tunnel in development.
+# Do not automatically reopen an internet-facing Cloudflare Tunnel in development.
 # Enable it manually from APIs → Tunnel after the local dashboard is ready.
 export TPROXY_SKIP_TUNNEL_AUTO=1
 
