@@ -623,6 +623,16 @@ func (r *Router) ConsumeCodexResetCreditWithID(ctx context.Context, provider sto
 	return r.registry.ConsumeCodexResetCredit(ctx, provider, credential, id)
 }
 
+// ClaudeLimitResets fetches the Claude limit-reset grants for a credential.
+func (r *Router) ClaudeLimitResets(ctx context.Context, provider store.Provider, credential store.Credential) (providers.ClaudeLimitResets, error) {
+	return r.registry.ClaudeLimitResets(ctx, provider, credential)
+}
+
+// ClaimClaudeLimitReset spends one Claude limit reset for a credential.
+func (r *Router) ClaimClaudeLimitReset(ctx context.Context, provider store.Provider, credential store.Credential, program, grantID, requestID string) (providers.ClaudeResetClaimResult, error) {
+	return r.registry.ClaimClaudeLimitReset(ctx, provider, credential, program, grantID, requestID)
+}
+
 func (r *Router) DiscoverCredentialModels(ctx context.Context, provider store.Provider, credential store.Credential) ([]providers.DiscoveredModel, error) {
 	items, err := r.registry.DiscoverModels(ctx, provider, credential)
 	if err != nil {

@@ -1121,6 +1121,7 @@
     "discoveringMore": " · discovering more…"
   },
   "quota": {
+    "servicePlan": "Plan: {{plan}}",
     "failedToFetch": "Failed to fetch quota",
     "failedToRefresh": "Failed to refresh quota",
     "failedToUpdate": "Failed to update account",

@@ -8,6 +8,7 @@ import { RequestLogsTable, type RequestSortKey } from "../logs/RequestLogsTable"
 import type { SortOrder } from "../logs/utils";
 import { Badge, Button, Modal, Toggle, cn } from "../ui";
 import { AccountTestChat } from "./AccountTestChat";
+import { ClaudeLimitResets } from "./ClaudeLimitResets";
 import { CredentialUsageChart } from "./CredentialUsageChart";
 import {
   fetchCredentialQuota,
@@ -414,25 +415,19 @@ export function QuotaAccountDetailModal({
             <button
               type="button"
               className="quota-tracker-icon-btn"
-              disabled={quotaLoading}
-              onClick={() => void refreshQuota()}
+              disabled={quotaLoading || clearingCooldown}
+              onClick={() => {
+                if (onClearCooldown) {
+                  onClearCooldown();
+                } else {
+                  void refreshQuota();
+                }
+              }}
               aria-label={t("quota.refreshQuota")}
               title={t("quota.refreshQuota")}
             >
-              <span className={cn("material-symbols-outlined", quotaLoading && "animate-spin")}>refresh</span>
+              <span className={cn("material-symbols-outlined", (quotaLoading || clearingCooldown) && "animate-spin")}>refresh</span>
             </button>
-            {onClearCooldown ? (
-              <button
-                type="button"
-                className="quota-tracker-icon-btn"
-                disabled={clearingCooldown}
-                onClick={onClearCooldown}
-                aria-label={t("quota.clearCooldownRecheck")}
-                title={t("quota.clearCooldownRecheck")}
-              >
-                <span className={cn("material-symbols-outlined", clearingCooldown && "animate-spin")}>restart_alt</span>
-              </button>
-            ) : null}
             {resetCreditCount > 0 && onResetQuota ? (
               <button
                 type="button"
@@ -463,6 +458,15 @@ export function QuotaAccountDetailModal({
             <p className="quota-account-modal-empty">No quota data loaded for this account.</p>
           )}
         </div>
+
+        {credential.providerType === "claude" && credential.auth_type === "oauth" ? (
+          <ClaudeLimitResets
+            secret={secret}
+            credentialId={credential.id}
+            active={open}
+            onReset={() => void refreshQuota()}
+          />
+        ) : null}
 
         <CredentialUsageChart secret={secret} credentialId={credential.id} active={open} />
 

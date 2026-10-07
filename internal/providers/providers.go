@@ -194,6 +194,9 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 	if provider.Type == "devin" {
 		return discoverDevinModels(ctx, r, provider, credential)
 	}
+	if provider.Type == "claude" {
+		return discoverClaudeModels(ctx, r, provider, credential)
+	}
 	if shouldSkipModelDiscovery(provider) {
 		if items := staticDiscoveryModels(provider); len(items) > 0 {
 			return items, nil

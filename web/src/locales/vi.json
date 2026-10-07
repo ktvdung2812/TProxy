@@ -1121,6 +1121,7 @@
     "discoveringMore": " · đang khám phá thêm…"
   },
   "quota": {
+    "servicePlan": "Gói: {{plan}}",
     "failedToFetch": "Không thể lấy quota",
     "failedToRefresh": "Không thể làm mới quota",
     "failedToUpdate": "Không thể cập nhật tài khoản",

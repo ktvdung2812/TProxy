@@ -231,6 +231,66 @@ func TestCredentialUsageChartBucketsByPeriodAndCredential(t *testing.T) {
 	}
 }
 
+func TestCredentialModelUsage(t *testing.T) {
+	key, err := security.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encryptor, err := security.NewEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := OpenSQLite(filepath.Join(t.TempDir(), "credential-model-usage.db"), encryptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 15, 30, 0, 0, time.UTC)
+	for _, event := range []UsageEvent{
+		{RequestID: "m1", CredentialID: "cred-1", PublicModelID: "td-coder", UpstreamModel: "gpt-5.6-sol", Status: 200, InputTokens: 10, OutputTokens: 5, CreatedAt: now},
+		{RequestID: "m2", CredentialID: "cred-1", PublicModelID: "td-coder", UpstreamModel: "gpt-5.6-sol", Status: 200, InputTokens: 20, OutputTokens: 8, CreatedAt: now.Add(-time.Hour)},
+		{RequestID: "m3", CredentialID: "cred-1", PublicModelID: "td-fast", UpstreamModel: "gpt-5-mini", Status: 200, InputTokens: 100, OutputTokens: 40, CreatedAt: now.Add(-25 * time.Hour)},
+		{RequestID: "other", CredentialID: "cred-2", PublicModelID: "td-coder", UpstreamModel: "gpt-5.6-sol", Status: 200, InputTokens: 999, OutputTokens: 999, CreatedAt: now},
+		{RequestID: "old", CredentialID: "cred-1", PublicModelID: "td-coder", UpstreamModel: "gpt-5.6-sol", Status: 200, InputTokens: 50, OutputTokens: 50, CreatedAt: now.Add(-40 * 24 * time.Hour)},
+	} {
+		if err := dataStore.AddUsage(ctx, event); err != nil {
+			t.Fatalf("AddUsage() error = %v", err)
+		}
+	}
+
+	week, err := dataStore.CredentialModelUsage(ctx, "cred-1", "week", now)
+	if err != nil {
+		t.Fatalf("CredentialModelUsage(week) error = %v", err)
+	}
+	if len(week) != 2 {
+		t.Fatalf("week models = %+v", week)
+	}
+	// gpt-5-mini (140 tokens) outranks gpt-5.6-sol (43 tokens).
+	if week[0].Model != "gpt-5-mini" || week[0].Requests != 1 || week[0].TotalTokens != 140 {
+		t.Fatalf("week[0] = %+v", week[0])
+	}
+	if week[1].Model != "gpt-5.6-sol" || week[1].Requests != 2 || week[1].PromptTokens != 30 || week[1].CompletionTokens != 13 || week[1].TotalTokens != 43 {
+		t.Fatalf("week[1] = %+v", week[1])
+	}
+
+	day, err := dataStore.CredentialModelUsage(ctx, "cred-1", "day", now)
+	if err != nil {
+		t.Fatalf("CredentialModelUsage(day) error = %v", err)
+	}
+	if len(day) != 1 || day[0].Model != "gpt-5.6-sol" || day[0].Requests != 2 {
+		t.Fatalf("day models = %+v", day)
+	}
+
+	if _, err := dataStore.CredentialModelUsage(ctx, "cred-1", "year", now); err == nil {
+		t.Fatal("invalid period was accepted")
+	}
+	if _, err := dataStore.CredentialModelUsage(ctx, "", "week", now); err == nil {
+		t.Fatal("empty credential id was accepted")
+	}
+}
+
 func TestUsagePeriodSince(t *testing.T) {
 	now := time.Date(2026, 7, 17, 15, 30, 0, 0, time.UTC)
 	since, err := UsagePeriodSince("today", now)

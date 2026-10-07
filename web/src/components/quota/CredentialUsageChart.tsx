@@ -11,7 +11,9 @@ import {
   YAxis,
 } from "recharts";
 import {
+  fetchCredentialModelUsage,
   fetchCredentialUsageChart,
+  type CredentialModelUsageEntry,
   type CredentialUsageChartPeriod,
   type CredentialUsageChartPoint,
 } from "./api";
@@ -37,6 +39,8 @@ function formatTokens(value: number) {
 export function CredentialUsageChart({ secret, credentialId, active }: Props) {
   const [period, setPeriod] = useState<CredentialUsageChartPeriod>("week");
   const [points, setPoints] = useState<CredentialUsageChartPoint[]>([]);
+  const [models, setModels] = useState<CredentialModelUsageEntry[]>([]);
+  const [modelsError, setModelsError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -45,6 +49,7 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
     let cancelled = false;
     setLoading(true);
     setError("");
+    setModelsError("");
     fetchCredentialUsageChart(secret, credentialId, period)
       .then((data) => {
         if (!cancelled) setPoints(data);
@@ -54,6 +59,16 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    fetchCredentialModelUsage(secret, credentialId, period)
+      .then((data) => {
+        if (!cancelled) setModels(data);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setModels([]);
+          setModelsError(cause instanceof Error ? cause.message : "Failed to load model usage");
+        }
       });
     return () => {
       cancelled = true;
@@ -143,6 +158,37 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
           </ResponsiveContainer>
         </div>
       )}
+      {modelsError ? (
+        <div className="credential-usage-chart-state is-error credential-usage-models-error">{modelsError}</div>
+      ) : models.length > 0 ? (
+        <div className="credential-usage-models">
+          <h6>By model</h6>
+          <div className="logs-table-scroll">
+            <table className="logs-table credential-usage-models-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th className="right">Requests</th>
+                  <th className="right">Input</th>
+                  <th className="right">Output</th>
+                  <th className="right">Total tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((row) => (
+                  <tr key={row.model}>
+                    <td className="credential-usage-models-name">{row.model}</td>
+                    <td className="right">{row.requests.toLocaleString()}</td>
+                    <td className="right">{formatTokens(row.promptTokens)}</td>
+                    <td className="right">{formatTokens(row.completionTokens)}</td>
+                    <td className="right">{formatTokens(row.totalTokens)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -65,6 +66,16 @@ type UsageChartPoint struct {
 	Label  string  `json:"label"`
 	Tokens int     `json:"tokens"`
 	Cost   float64 `json:"cost"`
+}
+
+// CredentialModelUsageEntry aggregates one model's proxy traffic for a single
+// credential inside the account detail modal.
+type CredentialModelUsageEntry struct {
+	Model            string `json:"model"`
+	Requests         int    `json:"requests"`
+	PromptTokens     int    `json:"promptTokens"`
+	CompletionTokens int    `json:"completionTokens"`
+	TotalTokens      int    `json:"totalTokens"`
 }
 
 // CredentialUsageChartPoint is the compact time-series payload used by the
@@ -262,24 +273,20 @@ func (s *Store) CredentialUsageChart(ctx context.Context, credentialID, period s
 		return nil, fmt.Errorf("credential id is required")
 	}
 
-	period = strings.TrimSpace(strings.ToLower(period))
-	startOfToday := usageStartOfDayUTC(now)
-	var start, end time.Time
+	start, end, err := credentialUsageWindow(period, now)
+	if err != nil {
+		return nil, err
+	}
 	var bucketCount int
 	var bucketSize time.Duration
 	var label func(time.Time) string
-	switch period {
+	switch strings.TrimSpace(strings.ToLower(period)) {
 	case "day":
-		start, end = startOfToday, startOfToday.Add(24*time.Hour)
 		bucketCount, bucketSize, label = 24, time.Hour, func(value time.Time) string { return value.Format("15:04") }
 	case "week":
-		start, end = usageStartOfDayUTC(now.Add(-6*24*time.Hour)), startOfToday.Add(24*time.Hour)
-		bucketCount, bucketSize, label = 7, 24*time.Hour, func(value time.Time) string { return value.Format("Mon") }
-	case "month":
-		start, end = usageStartOfDayUTC(now.Add(-29*24*time.Hour)), startOfToday.Add(24*time.Hour)
-		bucketCount, bucketSize, label = 30, 24*time.Hour, func(value time.Time) string { return value.Format("Jan 2") }
+		bucketCount, bucketSize, label = 7, 24 * time.Hour, func(value time.Time) string { return value.Format("Mon") }
 	default:
-		return nil, fmt.Errorf("invalid credential usage chart period %q", period)
+		bucketCount, bucketSize, label = 30, 24 * time.Hour, func(value time.Time) string { return value.Format("Jan 2") }
 	}
 
 	buckets := make([]CredentialUsageChartPoint, bucketCount)
@@ -316,6 +323,82 @@ WHERE credential_id=? AND created_at >= ? AND created_at < ?`,
 		buckets[index].Tokens += inputTokens + outputTokens
 	}
 	return buckets, rows.Err()
+}
+
+// credentialUsageWindow maps a credential detail period ("day", "week",
+// "month") to a UTC [start, end) range matching CredentialUsageChart.
+func credentialUsageWindow(period string, now time.Time) (time.Time, time.Time, error) {
+	startOfToday := usageStartOfDayUTC(now)
+	switch strings.TrimSpace(strings.ToLower(period)) {
+	case "day":
+		return startOfToday, startOfToday.Add(24 * time.Hour), nil
+	case "week":
+		return usageStartOfDayUTC(now.Add(-6 * 24 * time.Hour)), startOfToday.Add(24 * time.Hour), nil
+	case "month":
+		return usageStartOfDayUTC(now.Add(-29 * 24 * time.Hour)), startOfToday.Add(24 * time.Hour), nil
+	default:
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid credential usage chart period %q", period)
+	}
+}
+
+// CredentialModelUsage returns per-model request and token totals for one
+// credential over the same day/week/month windows used by CredentialUsageChart.
+// Rows are merged by display model (upstream name when recorded) and sorted by
+// total tokens descending.
+func (s *Store) CredentialModelUsage(ctx context.Context, credentialID, period string, now time.Time) ([]CredentialModelUsageEntry, error) {
+	if strings.TrimSpace(credentialID) == "" {
+		return nil, fmt.Errorf("credential id is required")
+	}
+	start, end, err := credentialUsageWindow(period, now)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT public_model_id, upstream_model, provider_id, COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0)
+FROM usage_events
+WHERE credential_id=? AND created_at >= ? AND created_at < ?
+GROUP BY public_model_id, upstream_model, provider_id`,
+		credentialID, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	merged := map[string]*CredentialModelUsageEntry{}
+	for rows.Next() {
+		var publicModelID, upstreamModel, providerID string
+		var requests, promptTokens, completionTokens int
+		if err := rows.Scan(&publicModelID, &upstreamModel, &providerID, &requests, &promptTokens, &completionTokens); err != nil {
+			return nil, err
+		}
+		model := usageDisplayModel(publicModelID, upstreamModel, providerID)
+		entry := merged[model]
+		if entry == nil {
+			entry = &CredentialModelUsageEntry{Model: model}
+			merged[model] = entry
+		}
+		entry.Requests += requests
+		entry.PromptTokens += promptTokens
+		entry.CompletionTokens += completionTokens
+		entry.TotalTokens += promptTokens + completionTokens
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]CredentialModelUsageEntry, 0, len(merged))
+	for _, entry := range merged {
+		result = append(result, *entry)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].TotalTokens != result[j].TotalTokens {
+			return result[i].TotalTokens > result[j].TotalTokens
+		}
+		if result[i].Requests != result[j].Requests {
+			return result[i].Requests > result[j].Requests
+		}
+		return result[i].Model < result[j].Model
+	})
+	return result, nil
 }
 
 func (s *Store) usageHourlyChart(ctx context.Context, start, end time.Time, bucketCount int) ([]UsageChartPoint, error) {

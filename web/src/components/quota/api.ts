@@ -85,6 +85,14 @@ export type CredentialUsageChartPoint = {
   tokens: number;
 };
 
+export type CredentialModelUsageEntry = {
+  model: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+
 async function adminFetch<T>(secret: string, path: string, method: "GET" | "POST" = "GET") {
   const response = await fetch(path, {
     method,
@@ -132,6 +140,17 @@ export function fetchCredentialUsageChart(
   );
 }
 
+export function fetchCredentialModelUsage(
+  secret: string,
+  credentialId: string,
+  period: CredentialUsageChartPeriod,
+) {
+  return adminFetch<CredentialModelUsageEntry[]>(
+    secret,
+    `/api/admin/credentials/${encodeURIComponent(credentialId)}/model-usage?period=${encodeURIComponent(period)}`,
+  );
+}
+
 export function fetchCodexResetCredits(secret: string, credentialId: string) {
   return adminFetch<CodexResetCredits>(
     secret,
@@ -166,7 +185,87 @@ export function consumeCodexResetCredit(secret: string, credentialId: string) {
   });
 }
 
-export type AccountChatMessage = { role: "user" | "assistant"; content: string };
+export type ClaudeResetGrant = {
+  id: string;
+  label?: string;
+  resets_total: number;
+  resets_left: number;
+  starts_at?: string;
+  ends_at?: string;
+  clears?: string[];
+  paused?: boolean;
+  usable_now: boolean;
+  use_requires_limit?: boolean;
+};
+
+export type ClaudeLimitResets = {
+  eligible: boolean;
+  ineligible_reason?: string;
+  at_limit?: boolean;
+  grants: ClaudeResetGrant[];
+  next_grant_id?: string;
+  cooldown_until?: string;
+  weekly_resets_at?: string;
+  session?: {
+    eligible: boolean;
+    ineligible_reason?: string;
+    available: boolean;
+    next_available_at?: string;
+    resets_per_week?: number;
+  };
+};
+
+export type ClaudeResetProgram = "cedar_ember" | "juniper_tide";
+
+export type ClaudeResetClaimResult = {
+  ok: boolean;
+  result: string;
+  reason?: string;
+  resets_left?: number;
+  cleared?: string[];
+  next_available_at?: string;
+};
+
+export function fetchClaudeLimitResets(secret: string, credentialId: string) {
+  return adminFetch<ClaudeLimitResets>(
+    secret,
+    `/api/admin/credentials/${encodeURIComponent(credentialId)}/claude-limit-resets`,
+  );
+}
+
+const pendingClaudeResetRequests = new Map<string, string>();
+
+export async function claimClaudeLimitReset(
+  secret: string,
+  credentialId: string,
+  program: ClaudeResetProgram,
+  grantId?: string,
+) {
+  // Reuse the request id until the claim is answered so a retry after a
+  // network error cannot spend a second grant upstream.
+  const pendingKey = `${credentialId}:${program}:${grantId ?? ""}`;
+  const requestId = pendingClaudeResetRequests.get(pendingKey) ?? crypto.randomUUID();
+  pendingClaudeResetRequests.set(pendingKey, requestId);
+  const response = await fetch(`/api/admin/credentials/${encodeURIComponent(credentialId)}/claude-limit-resets`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": requestId,
+      ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+    },
+    body: JSON.stringify({ program, grant_id: grantId }),
+  });
+  const data = (await response.json().catch(() => ({}))) as ClaudeResetClaimResult & {
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `HTTP ${response.status}`);
+  }
+  pendingClaudeResetRequests.delete(pendingKey);
+  return data;
+}
+
+export type AccountChatMessage ={ role: "user" | "assistant"; content: string };
 
 export type AccountChatResult = {
   ok: boolean;

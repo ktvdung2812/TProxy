@@ -123,6 +123,15 @@ export function formatServicePlanLabel(plan?: string) {
   if (!raw) return "";
   const key = raw.toLowerCase().replace(/[\s-]+/g, "_");
   if (SERVICE_PLAN_LABELS[key]) return SERVICE_PLAN_LABELS[key];
+  if (key.startsWith("claude_pro")) {
+    if (key.includes("cancel")) return "Pro (Canceled)";
+    if (key.includes("past_due")) return "Pro (Past Due)";
+    return "Pro";
+  }
+  if (key.startsWith("claude_max")) {
+    if (key.includes("cancel")) return "Max (Canceled)";
+    return "Max";
+  }
   if (key.includes("team")) return "Teams";
   if (key.includes("plus")) return "Plus";
   if (key === "pro" || key.endsWith("_pro")) return "Pro";

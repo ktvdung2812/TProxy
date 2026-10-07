@@ -2839,17 +2839,29 @@ button:disabled,
 .quota-tracker-card-titles h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--color-text-main); text-transform: capitalize; }
 .quota-tracker-card-titles p { margin: 2px 0 0; font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .quota-tracker-card-email { font-size: 11px !important; color: var(--color-text-subtle) !important; }
-.quota-tracker-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; flex-shrink: 0; width: 100%; }
+.quota-tracker-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 100%;
+}
 
 @media (min-width: 900px) {
   .quota-tracker-card-head {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
   }
 
   .quota-tracker-card-head-row {
-    display: contents;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
   }
 
   .quota-tracker-card-ident {
@@ -2882,7 +2894,7 @@ button:disabled,
   }
 
   .quota-tracker-card-actions {
-    width: auto;
+    width: 100%;
   }
 }
 
@@ -3102,6 +3114,38 @@ button:disabled,
 .credential-usage-chart-state.is-error {
   color: var(--color-danger);
 }
+.credential-usage-models {
+  display: grid;
+  gap: 6px;
+}
+.credential-usage-models h6 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.credential-usage-models .logs-table-scroll {
+  max-height: 240px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+.credential-usage-models-table th,
+.credential-usage-models-table td {
+  padding: 6px 12px;
+}
+.credential-usage-models-name {
+  font-weight: 500;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.credential-usage-models-error {
+  min-height: 0;
+  padding: 8px 0 0;
+  justify-content: flex-start;
+}
 .quota-account-modal-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3133,6 +3177,21 @@ button:disabled,
   color: var(--color-text-muted);
 }
 .quota-account-modal-note-error { color: var(--color-danger); }
+.claude-limit-reset-list { display: grid; gap: 8px; }
+.claude-limit-reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 10px;
+}
+.claude-limit-reset-row-muted { opacity: 0.65; }
+.claude-limit-reset-copy { display: grid; gap: 2px; min-width: 0; }
+.claude-limit-reset-copy strong { font-size: 13px; font-weight: 600; color: var(--color-text-main); }
+.claude-limit-reset-copy span { font-size: 12px; color: var(--color-text-muted); }
+.claude-limit-reset-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .quota-account-modal-empty,
 .quota-account-modal-state {
   display: flex;
@@ -9679,7 +9738,7 @@ pre {
   }
 
   .quota-tracker-card-actions {
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .quota-tracker-cell-name { width: 31%; }
@@ -9716,15 +9775,16 @@ pre {
   }
 
   .quota-tracker-card-head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
   }
 
   .quota-tracker-card-head-row {
     display: flex;
     align-items: center;
+    width: 100%;
     min-width: 0;
   }
 
@@ -9750,9 +9810,7 @@ pre {
   }
 
   .quota-tracker-card-actions {
-    grid-column: 2;
-    grid-row: 1;
-    width: auto;
+    width: 100%;
   }
 }
 
@@ -10384,6 +10442,28 @@ textarea,
   text-transform: uppercase;
 }
 
+.quota-tracker-card-plan {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.quota-tracker-card-muted .quota-tracker-card-plan {
+  opacity: 0.65;
+}
+
 .quota-tracker-card-muted {
   opacity: 0.48;
   filter: saturate(0.45);
@@ -10465,7 +10545,7 @@ textarea,
   .quota-tracker-card-actions {
     width: 100%;
     overflow-x: auto;
-    justify-content: flex-start;
+    justify-content: flex-end;
     padding-bottom: 2px;
   }
 

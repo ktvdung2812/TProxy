@@ -1484,6 +1484,14 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			s.adminCredentialUsageChart(w, r, strings.TrimSuffix(suffix, "/usage-chart"))
 			return
 		}
+		if strings.HasSuffix(suffix, "/model-usage") {
+			s.adminCredentialModelUsage(w, r, strings.TrimSuffix(suffix, "/model-usage"))
+			return
+		}
+		if strings.HasSuffix(suffix, "/claude-limit-resets") {
+			s.adminClaudeLimitResets(w, r, strings.TrimSuffix(suffix, "/claude-limit-resets"))
+			return
+		}
 		if strings.HasSuffix(suffix, "/codex-reset-credits") {
 			s.adminCodexResetCredits(w, r, strings.TrimSuffix(suffix, "/codex-reset-credits"))
 			return
@@ -2655,6 +2663,37 @@ func (s *Server) adminCredentialUsageChart(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, points)
 }
 
+func (s *Server) adminCredentialModelUsage(w http.ResponseWriter, r *http.Request, credentialID string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET required", useClientRequestID(r))
+		return
+	}
+	credentialID = strings.Trim(strings.TrimSuffix(credentialID, "/"), "/")
+	if credentialID == "" || strings.Contains(credentialID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "credential id is required", useClientRequestID(r))
+		return
+	}
+	if _, err := s.store.CredentialByID(r.Context(), credentialID); err != nil {
+		status := http.StatusInternalServerError
+		code, message := "store_error", err.Error()
+		if errors.Is(err, sql.ErrNoRows) {
+			status, code, message = http.StatusNotFound, "credential_not_found", "credential not found"
+		}
+		writeError(w, status, code, message, useClientRequestID(r))
+		return
+	}
+	period := strings.TrimSpace(r.URL.Query().Get("period"))
+	if period == "" {
+		period = "week"
+	}
+	models, err := s.store.CredentialModelUsage(r.Context(), credentialID, period, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, models)
+}
+
 func (s *Server) adminCredentialQuota(w http.ResponseWriter, r *http.Request, credentialID string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or POST required", useClientRequestID(r))
@@ -2822,6 +2861,68 @@ func (s *Server) adminCodexResetCredits(w http.ResponseWriter, r *http.Request, 
 			"message": consumeErr.Error(),
 		})
 		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) adminClaudeLimitResets(w http.ResponseWriter, r *http.Request, credentialID string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "GET or POST required", useClientRequestID(r))
+		return
+	}
+	credentialID = strings.Trim(strings.TrimSuffix(credentialID, "/"), "/")
+	if credentialID == "" || strings.Contains(credentialID, "/") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "credential id is required", useClientRequestID(r))
+		return
+	}
+	credential, err := s.store.CredentialByID(r.Context(), credentialID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "credential_not_found", "credential not found", useClientRequestID(r))
+		return
+	}
+	provider, err := s.store.Provider(r.Context(), credential.ProviderID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "provider_not_found", "provider not found", useClientRequestID(r))
+		return
+	}
+	if provider.Type != "claude" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "limit resets are only available for Claude credentials", useClientRequestID(r))
+		return
+	}
+	if credential.AuthType == "oauth" {
+		if updated, ensureErr := s.auth.EnsureValid(r.Context(), *provider, credential, false); ensureErr == nil {
+			credential = updated
+		}
+	}
+	if r.Method == http.MethodGet {
+		resets, fetchErr := s.router.ClaudeLimitResets(r.Context(), *provider, credential)
+		if fetchErr != nil {
+			writeError(w, providers.Status(fetchErr), providers.Code(fetchErr), fetchErr.Error(), useClientRequestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, resets)
+		return
+	}
+	var body struct {
+		Program string `json:"program"`
+		GrantID string `json:"grant_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body", useClientRequestID(r))
+		return
+	}
+	// The Idempotency-Key doubles as the upstream request_id, so a retried
+	// click cannot spend a second grant.
+	requestID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	result, claimErr := s.router.ClaimClaudeLimitReset(r.Context(), *provider, credential, body.Program, body.GrantID, requestID)
+	if claimErr != nil {
+		writeError(w, providers.Status(claimErr), providers.Code(claimErr), claimErr.Error(), useClientRequestID(r))
+		return
+	}
+	if result.OK {
+		// The windows are refilled upstream, so a cooldown left by the limit
+		// that was just cleared would only keep the account out of rotation.
+		_ = s.store.ClearCooldown(r.Context(), credential.ID)
 	}
 	writeJSON(w, http.StatusOK, result)
 }

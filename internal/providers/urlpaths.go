@@ -174,23 +174,26 @@ func staticDiscoveryModels(provider store.Provider) []DiscoveredModel {
 	}
 }
 
-// claudeStaticModelEntries is the catalogue for Claude Code OAuth accounts.
-//
-// Anthropic exposes no model list a Claude Code OAuth token can read, so the
-// set is carried here the same way the reference gateways carry it. Dated IDs
-// are used where Anthropic publishes them, because that is what the API
-// accepts; the undated aliases resolve to the same models and are left to the
-// mapping layer.
+// claudeStaticModelEntries is the fallback catalogue for Claude Code accounts,
+// used when discoverClaudeModels cannot reach the live Anthropic Models API
+// (offline, rate-limited, token not yet refreshed, etc). Keep it reasonably
+// current, but it no longer has to be exact: live discovery is the primary
+// source. Dated IDs are used where Anthropic publishes them, because that is
+// what the API accepts; the undated aliases resolve to the same models and
+// are left to the mapping layer.
 func claudeStaticModelEntries(provider store.Provider) []DiscoveredModel {
 	registry := NewRegistry()
 	ids := []struct{ id, name string }{
-		{"claude-opus-5", "Claude Opus 5"},
-		{"claude-sonnet-5", "Claude Sonnet 5"},
+		{"claude-fable-5-1", "Claude Fable 5.1"},
 		{"claude-fable-5", "Claude Fable 5"},
+		{"claude-opus-5-5", "Claude Opus 5.5"},
+		{"claude-opus-5", "Claude Opus 5"},
 		{"claude-opus-4-8", "Claude Opus 4.8"},
 		{"claude-opus-4-7", "Claude Opus 4.7"},
 		{"claude-opus-4-6", "Claude Opus 4.6"},
 		{"claude-opus-4-5-20251101", "Claude Opus 4.5"},
+		{"claude-sonnet-5-5", "Claude Sonnet 5.5"},
+		{"claude-sonnet-5", "Claude Sonnet 5"},
 		{"claude-sonnet-4-6", "Claude Sonnet 4.6"},
 		{"claude-sonnet-4-5-20250929", "Claude Sonnet 4.5"},
 		{"claude-haiku-4-5-20251001", "Claude Haiku 4.5"},

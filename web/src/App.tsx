@@ -372,6 +372,7 @@ function App() {
         weight: credential.weight,
         proxy_pool_ids: credential.proxy_pool_ids,
         created_at: credential.created_at,
+        cooldown_until: credential.cooldown_until,
       })),
     );
   }, [snapshot.credentials, snapshot.providers]);

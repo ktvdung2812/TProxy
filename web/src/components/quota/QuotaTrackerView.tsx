@@ -9,15 +9,16 @@ import { Button, ConfirmDialog, Modal, Toggle, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
 import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
 import { runQuotaActions, consumeCodexResetCredit, fetchCredentialProxyUsage, type CredentialProxyUsage, type CredentialQuota } from "./api";
-import { clearCachedQuota, loadCredentialQuotaOnce } from "./quotaOnce";
+import { clearCachedQuota, loadCredentialQuotaOnce, peekCachedQuota } from "./quotaOnce";
 import { QuotaRingGrid } from "./QuotaRingGrid";
 import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
-import { moveCredentialBefore } from "../providers/types";
+import { formatServicePlanLabel, isOnCooldown, moveCredentialBefore } from "../providers/types";
 import {
   ACCOUNT_FILTER_OPTIONS,
   AUTO_REFRESH_STORAGE_KEY,
   QUOTA_VISIBILITY_KEY,
+  CLAUDE_REFRESH_INTERVAL_MS,
   REFRESH_INTERVAL_MS,
   type AccountFilter,
   type QuotaVisibility,
@@ -88,6 +89,7 @@ type CredentialRow = {
   weight?: number;
   proxy_pool_ids?: string[];
   created_at?: string;
+  cooldown_until?: string;
 };
 
 type Props = {
@@ -162,7 +164,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   const passRunningRef = useRef(false);
   const cancelledRef = useRef(false);
   const inFlightIdsRef = useRef(new Set<string>());
-  const refreshAllRef = useRef<() => Promise<void>>(async () => {});
+  const refreshAllRef = useRef<(options?: { auto?: boolean }) => Promise<void>>(async () => {});
+  const loadedAtRef = useRef<Map<string, number>>(new Map());
   const ensureLoadedRef = useRef<() => Promise<void>>(async () => {});
   const quotaPassReadyRef = useRef(false);
 
@@ -377,6 +380,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         return false;
       }
       inFlightIdsRef.current.add(credentialId);
+      loadedAtRef.current.set(credentialId, Date.now());
       setLoading((current) => ({ ...current, [credentialId]: true }));
       setErrors((current) => ({ ...current, [credentialId]: "" }));
       try {
@@ -416,10 +420,10 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   }, [secret]);
 
   const runQuotaPass = useCallback(
-    async (force: boolean) => {
+    async (force: boolean, forcedIds?: string[]) => {
       let changed = false;
       if (force) {
-        const ids = loadOrderRef.current.map((item) => item.id);
+        const ids = forcedIds ?? loadOrderRef.current.map((item) => item.id);
         for (const id of ids) {
           if (cancelledRef.current) return null;
           if (await loadQuota(id, true)) changed = true;
@@ -461,20 +465,31 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     }
   }, [loadProxyUsage, onError, onMutated, runQuotaPass, t]);
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (options?: { auto?: boolean }) => {
     if (loadOrderRef.current.length === 0) return;
+    // Auto-refresh leaves Claude accounts alone until their slower interval
+    // has elapsed; a manual refresh always reloads everything.
+    const now = Date.now();
+    const skipped = options?.auto
+      ? loadOrderRef.current.filter((item) => (
+        quotaProviderKey(item) === "claude"
+        && now - (loadedAtRef.current.get(item.id) ?? 0) < CLAUDE_REFRESH_INTERVAL_MS - 5000
+      ))
+      : [];
+    const skippedIds = new Set(skipped.map((item) => item.id));
+    const ids = loadOrderRef.current.map((item) => item.id).filter((id) => !skippedIds.has(id));
     cancelledRef.current = false;
     passRunningRef.current = true;
     inFlightIdsRef.current = new Set();
-    clearCachedQuota(loadOrderRef.current.map((item) => item.id));
-    settledRef.current = new Set();
-    setSettledQuotaCredentialIds(new Set());
+    clearCachedQuota(ids);
+    settledRef.current = new Set(skippedIds);
+    setSettledQuotaCredentialIds(new Set(skippedIds));
     setRefreshingAll(true);
     setCountdown(60);
     try {
       await loadProxyUsage();
       if (cancelledRef.current) return;
-      const changed = await runQuotaPass(true);
+      const changed = await runQuotaPass(true, ids);
       if (changed) onMutated?.();
     } catch (cause) {
       if (!cancelledRef.current) {
@@ -519,7 +534,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     if (!autoRefresh) return;
     const refreshTimer = window.setInterval(() => {
       if (!quotaPassReadyRef.current || passRunningRef.current) return;
-      void refreshAllRef.current();
+      void refreshAllRef.current({ auto: true });
     }, REFRESH_INTERVAL_MS);
     const countdownTimer = window.setInterval(() => {
       setCountdown((value) => (value <= 1 ? 60 : value - 1));
@@ -999,7 +1014,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
           {sortedCredentials.map((credential) => {
             const quotaKey = quotaProviderKey(credential);
             const info = getProviderTypeInfo(quotaKey);
-            const quota = quotaById[credential.id];
+            const quota = quotaById[credential.id] || peekCachedQuota(credential.id)?.quota;
+            const quotaPlan = formatServicePlanLabel(quota?.plan) || quota?.plan?.trim();
             const busy = loading[credential.id];
             const error = errors[credential.id];
             const rowBusy = deletingId === credential.id || togglingId === credential.id || resettingLimitId === credential.id || clearingCooldownId === credential.id || quotaBulkBusy;
@@ -1119,15 +1135,23 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                         </div>
                       </div>
                     </div>
+                    {quotaPlan ? (
+                      <span
+                        className="quota-tracker-card-plan"
+                        title={t("quota.servicePlan", { plan: quotaPlan })}
+                      >
+                        {quotaPlan}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="quota-tracker-card-actions">
                     <Toggle
                       checked={credential.enabled}
                       disabled={rowBusy || !quotaDataReady}
                       onChange={(event) => void setCredentialEnabled(credential, event.target.checked)}
                       aria-label={credential.enabled ? "Disable connection" : "Enable connection"}
                     />
-                  </div>
-
-                  <div className="quota-tracker-card-actions">
                     {isCodex ? (
                       <>
                         <button
@@ -1171,24 +1195,18 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                       className="quota-tracker-icon-btn"
                       disabled={busy || rowBusy}
                       onClick={() => {
-                        void loadQuota(credential.id, true).then((changed) => {
-                          if (changed) onMutated?.();
-                        });
+                        if (credential.cooldown_until && isOnCooldown(credential.cooldown_until)) {
+                          void handleClearCooldown(credential);
+                        } else {
+                          void loadQuota(credential.id, true).then((changed) => {
+                            if (changed) onMutated?.();
+                          });
+                        }
                       }}
                       aria-label={t("quota.refreshQuota")}
                       title={t("quota.refreshQuota")}
                     >
-                      <span className={cn("material-symbols-outlined", busy && "animate-spin")}>refresh</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="quota-tracker-icon-btn"
-                      disabled={rowBusy}
-                      onClick={() => void handleClearCooldown(credential)}
-                      aria-label={t("quota.clearCooldown")}
-                      title={t("quota.clearCooldown")}
-                    >
-                      <span className={cn("material-symbols-outlined", clearingCooldownId === credential.id && "animate-spin")}>restart_alt</span>
+                      <span className={cn("material-symbols-outlined", (busy || clearingCooldownId === credential.id) && "animate-spin")}>refresh</span>
                     </button>
                     <button
                       type="button"
@@ -1369,7 +1387,15 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
           if (selectedCredential) void setCredentialEnabled(selectedCredential, enabled);
         }}
         onClearCooldown={() => {
-          if (selectedCredential) void handleClearCooldown(selectedCredential);
+          if (selectedCredential) {
+            if (selectedCredential.cooldown_until && isOnCooldown(selectedCredential.cooldown_until)) {
+              void handleClearCooldown(selectedCredential);
+            } else {
+              void loadQuota(selectedCredential.id, true).then((changed) => {
+                if (changed) onMutated?.();
+              });
+            }
+          }
         }}
         clearingCooldown={selectedCredential ? clearingCooldownId === selectedCredential.id : false}
         resetCreditCount={selectedCredential ? getCodexResetCreditCount(quotaById[selectedCredential.id]) : 0}

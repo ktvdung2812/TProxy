@@ -1,6 +1,8 @@
 import type { CredentialQuota, QuotaEntry } from "./api";
 
 export const REFRESH_INTERVAL_MS = 60000;
+// Claude's usage endpoint rate-limits aggressively, so its auto-refresh is slower.
+export const CLAUDE_REFRESH_INTERVAL_MS = 180000;
 export const QUOTA_REFRESH_CONCURRENCY = 4;
 export const DEPLETED_QUOTA_THRESHOLD = 5;
 export const AUTO_REFRESH_STORAGE_KEY = "tproxy.quotaAutoRefresh";
