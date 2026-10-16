@@ -18,6 +18,7 @@ type Props = {
   storageKey: string;
   renderSummaryCells: (group: UsageGroup) => ReactNode;
   renderDetailCells: (item: UsageGroup["items"][number]) => ReactNode;
+  renderGroupLabel?: (group: UsageGroup) => ReactNode;
   emptyMessage: string;
 };
 
@@ -57,6 +58,7 @@ export function UsageTable({
   storageKey,
   renderSummaryCells,
   renderDetailCells,
+  renderGroupLabel,
   emptyMessage,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -113,7 +115,7 @@ export function UsageTable({
                   <td>
                     <div className="usage-group-label">
                       <span className={`material-symbols-outlined chevron ${expanded.has(group.groupKey) ? "open" : ""}`}>chevron_right</span>
-                      <span>{group.groupKey}</span>
+                      <span>{renderGroupLabel ? renderGroupLabel(group) : group.groupKey}</span>
                     </div>
                   </td>
                   {renderSummaryCells(group)}

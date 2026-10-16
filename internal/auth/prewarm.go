@@ -81,16 +81,17 @@ func (p *PrewarmManager) Start(ctx context.Context, refresh func(context.Context
 	}
 	p.stopCh = make(chan struct{})
 	p.doneCh = make(chan struct{})
+	stopCh, doneCh := p.stopCh, p.doneCh
 	p.mu.Unlock()
 	go func() {
-		defer close(p.doneCh)
+		defer close(doneCh)
 		ticker := time.NewTicker(p.cfg.CheckInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				p.runCycle(ctx, refresh)
-			case <-p.stopCh:
+			case <-stopCh:
 				return
 			case <-ctx.Done():
 				return

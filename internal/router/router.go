@@ -30,6 +30,12 @@ import (
 )
 
 type Router struct {
+	limitsMu              sync.Mutex
+	providerRequests      map[string][]time.Time
+	quotaMu               sync.Mutex
+	quotaCache            map[string]QuotaSnapshot
+	quotaInflight         map[string]*quotaFlight
+	quotaSlots            chan struct{}
 	accountMu             sync.Mutex
 	accounts              map[string]*AccountRuntime
 	store                 *store.Store
@@ -93,6 +99,8 @@ type StreamResult struct {
 type RawResult struct {
 	Selection Selection
 	Response  *providers.RawResponse
+	// MediaReservation stays held until the caller persists the job.
+	MediaReservation *store.MediaJobReservation
 }
 
 type RawProxyOptions struct {
@@ -104,6 +112,7 @@ type RawProxyOptions struct {
 	AllowedCredentialIDs []string
 	Team                 string
 	PinnedProvider       string
+	MediaScopes          []store.MediaJobScope
 }
 
 const AllowedCredentialIDsMetadataKey = "client_allowed_credential_ids"
@@ -323,6 +332,9 @@ func (r *Router) recordProviderSuccess(modelID, providerID string) {
 }
 
 func (r *Router) recordProviderFailure(modelID, providerID string, status int, err error) {
+	if localPolicyError(err) {
+		return
+	}
 	if r.circuitBreakers == nil {
 		return
 	}
@@ -473,7 +485,7 @@ func (r *Router) resolveDirectProviderModel(ctx context.Context, providerPrefix,
 	}
 	hasEnabled := false
 	for _, credential := range credentials {
-		if credential.Enabled {
+		if credential.Enabled || store.QuotaAutoDisabled(credential.Metadata) {
 			hasEnabled = true
 			break
 		}
@@ -578,7 +590,7 @@ func (r *Router) checkCredentialHealth(ctx context.Context, provider store.Provi
 }
 
 // CredentialQuota fetches upstream quota windows for a credential.
-func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CredentialQuota, error) {
+func (r *Router) fetchCredentialQuota(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CredentialQuota, error) {
 	quota, err := r.registry.CredentialQuota(ctx, provider, credential)
 	if err != nil {
 		return quota, err
@@ -586,7 +598,12 @@ func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, c
 	if len(quota.Quotas) > 0 {
 		r.observeQuota(credential.ID, quota)
 		depleted := providers.QuotaAtZero(quota)
-		if changed, syncErr := r.store.SyncCredentialQuotaState(ctx, credential, depleted); syncErr == nil && changed {
+		var changed bool
+		var syncErr error
+		if depleted || quotaSnapshotState(quota) != "unknown" {
+			changed, syncErr = r.store.SyncCredentialQuotaState(ctx, credential, depleted)
+		}
+		if syncErr == nil && changed {
 			_ = r.store.SyncProviderHealth(ctx, provider.ID)
 			if refreshed, refreshErr := r.store.CredentialByID(ctx, credential.ID); refreshErr == nil {
 				enabled := refreshed.Enabled
@@ -722,11 +739,20 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			}
 			continue
 		}
-		response, errExecute := adapter.Execute(ctx, selection.Provider, selection.Credential, request)
+		dispatched := false
+		call := func() (*canonical.Response, error) {
+			attemptRequest := requestForProvider(request, selection.Provider)
+			if err := r.admitProviderRequest(ctx, selection.Provider, attemptRequest); err != nil {
+				return nil, err
+			}
+			dispatched = true
+			return adapter.Execute(ctx, selection.Provider, selection.Credential, attemptRequest)
+		}
+		response, errExecute := call()
 		if errExecute != nil && (providers.Status(errExecute) == 401 || providers.Status(errExecute) == 403) {
 			if refreshed, refreshErr, ok := r.refreshAfterAuthError(ctx, selection); ok {
 				selection.Credential = refreshed
-				response, errExecute = adapter.Execute(ctx, selection.Provider, selection.Credential, request)
+				response, errExecute = call()
 			} else if refreshErr != nil {
 				errExecute = asCredentialError(refreshErr)
 			}
@@ -737,10 +763,15 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			if !retry.sleepBackoff(ctx) {
 				break
 			}
-			response, errExecute = adapter.Execute(ctx, selection.Provider, selection.Credential, request)
+			response, errExecute = call()
 		}
 		releaseAccount()
-		r.recordAccount(selection, outcomeStatus(errExecute), nil)
+		if !dispatched {
+			credentialsTried--
+		}
+		if !localPolicyError(errExecute) {
+			r.recordAccount(selection, outcomeStatus(errExecute), nil)
+		}
 		if errExecute == nil {
 			r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID)
 			r.clearSuccessfulCooldown(ctx, selection)
@@ -763,7 +794,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 		}
 		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
-		if r.arena != nil {
+		if r.arena != nil && !localPolicyError(errExecute) {
 			r.arena.RecordOutcome(selection.Credential, false)
 		}
 		if disableFallback(request) {
@@ -835,6 +866,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			continue
 		}
 		if !r.acquireProviderStream(selection.Provider) {
+			credentialsTried--
 			releaseAccount()
 			lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "provider_concurrency_limit", Message: fmt.Sprintf("provider %s concurrent stream limit is reached", selection.Provider.ID)}
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: http.StatusTooManyRequests, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
@@ -843,11 +875,20 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			}
 			continue
 		}
-		events, errExecute := adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, request)
+		dispatched := false
+		call := func() (<-chan canonical.Event, error) {
+			attemptRequest := requestForProvider(request, selection.Provider)
+			if err := r.admitProviderRequest(ctx, selection.Provider, attemptRequest); err != nil {
+				return nil, err
+			}
+			dispatched = true
+			return adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, attemptRequest)
+		}
+		events, errExecute := call()
 		if errExecute != nil && (providers.Status(errExecute) == 401 || providers.Status(errExecute) == 403) {
 			if refreshed, refreshErr, ok := r.refreshAfterAuthError(ctx, selection); ok {
 				selection.Credential = refreshed
-				events, errExecute = adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, request)
+				events, errExecute = call()
 			} else if refreshErr != nil {
 				errExecute = asCredentialError(refreshErr)
 			}
@@ -859,12 +900,17 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			if !retry.sleepBackoff(ctx) {
 				break
 			}
-			events, errExecute = adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, request)
+			events, errExecute = call()
 			errExecute = validateStreamResult(events, errExecute)
 		}
 		if errExecute != nil {
 			releaseAccount()
-			r.recordAccount(selection, outcomeStatus(errExecute), nil)
+			if !dispatched {
+				credentialsTried--
+			}
+			if !localPolicyError(errExecute) {
+				r.recordAccount(selection, outcomeStatus(errExecute), nil)
+			}
 			r.releaseProviderStream(selection.Provider)
 			lastErr = errExecute
 			status, code := providers.Status(errExecute), providers.Code(errExecute)
@@ -925,13 +971,15 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 	if credential.ID == "" {
 		return nil, fmt.Errorf("media job credential %q is unavailable", job.CredentialID)
 	}
-	model, err := r.store.ResolveModel(ctx, job.PublicModelID, "")
+	model, err := r.Resolve(ctx, job.PublicModelID, nil)
 	if err != nil {
 		return nil, err
 	}
 	selection := Selection{Model: *model, Provider: *provider, Credential: credential, Route: store.RouteTarget{PublicModelID: model.ID, ProviderID: provider.ID, UpstreamModel: job.UpstreamID}, Attempt: 1}
-	if _, err = r.assignProxy(ctx, &selection); err != nil {
+	if available, err := r.assignProxy(ctx, &selection); err != nil {
 		return nil, err
+	} else if !available {
+		return nil, &providers.ProviderError{Status: http.StatusServiceUnavailable, Code: "proxy_unavailable", Message: "no enabled proxy pool is available for the job's source"}
 	}
 	adapter, err := r.registry.Adapter(provider.Type)
 	if err != nil {
@@ -945,12 +993,15 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 	if id == "" {
 		id = job.ID
 	}
-	release, _, admissionErr := r.acquireAccount(ctx, selection.Credential, true)
+	release, admissionErr := r.admitSelection(ctx, &selection, nil, true)
 	if admissionErr != nil {
 		return nil, admissionErr
 	}
 	defer release()
-	raw, err := rawAdapter.Proxy(ctx, *provider, selection.Credential, providers.RawRequest{Method: http.MethodGet, Path: "/v1/videos/" + url.PathEscape(id), Headers: http.Header{"X-Request-ID": []string{job.ID}}})
+	if err := r.admitProviderRPM(ctx, selection.Provider); err != nil {
+		return nil, err
+	}
+	raw, err := rawAdapter.Proxy(ctx, selection.Provider, selection.Credential, providers.RawRequest{Method: http.MethodGet, Path: "/v1/videos/" + url.PathEscape(id), Headers: http.Header{"X-Request-ID": []string{job.ID}}})
 	if err != nil {
 		return nil, err
 	}
@@ -963,6 +1014,11 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, requestID, path string, body []byte, contentType string, options RawProxyOptions) (*RawResult, error) {
 	start := time.Now()
 	rawRequestContext := canonical.Request{RequestID: requestID, PublicModelID: model.ID, Source: canonical.ProtocolOpenAI, Metadata: map[string]any{"capability": rawCapability(path), "path": path, "client_api_key_id": options.ClientAPIKeyID, "team": options.Team}}
+	rawRequestContext.Metadata[InputBytesMetadataKey] = int64(len(body))
+	if strings.Contains(contentType, "json") {
+		_ = json.Unmarshal(body, &rawRequestContext.Raw)
+		rawRequestContext.MaxTokens = conditionInt(rawRequestContext.Raw["max_tokens"])
+	}
 	if len(options.AllowedCredentialIDs) > 0 {
 		rawRequestContext.Metadata[AllowedCredentialIDsMetadataKey] = append([]string(nil), options.AllowedCredentialIDs...)
 	}
@@ -1022,21 +1078,47 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			}
 			continue
 		}
+		var reservation *store.MediaJobReservation
+		if isMediaCreation(path, options.Method) {
+			scopes := append([]store.MediaJobScope(nil), options.MediaScopes...)
+			scopes = append(scopes, store.MediaJobScope{Kind: "provider", ID: selection.Provider.ID, Limit: selection.Provider.Limits.MediaJobs})
+			reservation, err = r.store.ReserveMediaJob(ctx, store.MediaJobOwner{ProviderID: selection.Provider.ID, ClientAPIKeyID: options.ClientAPIKeyID, Team: options.Team}, scopes)
+			if err != nil {
+				releaseAccount()
+				var limitErr *store.MediaJobLimitError
+				if !errors.As(err, &limitErr) {
+					return nil, err
+				}
+				lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "media_job_limit_exceeded", Message: err.Error(), RetryAfter: "1"}
+				if options.DisableFallback || limitErr.Scope.Kind != "provider" {
+					return nil, lastErr
+				}
+				continue
+			}
+		}
 		requestBody := rewriteRequestModel(body, contentType, selection.Route.UpstreamModel)
 		rawRequest := providers.RawRequest{Method: options.Method, Path: path, Body: requestBody, ContentType: contentType, Headers: options.Headers.Clone()}
-		raw, errProxy := rawAdapter.Proxy(ctx, selection.Provider, selection.Credential, rawRequest)
+		call := func() (*providers.RawResponse, error) {
+			if err := r.admitProviderRequest(ctx, selection.Provider, rawRequestContext); err != nil {
+				return nil, err
+			}
+			return rawAdapter.Proxy(ctx, selection.Provider, selection.Credential, rawRequest)
+		}
+		raw, errProxy := call()
 		if errProxy != nil && (providers.Status(errProxy) == 401 || providers.Status(errProxy) == 403) {
 			if refreshed, refreshErr, ok := r.refreshAfterAuthError(ctx, selection); ok {
 				selection.Credential = refreshed
 				requestBody = rewriteRequestModel(body, contentType, selection.Route.UpstreamModel)
 				rawRequest.Body = requestBody
-				raw, errProxy = rawAdapter.Proxy(ctx, selection.Provider, selection.Credential, rawRequest)
+				raw, errProxy = call()
 			} else if refreshErr != nil {
 				errProxy = asCredentialError(refreshErr)
 			}
 		}
 		releaseAccount()
-		r.recordAccount(selection, outcomeStatus(errProxy), nil)
+		if !localPolicyError(errProxy) {
+			r.recordAccount(selection, outcomeStatus(errProxy), nil)
+		}
 		if errProxy == nil {
 			if model.RewriteResponseModel && strings.Contains(strings.ToLower(raw.ContentType), "json") {
 				raw.Body = rewriteResponseModel(raw.Body, model.ID)
@@ -1044,8 +1126,9 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			r.clearSuccessfulCooldown(ctx, selection)
 			r.recordProviderSuccess(model.ID, selection.Provider.ID)
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
-			return &RawResult{Selection: selection, Response: raw}, nil
+			return &RawResult{Selection: selection, Response: raw, MediaReservation: reservation}, nil
 		}
+		reservation.Release()
 		lastErr = errProxy
 		status, code := providers.Status(errProxy), providers.Code(errProxy)
 		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errProxy)
@@ -1375,12 +1458,12 @@ func mergeCanonicalUsage(current, update canonical.Usage) canonical.Usage {
 
 func (r *Router) acquireProviderStream(provider store.Provider) bool {
 	limit := provider.Limits.ConcurrentStreams
-	if limit <= 0 {
-		return true
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.providerStreams[provider.ID] >= limit {
+	if r.providerStreams == nil {
+		r.providerStreams = make(map[string]int)
+	}
+	if limit > 0 && r.providerStreams[provider.ID] >= limit {
 		return false
 	}
 	r.providerStreams[provider.ID]++
@@ -1388,9 +1471,6 @@ func (r *Router) acquireProviderStream(provider store.Provider) bool {
 }
 
 func (r *Router) releaseProviderStream(provider store.Provider) {
-	if provider.Limits.ConcurrentStreams <= 0 {
-		return
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.providerStreams[provider.ID] > 1 {
@@ -1510,6 +1590,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		return nil, err
 	}
 	var selections []Selection
+	var policyLimitErr error
 	policyLimited := false
 	modelCooldownLimited := false
 	failoverSkipped := false
@@ -1518,6 +1599,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 	proxyExhausted := false
 	routesConsidered := 0
 	var outlook credentialOutlook
+	var quotaErr error
 	now := time.Now()
 	retry := r.retrySettings()
 	for _, route := range routes {
@@ -1551,7 +1633,10 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 		withinPolicy, policyErr := r.providerWithinPolicy(ctx, *provider, request)
 		if policyErr != nil {
-			return nil, policyErr
+			if !localPolicyError(policyErr) {
+				return nil, policyErr
+			}
+			policyLimitErr = policyErr
 		}
 		if !withinPolicy {
 			policyLimited = true
@@ -1577,6 +1662,11 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			// Nothing usable here: remember why so the final error names the real
 			// cause instead of a bare "no_available_credential", and give an
 			// account-level cooldown the same short grace model-level ones get.
+			if err := r.quotaBlockedError(credentials, provider.Type, now); err != nil {
+				if quotaErr == nil || providers.RetryAfter(err) != "" {
+					quotaErr = err
+				}
+			}
 			outlook.observe(credentials, now)
 			eligible = r.waitForCredentialCooldown(ctx, credentials, now)
 		}
@@ -1604,11 +1694,17 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 	}
 	if len(selections) == 0 {
-		if pin := pinnedProvider(request); pin != "" {
-			return nil, &providers.ProviderError{Status: http.StatusBadGateway, Code: "provider_unavailable", Message: fmt.Sprintf("no available credential for provider %s on %s", pin, model.ID)}
+		if quotaErr != nil {
+			return nil, quotaErr
 		}
 		if policyLimited {
+			if policyLimitErr != nil {
+				return nil, policyLimitErr
+			}
 			return nil, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "provider_limit_exceeded", Message: "all eligible providers are outside configured resource or budget limits"}
+		}
+		if pin := pinnedProvider(request); pin != "" {
+			return nil, &providers.ProviderError{Status: http.StatusBadGateway, Code: "provider_unavailable", Message: fmt.Sprintf("no available credential for provider %s on %s", pin, model.ID)}
 		}
 		if modelCooldownLimited {
 			return nil, &providers.ProviderError{
@@ -1697,25 +1793,21 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 
 func (r *Router) providerWithinPolicy(ctx context.Context, provider store.Provider, request canonical.Request) (bool, error) {
 	limits := provider.Limits
-	if limits.MaxOutputTokens > 0 && request.MaxTokens > limits.MaxOutputTokens {
+	defaulted, _ := request.Metadata[DefaultOutputLimitMetadataKey].(bool)
+	if limits.MaxOutputTokens > 0 && request.MaxTokens > limits.MaxOutputTokens && !defaulted {
 		return false, nil
 	}
 	if limits.MaxInputBytes > 0 {
 		encoded, _ := json.Marshal(request.Raw)
-		if int64(len(encoded)) > limits.MaxInputBytes {
+		inputBytes := int64(len(encoded))
+		if actual, ok := request.Metadata[InputBytesMetadataKey].(int64); ok {
+			inputBytes = actual
+		}
+		if inputBytes > limits.MaxInputBytes {
 			return false, nil
 		}
 	}
 	now := time.Now().UTC()
-	if limits.RequestsPerMinute > 0 {
-		count, err := r.store.ProviderRequestCountSince(ctx, provider.ID, now.Add(-time.Minute))
-		if err != nil {
-			return false, err
-		}
-		if count >= limits.RequestsPerMinute {
-			return false, nil
-		}
-	}
 	if limits.BudgetUSDPerDay > 0 {
 		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 		cost, err := r.store.ProviderEstimatedCostSince(ctx, provider.ID, start)
@@ -1723,7 +1815,7 @@ func (r *Router) providerWithinPolicy(ctx context.Context, provider store.Provid
 			return false, err
 		}
 		if cost >= limits.BudgetUSDPerDay {
-			return false, nil
+			return false, providerLimited("daily budget limit exceeded for provider:"+provider.ID, strconv.Itoa(max(1, int(math.Ceil(start.Add(24*time.Hour).Sub(now).Seconds())))))
 		}
 	}
 	return true, nil
@@ -1810,6 +1902,11 @@ func (r *Router) providerSupports(provider store.Provider, request canonical.Req
 // routesForModel loads the provider priority chain saved by PPM (route_targets) for a public model ID.
 // This is the runtime source of truth for which provider handles a model request.
 func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([]store.RouteTarget, error) {
+	return r.modelRoutes(ctx, model, true)
+}
+
+// modelRoutes also serves capacity inspection, which must not advance rotation.
+func (r *Router) modelRoutes(ctx context.Context, model store.PublicModel, rotate bool) ([]store.RouteTarget, error) {
 	routeModelID := model.ID
 	if model.Limits != nil {
 		if source, ok := model.Limits["_auto_source_model"].(string); ok && strings.TrimSpace(source) != "" {
@@ -1822,7 +1919,10 @@ func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([
 			return nil, err
 		}
 		if len(routes) > 0 {
-			return r.rotateRoutes(model.ID, routes), nil
+			if rotate {
+				routes = r.rotateRoutes(model.ID, routes)
+			}
+			return routes, nil
 		}
 		if providerPrefix, upstreamModel, ok := splitProviderModelSelector(model.ID); ok {
 			provider, providerErr := r.store.ProviderByPrefix(ctx, providerPrefix)
@@ -1868,7 +1968,9 @@ func (r *Router) routesForModel(ctx context.Context, model store.PublicModel) ([
 				}
 			}
 		}
-		filtered = r.rotateRoutes(comboItem.PublicModelID, filtered)
+		if rotate {
+			filtered = r.rotateRoutes(comboItem.PublicModelID, filtered)
+		}
 		basePriority := (len(model.ComboItems) - index) * 1_000_000
 		for _, route := range filtered {
 			route.Priority = basePriority + route.Priority
@@ -2189,6 +2291,9 @@ func (r *Router) retrySettings() RetrySettings {
 }
 
 func (r *Router) setCredentialCooldown(ctx context.Context, providerID, credentialID, upstreamModel string, err error) {
+	if localPolicyError(err) {
+		return
+	}
 	if err == nil {
 		return
 	}

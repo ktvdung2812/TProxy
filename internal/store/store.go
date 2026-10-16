@@ -222,10 +222,12 @@ type MediaJob struct {
 }
 
 type Store struct {
-	db        *sql.DB
-	encryptor *security.Encryptor
-	path      string
-	mu        sync.RWMutex
+	db           *sql.DB
+	encryptor    *security.Encryptor
+	path         string
+	mu           sync.RWMutex
+	mediaMu      sync.Mutex
+	mediaPending map[*MediaJobReservation]MediaJobOwner
 }
 
 func OpenSQLite(path string, encryptor *security.Encryptor) (*Store, error) {
@@ -2439,7 +2441,7 @@ func (s *Store) TeamEstimatedCostSince(ctx context.Context, teamID string, since
 	if teamID == "" {
 		return 0, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,policy_json FROM api_keys WHERE enabled=1`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,policy_json FROM api_keys`)
 	if err != nil {
 		return 0, err
 	}

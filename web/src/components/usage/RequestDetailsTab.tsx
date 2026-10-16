@@ -4,6 +4,8 @@ import { Badge, Button, Card, Modal, Select } from "../ui";
 import { fetchUsageEvents } from "./api";
 import type { UsageEvent } from "./api";
 import { fmt, fmtCost } from "./utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type ProviderItem = {
   id: string;
@@ -21,6 +23,7 @@ const PAGE_SIZE = 20;
 
 export function RequestDetailsTab({ secret, providers, providerNames, onError }: Props) {
   const {t}=useTranslation();
+  const { masked } = useAccountMask();
   const [events, setEvents] = useState<UsageEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -143,7 +146,7 @@ export function RequestDetailsTab({ secret, providers, providerNames, onError }:
             <div><span>Provider</span>{providerNames[selected.provider_id] || selected.provider_id}</div>
             <div><span>Public model</span><code>{selected.public_model_id}</code></div>
             <div><span>Upstream model</span><code>{selected.upstream_model}</code></div>
-            <div><span>Credential</span><code>{selected.credential_id || "—"}</code></div>
+            <div><span>Credential</span><code>{maskAccountText(selected.credential_id, masked) || "—"}</code></div>
             <div><span>API key</span><code>{selected.client_api_key_id || "local"}</code></div>
             <div><span>Attempt</span>{selected.attempt}</div>
             <div><span>Status</span>{selected.status}</div>

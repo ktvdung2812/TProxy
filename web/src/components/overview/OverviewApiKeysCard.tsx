@@ -157,7 +157,7 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
                       <span className="overview-api-key-sep">·</span>
                       <span>{models}</span>
                       <span className="overview-api-key-sep">·</span>
-                      <span>{formatLimitSummary(key)}</span>
+                      <span>{formatLimitSummary(key, t)}</span>
                       <span className="overview-api-key-sep">·</span>
                       <span className="overview-api-key-usage">{usageText}</span>
                     </p>

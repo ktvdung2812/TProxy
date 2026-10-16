@@ -1267,6 +1267,7 @@ func TestProviderPrefixedRawRouteDisablesCredentialFallback(t *testing.T) {
 	var successCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer fail-key" {
+			w.Header().Set("Retry-After", "30")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"quota"}}`))
 			return
@@ -1296,7 +1297,7 @@ func TestProviderPrefixedRawRouteDisablesCredentialFallback(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadGateway {
+	if recorder.Code != http.StatusTooManyRequests || recorder.Header().Get("Retry-After") != "30" {
 		t.Fatalf("provider-pinned raw status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if successCalls.Load() != 0 {

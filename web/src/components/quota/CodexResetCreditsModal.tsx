@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, Modal } from "../ui";
 import { fetchCodexResetCredits, type CodexResetCredits } from "./api";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type CredentialRef = {
   id: string;
@@ -40,6 +42,7 @@ function formatTimeRemaining(value?: string) {
 }
 
 export function CodexResetCreditsModal({ open, secret, credential, onClose }: Props) {
+  const { masked } = useAccountMask();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<CodexResetCredits | null>(null);
@@ -65,7 +68,7 @@ export function CodexResetCreditsModal({ open, secret, credential, onClose }: Pr
     };
   }, [open, secret, credential]);
 
-  const label = credential?.label || credential?.email || credential?.id || "Codex account";
+  const label = maskAccountText(credential?.label || credential?.email || credential?.id || "Codex account", masked);
 
   return (
     <Modal open={open} onClose={onClose} title="Codex Reset Credit Expiry" subtitle={label} size="lg">

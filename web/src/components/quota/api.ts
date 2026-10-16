@@ -118,8 +118,8 @@ export function fetchCredentialProxyUsage(secret: string, period: "all" | "today
   );
 }
 
-export function fetchCredentialQuota(secret: string, credentialId: string) {
-  return adminFetch<CredentialQuota>(secret, `/api/admin/credentials/${encodeURIComponent(credentialId)}/quota`, "POST");
+export function fetchCredentialQuota(secret: string, credentialId: string, refresh = true) {
+  return adminFetch<CredentialQuota>(secret, `/api/admin/credentials/${encodeURIComponent(credentialId)}/quota`, refresh ? "POST" : "GET");
 }
 
 export function fetchCredentialRequestLogs(secret: string, credentialId: string, limit = 100) {

@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,8 +42,9 @@ import (
 type contextKey string
 
 const (
-	apiKeyContext     contextKey = "api-key"
-	requestLogContext contextKey = "request-log"
+	apiKeyContext         contextKey = "api-key"
+	clientEndpointContext contextKey = "client-endpoint"
+	requestLogContext     contextKey = "request-log"
 )
 
 type requestLogState struct {
@@ -144,6 +146,8 @@ func (s *Server) StartBackground(ctx context.Context) {
 	s.backgroundCancel = cancel
 	s.backgroundWG.Add(1)
 	go func() { defer s.backgroundWG.Done(); s.runOperationalMonitor(backgroundCtx) }()
+	s.backgroundWG.Add(1)
+	go func() { defer s.backgroundWG.Done(); s.runQuotaRefresh(backgroundCtx) }()
 	interval, err := time.ParseDuration(s.currentConfig().Retention.CleanupInterval)
 	if err != nil || interval <= 0 {
 		interval = time.Hour
@@ -272,10 +276,13 @@ func (s *Server) clientAuth(next http.Handler) http.Handler {
 			writeStreamAwareError(w, r, http.StatusUnauthorized, "missing_api_key", "Bearer client API key is required", useClientRequestID(r))
 			return
 		}
-		if err = s.limiter.admitRequest(key, r.URL.Path, s.limitScopes(key)...); err != nil {
+		if err = s.admitClientIngress(key, r); err != nil {
 			var policyErr *limitError
 			if errors.As(err, &policyErr) {
 				status := http.StatusTooManyRequests
+				if policyErr.RetryAfter != "" {
+					w.Header().Set("Retry-After", policyErr.RetryAfter)
+				}
 				if policyErr.Code == "endpoint_forbidden" {
 					status = http.StatusForbidden
 				}
@@ -301,7 +308,9 @@ func (s *Server) clientAuth(next http.Handler) http.Handler {
 				r.ContentLength = int64(len(data))
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), apiKeyContext, key)))
+		ctx := context.WithValue(r.Context(), apiKeyContext, key)
+		ctx = context.WithValue(ctx, clientEndpointContext, r.URL.Path)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -392,6 +401,9 @@ func (s *Server) v1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/v1/limits":
+		s.clientLimits(w, r)
+		return
 	case "/v1/models":
 		s.models(w, r)
 		return
@@ -571,20 +583,13 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 	if clientKey != nil {
 		clientKeyID = clientKey.ID
 	}
-	mediaJobLimit := s.effectiveLimits(clientKey).MediaJobs
-	if clientKey != nil && mediaJobLimit > 0 && isAsyncVideoPath(path) {
-		active, countErr := s.store.ActiveMediaJobCount(r.Context(), clientKeyID)
-		if countErr != nil {
-			writeError(w, http.StatusInternalServerError, "media_job_limit_check_failed", countErr.Error(), requestID)
-			return
-		}
-		if active >= mediaJobLimit {
-			writeError(w, http.StatusTooManyRequests, "media_job_limit_exceeded", "active media job limit exceeded", requestID)
-			return
-		}
-	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if asyncVideo && idempotencyKey != "" {
+		release, lockErr := s.lockMediaRequest(r.Context(), clientKeyID, idempotencyKey)
+		if lockErr != nil {
+			return
+		}
+		defer release()
 		if existing, lookupErr := s.store.MediaJobByIdempotency(r.Context(), clientKeyID, idempotencyKey); lookupErr == nil {
 			s.writeStoredMediaJob(w, existing)
 			return
@@ -594,6 +599,7 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 		}
 	}
 	if err := s.enforceClientBudget(r.Context(), clientKey); err != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(max(1, int(time.Until(startOfDayUTC(time.Now()).Add(24*time.Hour)).Seconds())+1)))
 		writeError(w, http.StatusPaymentRequired, "budget_exceeded", err.Error(), requestID)
 		return
 	}
@@ -647,18 +653,22 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 		team = clientKey.Policy.Team
 		allowedCredentialIDs = append([]string(nil), clientKey.Policy.CredentialIDs...)
 	}
-	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, AllowedCredentialIDs: allowedCredentialIDs, Team: team, PinnedProvider: pinnedProvider})
+	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, AllowedCredentialIDs: allowedCredentialIDs, Team: team, PinnedProvider: pinnedProvider, MediaScopes: s.mediaScopes(clientKey)})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, providers.Code(err), err.Error(), requestID)
+		writeProviderError(w, err, requestID)
 		return
 	}
+	defer result.MediaReservation.Release()
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
 		state.ProviderID = result.Selection.Provider.ID
 		state.CredentialID = result.Selection.Credential.ID
 		state.Attempt = result.Selection.Attempt
 	}
 	if asyncVideo {
-		if jobErr := s.recordMediaJob(r.Context(), result, *model, clientKeyID, idempotencyKey); jobErr != nil {
+		// Once upstream accepted a job, persist it even if the client disconnected.
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+		defer cancel()
+		if jobErr := s.recordMediaJob(persistCtx, result, *model, clientKeyID, idempotencyKey); jobErr != nil {
 			writeError(w, http.StatusInternalServerError, "media_job_persist_failed", jobErr.Error(), requestID)
 			return
 		}
@@ -702,7 +712,11 @@ func (s *Server) recordMediaJob(ctx context.Context, result *router.RawResult, m
 	if err != nil {
 		return err
 	}
-	return s.store.SaveMediaJob(ctx, store.MediaJob{ID: upstreamID, Kind: "video", Status: status, PublicModelID: model.ID, ProviderID: result.Selection.Provider.ID, CredentialID: result.Selection.Credential.ID, UpstreamID: upstreamID, ClientAPIKeyID: clientKeyID, IdempotencyKey: idempotencyKey, ResponseJSON: string(encoded), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
+	job := store.MediaJob{ID: upstreamID, Kind: "video", Status: status, PublicModelID: model.ID, ProviderID: result.Selection.Provider.ID, CredentialID: result.Selection.Credential.ID, UpstreamID: upstreamID, ClientAPIKeyID: clientKeyID, IdempotencyKey: idempotencyKey, ResponseJSON: string(encoded), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if result.MediaReservation != nil {
+		return result.MediaReservation.Save(ctx, job)
+	}
+	return s.store.SaveMediaJob(ctx, job)
 }
 
 func (s *Server) writeStoredMediaJob(w http.ResponseWriter, job *store.MediaJob) {
@@ -743,9 +757,13 @@ func (s *Server) mediaJobStatus(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	if !terminalMediaStatus(job.Status) {
+		if !s.store.PublicModelAllowed(key, job.PublicModelID) || (key != nil && len(key.Policy.CredentialIDs) > 0 && !slices.Contains(key.Policy.CredentialIDs, job.CredentialID)) {
+			writeError(w, http.StatusForbidden, "credential_forbidden", "the API key can no longer use this job's source", useClientRequestID(r))
+			return
+		}
 		result, refreshErr := s.router.RefreshMediaJob(r.Context(), *job)
 		if refreshErr != nil {
-			writeError(w, http.StatusBadGateway, providers.Code(refreshErr), refreshErr.Error(), useClientRequestID(r))
+			writeProviderError(w, refreshErr, useClientRequestID(r))
 			return
 		}
 		var payload map[string]any
@@ -907,10 +925,7 @@ func (s *Server) enforceClientBudget(ctx context.Context, key *store.APIKey) err
 }
 
 func (s *Server) limitScopes(key *store.APIKey) []limitScope {
-	scopes := make([]limitScope, 0, 3)
-	if s.currentConfig().Limits != (config.LimitPolicy{}) {
-		scopes = append(scopes, limitScope{ID: "global", Limits: s.currentConfig().Limits})
-	}
+	scopes := []limitScope{{ID: "global", Limits: s.currentConfig().Limits}}
 	if key != nil && key.Policy.Team != "" {
 		for _, team := range s.currentConfig().Teams {
 			if team.ID == key.Policy.Team {
@@ -1128,20 +1143,17 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 		writeError(w, http.StatusBadRequest, "invalid_request_controls", err.Error(), request.RequestID)
 		return
 	}
-	if err := s.enforceClientBudget(r.Context(), key); err != nil {
-		writeError(w, http.StatusPaymentRequired, "budget_exceeded", err.Error(), request.RequestID)
+	if err := s.prepareClientRequest(r, &request, key); err != nil {
+		writeProviderError(w, err, request.RequestID)
 		return
 	}
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
 		state.Protocol = string(request.Source)
 		state.PublicModelID = request.PublicModelID
 	}
-	if maxOutput := s.effectiveLimits(key).MaxOutputTokens; maxOutput > 0 && request.MaxTokens > maxOutput {
-		writeError(w, http.StatusBadRequest, "max_output_tokens_exceeded", "requested output tokens exceed API key policy", request.RequestID)
-		return
-	}
 	if request.Stream {
-		if err := s.limiter.acquireStream(key, s.limitScopes(key)...); err != nil {
+		release, err := s.acquireClientStream(key)
+		if err != nil {
 			var policyErr *limitError
 			if errors.As(err, &policyErr) {
 				writeError(w, http.StatusTooManyRequests, policyErr.Code, policyErr.Message, request.RequestID)
@@ -1150,7 +1162,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			writeError(w, http.StatusTooManyRequests, "concurrency_limit_exceeded", err.Error(), request.RequestID)
 			return
 		}
-		defer s.limiter.releaseStream(key, s.limitScopes(key)...)
+		defer release()
 	}
 	model, err := s.router.Resolve(r.Context(), request.PublicModelID, key)
 	if err != nil {
@@ -1363,20 +1375,17 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	attachClientPolicyMetadata(&request, key)
 	attachIngressMetadata(r, &request)
-	if err := s.enforceClientBudget(r.Context(), key); err != nil {
-		writeError(w, http.StatusPaymentRequired, "budget_exceeded", err.Error(), requestID)
-		return
-	}
-	if maxOutput := s.effectiveLimits(key).MaxOutputTokens; maxOutput > 0 && request.MaxTokens > maxOutput {
-		writeError(w, http.StatusBadRequest, "max_output_tokens_exceeded", "requested output tokens exceed API key policy", requestID)
+	if err := s.prepareClientRequest(r, &request, key); err != nil {
+		writeProviderError(w, err, requestID)
 		return
 	}
 	if request.Stream {
-		if err := s.limiter.acquireStream(key, s.limitScopes(key)...); err != nil {
+		release, err := s.acquireClientStream(key)
+		if err != nil {
 			writeError(w, http.StatusTooManyRequests, "concurrency_limit_exceeded", err.Error(), requestID)
 			return
 		}
-		defer s.limiter.releaseStream(key, s.limitScopes(key)...)
+		defer release()
 	}
 	model, err := s.router.Resolve(r.Context(), requestedModel, key)
 	if err != nil {
@@ -2714,11 +2723,21 @@ func (s *Server) adminCredentialQuota(w http.ResponseWriter, r *http.Request, cr
 		writeError(w, http.StatusNotFound, "provider_not_found", "provider not found", useClientRequestID(r))
 		return
 	}
-	if credential.AuthType == "oauth" || credential.AuthType == "service_account" {
-		updated, ensureErr := s.auth.EnsureValid(r.Context(), *provider, credential, false)
-		if ensureErr == nil {
-			credential = updated
+	if r.Method == http.MethodGet {
+		snapshot := s.router.CachedQuota(credential.ID, provider.Type)
+		quota := providers.CredentialQuota{CredentialID: credential.ID, ProviderID: provider.ID, ProviderType: provider.Type, Quotas: map[string]providers.QuotaEntry{}, Message: "Quota has not been refreshed yet"}
+		if snapshot.Quota != nil {
+			quota = *snapshot.Quota
 		}
+		enabled, autoDisabled := credential.Enabled, store.QuotaAutoDisabled(credential.Metadata)
+		quota.CredentialEnabled, quota.QuotaAutoDisabled = &enabled, &autoDisabled
+		writeJSON(w, http.StatusOK, struct {
+			providers.CredentialQuota
+			State     string    `json:"state"`
+			CheckedAt time.Time `json:"checked_at"`
+			Stale     bool      `json:"stale"`
+		}{quota, snapshot.State, snapshot.CheckedAt, snapshot.Stale})
+		return
 	}
 	quota, err := s.router.CredentialQuota(r.Context(), *provider, credential)
 	if err != nil {
@@ -2939,6 +2958,7 @@ func (s *Server) adminQuotaSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type keySummary struct {
+		router.CapacitySnapshot
 		ID              string  `json:"id"`
 		Name            string  `json:"name"`
 		Enabled         bool    `json:"enabled"`
@@ -2954,14 +2974,20 @@ func (s *Server) adminQuotaSummary(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "store_error", usageErr.Error(), useClientRequestID(r))
 			return
 		}
+		capacity, capacityErr := s.keyCapacity(r.Context(), &store.APIKey{ID: key.ID, Models: key.Models, Policy: key.Policy, Enabled: key.Enabled}, strings.TrimSpace(r.URL.Query().Get("model")))
+		if capacityErr != nil {
+			writeError(w, http.StatusInternalServerError, "capacity_error", capacityErr.Error(), useClientRequestID(r))
+			return
+		}
 		items = append(items, keySummary{
-			ID:              key.ID,
-			Name:            key.Name,
-			Enabled:         key.Enabled,
-			RequestsToday:   requests,
-			CostUSDToday:    cost,
-			BudgetUSDPerDay: key.Policy.Limits.BudgetUSDPerDay,
-			RequestsPerMin:  key.Policy.Limits.RequestsPerMinute,
+			CapacitySnapshot: capacity,
+			ID:               key.ID,
+			Name:             key.Name,
+			Enabled:          key.Enabled,
+			RequestsToday:    requests,
+			CostUSDToday:     cost,
+			BudgetUSDPerDay:  key.Policy.Limits.BudgetUSDPerDay,
+			RequestsPerMin:   key.Policy.Limits.RequestsPerMinute,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -27,6 +27,8 @@ import {
 } from "../quota/api";
 import { loadCredentialQuotaOnce } from "../quota/quotaOnce";
 import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByPriority, formatCredentialAddedAt, formatServicePlanLabel, moveCredentialBefore, type Credential, type ModelAlias, type Provider } from "./types";
 
 /** Providers whose upstream quota/balance probe is implemented in tproxy. */
@@ -128,6 +130,7 @@ export function ProviderDetail({
     [provider.Type, provider.ID, presets],
   );
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const connectionProfile = useMemo(
     () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
     [catalog, presets, provider.ID],
@@ -437,7 +440,7 @@ export function ProviderDetail({
           },
         }));
         if (!silent && message && badges.length === 0) {
-          onNotice(`${credentialId}: ${message}`);
+          onNotice(`${maskAccountText(credentialId, masked)}: ${message}`);
         }
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : "Quota check failed";
@@ -923,7 +926,7 @@ export function ProviderDetail({
         autoStart
         onClose={() => setReAuthCredential(null)}
         onComplete={() => {
-          onNotice(`Credential ${reAuthCredential?.id ?? ""} re-authenticated`);
+          onNotice(`Credential ${maskAccountText(reAuthCredential?.id ?? "", masked)} re-authenticated`);
           setReAuthCredential(null);
           onMutated();
         }}
@@ -952,7 +955,7 @@ export function ProviderDetail({
       />
       <ConfirmDialog
         open={confirmDeleteCred !== null}
-        title={`Delete credential ${confirmDeleteCred?.id}?`}
+        title={`Delete credential ${maskAccountText(confirmDeleteCred?.id ?? "", masked)}?`}
         message="This permanently removes the credential and its encrypted secret."
         confirmText="Delete credential"
         variant="danger"
@@ -1035,6 +1038,7 @@ function ConnectionRow({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const { masked } = useAccountMask();
   const status = credentialStatusLabel(credential);
   const authIcon = credential.auth_type === "oauth" ? "lock_person" : credential.auth_type === "none" ? "lock_open" : "key";
   const hasProxy = (credential.proxy_pool_ids?.length ?? 0) > 0;
@@ -1107,7 +1111,7 @@ function ConnectionRow({
     setBusy(true);
     try {
       await clearCredentialCooldown(secret, credential.id);
-      onNotice(`Cooldown cleared for ${credential.id}`);
+      onNotice(`Cooldown cleared for ${maskAccountText(credential.id, masked)}`);
       onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "Clear cooldown failed");
@@ -1137,7 +1141,7 @@ function ConnectionRow({
         onDragStart={(event) => onDragStart(event, credential.id)}
         onDragEnd={onDragEnd}
         disabled={dragDisabled}
-        aria-label={`Drag ${connectionTitle} to change account order`}
+        aria-label={`Drag ${maskAccountText(connectionTitle, masked)} to change account order`}
         title="Drag to change account order"
       >
         <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
@@ -1147,7 +1151,7 @@ function ConnectionRow({
           type="checkbox"
           checked={selected}
           onChange={(event) => onSelectedChange(credential.id, event.target.checked)}
-          aria-label={`Select ${credential.email || credential.label || credential.id}`}
+          aria-label={`Select ${maskAccountText(credential.email || credential.label || credential.id, masked)}`}
         />
       </label>
       <span
@@ -1165,10 +1169,10 @@ function ConnectionRow({
       <div className="connection-main">
         <div className="connection-label">
           {accountNumber ? <span className="connection-label-index">#{accountNumber}</span> : null}
-          <span className="connection-label-text">{connectionTitle}</span>
+          <span className="connection-label-text">{maskAccountText(connectionTitle, masked)}</span>
         </div>
         {(credential.email || credential.label || credential.created_at) && (
-          <div className="connection-sub" title={`Credential ID: ${credential.id}`}>
+          <div className="connection-sub" title={`Credential ID: ${maskAccountText(credential.id, masked)}`}>
             Added {formatCredentialAddedAt(credential.created_at)}
           </div>
         )}

@@ -19,8 +19,15 @@ import (
 func decodeBody(r *http.Request) (map[string]any, error) {
 	defer r.Body.Close()
 	var body map[string]any
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 16<<20))
-	if err := decoder.Decode(&body); err != nil {
+	data, err := io.ReadAll(io.LimitReader(r.Body, (16<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > 16<<20 {
+		return nil, fmt.Errorf("request body exceeds 16 MiB")
+	}
+	r.ContentLength = int64(len(data))
+	if err := json.Unmarshal(data, &body); err != nil {
 		return nil, fmt.Errorf("invalid JSON body: %w", err)
 	}
 	return body, nil

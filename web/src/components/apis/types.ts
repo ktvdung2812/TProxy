@@ -31,6 +31,18 @@ export type ApiKeyUsage = {
   cost_usd_today: number;
   budget_usd_per_day?: number;
   requests_per_minute?: number;
+  effective_limits?: Record<string, EffectiveLimit>;
+  shared_limits?: Record<string, EffectiveLimit>;
+  eligible_account_count?: number;
+  quota_windows?: Array<{ credential_id: string; state: string; stale: boolean; checked_at: string }>;
+  computed_at?: string;
+};
+
+export type EffectiveLimit = {
+  state: "finite" | "unbounded" | "unknown" | "unavailable";
+  value?: number;
+  remaining?: number;
+  sources: string[];
 };
 
 export type ApiKeyFormData = {

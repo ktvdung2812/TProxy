@@ -104,6 +104,35 @@ func (s *Server) responsesWebSocket(w http.ResponseWriter, r *http.Request) {
 			_ = writeWebSocketError(connection, "unsupported_event", "supported event type is response.create", stringValue(event["request_id"]))
 			continue
 		}
+		if token, tokenErr := extractClientAPIKey(r); tokenErr != nil {
+			_ = writeWebSocketPolicyError(connection, &providers.ProviderError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "invalid client API key"}, "")
+			return
+		} else if token != "" {
+			key, authErr := s.store.AuthenticateAPIKey(ctx, token)
+			if authErr != nil {
+				_ = writeWebSocketPolicyError(connection, &providers.ProviderError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "invalid client API key"}, "")
+				return
+			}
+			r = r.WithContext(context.WithValue(ctx, apiKeyContext, key))
+		}
+		key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
+		r.ContentLength = int64(len(data))
+		endpoint, _ := r.Context().Value(clientEndpointContext).(string)
+		if endpoint == "" {
+			endpoint = r.URL.Path
+		}
+		if err := s.limiter.admitRequest(key, endpoint, s.limitScopes(key)...); err != nil {
+			if writeWebSocketPolicyError(connection, err, stringValue(event["request_id"])) != nil {
+				return
+			}
+			continue
+		}
+		if limit := s.effectiveLimits(key).MaxInputBytes; limit > 0 && int64(len(data)) > limit {
+			if writeWebSocketPolicyError(connection, &providers.ProviderError{Status: http.StatusRequestEntityTooLarge, Code: "request_too_large", Message: "request body exceeds API key max_input_bytes"}, stringValue(event["request_id"])) != nil {
+				return
+			}
+			continue
+		}
 		payload := event
 		if nested, ok := event["response"].(map[string]any); ok {
 			payload = nested
@@ -152,16 +181,14 @@ func (s *Server) responsesWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection *websocket.Conn, r *http.Request, request canonical.Request, scope string) (string, error) {
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	attachClientPolicyMetadata(&request, key)
-	if err := s.enforceClientBudget(parent, key); err != nil {
-		return "", writeWebSocketError(connection, "budget_exceeded", err.Error(), request.RequestID)
+	if err := s.prepareClientRequest(r, &request, key); err != nil {
+		return "", writeWebSocketPolicyError(connection, err, request.RequestID)
 	}
-	if key != nil && key.Policy.Limits.MaxOutputTokens > 0 && request.MaxTokens > key.Policy.Limits.MaxOutputTokens {
-		return "", writeWebSocketError(connection, "max_output_tokens_exceeded", "requested output tokens exceed API key policy", request.RequestID)
+	release, err := s.acquireClientStream(key)
+	if err != nil {
+		return "", writeWebSocketPolicyError(connection, err, request.RequestID)
 	}
-	if err := s.limiter.acquireStream(key, s.limitScopes(key)...); err != nil {
-		return "", writeWebSocketError(connection, "concurrency_limit_exceeded", err.Error(), request.RequestID)
-	}
-	defer s.limiter.releaseStream(key, s.limitScopes(key)...)
+	defer release()
 	model, err := s.router.Resolve(parent, request.PublicModelID, key)
 	if err != nil {
 		return "", writeWebSocketError(connection, "model_not_found", err.Error(), request.RequestID)
@@ -175,7 +202,7 @@ func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection
 	defer cancel()
 	stream, err := s.router.ExecuteStream(ctx, *model, request)
 	if err != nil {
-		return "", writeWebSocketError(connection, providers.Code(err), err.Error(), request.RequestID)
+		return "", writeWebSocketPolicyError(connection, err, request.RequestID)
 	}
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
 		state.ProviderID = stream.Selection.Provider.ID
@@ -244,6 +271,25 @@ func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection
 		}
 	}
 	return "", nil
+}
+
+func writeWebSocketPolicyError(connection *websocket.Conn, err error, requestID string) error {
+	status, code, retry := providers.Status(err), providers.Code(err), providers.RetryAfter(err)
+	if limit, ok := err.(*limitError); ok {
+		status, code, retry = http.StatusTooManyRequests, limit.Code, limit.RetryAfter
+		if code == "endpoint_forbidden" {
+			status = http.StatusForbidden
+		}
+	}
+	if status < 400 {
+		status = http.StatusBadGateway
+	}
+	_ = connection.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	payload := map[string]any{"type": "error", "status": status, "error": map[string]any{"type": "provider_error", "code": code, "message": security.RedactText(err.Error()), "request_id": requestID}}
+	if retry != "" {
+		payload["retry_after"] = retry
+	}
+	return connection.WriteJSON(payload)
 }
 
 func writeWebSocketError(connection *websocket.Conn, code, message, requestID string) error {

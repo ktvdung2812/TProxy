@@ -1,4 +1,5 @@
 import type { ApiKeyFormData, ApiKeyRecord, ApiModelOption, ProxyEndpoint } from "./types";
+import type { TFunction } from "i18next";
 import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
 
 export function normalizeBaseUrl(origin: string): string {
@@ -110,9 +111,10 @@ export function formToPayload(form: ApiKeyFormData, editing: boolean) {
   return payload;
 }
 
-export function formatLimitSummary(key: ApiKeyRecord): string {
+export function formatLimitSummary(key: ApiKeyRecord, t?: TFunction): string {
   const limits = key.policy?.limits;
-  if (!limits) return "No limits";
+  const inherited = t ? t("apis.inheritedLimits") : "Based on available accounts";
+  if (!limits) return inherited;
 
   const parts: string[] = [];
   if (limits.requests_per_minute) parts.push(`${limits.requests_per_minute} req/min`);
@@ -121,7 +123,7 @@ export function formatLimitSummary(key: ApiKeyRecord): string {
   if (limits.max_output_tokens) parts.push(`${limits.max_output_tokens} tokens out`);
   if (limits.media_jobs) parts.push(`${limits.media_jobs} media jobs`);
   if (limits.budget_usd_per_day) parts.push(`$${limits.budget_usd_per_day}/day`);
-  return parts.length ? parts.join(" · ") : "No limits";
+  return parts.length ? parts.join(" · ") : inherited;
 }
 
 type ExampleModelSource = {

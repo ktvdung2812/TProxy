@@ -719,8 +719,8 @@ func TestCodexDiscoveryUsesCodexModelsEndpoint(t *testing.T) {
 func TestAppendCodexWindows(t *testing.T) {
 	quotas := map[string]QuotaEntry{}
 	appendCodexWindows(quotas, "", map[string]any{
-		"primary_window":   map[string]any{"used_percent": 25, "reset_at": "2030-01-01T00:00:00Z"},
-		"secondary_window": map[string]any{"used_percent": 10, "reset_at": "2030-01-07T00:00:00Z"},
+		"primary_window":   map[string]any{"used_percent": 25, "limit_window_seconds": 18000, "reset_at": "2030-01-01T00:00:00Z"},
+		"secondary_window": map[string]any{"used_percent": 10, "limit_window_seconds": 604800, "reset_at": "2030-01-07T00:00:00Z"},
 	})
 	if len(quotas) != 2 || quotas["session"].Used != 25 || quotas["weekly"].Used != 10 {
 		t.Fatalf("quotas=%+v", quotas)

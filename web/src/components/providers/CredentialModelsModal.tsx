@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Badge, Button, EmptyState, Input, Modal } from "../ui";
 import { discoverCredentialModels, testModel, type DiscoveredModel } from "./api";
 import type { Credential } from "./types";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Props = {
   open: boolean;
@@ -14,6 +16,7 @@ type Props = {
 
 export function CredentialModelsModal({ open, credential, providerId, secret, onClose }: Props) {
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -79,8 +82,8 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
 
   if (!credential) return null;
 
-  const title = credential.email || credential.label || credential.id;
-  const subtitle = credential.email || credential.label ? credential.id : undefined;
+  const title = maskAccountText(credential.email || credential.label || credential.id, masked);
+  const subtitle = credential.email || credential.label ? maskAccountText(credential.id, masked) : undefined;
 
   const handleCopy = async (modelId: string) => {
     try {

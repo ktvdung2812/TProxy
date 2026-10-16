@@ -79,7 +79,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 
 ### Operations & governance
 
-- **Client API keys** default to all models, with per-key toggles plus endpoint, RPM, concurrency, input size, media-job, and daily-budget policies.
+- **Client API keys** default to all models and inherit limits from available accounts. Per-key endpoint, RPM, concurrency, input size, output token, media-job, and daily-budget policies can tighten this shared capacity.
 - **Teams** with scoped limits and cost aggregation.
 - **Token Saver** compression pipeline (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** per provider (OPEN / DEGRADED / CLOSED).
@@ -200,6 +200,40 @@ under **Settings** before enabling LAN, remote, or tunnel access).
 - **Usage** includes cache reads, cache writes, and reasoning. Input totals include cache tokens; output totals include reasoning, so these details must not be added again. TTFT is measured at the first content delta; non-streaming requests have no TTFT sample.
 
 Responses WebSocket continuations accept `previous_response_id`, inherit omitted settings, and reconstruct prior input/output for stateless upstreams. Send a stable `X-Session-ID` (or `session_id`, `conversation_id`, or `prompt_cache_key`) to resume across connections. History is isolated by API key/team/session, held only in memory for 15 minutes, and bounded to 128 responses / 32 MiB total / 2 MiB per context. On expiry or server restart, resend full input without `previous_response_id`; `reset: true` starts a fresh context. Routing observations and active alerts also reset on restart; usage metrics remain in SQLite.
+
+### API key limits and shared capacity
+
+For both existing and new keys, each zero or omitted `policy.limits` field inherits the serving pool's limits. Positive key, team and global limits remain additional gates. Limits are evaluated against accounts the key may use for the requested model and its routes/combo; disabled, expired, unauthorized and cooling-down accounts are excluded. Reading capacity never advances rotation, and derived values are not saved to the key policy.
+
+| Limit | Shared source behavior |
+| --- | --- |
+| Requests/minute | Sum of eligible provider limits, counted once per provider. Every upstream attempt, including retries, consumes provider RPM atomically. |
+| Concurrent requests | Sum of account `max_concurrent_requests` capacity; regular and streaming requests share these slots. |
+| Concurrent streams | Account capacity additionally capped by each provider's stream limit, then by key/team/global stream limits. |
+| USD/day | Provider budgets and remaining balances use shared estimated spend since midnight UTC. In-flight work can finish after the recorded budget reaches its cap. |
+| Media jobs | Pending creations and unfinished jobs share provider/key/team/global capacity. Idempotent repeats reuse the existing job. |
+| Input bytes/output tokens | Checked per request against a route that can serve it; these limits are not summed across accounts. Omitted output limits are forwarded to upstream where its protocol supports them. Codex removes unsupported output-cap fields, so its generated-token ceiling cannot be guaranteed by this setting. |
+| Upstream quota | Each account keeps its original quota windows and existing exhaustion rules. Percentages are not converted into requests, tokens or USD. |
+
+For example, accounts with request concurrency 3 and 5 provide eight shared slots. Creating another API key does not create another eight slots. An uncapped source remains usable; missing quota data is reported as unknown. An empty pool is unavailable, never unlimited.
+
+`GET /api/admin/quota/summary?model=<optional-model>` preserves existing fields and adds `effective_limits`, `shared_limits` (before key/team/global gates), `eligible_account_count`, `quota_windows`, and `computed_at` to each key. Each effective limit reports `finite`, `unbounded`, `unknown` or `unavailable`, with `value`, `remaining` where calculable, and source IDs. Without `model`, this is a capacity ceiling across permitted models; an individual request may have fewer eligible routes. Source capacity is shared, so remaining amounts can change as other keys make requests.
+
+Clients can read their own limits with `GET /v1/limits?model=<optional-model>`, using `Authorization: Bearer <client-api-key>` or `X-Api-Key`. A client key is required even when anonymous local inference is enabled; a management password cannot replace it. The response has `object: "tproxy.limits"`, `api_key_id`, the optional `model`, and the same capacity fields described above, scoped to the authenticated key. Passing another key ID does not change that scope.
+
+To discover support without assuming a provider or hostname, try `GET <base-url>/limits` with the existing client key. Accept it as a tproxy limits response only on HTTP 200 with `object: "tproxy.limits"` and valid capacity fields. A 404 or incompatible payload means limits discovery is unsupported (including older tproxy versions); distinguish authentication errors and temporary failures from that result. This probe does not require sending a generation request.
+
+```bash
+curl "$TPROXY_BASE_URL/limits?model=gpt-6.1-sol" \
+  -H "Authorization: Bearer $TPROXY_API_KEY"
+# TPROXY_BASE_URL includes /v1, for example http://127.0.0.1:28120/v1.
+```
+
+Reading limits consumes no inference RPM and remains available when a key is rate-limited or its endpoint policy only allows generation. Responses use `Cache-Control: no-store`; they neither rotate accounts nor probe upstream. A missing or forbidden model returns an `unavailable` pool. `quota_windows` keeps each account's cached quota, timestamps and stale/unknown state; diagnostic messages and reset-credit redemption details are omitted. Codex windows expose `window_minutes`: 300 is five hours and 10080 is seven days, regardless of whether upstream calls the window primary or secondary. Missing/invalid duration or usage has `total: 0` (unknown), not an assumed 100% remaining. Never add percentages across accounts or treat a response header from one generation as the quota of the whole key.
+
+Quota snapshots refresh in the backend even with the dashboard closed: every 60 seconds (180 seconds for Claude), with up to four probes at once and duplicate probes coalesced. Quota-paused accounts are checked for recovery; manual disables are preserved. `GET /api/admin/credentials/{id}/quota` reads the snapshot, while `POST` requests a fresh probe. A failed probe retains the previous windows and marks them stale/unknown. No quota probe runs in the inference request path.
+
+Deploy the backend before the dashboard. Existing SQLite tables and key policies need no migration. RPM, active request/stream counters and quota snapshots remain process-local and reset on restart; persisted spend and unfinished media jobs remain in SQLite. This does not provide distributed admission across multiple gateway processes.
 
 ---
 

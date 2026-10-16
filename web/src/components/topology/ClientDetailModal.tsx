@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchTopologyClientDetail, type TopologyClientDetail } from "./api";
 import { formatNumber, timeAgo } from "./utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Props = {
   secret: string;
@@ -10,6 +12,7 @@ type Props = {
 };
 
 export function ClientDetailModal({ secret, clientKeyId, clientLabel, onClose }: Props) {
+  const { masked } = useAccountMask();
   const [detail, setDetail] = useState<TopologyClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -94,7 +97,7 @@ export function ClientDetailModal({ secret, clientKeyId, clientLabel, onClose }:
                       <tr key={`${row.model}-${row.provider}-${row.credential_id}`}>
                         <td>{row.model}</td>
                         <td>{row.provider}</td>
-                        <td>{row.account_label || row.credential_id}</td>
+                        <td>{maskAccountText(row.account_label || row.credential_id, masked)}</td>
                         <td className="right">{formatNumber(row.request_count)}</td>
                         <td className="right muted">{row.last_used_at ? timeAgo(row.last_used_at) : "—"}</td>
                       </tr>

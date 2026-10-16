@@ -24,6 +24,7 @@ import { LanPortHelpModal } from "./LanPortHelpModal";
 import { SecurityWarning } from "./SecurityWarning";
 import { ApiModelAccessField } from "./ApiModelAccessField";
 import { ApiKeyCredentialAccessField } from "./ApiKeyCredentialAccessField";
+import { ApiKeyCapacity } from "./ApiKeyCapacity";
 import type {
   ApiKeyCombo,
   ApiKeyCredential,
@@ -140,6 +141,8 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
 
   useEffect(() => {
     void loadUsage();
+    const timer = window.setInterval(() => void loadUsage(), 30000);
+    return () => window.clearInterval(timer);
   }, [loadUsage, apiKeys]);
 
   useEffect(() => {
@@ -248,6 +251,7 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
   const renderKeyLimitsForm = () => (
     <div className="apis-form-limits">
       <p className="apis-form-section-title">{t("apis.rateLimits")}</p>
+      <p className="apis-key-row-meta">{t("apis.inheritLimitsHint")}</p>
       <div className="inline-fields">
         <Field label={t("apis.requestsPerMin")}>
           <Input
@@ -498,13 +502,14 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
                     </div>
                     <p className="apis-key-row-meta">
                       <span className={`apis-model-access-summary${allModels ? " is-all" : ""}`}>{modelAccess}</span>
-                      {" · "}{formatLimitSummary(key)}
+                      {" · "}{formatLimitSummary(key, t)}
                     </p>
                     <p className="apis-key-row-meta">
                       {loadingUsage ? t("apis.loadingUsage") : `${compact(requests)} requests today · ${usd(spent)} spent`}
                       {budget ? ` · ${usd(budget)} budget` : ""}
                     </p>
                     {!key.enabled ? <p className="apis-key-row-paused">Paused</p> : null}
+                    <ApiKeyCapacity usage={usage} />
                   </div>
                   <div className="apis-key-row-actions">
                     <Button variant="outline" size="sm" icon="edit" onClick={() => openEditModal(key)}>

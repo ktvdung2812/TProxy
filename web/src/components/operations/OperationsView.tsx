@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button, Card, Input } from "../ui";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Metric = {provider_id:string; model_id:string; credential_id:string; requests:number; errors:number; fallbacks:number; p95_ms:number; ttft_p95_ms:number|null; queue_ms:number; input_tokens:number; output_tokens:number; cached_tokens:number; cache_creation_tokens:number};
 type Account = {credential_id:string; in_flight:number; waiting:number; samples:number; latency_ms:number; ttft_ms:number; error_rate:number; quota_remaining?:number; quota_at:string};
@@ -10,6 +12,7 @@ type Snapshot = {metrics:Metric[];accounts:Account[];alerts:Alert[];since:string
 
 export function OperationsView({secret}:{secret:string}) {
   const {t}=useTranslation();
+  const {masked}=useAccountMask();
   const [data,setData]=useState<Snapshot>();
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
@@ -47,7 +50,7 @@ export function OperationsView({secret}:{secret:string}) {
       <div style={{overflowX:"auto",marginTop:12}}><table className="data-table" style={{width:"100%"}}>
         <thead><tr>{["account","attempts","errors","fallbacks","latency","ttft","queue","input","output","cacheRead","cacheWrite"].map(key=><th key={key}>{t(`operations.${key}`)}</th>)}</tr></thead>
         <tbody>{rows.map(row=><tr key={`${row.provider_id}/${row.model_id}/${row.credential_id}`}>
-          <td><strong>{row.model_id}</strong><br/>{row.provider_id} / {row.credential_id}</td><td>{row.requests}</td><td>{number(100*row.errors/row.requests)}%</td><td>{row.fallbacks}</td><td>{number(row.p95_ms)} ms</td><td>{row.ttft_p95_ms===null?"—":`${number(row.ttft_p95_ms)} ms`}</td><td>{number(row.queue_ms)} ms</td><td>{number(row.input_tokens)}</td><td>{number(row.output_tokens)}</td><td>{number(row.cached_tokens)}</td><td>{number(row.cache_creation_tokens)}</td>
+          <td><strong>{row.model_id}</strong><br/>{row.provider_id} / {maskAccountText(row.credential_id, masked)}</td><td>{row.requests}</td><td>{number(100*row.errors/row.requests)}%</td><td>{row.fallbacks}</td><td>{number(row.p95_ms)} ms</td><td>{row.ttft_p95_ms===null?"—":`${number(row.ttft_p95_ms)} ms`}</td><td>{number(row.queue_ms)} ms</td><td>{number(row.input_tokens)}</td><td>{number(row.output_tokens)}</td><td>{number(row.cached_tokens)}</td><td>{number(row.cache_creation_tokens)}</td>
         </tr>)}</tbody>
       </table>{data&&rows.length===0&&<p>{t("operations.noRequests")}</p>}</div>
     </Card>
@@ -55,7 +58,7 @@ export function OperationsView({secret}:{secret:string}) {
       <div style={{overflowX:"auto"}}><table className="data-table" style={{width:"100%"}}>
         <thead><tr>{["account","inFlight","waiting","samples","ewma","errors","quota"].map(key=><th key={key}>{t(`operations.${key}`)}</th>)}</tr></thead>
         <tbody>{data?.accounts.filter(a=>a.credential_id.toLowerCase().includes(query.toLowerCase())).map(account=><tr key={account.credential_id}>
-          <td>{account.credential_id}</td><td>{account.in_flight}</td><td>{account.waiting}</td><td>{account.samples}</td><td>{number(account.latency_ms)} ms</td><td>{number(account.error_rate*100)}%</td><td>{account.quota_remaining===undefined?"—":`${number(account.quota_remaining*100)}%${Date.now()-Date.parse(account.quota_at)>300000?` (${t("operations.stale")})`:""}`}</td>
+          <td>{maskAccountText(account.credential_id, masked)}</td><td>{account.in_flight}</td><td>{account.waiting}</td><td>{account.samples}</td><td>{number(account.latency_ms)} ms</td><td>{number(account.error_rate*100)}%</td><td>{account.quota_remaining===undefined?"—":`${number(account.quota_remaining*100)}%${Date.now()-Date.parse(account.quota_at)>300000?` (${t("operations.stale")})`:""}`}</td>
         </tr>)}</tbody>
       </table></div>
     </Card>

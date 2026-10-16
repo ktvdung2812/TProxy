@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchUsageStats } from "./api";
 import type { UsagePeriod, UsageStats } from "./api";
@@ -15,9 +15,13 @@ import {
   groupUsageRows,
   sortUsageRows,
   sameUsageLiveSnapshot,
+  type UsageGroup,
+  type UsageRow,
   type UsageTableView,
   type UsageValueMode,
 } from "./utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type ProviderItem = {
   id: string;
@@ -33,6 +37,16 @@ type Props = {
   onError: (message: string) => void;
 };
 
+type UsageTableConfig = {
+  columns: Array<{ field: string; label: string; align?: "right" }>;
+  groupedData: UsageGroup[];
+  storageKey: string;
+  emptyMessage: string;
+  renderSummaryCells: (group: UsageGroup) => ReactNode;
+  renderDetailCells: (item: UsageRow) => ReactNode;
+  renderGroupLabel?: (group: UsageGroup) => ReactNode;
+};
+
 function buildTableOptions(t: (key: string) => string): Array<{ value: UsageTableView; label: string }> {
   return [
     { value: "model", label: t("usage.byModel") },
@@ -44,6 +58,7 @@ function buildTableOptions(t: (key: string) => string): Array<{ value: UsageTabl
 
 export function UsageStatsView({ secret, period, providers, onError }: Props) {
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const TABLE_OPTIONS = useMemo(() => buildTableOptions(t), [t]);
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,7 +125,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
     });
   }, []);
 
-  const tableConfig = useMemo(() => {
+  const tableConfig = useMemo<UsageTableConfig | null>(() => {
     if (!stats) return null;
     const source =
       tableView === "model"
@@ -172,6 +187,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
         groupedData,
         storageKey: "tproxy-usage:expanded-accounts",
         emptyMessage,
+        renderGroupLabel: (group: ReturnType<typeof groupUsageRows>[number]) => maskAccountText(group.groupKey, masked),
         renderSummaryCells: (group: ReturnType<typeof groupUsageRows>[number]) => (
           <>
             <td>—</td>
@@ -184,7 +200,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
           <>
             <td>{item.rawModel}</td>
             <td><ProviderBadge provider={item.provider} /></td>
-            <td>{item.accountName}</td>
+            <td>{maskAccountText(item.accountName, masked)}</td>
             <td className="right">{fmt(item.requests)}</td>
             <td className="right muted">{fmtTime(item.lastUsed)}</td>
           </>
@@ -253,7 +269,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
         </>
       ),
     };
-  }, [stats, tableView, sortBy, sortOrder]);
+  }, [stats, tableView, sortBy, sortOrder, masked]);
 
   const recentAside = useMemo(
     () => <RecentRequests requests={stats?.recentRequests ?? []} />,
@@ -311,6 +327,7 @@ export function UsageStatsView({ secret, period, providers, onError }: Props) {
           storageKey={tableConfig.storageKey}
           renderSummaryCells={tableConfig.renderSummaryCells}
           renderDetailCells={tableConfig.renderDetailCells}
+          renderGroupLabel={tableConfig.renderGroupLabel}
           emptyMessage={tableConfig.emptyMessage}
         />
       ) : null}

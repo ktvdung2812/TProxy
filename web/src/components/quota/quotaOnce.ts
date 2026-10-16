@@ -24,14 +24,14 @@ export function clearCachedQuota(credentialIds?: string[]) {
   }
 }
 
-export function loadCredentialQuotaOnce(secret: string, credentialId: string, force = false): Promise<CachedQuota> {
+export function loadCredentialQuotaOnce(secret: string, credentialId: string, force = false, refreshUpstream = force): Promise<CachedQuota> {
   if (!force) {
     const cached = cache.get(credentialId);
     if (cached) return Promise.resolve(cached);
     const pending = inflight.get(credentialId);
     if (pending) return pending;
   }
-  const request = fetchCredentialQuota(secret, credentialId)
+  const request = fetchCredentialQuota(secret, credentialId, refreshUpstream)
     .then((quota) => {
       const entry: CachedQuota = { quota };
       cache.set(credentialId, entry);

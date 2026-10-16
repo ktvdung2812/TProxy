@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -16,12 +17,13 @@ import (
 
 // QuotaEntry is a normalized quota window for dashboard display.
 type QuotaEntry struct {
-	Name      string  `json:"name"`
-	Used      float64 `json:"used"`
-	Total     float64 `json:"total"`
-	Remaining float64 `json:"remaining,omitempty"`
-	ResetAt   string  `json:"reset_at,omitempty"`
-	Unlimited bool    `json:"unlimited,omitempty"`
+	Name          string  `json:"name"`
+	Used          float64 `json:"used"`
+	Total         float64 `json:"total"`
+	Remaining     float64 `json:"remaining,omitempty"`
+	ResetAt       string  `json:"reset_at,omitempty"`
+	Unlimited     bool    `json:"unlimited,omitempty"`
+	WindowMinutes float64 `json:"window_minutes,omitempty"`
 }
 
 // CredentialQuota is upstream quota data for one credential.
@@ -318,21 +320,26 @@ func appendCodexWindows(quotas map[string]QuotaEntry, prefix string, snapshot ma
 	if nested, ok := snapshot["rate_limit"].(map[string]any); ok {
 		rateLimit = nested
 	}
-	primary := firstMap(rateLimit, "primary_window", "primary")
-	secondary := firstMap(rateLimit, "secondary_window", "secondary")
-	if primary != nil {
-		name := "session"
-		if prefix != "" {
-			name = prefix + "_session"
+	for _, role := range []string{"primary", "secondary"} {
+		window := firstMap(rateLimit, role+"_window", role)
+		if window == nil {
+			continue
 		}
-		quotas[name] = codexWindowEntry(name, primary)
-	}
-	if secondary != nil {
-		name := "weekly"
-		if prefix != "" {
-			name = prefix + "_weekly"
+		entry := codexWindowEntry(role, window)
+		name := role
+		// Primary can be weekly (for example, GPT premium). Only the
+		// upstream duration identifies a five-hour or seven-day window.
+		switch entry.WindowMinutes {
+		case 300:
+			name = "session"
+		case 10080:
+			name = "weekly"
 		}
-		quotas[name] = codexWindowEntry(name, secondary)
+		if prefix != "" {
+			name = prefix + "_" + name
+		}
+		entry.Name = name
+		quotas[name] = entry
 	}
 }
 
@@ -362,20 +369,18 @@ func codexReviewRateLimit(payload map[string]any) map[string]any {
 }
 
 func codexWindowEntry(name string, window map[string]any) QuotaEntry {
-	used := float64(numberValue(firstValue(window, "used_percent", "percent_used")))
-	if used < 0 {
-		used = 0
+	entry := QuotaEntry{Name: name, ResetAt: parseResetAt(firstValue(window, "reset_at", "resets_at", "resetAt"))}
+	seconds, validDuration := numberValueAny(window["limit_window_seconds"])
+	if !validDuration || seconds <= 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return entry
 	}
-	if used > 100 {
-		used = 100
+	entry.WindowMinutes = seconds / 60
+	used, validUsed := numberValueAny(firstValue(window, "used_percent", "percent_used"))
+	if !validUsed || used < 0 || used > 100 || math.IsNaN(used) || math.IsInf(used, 0) {
+		return entry
 	}
-	return QuotaEntry{
-		Name:      name,
-		Used:      used,
-		Total:     100,
-		Remaining: 100 - used,
-		ResetAt:   parseResetAt(firstValue(window, "reset_at", "resets_at", "resetAt")),
-	}
+	entry.Used, entry.Total, entry.Remaining = used, 100, 100-used
+	return entry
 }
 
 func githubQuotaEntry(item map[string]any, resetAt string) QuotaEntry {

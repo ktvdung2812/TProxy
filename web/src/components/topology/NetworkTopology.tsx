@@ -25,6 +25,8 @@ import {
   type FlowEdgeData,
   type ProviderItem,
 } from "./utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Props = {
   secret: string;
@@ -126,6 +128,7 @@ function ProviderNode({ data }: NodeProps) {
 }
 
 function CredentialNode({ data }: NodeProps) {
+  const { masked } = useAccountMask();
   const payload = data as {
     label: string;
     color: string;
@@ -138,7 +141,7 @@ function CredentialNode({ data }: NodeProps) {
       <Handle id={FLOW_TARGET_TOP} type="target" position={Position.Top} className="topology-handle" />
       <span className="topology-dot" style={{ backgroundColor: payload.enabled ? payload.color : "#477453" }} />
       <div>
-        <strong>{payload.label}</strong>
+        <strong>{maskAccountText(payload.label, masked)}</strong>
         <p>{formatNumber(payload.totalRequests)} requests</p>
       </div>
     </div>

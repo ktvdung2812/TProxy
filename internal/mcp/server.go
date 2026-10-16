@@ -2,10 +2,22 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 )
+
+// RequestError preserves gateway admission status on the JSON-RPC transport.
+type RequestError struct {
+	Err        error
+	Code       string
+	Status     int
+	RetryAfter string
+}
+
+func (e *RequestError) Error() string { return e.Err.Error() }
+func (e *RequestError) Unwrap() error { return e.Err }
 
 // Handler exposes a minimal MCP-compatible JSON-RPC surface for agent integrations.
 func Handler(chat func(prompt string) (string, error)) http.Handler {
@@ -19,6 +31,7 @@ func Handler(chat func(prompt string) (string, error)) http.Handler {
 			writeRPCError(w, nil, -32700, "invalid request body")
 			return
 		}
+		r.ContentLength = int64(len(body))
 		var envelope struct {
 			JSONRPC string          `json:"jsonrpc"`
 			ID      any             `json:"id"`
@@ -75,6 +88,16 @@ func Handler(chat func(prompt string) (string, error)) http.Handler {
 			}
 			content, err := chat(prompt)
 			if err != nil {
+				var requestErr *RequestError
+				if errors.As(err, &requestErr) {
+					w.Header().Set("Content-Type", "application/json")
+					if requestErr.RetryAfter != "" {
+						w.Header().Set("Retry-After", requestErr.RetryAfter)
+					}
+					w.WriteHeader(requestErr.Status)
+					_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": envelope.ID, "error": map[string]any{"code": -32000, "message": err.Error(), "data": map[string]any{"status": requestErr.Status, "code": requestErr.Code, "retry_after": requestErr.RetryAfter}}})
+					return
+				}
 				writeRPCError(w, envelope.ID, -32000, err.Error())
 				return
 			}

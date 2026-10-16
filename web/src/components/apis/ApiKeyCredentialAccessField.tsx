@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { Badge, Button, Toggle } from "../ui";
 import type { ApiKeyCombo, ApiKeyCredential, ApiKeyProvider, ApiKeyRoute } from "./types";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Props = {
   value: string[];
@@ -24,6 +26,7 @@ function unique(values: Iterable<string>): string[] {
 }
 
 export function ApiKeyCredentialAccessField({ value, models, providers, credentials, routes, combos, onChange }: Props) {
+  const { masked } = useAccountMask();
   const selectedCredentialIDs = useMemo(() => new Set(value), [value]);
   const selectedModels = useMemo(() => parseModelSelection(models), [models]);
 
@@ -132,8 +135,8 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
                         return (
                           <div key={credential.id} className={`api-credential-account${selected ? " is-enabled" : ""}`}>
                             <div className="api-model-access-label">
-                              <strong>{credential.label || credential.email || credential.id}</strong>
-                              <code>{credential.email || credential.id}</code>
+                              <strong>{maskAccountText(credential.label || credential.email || credential.id, masked)}</strong>
+                              <code>{maskAccountText(credential.email || credential.id, masked)}</code>
                             </div>
                             <div className="api-model-access-action">
                               {!credential.enabled ? <Badge variant="warning" size="sm">Disabled</Badge> : null}
@@ -142,7 +145,7 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
                                 checked={selected}
                                 disabled={!credential.enabled && !selected}
                                 onChange={(event) => setCredentialEnabled(credential, event.target.checked)}
-                                aria-label={`Allow ${credential.label || credential.id}`}
+                                aria-label={`Allow ${maskAccountText(credential.label || credential.id, masked)}`}
                               />
                             </div>
                           </div>

@@ -44,6 +44,40 @@ type Request struct {
 	Raw           map[string]any   `json:"raw,omitempty"`
 }
 
+// SetMaxTokens keeps native pass-through payloads in sync without mutating the
+// original request (which may be reused by fallback or parallel combo children).
+func (r *Request) SetMaxTokens(limit int) {
+	r.MaxTokens = limit
+	if r.Raw == nil || limit <= 0 {
+		return
+	}
+	raw := make(map[string]any, len(r.Raw)+1)
+	for key, value := range r.Raw {
+		raw[key] = value
+	}
+	switch r.Source {
+	case ProtocolResponses:
+		raw["max_output_tokens"] = limit
+	case ProtocolGemini:
+		generation := map[string]any{}
+		if current, ok := raw["generationConfig"].(map[string]any); ok {
+			for key, value := range current {
+				generation[key] = value
+			}
+		}
+		generation["maxOutputTokens"] = limit
+		raw["generationConfig"] = generation
+	default:
+		if _, exists := raw["max_completion_tokens"]; exists {
+			raw["max_completion_tokens"] = limit
+		}
+		if _, exists := raw["max_tokens"]; exists || raw["max_completion_tokens"] == nil {
+			raw["max_tokens"] = limit
+		}
+	}
+	r.Raw = raw
+}
+
 // InputTokens includes cached input; CachedTokens and CacheCreationTokens are subsets.
 // OutputTokens includes reasoning; ReasoningTokens is a subset.
 type Usage struct {

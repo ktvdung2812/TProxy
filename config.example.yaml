@@ -89,6 +89,8 @@ retention:
   oauth-sessions: 24h
   cleanup-interval: 1h
 
+# Global and team limits tighten source capacity. 0 adds no cap at that scope.
+# Provider/account capacity is shared by every key using it.
 limits:
   requests-per-minute: 600
   concurrent-streams: 64
@@ -115,6 +117,10 @@ client-api-keys:
       team: engineering
       # Opt this key out of the global custom model mapping (model.mapping_rules).
       # disable-model-mapping: true
+      # Every zero/omitted field inherits eligible provider/account limits,
+      # for both old and new keys. Positive values add a per-key ceiling.
+      # Budgets use recorded estimated spend since midnight UTC. Output defaults
+      # are forwarded where upstream supports them (Codex strips these fields).
       limits:
         requests-per-minute: 120
         concurrent-streams: 16
@@ -129,6 +135,14 @@ providers:
     name: OpenAI-compatible primary
     base-url: https://api.openai.com
     enabled: true
+    # Optional shared provider caps (0 = no configured provider cap):
+    # limits:
+    #   requests-per-minute: 120
+    #   concurrent-streams: 8
+    #   media-jobs: 4
+    #   budget-usd-per-day: 20
+    # Account admission is separate: credential metadata.max_concurrent_requests
+    # counts all requests, including streams; optional queue settings still apply.
     # OAuth providers can use the same adapter with browser PKCE or device flow.
     # oauth:
     #   authorization-url: https://provider.example/oauth/authorize

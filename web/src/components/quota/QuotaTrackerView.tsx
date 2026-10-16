@@ -14,6 +14,8 @@ import { QuotaRingGrid } from "./QuotaRingGrid";
 import { QuotaStackedBar } from "./QuotaStackedBar";
 import { QuotaTable } from "./QuotaTable";
 import { formatServicePlanLabel, isOnCooldown, moveCredentialBefore } from "../providers/types";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 import {
   ACCOUNT_FILTER_OPTIONS,
   AUTO_REFRESH_STORAGE_KEY,
@@ -128,6 +130,7 @@ function formatRenewalDate(value?: string): string | null {
 
 export function QuotaTrackerView({ secret, credentials, accountsLoading = false, onError, onNotice, onMutated }: Props) {
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [quotaById, setQuotaById] = useState<Record<string, CredentialQuota>>({});
@@ -375,7 +378,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   }, []);
 
   const loadQuota = useCallback(
-    async (credentialId: string, force = false): Promise<boolean> => {
+    async (credentialId: string, force = false, refreshUpstream = force): Promise<boolean> => {
       if (!force && (settledRef.current.has(credentialId) || inFlightIdsRef.current.has(credentialId))) {
         return false;
       }
@@ -384,7 +387,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
       setLoading((current) => ({ ...current, [credentialId]: true }));
       setErrors((current) => ({ ...current, [credentialId]: "" }));
       try {
-        const cached = await loadCredentialQuotaOnce(secret, credentialId, force);
+        const cached = await loadCredentialQuotaOnce(secret, credentialId, force, refreshUpstream);
         if (cached.error) {
           setErrors((current) => ({ ...current, [credentialId]: cached.error || t("quota.failedToFetch") }));
           return false;
@@ -420,13 +423,13 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   }, [secret]);
 
   const runQuotaPass = useCallback(
-    async (force: boolean, forcedIds?: string[]) => {
+    async (force: boolean, forcedIds?: string[], refreshUpstream = force) => {
       let changed = false;
       if (force) {
         const ids = forcedIds ?? loadOrderRef.current.map((item) => item.id);
         for (const id of ids) {
           if (cancelledRef.current) return null;
-          if (await loadQuota(id, true)) changed = true;
+          if (await loadQuota(id, true, refreshUpstream)) changed = true;
         }
       } else {
         while (true) {
@@ -489,7 +492,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     try {
       await loadProxyUsage();
       if (cancelledRef.current) return;
-      const changed = await runQuotaPass(true, ids);
+      const changed = await runQuotaPass(true, ids, !options?.auto);
       if (changed) onMutated?.();
     } catch (cause) {
       if (!cancelledRef.current) {
@@ -695,7 +698,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
       clearCachedQuota([credential.id]);
       const changed = await loadQuota(credential.id, true);
       if (changed) onMutated?.();
-      onNotice?.(t("quota.cooldownCleared", { label: getConnectionLabel(credential) || credential.email || credential.id }));
+      onNotice?.(t("quota.cooldownCleared", { label: maskAccountText(getConnectionLabel(credential) || credential.email || credential.id, masked) }));
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : t("quota.failedToClearCooldown"));
     } finally {
@@ -722,9 +725,9 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
             if(item.quota){setQuotaById(current=>({...current,[credential.id]:item.quota!}));markSettled(credential.id);credentialStateChanged ||= item.quota.credential_enabled!==undefined&&credential.enabled!==item.quota.credential_enabled;}
             const message=item.ok?t(action==="refresh"?"quota.refreshed":action==="cooldown"?"quota.cooldownClearedAndRefreshed":"quota.resetAndRefreshed"):item.action_applied?t(action==="cooldown"?"quota.cooldownClearedRefreshFailed":"quota.resetRefreshFailed",{error:item.error}):item.error||t("quota.bulkActionFailed");
             setErrors(current=>({...current,[credential.id]:item.ok?"":message}));
-            results.push({id:credential.id,label:getConnectionLabel(credential)||credential.email||credential.id,ok:item.ok,message});
+            results.push({id:credential.id,label:maskAccountText(getConnectionLabel(credential)||credential.email||credential.id,masked),ok:item.ok,message});
           }
-        }catch(cause){for(const credential of chunk)results.push({id:credential.id,label:getConnectionLabel(credential)||credential.email||credential.id,ok:false,message:cause instanceof Error?cause.message:t("quota.bulkActionFailed")});}
+        }catch(cause){for(const credential of chunk)results.push({id:credential.id,label:maskAccountText(getConnectionLabel(credential)||credential.email||credential.id,masked),ok:false,message:cause instanceof Error?cause.message:t("quota.bulkActionFailed")});}
       }
       if (credentialStateChanged) onMutated?.();
       const title = action === "refresh"
@@ -1024,6 +1027,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
             const hiddenEntries = getHiddenQuotaRows(quotaKey, allEntries, quotaVisibility);
             const secondary = credential.email && credential.label && credential.email !== credential.label ? credential.email : null;
             const connectionLabel = getConnectionLabel(credential) || credential.id;
+            const displayLabel = maskAccountText(connectionLabel, masked);
+            const displaySecondary = secondary ? maskAccountText(secondary, masked) : null;
             const isCodex = quotaKey === "codex" || credential.providerType === "codex";
             const resetCreditCount = getCodexResetCreditCount(quota);
             const isResettingLimit = resettingLimitId === credential.id;
@@ -1054,7 +1059,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                 )}
                 role="button"
                 tabIndex={0}
-                aria-label={`View details for ${connectionLabel}`}
+                aria-label={`View details for ${displayLabel}`}
                 onDragOver={(event) => {
                   const source = credentials.find((item) => item.id === draggingCredentialId);
                   if (!reorderingProviderId && source && source.providerId === credential.providerId && source.id !== credential.id) {
@@ -1093,7 +1098,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                           return next;
                         });
                       }}
-                      aria-label={t("quota.selectAccount", { label: connectionLabel })}
+                      aria-label={t("quota.selectAccount", { label: displayLabel })}
                     />
                     {canReorder ? (
                       <button
@@ -1113,7 +1118,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                           setDraggingCredentialId(null);
                           setDragOverCredentialId(null);
                         }}
-                        aria-label={`Drag ${getConnectionLabel(credential) || credential.id} to change account order`}
+                        aria-label={`Drag ${displayLabel} to change account order`}
                         title="Drag to change account order"
                       >
                         <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
@@ -1128,8 +1133,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                       <div className="quota-tracker-card-titles">
                         <h3>{info.name}</h3>
                         <div className="quota-tracker-card-meta">
-                          <span className="quota-tracker-card-account" title={connectionLabel}>{connectionLabel}</span>
-                          {secondary ? <span className="quota-tracker-card-secondary" title={secondary}>{secondary}</span> : null}
+                          <span className="quota-tracker-card-account" title={displayLabel}>{displayLabel}</span>
+                          {displaySecondary ? <span className="quota-tracker-card-secondary" title={displaySecondary}>{displaySecondary}</span> : null}
                           {!credential.enabled ? <span className="quota-tracker-card-state">{t("quota.off")}</span> : null}
                           {isQuotaAutoDisabled ? <span className="quota-tracker-card-state">{t("quota.autoPaused")}</span> : null}
                         </div>
@@ -1315,7 +1320,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         title={t("quota.resetCodexConfirm")}
         message={
           resetConfirmCredential
-            ? `Use 1 Codex reset credit for ${getConnectionLabel(resetConfirmCredential) || resetConfirmCredential.email || "this account"}. This cannot be undone. Remaining credits: ${getCodexResetCreditCount(quotaById[resetConfirmCredential.id])}.`
+            ? `Use 1 Codex reset credit for ${maskAccountText(getConnectionLabel(resetConfirmCredential) || resetConfirmCredential.email || "this account", masked)}. This cannot be undone. Remaining credits: ${getCodexResetCreditCount(quotaById[resetConfirmCredential.id])}.`
             : ""
         }
         confirmText={t("quota.resetLimit")}

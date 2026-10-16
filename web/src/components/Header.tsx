@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, IconButton, cn } from "./ui";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageToggle } from "./LanguageToggle";
+import { useAccountMask } from "../hooks/useAccountMask";
 
 const GITHUB_REPO_URL = "https://github.com/ktvdung2812/TProxy";
 const BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/ktvdung";
@@ -29,6 +30,7 @@ export function Header({
   extra,
 }: HeaderProps) {
   const { t } = useTranslation();
+  const { masked, toggle: toggleAccountMask } = useAccountMask();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +105,13 @@ export function Header({
             />
           </svg>
         </a>
+        <IconButton
+          icon={masked ? "visibility_off" : "visibility"}
+          label={masked ? t("common.showAccounts") : t("common.maskAccounts")}
+          aria-pressed={masked}
+          className={cn("header-mask-toggle", masked && "is-active")}
+          onClick={toggleAccountMask}
+        />
         <div className="header-theme-toggle">
           <ThemeToggle />
         </div>

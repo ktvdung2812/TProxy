@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal } from "../ui";
 import { checkCredentialHealth, saveCredential, type ProxyPoolOption } from "./api";
 import type { AdmissionPolicy, Credential } from "./types";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type Props = {
   open: boolean;
@@ -25,6 +27,7 @@ type Props = {
  */
 export function EditConnectionModal({ open, providerId, credential, proxyPools, secret, onClose, onSaved }: Props) {
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const [admission, setAdmission] = useState<AdmissionPolicy>({max_concurrent_requests:0,max_queue_size:16,queue_timeout_ms:5000});
   const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
@@ -114,7 +117,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
     <Modal
       open={open}
       onClose={onClose}
-      title={`Edit ${credential.label || credential.id}`}
+      title={`Edit ${maskAccountText(credential.label || credential.id, masked)}`}
       subtitle={isOAuth ? t("providers.oauthCredentialHint") : t("providers.leaveSecretBlank")}
       icon="edit"
       size="md"

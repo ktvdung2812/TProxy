@@ -29,6 +29,8 @@ import {
   usesQuotaRingLayout,
   usesQuotaStackedLayout,
 } from "./utils";
+import { maskAccountText } from "../../lib/accountMask";
+import { useAccountMask } from "../../hooks/useAccountMask";
 
 type CredentialRow = {
   id: string;
@@ -106,6 +108,7 @@ export function QuotaAccountDetailModal({
   refreshCountdown,
 }: Props) {
   const { t } = useTranslation();
+  const { masked } = useAccountMask();
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState("");
@@ -253,6 +256,7 @@ export function QuotaAccountDetailModal({
 
   const info = getProviderTypeInfo(quotaKey);
   const label = credential ? getConnectionLabel(credential) || credential.email || credential.id : "";
+  const displayLabel = maskAccountText(label, masked);
   const entries = useMemo(() => quotaEntries(localQuota), [localQuota]);
   const resetCountdowns = useMemo(
     () =>
@@ -280,7 +284,7 @@ export function QuotaAccountDetailModal({
       open={open}
       onClose={onClose}
       title={info.name}
-      subtitle={label}
+      subtitle={displayLabel}
       icon="account_circle"
       size="lg"
       className="quota-account-modal"
@@ -296,7 +300,7 @@ export function QuotaAccountDetailModal({
           <ProviderLogo className="quota-tracker-provider-icon quota-tracker-provider-icon-lg" providerType={quotaKey} style={{ color: info.color }} />
           <div className="quota-account-modal-hero-copy">
             <div className="quota-account-modal-title-row">
-              <h4>{label}</h4>
+              <h4>{displayLabel}</h4>
               <Badge variant={credential.enabled ? "success" : "default"} size="sm" dot>
                 {credential.enabled ? "Enabled" : "Disabled"}
               </Badge>
@@ -304,7 +308,7 @@ export function QuotaAccountDetailModal({
                 <Badge variant="info" size="sm" dot>Live</Badge>
               ) : null}
             </div>
-            <p className="quota-account-modal-meta">{credential.email && credential.email !== label ? credential.email : credential.id}</p>
+            <p className="quota-account-modal-meta">{maskAccountText(credential.email && credential.email !== label ? credential.email : credential.id, masked)}</p>
             <div className="quota-account-modal-toggle-row">
               <span>Account routing</span>
               <Toggle

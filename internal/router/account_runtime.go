@@ -85,6 +85,17 @@ func (r *Router) acquireAccount(ctx context.Context, credential store.Credential
 		}
 	}
 	for {
+		if r.store != nil {
+			r.accountMu.Unlock()
+			current, err := r.store.CredentialByID(ctx, credential.ID)
+			r.accountMu.Lock()
+			if err != nil || len(store.EligibleCredentials([]store.Credential{current}, time.Now())) == 0 {
+				leave()
+				r.accountMu.Unlock()
+				return nil, time.Since(started).Milliseconds(), admissionError("account_unavailable")
+			}
+			policy = store.CredentialAdmission(current.Metadata)
+		}
 		if ctx.Err() != nil {
 			leave()
 			r.accountMu.Unlock()
@@ -160,6 +171,13 @@ func (r *Router) admitSelection(ctx context.Context, selection *Selection, remai
 		release()
 		return nil, admissionError("account_unavailable")
 	}
+	provider, err := r.store.Provider(ctx, selection.Provider.ID)
+	if err != nil || !provider.Enabled || provider.Status == "disabled" {
+		release()
+		return nil, admissionError("account_unavailable")
+	}
+	selection.Credential.Metadata = credential.Metadata
+	selection.Provider = *provider
 	selection.StartedAt = time.Now()
 	return release, nil
 }
