@@ -74,7 +74,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - OAuth profile: **Codex**, **Claude**, **Kimi**, **xAI**, **Antigravity** (Google Cloud Code), **Copilot**, **Cursor**, **Kiro** và nhiều hơn nữa.
 - Provider API-key: Tavily search, ElevenLabs audio, image/video aliases, HTTP plugin tùy chọn.
 - **Proxy pool mã hóa** (HTTP/S, SOCKS5) gắn với từng provider hoặc credential.
-- **9router / CLIProxyAPI / sub2api import** hỗ trợ di chuyển từ các thiết lập hiện có. Trong Providers → Import data, chọn tệp JSON export accounts của sub2api; Preview kiểm tra mà không lưu dữ liệu. Tài khoản OpenAI OAuth được nhập thành credential Codex, giữ riêng từng thành viên trong cùng workspace Team, refresh token và thời hạn token. Các thiết lập lập lịch được giữ dưới dạng metadata sub2api.
+- **9router / CLIProxyAPI / sub2api import** hỗ trợ di chuyển từ các thiết lập hiện có. Trong mục Connections của provider, chọn **Import sub2api accounts** cạnh đăng nhập/thêm tài khoản, hoặc vào Providers → Import data. Chọn tệp JSON export accounts của sub2api; Preview kiểm tra mà không lưu dữ liệu. Hỗ trợ cả mảng tài khoản, một tài khoản đơn và dữ liệu bọc trong `data`, `export`, `payload` hoặc `account`. Tài khoản OpenAI OAuth được nhập thành credential Codex, giữ riêng từng thành viên trong cùng workspace Team, refresh token và thời hạn token. Các thiết lập lập lịch được giữ dưới dạng metadata sub2api.
 
 ### Vận hành & quản trị
 

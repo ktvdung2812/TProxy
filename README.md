@@ -75,7 +75,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - First-party OAuth profiles: **Codex**, **Claude**, **Kimi**, **xAI**, **Antigravity** (Google Cloud Code), **Copilot**, **Cursor**, **Kiro**, and more.
 - API-key providers: Tavily search, ElevenLabs audio, image/video aliases, opt-in HTTP plugins.
 - **Encrypted proxy pools** (HTTP/S, SOCKS5) bound per provider or credential.
-- **9router / CLIProxyAPI / sub2api import** helpers for migrating existing setups. In Providers → Import data, select a sub2api accounts JSON export; Preview validates it without saving. OpenAI OAuth accounts become Codex credentials, including separate members of a shared Team workspace, refresh tokens, and token expiry. Scheduling settings are retained as sub2api metadata.
+- **9router / CLIProxyAPI / sub2api import** helpers for migrating existing setups. In a provider’s Connections section, choose **Import sub2api accounts** next to sign-in/add account, or use Providers → Import data. Select a sub2api accounts JSON export; Preview validates it without saving. Account arrays, single accounts, and exports wrapped in `data`, `export`, `payload`, or `account` are also accepted. OpenAI OAuth accounts become Codex credentials, including separate members of a shared Team workspace, refresh tokens, and token expiry. Scheduling settings are retained as sub2api metadata.
 
 ### Operations & governance
 

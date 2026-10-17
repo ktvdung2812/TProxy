@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +115,55 @@ func TestImportSub2apiOpenAIOAuthAccounts(t *testing.T) {
 	}
 	if first.Metadata["sub2api_concurrency"] != float64(10) {
 		t.Fatalf("metadata=%+v", first.Metadata)
+	}
+}
+
+func TestImportSub2apiAccountVariants(t *testing.T) {
+	const account = `{"name":"member@example.com","platform":"openai","type":"oauth","concurrency":3,"priority":50,"credentials":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","id_token":"synthetic-id","client_id":"synthetic-client","email":"member@example.com","chatgpt_account_id":"workspace","expires_at":"2026-10-27T09:04:10.000Z"}}`
+	cases := map[string]string{
+		"versioned export":     `{"type":"sub2api-data","version":1,"exported_at":"2026-10-17T09:14:28Z","proxies":[],"accounts":[` + account + `]}`,
+		"account array":        `[` + account + `]`,
+		"single account":       account,
+		"nested data":          `{"data":{"accounts":[` + account + `]}}`,
+		"nested payload array": `{"payload":[` + account + `]}`,
+		"nested export":        `{"export":{"accounts":[` + account + `]}}`,
+		"nested account":       `{"account":` + account + `}`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			dataStore := openTestStore(t)
+			for _, dryRun := range []bool{true, false, false} {
+				result, err := importsub2api.Import(ctx, dataStore, []byte(payload), importsub2api.Options{DryRun: dryRun})
+				if err != nil || !result.OK || result.Counts.Credentials != 1 || len(result.Warnings) != 0 {
+					t.Fatalf("dry_run=%v result=%+v err=%v", dryRun, result, err)
+				}
+				credentials, err := dataStore.Credentials(ctx, "codex")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if dryRun {
+					if len(credentials) != 0 {
+						t.Fatal("preview saved credentials")
+					}
+					continue
+				}
+				if len(credentials) != 1 {
+					t.Fatalf("stored %d accounts, want 1", len(credentials))
+				}
+				token := credentials[0].OAuthToken
+				if token == nil || token.AccessToken != "synthetic-access" || token.RefreshToken != "synthetic-refresh" ||
+					token.Extra["account_id"] != "workspace" || token.Extra["client_id"] != "synthetic-client" ||
+					token.Extra["id_token"] != "synthetic-id" || token.ExpiresAt.Format(time.RFC3339) != "2026-10-27T09:04:10Z" {
+					t.Fatal("OAuth fields were not preserved")
+				}
+			}
+		})
+	}
+	for _, payload := range []string{`null`, `[]`, `{}`, `{"accounts":[]}`, `{"data":{"accounts":"invalid"}}`, `{"account":{"platform":"openai","credentials":[]}}`, strings.Repeat(`{"data":`, 9) + account + strings.Repeat(`}`, 9)} {
+		if _, err := importsub2api.ParseExport([]byte(payload)); err == nil {
+			t.Fatal("accepted malformed export")
+		}
 	}
 }
 

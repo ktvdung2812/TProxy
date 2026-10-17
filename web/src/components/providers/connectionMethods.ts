@@ -13,6 +13,7 @@ export type ConnectionMethodKind =
   | "service_account"
   | "none"
   | "import_cliproxy"
+  | "import_sub2api"
   | "import_9router"
   | "import_cursor"
   | "connect_kiro";
@@ -49,6 +50,8 @@ const CLIPROXY_IMPORT_TYPES = new Set([
   "openai-compatible",
   "anthropic-compatible",
 ]);
+
+const SUB2API_IMPORT_TYPES = new Set(["codex", "claude", "antigravity", "xai"]);
 
 const OAUTH_READY_TYPES = new Set(OAUTH_PROVIDER_TYPES);
 
@@ -240,7 +243,16 @@ export function resolveConnectionProfile(
     methods.push({
       kind: "import_cliproxy",
       label: "Import CLIProxyAPI OAuth JSON",
-      description: "Alternative to interactive OAuth — import `tproxy-auth-bundle.json` or CLIProxyAPI auth export.",
+      description: "Connect using a CLIProxyAPI OAuth auth export.",
+      available: true,
+    });
+  }
+
+  if (SUB2API_IMPORT_TYPES.has(providerType)) {
+    methods.push({
+      kind: "import_sub2api",
+      label: "Import sub2api accounts",
+      description: "Import OAuth accounts from a sub2api JSON export, including refresh tokens and account metadata.",
       available: true,
     });
   }

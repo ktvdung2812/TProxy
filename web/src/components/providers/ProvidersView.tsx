@@ -14,6 +14,7 @@ import { AddCredentialModal } from "./AddCredentialModal";
 import { CursorImportModal } from "./CursorImportModal";
 import { KiroOAuthModal } from "./KiroOAuthModal";
 import { OAuthModal } from "./OAuthModal";
+import type { ImportSource } from "../import/utils";
 import type { Credential, ModelAlias, Provider } from "./types";
 
 type Props = {
@@ -52,7 +53,7 @@ export function ProvidersView({
   const [authBusy, setAuthBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [showOAuth, setShowOAuth] = useState(false);
-  const [showImport, setShowImport] = useState(false);
+  const [importSource, setImportSource] = useState<ImportSource | null>(null);
   const [oauthProviderId, setOauthProviderId] = useState<string | null>(null);
   const [oauthProviderType, setOauthProviderType] = useState<string | null>(null);
   const [oauthPresetId, setOauthPresetId] = useState<string | null>(null);
@@ -138,6 +139,12 @@ export function ProvidersView({
       onError(method.unavailableReason || t("providers.methodUnavailable"));
       return;
     }
+    // File imports create only the providers actually present in the export.
+    // Opening or cancelling the picker must not leave an empty provider behind.
+    if (method.kind === "import_cliproxy" || method.kind === "import_sub2api" || method.kind === "import_9router") {
+      setImportSource(method.kind === "import_cliproxy" ? "cliproxy" : method.kind === "import_sub2api" ? "sub2api" : "9router");
+      return;
+    }
     setConnectBusy(true);
     try {
       const providerId = await ensureCatalogProvider(catalog);
@@ -155,10 +162,6 @@ export function ProvidersView({
         case "none":
           setCatalogCredentialMethod(method);
           setShowCatalogCredential(true);
-          break;
-        case "import_cliproxy":
-        case "import_9router":
-          setShowImport(true);
           break;
         case "import_cursor":
           setShowCursorImport(true);
@@ -259,16 +262,17 @@ export function ProvidersView({
           aliases={aliases}
           secret={secret}
           presets={presets}
-          onOpenImport={() => setShowImport(true)}
+          onOpenImport={(source) => setImportSource(source)}
           onBack={() => onSelect(null)}
           onMutated={onMutated}
           onNotice={onNotice}
           onError={onError}
         />
         <ImportModal
-          open={showImport}
+          open={importSource !== null}
           secret={secret}
-          onClose={() => setShowImport(false)}
+          initialSource={importSource ?? "9router"}
+          onClose={() => setImportSource(null)}
           onNotice={onNotice}
           onError={onError}
           onMutated={onMutated}
@@ -328,9 +332,10 @@ export function ProvidersView({
           }}
         />
         <ImportModal
-          open={showImport}
+          open={importSource !== null}
           secret={secret}
-          onClose={() => setShowImport(false)}
+          initialSource={importSource ?? "9router"}
+          onClose={() => setImportSource(null)}
           onNotice={onNotice}
           onError={onError}
           onMutated={onMutated}
@@ -381,11 +386,12 @@ export function ProvidersView({
 
   return (
     <>
-      <ImportDataCard onOpen={() => setShowImport(true)} />
+      <ImportDataCard onOpen={() => setImportSource("9router")} />
       <ImportModal
-        open={showImport}
+        open={importSource !== null}
         secret={secret}
-        onClose={() => setShowImport(false)}
+        initialSource={importSource ?? "9router"}
+        onClose={() => setImportSource(null)}
         onNotice={onNotice}
         onError={onError}
         onMutated={onMutated}

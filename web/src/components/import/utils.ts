@@ -6,6 +6,9 @@ export function detectImportSource(payload: unknown): ImportSource | null {
     if (isCliproxyAuth(first)) {
       return "cliproxy";
     }
+    if (payload.some(isSub2apiAccount)) {
+      return "sub2api";
+    }
     return null;
   }
   if (!payload || typeof payload !== "object") {
@@ -38,22 +41,33 @@ function isCliproxyAuth(value: unknown): boolean {
 
 // sub2api exports wrap everything in { exported_at, proxies, accounts } where
 // each account carries platform + credentials.
-function isSub2apiExport(record: Record<string, unknown>): boolean {
-  if (!Array.isArray(record.accounts)) {
+function isSub2apiExport(value: unknown, depth = 0): boolean {
+  if (depth > 8 || !value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(isSub2apiAccount);
+  const record = value as Record<string, unknown>;
+  if ("accounts" in record) {
+    return Array.isArray(record.accounts) && record.accounts.some(isSub2apiAccount);
+  }
+  if (isSub2apiAccount(record)) {
+    return true;
+  }
+  for (const key of ["data", "export", "payload", "account"]) {
+    if (key in record) return isSub2apiExport(record[key], depth + 1);
+  }
+  return false;
+}
+
+function isSub2apiAccount(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  return record.accounts.some((item) => {
-    if (!item || typeof item !== "object") {
-      return false;
-    }
-    const account = item as Record<string, unknown>;
-    return (
-      typeof account.platform === "string" &&
-      account.platform.trim() !== "" &&
-      account.credentials !== null &&
-      typeof account.credentials === "object" &&
-      !Array.isArray(account.credentials) &&
-      Object.keys(account.credentials).length > 0
-    );
-  });
+  const account = value as Record<string, unknown>;
+  return (
+    typeof account.platform === "string" &&
+    account.platform.trim() !== "" &&
+    account.credentials !== null &&
+    typeof account.credentials === "object" &&
+    !Array.isArray(account.credentials) &&
+    Object.keys(account.credentials).length > 0
+  );
 }

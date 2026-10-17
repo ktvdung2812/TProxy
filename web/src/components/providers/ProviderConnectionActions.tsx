@@ -8,8 +8,6 @@ type Props = {
   size?: "sm" | "md";
   /** empty = first-time connect (prominent); footer = provider already has accounts */
   placement?: "empty" | "footer";
-  /** Hide backup/token-file import actions on provider detail pages. */
-  hideImports?: boolean;
 };
 
 function methodLabel(method: ConnectionMethod, placement: "empty" | "footer"): string {
@@ -39,11 +37,8 @@ export function ProviderConnectionActions({
   busy,
   size = "sm",
   placement = "empty",
-  hideImports = false,
 }: Props) {
-  const methods = hideImports
-    ? profile.methods.filter((method) => method.kind !== "import_9router" && method.kind !== "import_cliproxy")
-    : profile.methods;
+  const methods = profile.methods;
   const cursorPrimary =
     methods.some((method) => method.kind === "import_cursor") &&
     !methods.some(
@@ -56,7 +51,7 @@ export function ProviderConnectionActions({
     );
 
   const primary = methods.filter((method) => {
-    if (method.kind === "import_9router" || method.kind === "import_cliproxy") return false;
+    if (method.kind === "import_9router" || method.kind === "import_cliproxy" || method.kind === "import_sub2api") return false;
     if (method.kind === "import_cursor" && !cursorPrimary) return false;
     return true;
   });
@@ -64,6 +59,7 @@ export function ProviderConnectionActions({
     (method) =>
       method.kind === "import_9router" ||
       method.kind === "import_cliproxy" ||
+      method.kind === "import_sub2api" ||
       (method.kind === "import_cursor" && !cursorPrimary),
   );
 
@@ -121,6 +117,8 @@ function iconForMethod(kind: ConnectionMethod["kind"]): string {
       return "lock_open";
     case "import_cliproxy":
       return "upload";
+    case "import_sub2api":
+      return "upload_file";
     case "import_cursor":
       return "edit";
     case "connect_kiro":

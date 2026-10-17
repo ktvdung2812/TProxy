@@ -277,6 +277,22 @@ export async function exportAuthBundle(secret: string): Promise<Blob> {
   return response.blob();
 }
 
+export async function exportSub2apiAccounts(secret: string, credentialIds: string[]): Promise<Blob> {
+  const response = await fetch("/api/admin/export/sub2api", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+    },
+    body: JSON.stringify({ credential_ids: credentialIds }),
+  });
+  if (!response.ok) {
+    const data = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(data?.error?.message || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
 export function importAuthBundle(secret: string, bundle: unknown) {
   return adminFetch<{ ok: boolean }>(secret, "/api/admin/auth/import", "POST", bundle);
 }

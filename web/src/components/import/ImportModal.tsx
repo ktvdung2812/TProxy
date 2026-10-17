@@ -8,6 +8,7 @@ import { detectImportSource, type ImportSource } from "./utils";
 type Props = {
   open: boolean;
   secret: string;
+  initialSource?: ImportSource;
   onClose: () => void;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
@@ -43,11 +44,11 @@ const SOURCES: Array<{
     title: "import.sourceSub2apiTitle",
     description:
       "import.sourceSub2apiDesc",
-    patterns: ["*_sub2api_accounts.json", "*-sub2api-accounts.json", "accounts-export.json"],
+    patterns: ["*_sub2api_*.json", "*_sub2api_accounts.json", "accounts-export.json"],
   },
 ];
 
-export function ImportModal({ open, secret, onClose, onNotice, onError, onMutated }: Props) {
+export function ImportModal({ open, secret, initialSource = "9router", onClose, onNotice, onError, onMutated }: Props) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ImportSource>("9router");
@@ -62,7 +63,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
 
   useEffect(() => {
     if (!open) return;
-    setSource("9router");
+    setSource(initialSource);
     setSelectedFile(null);
     setLastSummary(null);
     setImporting(false);
@@ -71,7 +72,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
     if (inputRef.current) {
       inputRef.current.value = "";
     }
-  }, [open]);
+  }, [open, initialSource]);
 
   const formatSummary = (nextSource: ImportSource, counts: Record<string, number>) => {
     if (nextSource === "9router") {

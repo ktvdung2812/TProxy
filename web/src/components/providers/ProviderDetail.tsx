@@ -19,7 +19,7 @@ import {
   type ConnectionMethod,
 } from "./connectionMethods";
 import { ProviderLogo } from "./ProviderLogo";
-import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, listProxyPools, refreshCredential, reorderProviderCredentials, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
+import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, exportSub2apiAccounts, listProxyPools, refreshCredential, reorderProviderCredentials, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
 import {
   fetchCredentialProxyUsage,
   type CredentialProxyUsage,
@@ -29,6 +29,7 @@ import { loadCredentialQuotaOnce } from "../quota/quotaOnce";
 import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
 import { maskAccountText } from "../../lib/accountMask";
 import { useAccountMask } from "../../hooks/useAccountMask";
+import type { ImportSource } from "../import/utils";
 import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByPriority, formatCredentialAddedAt, formatServicePlanLabel, moveCredentialBefore, type Credential, type ModelAlias, type Provider } from "./types";
 
 /** Providers whose upstream quota/balance probe is implemented in tproxy. */
@@ -104,7 +105,7 @@ type Props = {
   aliases: ModelAlias[];
   secret: string;
   presets: NinerouterPreset[];
-  onOpenImport?: (source: "cliproxy" | "9router") => void;
+  onOpenImport?: (source: ImportSource) => void;
   onBack: () => void;
   onMutated: () => void;
   onNotice: (message: string) => void;
@@ -244,6 +245,7 @@ export function ProviderDetail({
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [selectedCredentialIds, setSelectedCredentialIds] = useState<string[]>([]);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
+  const [bulkExportBusy, setBulkExportBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
   const [discoverNonce, setDiscoverNonce] = useState(0);
   const [modelsCredential, setModelsCredential] = useState<Credential | null>(null);
@@ -542,6 +544,9 @@ export function ProviderDetail({
       case "import_cliproxy":
         onOpenImport?.("cliproxy");
         break;
+      case "import_sub2api":
+        onOpenImport?.("sub2api");
+        break;
       case "import_cursor":
         setShowCursorImport(true);
         break;
@@ -569,6 +574,22 @@ export function ProviderDetail({
       onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
+    }
+  };
+
+  const handleExportCredentials = async (credentialIds: string[]) => {
+    const ids = [...new Set(credentialIds.map((id) => id.trim()).filter(Boolean))];
+    if (ids.length === 0) return;
+    setBulkExportBusy(true);
+    try {
+      const blob = await exportSub2apiAccounts(secret, ids);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      downloadSub2apiExport(blob, `sub2api-accounts-${stamp}.json`);
+      onNotice(t("providers.sub2apiExportSuccess", { count: ids.length }));
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : t("providers.sub2apiExportFailed"));
+    } finally {
+      setBulkExportBusy(false);
     }
   };
 
@@ -674,7 +695,6 @@ export function ProviderDetail({
               profile={connectionProfile}
               onMethod={handleConnectionMethod}
               placement="footer"
-              hideImports
             />
           </div>
         }
@@ -762,24 +782,35 @@ export function ProviderDetail({
                   {selectedCredentialIds.length > 0 ? (
                     <div className="connections-selection-actions">
                       <span className="connections-toolbar-meta">
-                        {selectedCredentialIds.length} selected
+                        {t("providers.selectedCount", { count: selectedCredentialIds.length })}
                       </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        icon="download"
+                        loading={bulkExportBusy}
+                        disabled={bulkDeleteBusy}
+                        onClick={() => void handleExportCredentials(selectedCredentialIds)}
+                      >
+                        {t("providers.exportSelected")}
+                      </Button>
                       <Button
                         variant="danger"
                         size="sm"
                         icon="delete"
                         loading={bulkDeleteBusy}
+                        disabled={bulkExportBusy}
                         onClick={() => setConfirmBulkDelete(true)}
                       >
-                        Delete selected
+                        {t("providers.deleteSelected")}
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setSelectedCredentialIds([])}
-                        disabled={bulkDeleteBusy}
+                        disabled={bulkDeleteBusy || bulkExportBusy}
                       >
-                        Clear
+                        {t("providers.clearSelection")}
                       </Button>
                     </div>
                   ) : null}
@@ -802,6 +833,7 @@ export function ProviderDetail({
                   proxyUsage={proxyUsageById[cred.id]}
                   supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
                   onEdit={(c) => setEditingCredential(c)}
+                  onExport={(c) => void handleExportCredentials([c.id])}
                   onDeleted={(c) => setConfirmDeleteCred(c)}
                   onReAuth={(c) => setReAuthCredential(c)}
                   onShowModels={(c) => setModelsCredential(c)}
@@ -1002,6 +1034,7 @@ function ConnectionRow({
   onDrop,
   onDragEnd,
   onEdit,
+  onExport,
   onReAuth,
   onShowModels,
   onNotice,
@@ -1022,6 +1055,7 @@ function ConnectionRow({
   proxyUsage?: CredentialProxyUsage;
   supportsOAuth: boolean;
   onEdit: (credential: Credential) => void;
+  onExport: (credential: Credential) => void;
   onDeleted: (credential: Credential) => void;
   onReAuth: (credential: Credential) => void;
   onShowModels: (credential: Credential) => void;
@@ -1037,6 +1071,7 @@ function ConnectionRow({
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const { masked } = useAccountMask();
   const status = credentialStatusLabel(credential);
@@ -1242,12 +1277,29 @@ function ConnectionRow({
         {needsReAuth && supportsOAuth && (
           <Button variant="ghost" size="sm" icon="lock_reset" onClick={() => onReAuth(credential)} aria-label="Re-authenticate" title="Re-authenticate OAuth" />
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="download"
+          onClick={() => onExport(credential)}
+          aria-label={t("providers.exportAccount")}
+          title={t("providers.exportAccount")}
+        />
         <Button variant="ghost" size="sm" icon="edit" onClick={() => onEdit(credential)} aria-label="Edit credential" />
         <Toggle checked={credential.enabled} onChange={handleToggle} disabled={busy} aria-label="Toggle credential" />
         <Button variant="ghost" size="sm" icon="delete" onClick={() => onDeleted(credential)} aria-label="Delete credential" />
       </div>
     </div>
   );
+}
+
+function downloadSub2apiExport(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function formatRelativeTime(value: string) {

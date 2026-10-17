@@ -108,14 +108,19 @@ var apiKeyPlatformSpecs = map[string]providerSpec{
 // (sk-ant-oat…, which tproxy's claude provider recognizes as OAuth material).
 var oauthLikeTypes = map[string]bool{
 	"oauth":       true,
-	"setup-token": true,
+	"oauth2":      true,
+	"oauth_token": true,
 	"setup_token": true,
 }
 
 func ParseExport(data []byte) (*Export, error) {
-	var export Export
-	if err := json.Unmarshal(data, &export); err != nil {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	export, err := exportFromValue(value, 0)
+	if err != nil {
+		return nil, err
 	}
 	usable := 0
 	for _, account := range export.Accounts {
@@ -126,7 +131,56 @@ func ParseExport(data []byte) (*Export, error) {
 	if usable == 0 {
 		return nil, fmt.Errorf("not a sub2api export: missing accounts with platform and credentials")
 	}
+	return export, nil
+}
+
+// exportFromValue normalizes account-only JSON and wrapped exports before
+// decoding them through the same typed schema as a standard sub2api export.
+func exportFromValue(value any, depth int) (*Export, error) {
+	if depth > 8 {
+		return nil, fmt.Errorf("sub2api export nesting exceeds 8 levels")
+	}
+	switch typed := value.(type) {
+	case []any:
+		value = map[string]any{"accounts": typed}
+	case map[string]any:
+		if _, exists := typed["accounts"]; !exists {
+			if isAccountValue(typed) {
+				value = map[string]any{"accounts": []any{typed}}
+			} else {
+				for _, key := range []string{"data", "export", "payload", "account"} {
+					if nested, exists := typed[key]; exists {
+						return exportFromValue(nested, depth+1)
+					}
+				}
+				return nil, fmt.Errorf("not a sub2api export: expected accounts array or account object")
+			}
+		}
+	default:
+		return nil, fmt.Errorf("not a sub2api export: expected accounts array or account object")
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sub2api export: %w", err)
+	}
+	var export Export
+	if err := json.Unmarshal(encoded, &export); err != nil {
+		return nil, fmt.Errorf("invalid sub2api export: %w", err)
+	}
 	return &export, nil
+}
+
+func isAccountValue(value any) bool {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	platform, ok := record["platform"].(string)
+	if !ok || strings.TrimSpace(platform) == "" {
+		return false
+	}
+	credentials, ok := record["credentials"].(map[string]any)
+	return ok && len(credentials) > 0
 }
 
 func Import(ctx context.Context, dataStore *store.Store, data []byte, opts Options) (*Result, error) {
@@ -242,6 +296,7 @@ func (i *importer) importProxy(ctx context.Context, proxy Proxy) {
 func (i *importer) importAccount(ctx context.Context, account Account) {
 	platform := strings.ToLower(strings.TrimSpace(account.Platform))
 	accountType := strings.ToLower(strings.TrimSpace(account.Type))
+	accountType = strings.NewReplacer("-", "_", " ", "_").Replace(accountType)
 	label := accountLabel(account)
 	if label == "" {
 		label = platform + " account"

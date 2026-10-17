@@ -1708,6 +1708,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminImportCliproxyAPI(w, r)
 	case "/api/admin/import/sub2api":
 		s.adminImportSub2API(w, r)
+	case "/api/admin/export/sub2api":
+		s.adminExportSub2API(w, r)
 	case "/api/admin/config/export":
 		s.adminConfigExport(w, r)
 	case "/api/admin/config/import":
@@ -3192,6 +3194,33 @@ func (s *Server) adminImportSub2API(w http.ResponseWriter, r *http.Request) {
 	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
 		return importsub2api.Import(ctx, s.store, data, importsub2api.Options{DryRun: dryRun})
 	})
+}
+
+func (s *Server) adminExportSub2API(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
+		return
+	}
+	var request struct {
+		CredentialIDs []string `json:"credential_ids"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	data, result, err := importsub2api.ExportAccounts(r.Context(), s.store, request.CredentialIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "export_failed", err.Error(), useClientRequestID(r))
+		return
+	}
+	filename := fmt.Sprintf("sub2api-accounts-%s.json", time.Now().UTC().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if len(result.Warnings) > 0 {
+		w.Header().Set("X-TProxy-Warnings", strings.Join(result.Warnings, " | "))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 type importOK interface {
