@@ -284,9 +284,9 @@ func (s *Store) CredentialUsageChart(ctx context.Context, credentialID, period s
 	case "day":
 		bucketCount, bucketSize, label = 24, time.Hour, func(value time.Time) string { return value.Format("15:04") }
 	case "week":
-		bucketCount, bucketSize, label = 7, 24 * time.Hour, func(value time.Time) string { return value.Format("Mon") }
+		bucketCount, bucketSize, label = 7, 24*time.Hour, func(value time.Time) string { return value.Format("Mon") }
 	default:
-		bucketCount, bucketSize, label = 30, 24 * time.Hour, func(value time.Time) string { return value.Format("Jan 2") }
+		bucketCount, bucketSize, label = 30, 24*time.Hour, func(value time.Time) string { return value.Format("Jan 2") }
 	}
 
 	buckets := make([]CredentialUsageChartPoint, bucketCount)

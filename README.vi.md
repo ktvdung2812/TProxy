@@ -76,9 +76,21 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - **Proxy pool mã hóa** (HTTP/S, SOCKS5) gắn với từng provider hoặc credential.
 - **9router / CLIProxyAPI / sub2api import** hỗ trợ di chuyển từ các thiết lập hiện có. Trong mục Connections của provider, chọn **Import sub2api accounts** cạnh đăng nhập/thêm tài khoản, hoặc vào Providers → Import data. Chọn tệp JSON export accounts của sub2api; Preview kiểm tra mà không lưu dữ liệu. Hỗ trợ cả mảng tài khoản, một tài khoản đơn và dữ liệu bọc trong `data`, `export`, `payload` hoặc `account`. Tài khoản OpenAI OAuth được nhập thành credential Codex, giữ riêng từng thành viên trong cùng workspace Team, refresh token và thời hạn token. Các thiết lập lập lịch được giữ dưới dạng metadata sub2api.
 
+Với sub2api, có thể chọn nhiều file JSON cùng lúc. Khi chọn nhiều file hoặc một file chứa nhiều tài khoản, kiểm tra số tài khoản trong từng file và chọn số dòng cần nhập từ đầu file (ban đầu là một). Dashboard mặc định bật **Bỏ qua tài khoản đã tồn tại**, nhận diện theo credential ID hoặc email OAuth trên cùng provider. Provider được chuẩn bị trước khi lưu credential. Các file được xử lý lần lượt; lỗi ở file sau không hoàn tác những file đã nhập thành công.
+
+Endpoint quản trị là `POST /api/admin/import/sub2api`, nhận nội dung JSON export và yêu cầu xác thực quản trị. Các query parameter tùy chọn:
+
+| Tham số | Hành vi |
+| --- | --- |
+| `dry_run=true` | Kiểm tra và xem trước, không lưu dữ liệu. |
+| `max_accounts=N` | Xét `N` dòng tài khoản đầu tiên trước khi lọc trùng; `0` hoặc bỏ trống xét toàn bộ. Không giới hạn các mục proxy. |
+| `skip_duplicates=true` | Bỏ qua credential đã lưu thay vì cập nhật. Khi gọi API mà bỏ trống, mặc định là false để giữ tương thích. |
+
+Phản hồi có `counts.skipped` và danh sách `accounts` gồm tên, email, provider/credential ID cùng hành động (`create`, `update`, `skip_duplicate`). Xem trước nhiều file chỉ đối chiếu từng file với cơ sở dữ liệu hiện tại, không lưu file trước đó, nên số trùng giữa các file có thể thay đổi khi nhập thật.
+
 ### Vận hành & quản trị
 
-- **Client API key** mặc định dùng tất cả model, hỗ trợ bật/tắt model theo từng key cùng chính sách endpoint, RPM, concurrency, kích thước input, media job và ngân sách hàng ngày.
+- **Client API key** mặc định dùng tất cả model và kế thừa giới hạn từ các tài khoản khả dụng. Chính sách endpoint, RPM, concurrency, kích thước input, output token, media job và ngân sách hàng ngày của key có thể siết thêm sức chứa dùng chung.
 - **Teams** với giới hạn phạm vi và tổng hợp chi phí.
 - **Token Saver** pipeline nén (RTK, Caveman, CCR, Headroom, LLMLingua-2).
 - **Circuit breaker** cho từng provider (OPEN / DEGRADED / CLOSED).
@@ -100,6 +112,30 @@ Dashboard React nhúng được phục vụ từ cùng một tiến trình — k
 - **Usage** theo dõi cache đọc, cache ghi và reasoning. Tổng input đã bao gồm token cache; tổng output đã bao gồm reasoning, không cộng lại các phần này. TTFT tính từ delta nội dung đầu tiên; request không stream không có mẫu TTFT.
 
 Responses WebSocket hỗ trợ `previous_response_id`, kế thừa thiết lập bị lược bỏ và ghép lại input/output trước đó cho upstream không lưu trạng thái. Gửi `X-Session-ID` ổn định (hoặc `session_id`, `conversation_id`, `prompt_cache_key`) để nối tiếp qua kết nối mới. Lịch sử được tách theo API key/team/session, chỉ giữ trong bộ nhớ 15 phút, tối đa 128 phản hồi / 32 MiB tổng / 2 MiB mỗi ngữ cảnh. Khi hết hạn hoặc khởi động lại server, gửi lại input đầy đủ và bỏ `previous_response_id`; `reset: true` bắt đầu ngữ cảnh mới. Quan sát định tuyến và cảnh báo đang hoạt động cũng bắt đầu lại sau restart; số liệu usage vẫn lưu trong SQLite.
+
+### Giới hạn API key và sức chứa dùng chung
+
+Với cả key cũ và mới, từng trường `policy.limits` bằng `0` hoặc bỏ trống kế thừa giới hạn của nguồn phục vụ. Giới hạn dương của key, team và global tiếp tục siết thêm. Chỉ tính các tài khoản key được phép dùng cho model, route hoặc combo yêu cầu; loại tài khoản bị tắt, hết hạn, lỗi xác thực hoặc đang cooldown. Việc đọc giới hạn không thay đổi rotation và không ghi tổng suy ra vào cấu hình key.
+
+RPM cộng theo provider và mỗi lần thử gọi upstream đều tiêu thụ RPM. Sức chứa request cộng theo tài khoản; request thường và stream dùng chung slot tài khoản, stream chịu thêm trần provider/key/team/global. Ngân sách dùng chi phí ước tính kể từ đầu ngày UTC. Media tính cả job đang tạo và chưa kết thúc; retry có cùng idempotency key dùng lại job đã lưu. Input bytes và output tokens được kiểm tra trên từng request/route, không cộng giữa tài khoản. Trần output được đưa vào request khi upstream hỗ trợ; Codex loại bỏ các trường trần output không hỗ trợ nên không bảo đảm được giới hạn token sinh ra bằng thiết lập này.
+
+Ví dụ, hai tài khoản có concurrency 3 và 5 tạo tám slot dùng chung; tạo thêm key không tăng sức chứa. Nguồn chưa đặt trần vẫn có thể phục vụ theo giới hạn đã biết. Các trạng thái là `finite` (có trần), `unbounded` (chưa đặt trần), `unknown` (thiếu dữ liệu), `unavailable` (không khả dụng); pool rỗng không được hiểu là vô hạn.
+
+Client đọc giới hạn bằng chính API key qua `GET /v1/limits?model=<model-tùy-chọn>`, dùng `Authorization: Bearer <client-api-key>` hoặc `X-Api-Key`. Endpoint luôn yêu cầu client key, kể cả khi bật gọi nội bộ không cần key. Phản hồi có `object: "tproxy.limits"`, `api_key_id`, `effective_limits`, `shared_limits`, `eligible_account_count`, `quota_windows`, `computed_at` và chỉ phản ánh quyền của key đã xác thực. Đọc giới hạn không tiêu thụ RPM inference, không xoay tài khoản và không probe upstream. Model không tồn tại hoặc key không được phép dùng trả pool `unavailable`.
+
+```bash
+curl "$TPROXY_BASE_URL/limits?model=gpt-6.1-sol" \
+  -H "Authorization: Bearer $TPROXY_API_KEY"
+# TPROXY_BASE_URL bao gồm /v1, ví dụ http://127.0.0.1:28120/v1.
+```
+
+Để phát hiện hỗ trợ, chỉ chấp nhận HTTP 200 với `object: "tproxy.limits"` và các trường sức chứa hợp lệ. HTTP 404 hoặc payload khác nghĩa là endpoint chưa được hỗ trợ; phân biệt với lỗi xác thực hoặc lỗi tạm thời. Quản trị viên xem các trường tương tự theo từng key qua `GET /api/admin/quota/summary?model=<model-tùy-chọn>`. Khi không truyền model, kết quả là trần sức chứa trên các model được phép; từng request có thể có ít route khả dụng hơn.
+
+Quota upstream giữ riêng từng cửa sổ của từng tài khoản. Với Codex, đọc `window_minutes`: `300` là 5 giờ, `10080` là 7 ngày, không suy luận chỉ từ tên primary/secondary. Thiếu hoặc sai thời lượng/phần đã dùng có `total: 0` (chưa biết), không mặc định còn 100%. Khi số liệu hợp lệ, phần trăm còn lại bằng `100 - used_percent`. Header quota của một request sinh nội dung chỉ thuộc tài khoản phục vụ request đó; không cộng phần trăm giữa các tài khoản hoặc quy đổi thành token, lượt gọi hay USD.
+
+Backend làm mới snapshot quota mỗi 60 giây (Claude: 180 giây), tối đa bốn probe cùng lúc và gộp probe trùng nhau, kể cả khi dashboard đóng. `GET /api/admin/credentials/{id}/quota` đọc snapshot; `POST` yêu cầu làm mới. Probe lỗi giữ dữ liệu trước đó và đánh dấu cũ/chưa biết; kiểm tra phục hồi tài khoản hết quota giữ nguyên trạng thái tắt thủ công.
+
+Triển khai backend trước dashboard; không cần migration SQLite hay cấu hình key. Bộ đếm RPM, slot đang dùng và snapshot quota chỉ có phạm vi một tiến trình, reset khi khởi động lại. Chi tiêu và media job chưa hoàn tất vẫn lưu trong SQLite.
 
 ---
 

@@ -77,6 +77,18 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - **Encrypted proxy pools** (HTTP/S, SOCKS5) bound per provider or credential.
 - **9router / CLIProxyAPI / sub2api import** helpers for migrating existing setups. In a provider’s Connections section, choose **Import sub2api accounts** next to sign-in/add account, or use Providers → Import data. Select a sub2api accounts JSON export; Preview validates it without saving. Account arrays, single accounts, and exports wrapped in `data`, `export`, `payload`, or `account` are also accepted. OpenAI OAuth accounts become Codex credentials, including separate members of a shared Team workspace, refresh tokens, and token expiry. Scheduling settings are retained as sub2api metadata.
 
+For sub2api, you can select several JSON files at once. When there are multiple files or a file contains multiple accounts, review the account count per file and choose how many rows to import from the beginning of each file (initially one). **Skip accounts that already exist** is enabled by default in the dashboard. It matches an existing credential ID, or an OAuth email on the same provider. Providers are prepared before credentials are saved. Files are processed sequentially; a failure in a later file does not roll back earlier imports.
+
+The management endpoint is `POST /api/admin/import/sub2api`, with a JSON export body and management authentication. Its optional query parameters are:
+
+| Parameter | Behavior |
+| --- | --- |
+| `dry_run=true` | Validate and preview without saving. |
+| `max_accounts=N` | Consider the first `N` account rows before duplicate filtering; `0` or omitted considers all rows. This does not limit proxy entries. |
+| `skip_duplicates=true` | Skip credentials already stored instead of updating them. Omitted defaults to false for API compatibility. |
+
+The response includes `counts.skipped` and an `accounts` plan containing the account label, email, provider/credential IDs, and action (`create`, `update`, or `skip_duplicate`). A batch preview checks each file against the current database without saving earlier files, so duplicate counts across files can differ at import time.
+
 ### Operations & governance
 
 - **Client API keys** default to all models and inherit limits from available accounts. Per-key endpoint, RPM, concurrency, input size, output token, media-job, and daily-budget policies can tighten this shared capacity.

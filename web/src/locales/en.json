@@ -1445,7 +1445,20 @@
     "failed": "Import failed",
     "failedFile": "Failed to import file",
     "sourceSub2apiTitle": "sub2api accounts",
-    "sourceSub2apiDesc": "Import OAuth accounts, API keys, and proxies from a sub2api admin data export."
+    "sourceSub2apiDesc": "Import OAuth accounts, API keys, and proxies from a sub2api admin data export.",
+    "sub2apiMultiFileHint": "Select one JSON file per account, or several files at once. Providers are created before credentials are saved.",
+    "sub2apiChooseFiles": "Choose JSON file(s)",
+    "sub2apiBatchIntro": "Review each file before import. When a file contains multiple accounts, choose how many to import from the top of the list.",
+    "sub2apiBatchFile": "File",
+    "sub2apiBatchFound": "Accounts found",
+    "sub2apiBatchImportCount": "Import count",
+    "sub2apiSkipDuplicates": "Skip accounts that already exist (same email or credential id)",
+    "sub2apiDuplicateLine": "{{email}} already exists — skipped",
+    "sub2apiWrongFormat": "{{name}} is not a sub2api export",
+    "sub2apiNoAccounts": "{{name}} has no importable accounts",
+    "sub2apiBatchPreview": "Previewed {{files}} file(s): {{summary}}",
+    "sub2apiBatchDone": "Imported {{files}} file(s): {{summary}}",
+    "back": "Back"
   },
   "topology": {
     "requestFlow": "Request flow topology",

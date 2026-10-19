@@ -66,12 +66,37 @@ export type ImportSub2apiResult = {
     providers: number;
     credentials: number;
     proxy_pools: number;
+    skipped?: number;
   };
+  accounts?: Array<{
+    label: string;
+    email: string;
+    platform: string;
+    provider_id: string;
+    credential_id: string;
+    action: string;
+  }>;
   warnings: string[];
   errors: string[];
 };
 
-export function importSub2apiExport(secret: string, payload: unknown, dryRun = false) {
-  const query = dryRun ? "?dry_run=true" : "";
+export type ImportSub2apiOptions = {
+  dryRun?: boolean;
+  maxAccounts?: number;
+  skipDuplicates?: boolean;
+};
+
+export function importSub2apiExport(secret: string, payload: unknown, options: ImportSub2apiOptions = {}) {
+  const params = new URLSearchParams();
+  if (options.dryRun) {
+    params.set("dry_run", "true");
+  }
+  if (options.maxAccounts && options.maxAccounts > 0) {
+    params.set("max_accounts", String(options.maxAccounts));
+  }
+  if (options.skipDuplicates) {
+    params.set("skip_duplicates", "true");
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : "";
   return adminFetch<ImportSub2apiResult>(secret, `/api/admin/import/sub2api${query}`, "POST", payload);
 }

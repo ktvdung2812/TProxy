@@ -1445,7 +1445,20 @@
     "failed": "Nhập thất bại",
     "failedFile": "Không thể nhập file",
     "sourceSub2apiTitle": "sub2api accounts",
-    "sourceSub2apiDesc": "Nhập tài khoản OAuth, API key và proxy từ file export dữ liệu admin của sub2api."
+    "sourceSub2apiDesc": "Nhập tài khoản OAuth, API key và proxy từ file export dữ liệu admin của sub2api.",
+    "sub2apiMultiFileHint": "Chọn một file JSON cho mỗi tài khoản, hoặc nhiều file cùng lúc. Provider được tạo trước khi lưu credential.",
+    "sub2apiChooseFiles": "Chọn file JSON",
+    "sub2apiBatchIntro": "Kiểm tra từng file trước khi nhập. Nếu một file có nhiều tài khoản, chọn số lượng cần nhập (theo thứ tự trong file).",
+    "sub2apiBatchFile": "File",
+    "sub2apiBatchFound": "Số tài khoản",
+    "sub2apiBatchImportCount": "Số lượng nhập",
+    "sub2apiSkipDuplicates": "Bỏ qua tài khoản đã tồn tại (cùng email hoặc credential id)",
+    "sub2apiDuplicateLine": "{{email}} đã tồn tại — bỏ qua",
+    "sub2apiWrongFormat": "{{name}} không phải export sub2api",
+    "sub2apiNoAccounts": "{{name}} không có tài khoản hợp lệ",
+    "sub2apiBatchPreview": "Đã xem trước {{files}} file: {{summary}}",
+    "sub2apiBatchDone": "Đã nhập {{files}} file: {{summary}}",
+    "back": "Quay lại"
   },
   "topology": {
     "requestFlow": "Topology luồng yêu cầu",

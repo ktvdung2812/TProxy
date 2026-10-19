@@ -57,6 +57,49 @@ function isSub2apiExport(value: unknown, depth = 0): boolean {
   return false;
 }
 
+/** Returns usable sub2api account objects from any supported export shape. */
+export function extractSub2apiAccounts(payload: unknown): unknown[] {
+  const accounts: unknown[] = [];
+  collectSub2apiAccounts(payload, 0, accounts);
+  return accounts.filter(isSub2apiAccount);
+}
+
+export function countSub2apiAccounts(payload: unknown): number {
+  return extractSub2apiAccounts(payload).length;
+}
+
+function collectSub2apiAccounts(value: unknown, depth: number, out: unknown[]): void {
+  if (depth > 8 || value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (isSub2apiAccount(item)) {
+        out.push(item);
+      }
+    }
+    return;
+  }
+  if (typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.accounts)) {
+    for (const item of record.accounts) {
+      if (isSub2apiAccount(item)) {
+        out.push(item);
+      }
+    }
+    return;
+  }
+  if (isSub2apiAccount(record)) {
+    out.push(record);
+    return;
+  }
+  for (const key of ["data", "export", "payload", "account"]) {
+    if (key in record) {
+      collectSub2apiAccounts(record[key], depth + 1, out);
+      return;
+    }
+  }
+}
+
 function isSub2apiAccount(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;

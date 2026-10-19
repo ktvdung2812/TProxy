@@ -55,14 +55,29 @@ type Account struct {
 
 type Options struct {
 	DryRun bool
+	// MaxAccounts limits how many usable accounts are imported from the export (0 = all).
+	MaxAccounts int
+	// SkipDuplicates skips credentials that already exist (same id or oauth email on provider).
+	SkipDuplicates bool
 }
 
 type Result struct {
 	OK       bool     `json:"ok"`
 	DryRun   bool     `json:"dry_run"`
 	Counts   Counts   `json:"counts"`
+	Accounts []Plan   `json:"accounts,omitempty"`
 	Warnings []string `json:"warnings"`
 	Errors   []string `json:"errors"`
+}
+
+// Plan describes one account row before import completes (preview + result summary).
+type Plan struct {
+	Label        string `json:"label"`
+	Email        string `json:"email"`
+	Platform     string `json:"platform"`
+	ProviderID   string `json:"provider_id"`
+	CredentialID string `json:"credential_id"`
+	Action       string `json:"action"`
 }
 
 func (r *Result) GetOK() bool {
@@ -76,6 +91,7 @@ type Counts struct {
 	Providers   int `json:"providers"`
 	Credentials int `json:"credentials"`
 	ProxyPools  int `json:"proxy_pools"`
+	Skipped     int `json:"skipped"`
 }
 
 type providerSpec struct {
@@ -188,13 +204,35 @@ func Import(ctx context.Context, dataStore *store.Store, data []byte, opts Optio
 	if err != nil {
 		return nil, err
 	}
+	accounts := export.Accounts
+	if opts.MaxAccounts > 0 && len(accounts) > opts.MaxAccounts {
+		accounts = accounts[:opts.MaxAccounts]
+	}
 	result := &Result{DryRun: opts.DryRun, OK: true}
-	importer := &importer{store: dataStore, result: result, dryRun: opts.DryRun, providers: map[string]struct{}{}, proxyPoolByKey: map[string]string{}}
+	importer := &importer{
+		store:          dataStore,
+		result:         result,
+		dryRun:         opts.DryRun,
+		skipDuplicates: opts.SkipDuplicates,
+		providers:      map[string]struct{}{},
+		providerSpecs:  map[string]providerSpec{},
+		proxyPoolByKey: map[string]string{},
+	}
 
 	for _, proxy := range export.Proxies {
 		importer.importProxy(ctx, proxy)
 	}
-	for _, account := range export.Accounts {
+	for _, account := range accounts {
+		importer.planAccount(ctx, account)
+	}
+	for providerID, spec := range importer.providerSpecs {
+		importer.ensureProvider(ctx, providerID, spec)
+	}
+	if len(result.Errors) > 0 {
+		result.OK = false
+		return result, nil
+	}
+	for _, account := range accounts {
 		importer.importAccount(ctx, account)
 	}
 	if len(result.Errors) > 0 {
@@ -207,9 +245,12 @@ type importer struct {
 	store          *store.Store
 	result         *Result
 	dryRun         bool
+	skipDuplicates bool
 	providers      map[string]struct{}
+	providerSpecs  map[string]providerSpec
 	proxyPoolByKey map[string]string
 	warnSet        map[string]struct{}
+	planByKey      map[string]Plan
 }
 
 func (i *importer) warn(message string) {
@@ -225,6 +266,134 @@ func (i *importer) warn(message string) {
 
 func (i *importer) fail(message string) {
 	i.result.Errors = append(i.result.Errors, message)
+}
+
+func (i *importer) planAccount(ctx context.Context, account Account) {
+	target, ok := resolveAccountTarget(account)
+	if !ok {
+		return
+	}
+	action := "create"
+	if i.skipDuplicates {
+		if duplicate, err := i.credentialDuplicate(ctx, target.providerID, target.credentialID, target.email, target.authType); err != nil {
+			i.fail(fmt.Sprintf("account %q: %v", target.label, err))
+			return
+		} else if duplicate {
+			action = "skip_duplicate"
+		}
+	} else if exists, err := i.credentialExists(ctx, target.credentialID); err != nil {
+		i.fail(fmt.Sprintf("account %q: %v", target.label, err))
+		return
+	} else if exists {
+		action = "update"
+	}
+	if action != "skip_duplicate" {
+		i.providerSpecs[target.providerID] = target.spec
+	}
+	plan := Plan{
+		Label:        target.label,
+		Email:        target.email,
+		Platform:     strings.ToLower(strings.TrimSpace(account.Platform)),
+		ProviderID:   target.providerID,
+		CredentialID: target.credentialID,
+		Action:       action,
+	}
+	if i.planByKey == nil {
+		i.planByKey = map[string]Plan{}
+	}
+	i.planByKey[planKey(account)] = plan
+	i.result.Accounts = append(i.result.Accounts, plan)
+}
+
+func planKey(account Account) string {
+	platform := strings.ToLower(strings.TrimSpace(account.Platform))
+	return platform + "\x00" + credentialIDFor(account, platform)
+}
+
+type importTarget struct {
+	spec         providerSpec
+	providerID   string
+	credentialID string
+	label        string
+	email        string
+	authType     string
+}
+
+func resolveAccountTarget(account Account) (importTarget, bool) {
+	platform := strings.ToLower(strings.TrimSpace(account.Platform))
+	accountType := strings.ToLower(strings.TrimSpace(account.Type))
+	accountType = strings.NewReplacer("-", "_", " ", "_").Replace(accountType)
+	label := accountLabel(account)
+	if label == "" {
+		label = platform + " account"
+	}
+	if len(account.Credentials) == 0 {
+		return importTarget{}, false
+	}
+	if oauthLikeTypes[accountType] {
+		spec, ok := platformSpecs[platform]
+		if !ok {
+			return importTarget{}, false
+		}
+		if credentialString(account.Credentials, "access_token", "session_key", "token") == "" {
+			return importTarget{}, false
+		}
+		return importTarget{
+			spec:         spec,
+			providerID:   spec.Type,
+			credentialID: credentialIDFor(account, platform),
+			label:        label,
+			email:        accountEmail(account),
+			authType:     "oauth",
+		}, true
+	}
+	if accountType == "apikey" || accountType == "api_key" {
+		spec, ok := apiKeyPlatformSpecs[platform]
+		if !ok {
+			return importTarget{}, false
+		}
+		if credentialString(account.Credentials, "api_key", "key", "access_token") == "" {
+			return importTarget{}, false
+		}
+		providerID := spec.Type
+		if platform == "openai" {
+			providerID = "openai-api"
+		}
+		return importTarget{
+			spec:         spec,
+			providerID:   providerID,
+			credentialID: credentialIDFor(account, platform),
+			label:        label,
+			email:        accountEmail(account),
+			authType:     "api_key",
+		}, true
+	}
+	return importTarget{}, false
+}
+
+func (i *importer) credentialExists(ctx context.Context, credentialID string) (bool, error) {
+	_, err := i.store.CredentialByID(ctx, credentialID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (i *importer) credentialDuplicate(ctx context.Context, providerID, credentialID, email, authType string) (bool, error) {
+	if exists, err := i.credentialExists(ctx, credentialID); err != nil || exists {
+		return exists, err
+	}
+	if authType != "oauth" || strings.TrimSpace(email) == "" {
+		return false, nil
+	}
+	existing, err := i.store.OAuthCredentialIDForLogin(ctx, providerID, credentialID, email, false)
+	if err != nil {
+		return false, err
+	}
+	return existing != "" && existing != credentialID, nil
 }
 
 func (i *importer) ensureProvider(ctx context.Context, providerID string, spec providerSpec) bool {
@@ -305,6 +474,11 @@ func (i *importer) importAccount(ctx context.Context, account Account) {
 		i.warn(fmt.Sprintf("account %q has no credentials", label))
 		return
 	}
+	if plan, ok := i.planByKey[planKey(account)]; ok && plan.Action == "skip_duplicate" {
+		i.result.Counts.Skipped++
+		i.warn(fmt.Sprintf("account %q (%s) already exists — skipped", plan.Label, plan.Email))
+		return
+	}
 
 	if oauthLikeTypes[accountType] {
 		i.importOAuthAccount(ctx, account, platform, label)
@@ -330,10 +504,6 @@ func (i *importer) importOAuthAccount(ctx context.Context, account Account, plat
 		i.warn(fmt.Sprintf("oauth account %q has no access token", label))
 		return
 	}
-	if !i.ensureProvider(ctx, providerID, spec) {
-		return
-	}
-
 	token := store.OAuthToken{
 		AccessToken:  accessToken,
 		RefreshToken: credentialString(account.Credentials, "refresh_token"),
@@ -387,9 +557,6 @@ func (i *importer) importAPIKeyAccount(ctx context.Context, account Account, pla
 		providerID = "openai-api"
 	}
 	spec.BaseURL = firstNonEmpty(spec.BaseURL, credentialString(account.Credentials, "base_url"))
-	if !i.ensureProvider(ctx, providerID, spec) {
-		return
-	}
 
 	credentialID := credentialIDFor(account, platform)
 	priority := mappedPriority(account.Priority)

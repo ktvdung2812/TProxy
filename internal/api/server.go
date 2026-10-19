@@ -3192,7 +3192,13 @@ func (s *Server) adminImportCliproxyAPI(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) adminImportSub2API(w http.ResponseWriter, r *http.Request) {
 	s.adminImportPayload(w, r, func(ctx context.Context, data []byte, dryRun bool) (importOK, error) {
-		return importsub2api.Import(ctx, s.store, data, importsub2api.Options{DryRun: dryRun})
+		maxAccounts, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("max_accounts")))
+		skipDuplicates := strings.EqualFold(r.URL.Query().Get("skip_duplicates"), "true") || r.URL.Query().Get("skip_duplicates") == "1"
+		return importsub2api.Import(ctx, s.store, data, importsub2api.Options{
+			DryRun:         dryRun,
+			MaxAccounts:    maxAccounts,
+			SkipDuplicates: skipDuplicates,
+		})
 	})
 }
 

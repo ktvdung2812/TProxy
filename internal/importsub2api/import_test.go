@@ -354,6 +354,33 @@ func TestImportPreservesExistingProvider(t *testing.T) {
 	}
 }
 
+func TestImportSub2apiMaxAccountsAndSkipDuplicates(t *testing.T) {
+	ctx := context.Background()
+	dataStore := openTestStore(t)
+	payload := []byte(`{"accounts":[
+	  {"name":"one@example.com","platform":"openai","type":"oauth","credentials":{"access_token":"a1","email":"one@example.com"}},
+	  {"name":"two@example.com","platform":"openai","type":"oauth","credentials":{"access_token":"a2","email":"two@example.com"}},
+	  {"name":"three@example.com","platform":"openai","type":"oauth","credentials":{"access_token":"a3","email":"three@example.com"}}
+	]}`)
+
+	limited, err := importsub2api.Import(ctx, dataStore, payload, importsub2api.Options{MaxAccounts: 2})
+	if err != nil || !limited.OK || limited.Counts.Credentials != 2 || len(limited.Accounts) != 2 {
+		t.Fatalf("limited import: %+v err=%v", limited, err)
+	}
+	credentials, err := dataStore.Credentials(ctx, "codex")
+	if err != nil || len(credentials) != 2 {
+		t.Fatalf("stored=%d err=%v", len(credentials), err)
+	}
+
+	skip, err := importsub2api.Import(ctx, dataStore, payload, importsub2api.Options{SkipDuplicates: true})
+	if err != nil || !skip.OK || skip.Counts.Skipped != 2 || skip.Counts.Credentials != 1 {
+		t.Fatalf("skip duplicates: %+v err=%v", skip, err)
+	}
+	if credentials, err = dataStore.Credentials(ctx, "codex"); err != nil || len(credentials) != 3 {
+		t.Fatalf("final count=%d err=%v", len(credentials), err)
+	}
+}
+
 func TestImportRejectsProviderTypeConflict(t *testing.T) {
 	ctx := context.Background()
 	dataStore := openTestStore(t)
