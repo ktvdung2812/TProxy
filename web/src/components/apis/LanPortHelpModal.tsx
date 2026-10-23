@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Segmented } from "../page-kit";
 import { Button, Modal } from "../ui";
 import {
   LAN_PORT_OS_TABS,
@@ -35,21 +36,18 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
       open={open}
       onClose={onClose}
       title={t("apis.lan.openPort")}
-      subtitle={`Allow inbound TCP ${port} so other devices on your network can reach tproxy.`}
+      subtitle={t("apis.lanPortHelpSubtitle", { port })}
+      icon="lan"
       size="lg"
     >
       <div className="lan-port-help">
-        <div className="usage-segmented lan-port-help-tabs">
-          {LAN_PORT_OS_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={osTab === tab.id ? "active" : ""}
-              onClick={() => setOsTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="lan-port-help-tabs">
+          <Segmented
+            label={t("apis.lan.osLabel")}
+            value={osTab}
+            onChange={setOsTab}
+            items={LAN_PORT_OS_TABS.map((tab) => ({ value: tab.id, label: tab.label }))}
+          />
         </div>
 
         <div className="lan-port-help-sections">
@@ -77,8 +75,7 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
         </div>
 
         <p className="lan-port-help-footer">
-          Ensure <code>server.host</code> is set to <code>0.0.0.0</code> in <code>config.yaml</code> and restart
-          tproxy after opening the port.
+          <Trans i18nKey="apis.lan.footer" components={{ code: <code /> }} />
         </p>
       </div>
     </Modal>

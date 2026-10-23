@@ -293,10 +293,6 @@ export async function exportSub2apiAccounts(secret: string, credentialIds: strin
   return response.blob();
 }
 
-export function importAuthBundle(secret: string, bundle: unknown) {
-  return adminFetch<{ ok: boolean }>(secret, "/api/admin/auth/import", "POST", bundle);
-}
-
 /* ------------------------------------------------------------
    OAuth flow
    ------------------------------------------------------------ */

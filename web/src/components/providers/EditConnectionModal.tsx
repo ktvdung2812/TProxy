@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Field, Input, Modal } from "../ui";
+import { Button, Field, Input, Modal, Toggle } from "../ui";
+import { StatusPill, ToolButton } from "../page-kit";
 import { checkCredentialHealth, saveCredential, type ProxyPoolOption } from "./api";
 import type { AdmissionPolicy, Credential } from "./types";
 import { maskAccountText } from "../../lib/accountMask";
@@ -71,7 +72,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
     try {
       const result = await checkCredentialHealth(secret, credential.id);
       setTestResult(result.ok ? "ok" : "error");
-      setTestMessage(result.ok ? `Connection ${result.status || "healthy"}` : result.last_error || result.error || t("providers.healthCheckFailed"));
+      setTestMessage(result.ok ? t("providers.editConnectionHealthy", { status: result.status || "healthy" }) : result.last_error || result.error || t("providers.healthCheckFailed"));
     } catch (cause) {
       setTestResult("error");
       setTestMessage(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
@@ -117,20 +118,20 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
     <Modal
       open={open}
       onClose={onClose}
-      title={`Edit ${maskAccountText(credential.label || credential.id, masked)}`}
+      title={t("providers.editConnectionTitle", { label: maskAccountText(credential.label || credential.email || credential.id, masked) })}
       subtitle={isOAuth ? t("providers.oauthCredentialHint") : t("providers.leaveSecretBlank")}
-      icon="edit"
+      icon="tune"
       size="md"
     >
-      <form onSubmit={handleSave} style={{ display: "grid", gap: 12 }}>
-        <Field label="Label">
-          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Friendly name" />
+      <form onSubmit={handleSave} className="pv-form">
+        <Field label={t("providers.label")}>
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("providers.editConnectionFriendlyName")} />
         </Field>
         <div className="inline-fields">
-          <Field label="Priority" hint="Higher runs first">
+          <Field label={t("providers.priority")} hint={t("providers.priorityHint")}>
             <Input type="number" value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
           </Field>
-          <Field label="Weight" hint="Relative load share">
+          <Field label={t("providers.weight")} hint={t("providers.weightHint")}>
             <Input type="number" min={1} value={weight} onChange={(e) => setWeight(Number(e.target.value))} />
           </Field>
         </div>
@@ -145,76 +146,63 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
             <Input aria-label={t("operations.queueTimeout")} type="number" min={0} max={120000} value={admission.queue_timeout_ms} onChange={e=>setAdmission({...admission,queue_timeout_ms:Number(e.target.value)})}/>
           </Field>
         </div>
-        <Field label={t("operations.expiry")} hint="RFC3339 · 2026-12-31T23:59:59+07:00">
+        <Field label={t("operations.expiry")} hint={t("providers.editConnection.expiryHint")}>
           <Input aria-label={t("operations.expiry")} value={admission.account_expires_at ?? ""} onChange={e=>setAdmission({...admission,account_expires_at:e.target.value})}/>
         </Field>
         {isOAuth && (
-          <Field label="Account email">
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="account@example.com" />
+          <Field label={t("providers.editConnectionAccountEmail")}>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("providers.emailPlaceholder")} />
           </Field>
         )}
         {needsSecret && (
-          <Field
-            label="New secret"
-            hint="Optional — only set to rotate. Encrypted at rest, never returned."
-          >
+          <Field label={t("providers.editConnectionNewSecret")} hint={t("providers.editConnectionNewSecretHint")}>
             <Input
               type="password"
               value={newSecret}
               onChange={(e) => setNewSecret(e.target.value)}
-              placeholder="Leave blank to keep current"
+              placeholder={t("providers.editConnectionLeaveBlank")}
             />
           </Field>
         )}
         {proxyPools.length > 0 && (
-          <Field label="Proxy pools" hint="Bind this credential to one or more egress pools.">
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <Field label={t("providers.editConnectionProxyPools")} hint={t("providers.editConnectionProxyPoolsHint")}>
+            <div className="pv-check-list">
               {proxyPools.map((pool) => (
-                <label key={pool.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={proxyPoolIds.includes(pool.id)}
-                    onChange={() => togglePool(pool.id)}
-                  />
-                  <span style={{ color: "var(--color-text-main)" }}>{pool.name || pool.id}</span>
-                  <span style={{ color: "var(--color-text-muted)" }}>· {pool.status}</span>
+                <label key={pool.id} className="pv-check-item">
+                  <input type="checkbox" className="cp-check" checked={proxyPoolIds.includes(pool.id)} onChange={() => togglePool(pool.id)} />
+                  <span>{pool.name || pool.id}</span>
+                  <small>{pool.status}</small>
                 </label>
               ))}
             </div>
           </Field>
         )}
-        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span style={{ fontSize: 14, color: "var(--color-text-main)" }}>Enabled</span>
-        </label>
+        <Toggle label={t("providers.enabled")} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
 
         {/* Provider-level health check (tdproxy has no per-credential test) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, background: "var(--color-surface-2)", borderRadius: 10 }}>
-          <Button type="button" variant="outline" size="sm" icon="monitor_heart" onClick={handleTest} loading={testing} disabled={testing}>
-            Run health check
-          </Button>
-          {testResult && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: testResult === "ok" ? "var(--color-success)" : "var(--color-danger)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                {testResult === "ok" ? "check_circle" : "error"}
-              </span>
+        <div className="pv-form-check">
+          <ToolButton icon="monitor_heart" spinning={testing} disabled={testing} onClick={() => void handleTest()}>
+            {t("providers.editConnectionRunHealthCheck")}
+          </ToolButton>
+          {testResult ? (
+            <StatusPill tone={testResult === "ok" ? "success" : "danger"} title={testMessage}>
               {testMessage}
-            </span>
-          )}
+            </StatusPill>
+          ) : null}
         </div>
 
         {error && (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--color-danger)", display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>error</span>
+          <p className="pv-form-error" role="alert">
+            <span className="material-symbols-outlined" aria-hidden>error</span>
             {error}
           </p>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+        <div className="pv-form-actions">
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" icon="save" loading={saving}>
-            Save changes
+            {t("providers.editConnectionSaveChanges")}
           </Button>
         </div>
       </form>

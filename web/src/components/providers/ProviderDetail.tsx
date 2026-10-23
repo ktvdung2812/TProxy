@@ -1,103 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Select, Toggle } from "../ui";
-import { CooldownTimer } from "./CooldownTimer";
+import { ConfirmDialog } from "../ui";
+import { ActionMenu, Tag, ToolButton } from "../page-kit";
 import { CredentialModelsModal } from "./CredentialModelsModal";
 import { EditConnectionModal } from "./EditConnectionModal";
-import { ModelAvailabilityBadge } from "./ModelAvailabilityBadge";
-import { ConnectionStatsInline } from "./ConnectionStatsInline";
 import { ModelsSection } from "./ModelsSection";
 import { OAuthModal } from "./OAuthModal";
 import { KiroOAuthModal } from "./KiroOAuthModal";
 import { CursorImportModal } from "./CursorImportModal";
 import { AddCredentialModal } from "./AddCredentialModal";
-import { ProviderConnectionActions } from "./ProviderConnectionActions";
+import { ProviderAccounts } from "./ProviderAccounts";
+import { ProviderIdentity } from "./ProviderIdentity";
+import { HealthPill, providerLogoId } from "./ProviderListItem";
 import { ProviderRotationCard } from "./ProviderRotationCard";
-import {
-  catalogWithPreset,
-  resolveConnectionProfile,
-  type ConnectionMethod,
-} from "./connectionMethods";
-import { ProviderLogo } from "./ProviderLogo";
-import { checkCredentialHealth, checkProviderHealth, clearCredentialCooldown, deleteCredential, deleteProvider, exportSub2apiAccounts, listProxyPools, refreshCredential, reorderProviderCredentials, saveCredential, type NinerouterPreset, type ProxyPoolOption } from "./api";
-import {
-  fetchCredentialProxyUsage,
-  type CredentialProxyUsage,
-  type CredentialQuota,
-} from "../quota/api";
-import { loadCredentialQuotaOnce } from "../quota/quotaOnce";
-import { formatProxyUsageLabel, getColorTone } from "../quota/utils";
+import { catalogWithPreset, resolveConnectionProfile, type ConnectionMethod } from "./connectionMethods";
+import { checkProviderHealth, deleteProvider, listProxyPools, type NinerouterPreset, type ProxyPoolOption } from "./api";
+import { providerHealth, relativeAge } from "./providerHealth";
 import { maskAccountText } from "../../lib/accountMask";
 import { useAccountMask } from "../../hooks/useAccountMask";
-import type { ImportSource } from "../import/utils";
-import { credentialStatusLabel, isOnCooldown, buildCredentialAccountNumbers, compareCredentialsByPriority, formatCredentialAddedAt, formatServicePlanLabel, moveCredentialBefore, type Credential, type ModelAlias, type Provider } from "./types";
-
-/** Providers whose upstream quota/balance probe is implemented in tproxy. */
-const CONNECTION_QUOTA_PROVIDER_IDS = new Set([
-  "deepseek",
-  "codex",
-  "claude",
-  "copilot",
-  "github",
-  "antigravity",
-  "gemini-cli",
-  "glm",
-  "glm-cn",
-  "minimax",
-  "minimax-cn",
-  "kiro",
-  "qoder",
-  "qwen",
-  "xai",
-  "grok-cli",
-  "vercel-ai-gateway",
-  "codebuddy-cn",
-  "ollama",
-  "kimi",
-  "kimi-coding",
-]);
-
-function providerSupportsUpstreamQuota(providerId: string, presets: NinerouterPreset[]) {
-  if (CONNECTION_QUOTA_PROVIDER_IDS.has(providerId)) return true;
-  return Boolean(presets.find((preset) => preset.id === providerId)?.supports_quota);
-}
-
-type QuotaBadge = {
-  key: string;
-  label: string;
-  tone: "success" | "warning" | "error" | "info" | "default";
-};
-
-type QuotaView = {
-  badges: QuotaBadge[];
-  plan: string;
-  message: string;
-};
-
-function quotaBadgesFromQuota(quota: CredentialQuota | null | undefined): QuotaBadge[] {
-  if (!quota?.quotas) return [];
-  return Object.entries(quota.quotas).map(([key, entry]) => {
-    const name = (entry.name || key).trim();
-    if (entry.unlimited) {
-      return { key, label: `${name} ∞`, tone: "info" as const };
-    }
-    // Absolute balance labels from DeepSeek-style probes: "USD 0.12"
-    if (/^[A-Z]{3}\s+-?\d/.test(name)) {
-      return { key, label: name, tone: "info" as const };
-    }
-    const total = entry.total || 0;
-    const used = entry.used || 0;
-    const remainingPct =
-      typeof entry.remaining === "number" && entry.remaining > 0 && entry.remaining <= 100
-        ? Math.round(entry.remaining)
-        : total > 0
-          ? Math.max(0, Math.round(((total - used) / total) * 100))
-          : 100;
-    const toneRaw = getColorTone(remainingPct);
-    const tone = toneRaw === "danger" ? ("error" as const) : toneRaw;
-    return { key, label: `${name} ${remainingPct}%`, tone };
-  });
-}
+import type { Credential, ModelAlias, Provider } from "./types";
 
 type Props = {
   provider: Provider;
@@ -105,19 +26,18 @@ type Props = {
   aliases: ModelAlias[];
   secret: string;
   presets: NinerouterPreset[];
-  onOpenImport?: (source: ImportSource) => void;
+  onOpenImport?: () => void;
   onBack: () => void;
   onMutated: () => void;
   onNotice: (message: string) => void;
   onError: (message: string) => void;
 };
 
-/** Provider detail page — header + connections card + discovered models.
+/** Provider detail page — identity, accounts (with bulk actions), models and rotation.
  *  Ported from 9router [id]/page.js, adapted to tdproxy's snapshot model. */
 export function ProviderDetail({
   provider,
   credentials,
-  aliases,
   secret,
   presets,
   onOpenImport,
@@ -132,108 +52,8 @@ export function ProviderDetail({
   );
   const { t } = useTranslation();
   const { masked } = useAccountMask();
-  const connectionProfile = useMemo(
-    () => resolveConnectionProfile(catalog, presets.find((item) => item.id === provider.ID) ?? null),
-    [catalog, presets, provider.ID],
-  );
-  const [credentialRefreshOverrides, setCredentialRefreshOverrides] = useState<Record<string, { status?: string; last_validated_at?: string }>>({});
-  const [credentialOrder, setCredentialOrder] = useState<string[] | null>(null);
-  const [draggingCredentialId, setDraggingCredentialId] = useState<string | null>(null);
-  const [dragOverCredentialId, setDragOverCredentialId] = useState<string | null>(null);
-  const [reorderingCredentials, setReorderingCredentials] = useState(false);
-  const displayedCredentials = useMemo(
-    () => credentials.map((credential) => {
-      const override = credentialRefreshOverrides[credential.id];
-      return override ? { ...credential, ...override } : credential;
-    }),
-    [credentials, credentialRefreshOverrides],
-  );
-  const sortedCredentials = useMemo(
-    () => {
-      const priorityOrder = [...displayedCredentials].sort(compareCredentialsByPriority);
-      if (!credentialOrder || credentialOrder.length !== priorityOrder.length) return priorityOrder;
-      const byId = new Map(priorityOrder.map((credential) => [credential.id, credential]));
-      if (credentialOrder.some((id) => !byId.has(id))) return priorityOrder;
-      return credentialOrder.map((id) => byId.get(id)!).filter(Boolean);
-    },
-    [displayedCredentials, credentialOrder],
-  );
-  const credentialAccountNumbers = useMemo(
-    () => buildCredentialAccountNumbers(sortedCredentials),
-    [sortedCredentials],
-  );
-  const [accountQuery, setAccountQuery] = useState("");
-  const [errorCodeFilter, setErrorCodeFilter] = useState("");
-  const errorCodeOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const credential of sortedCredentials) {
-      const code = credential.last_error_code?.trim();
-      if (!code) continue;
-      counts.set(code, (counts.get(code) || 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-      .map(([code, count]) => ({ code, count }));
-  }, [sortedCredentials]);
-  const erroredWithoutCodeCount = useMemo(
-    () =>
-      sortedCredentials.filter((credential) => {
-        if (credential.last_error_code?.trim()) return false;
-        return Boolean(
-          credential.last_error?.trim() ||
-            credential.status === "auth_required" ||
-            credential.status === "cooldown" ||
-            isOnCooldown(credential.cooldown_until),
-        );
-      }).length,
-    [sortedCredentials],
-  );
-  const filteredCredentials = useMemo(() => {
-    const query = accountQuery.trim().toLowerCase();
-    return sortedCredentials.filter((credential) => {
-      const code = credential.last_error_code?.trim() || "";
-      const hasError =
-        Boolean(code) ||
-        Boolean(credential.last_error?.trim()) ||
-        credential.status === "auth_required" ||
-        credential.status === "cooldown" ||
-        isOnCooldown(credential.cooldown_until);
-
-      if (errorCodeFilter === "__any__") {
-        if (!hasError) return false;
-      } else if (errorCodeFilter === "__none__") {
-        if (!hasError || code) return false;
-      } else if (errorCodeFilter) {
-        if (code !== errorCodeFilter) return false;
-      }
-
-      if (!query) return true;
-      const haystack = [
-        credential.id,
-        credential.label,
-        credential.email,
-        credential.auth_type,
-        credential.status,
-        credential.last_error_code,
-        credential.last_error,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [sortedCredentials, accountQuery, errorCodeFilter]);
-  useEffect(() => {
-    if (!errorCodeFilter) return;
-    if (errorCodeFilter === "__any__") return;
-    if (errorCodeFilter === "__none__") {
-      if (erroredWithoutCodeCount === 0) setErrorCodeFilter("");
-      return;
-    }
-    if (!errorCodeOptions.some((option) => option.code === errorCodeFilter)) {
-      setErrorCodeFilter("");
-    }
-  }, [errorCodeFilter, errorCodeOptions, erroredWithoutCodeCount]);
+  const preset = useMemo(() => presets.find((item) => item.id === provider.ID) ?? null, [presets, provider.ID]);
+  const connectionProfile = useMemo(() => resolveConnectionProfile(catalog, preset), [catalog, preset]);
   const [showAddCredential, setShowAddCredential] = useState(false);
   const [credentialMethod, setCredentialMethod] = useState<ConnectionMethod | null>(null);
   const [showOAuth, setShowOAuth] = useState(false);
@@ -241,127 +61,15 @@ export function ProviderDetail({
   const [reAuthCredential, setReAuthCredential] = useState<Credential | null>(null);
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
   const [confirmDeleteProvider, setConfirmDeleteProvider] = useState(false);
-  const [confirmDeleteCred, setConfirmDeleteCred] = useState<Credential | null>(null);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
-  const [selectedCredentialIds, setSelectedCredentialIds] = useState<string[]>([]);
-  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
-  const [bulkExportBusy, setBulkExportBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
   const [discoverNonce, setDiscoverNonce] = useState(0);
   const [modelsCredential, setModelsCredential] = useState<Credential | null>(null);
   const [showCursorImport, setShowCursorImport] = useState(false);
   const [showKiroOAuth, setShowKiroOAuth] = useState(false);
   const [proxyPools, setProxyPools] = useState<ProxyPoolOption[]>([]);
-  const [proxyUsageById, setProxyUsageById] = useState<Record<string, CredentialProxyUsage>>({});
-  const [quotaById, setQuotaById] = useState<Record<string, QuotaView>>({});
-  const [quotaBusyById, setQuotaBusyById] = useState<Record<string, boolean>>({});
-  const [settledQuotaIds, setSettledQuotaIds] = useState<Set<string>>(() => new Set());
-  const supportsUpstreamQuota = useMemo(
-    () => providerSupportsUpstreamQuota(provider.ID, presets),
-    [provider.ID, presets],
-  );
-  const passRunningRef = useRef(false);
-  const cancelledRef = useRef(false);
-  const inFlightIdsRef = useRef(new Set<string>());
-  const ensureLoadedRef = useRef<() => Promise<void>>(async () => {});
-
-  useEffect(() => {
-    setCredentialOrder(null);
-    const available = new Set(credentials.map((credential) => credential.id));
-    setCredentialRefreshOverrides((current) => {
-      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setSelectedCredentialIds((current) => {
-      const next = current.filter((id) => available.has(id));
-      return next.length === current.length ? current : next;
-    });
-    setQuotaById((current) => {
-      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setQuotaBusyById((current) => {
-      const next = Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id)));
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setSettledQuotaIds((current) => {
-      const next = new Set([...current].filter((id) => available.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [credentials]);
-
-  const handleCredentialDragStart = (event: React.DragEvent<HTMLButtonElement>, credentialId: string) => {
-    if (reorderingCredentials) {
-      event.preventDefault();
-      return;
-    }
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", credentialId);
-    setDraggingCredentialId(credentialId);
-    setDragOverCredentialId(null);
-  };
-
-  const handleCredentialDrop = async (event: React.DragEvent<HTMLElement>, targetId: string) => {
-    event.preventDefault();
-    const sourceId = event.dataTransfer.getData("text/plain") || draggingCredentialId;
-    setDraggingCredentialId(null);
-    setDragOverCredentialId(null);
-    if (!sourceId || sourceId === targetId || reorderingCredentials) return;
-    const next = moveCredentialBefore(sortedCredentials, sourceId, targetId);
-    if (next === sortedCredentials) return;
-    const nextIds = next.map((credential) => credential.id);
-    setCredentialOrder(nextIds);
-    setReorderingCredentials(true);
-    try {
-      await reorderProviderCredentials(secret, provider.ID, nextIds);
-      onNotice("Account order saved");
-      onMutated();
-    } catch (cause) {
-      setCredentialOrder(null);
-      onError(cause instanceof Error ? cause.message : "Failed to save account order");
-    } finally {
-      setReorderingCredentials(false);
-    }
-  };
-
-  const filteredIdSet = useMemo(
-    () => new Set(filteredCredentials.map((credential) => credential.id)),
-    [filteredCredentials],
-  );
-  const selectedInView = useMemo(
-    () => selectedCredentialIds.filter((id) => filteredIdSet.has(id)),
-    [selectedCredentialIds, filteredIdSet],
-  );
-  const allFilteredSelected =
-    filteredCredentials.length > 0 && selectedInView.length === filteredCredentials.length;
-  const someFilteredSelected = selectedInView.length > 0 && !allFilteredSelected;
-
-  const handleCredentialRefreshed = (credentialId: string, status?: string) => {
-    setCredentialRefreshOverrides((current) => ({
-      ...current,
-      [credentialId]: { status: status || "healthy", last_validated_at: new Date().toISOString() },
-    }));
-  };
-
-  const toggleCredentialSelected = (credentialId: string, selected: boolean) => {
-    setSelectedCredentialIds((current) => {
-      if (selected) {
-        return current.includes(credentialId) ? current : [...current, credentialId];
-      }
-      return current.filter((id) => id !== credentialId);
-    });
-  };
-
-  const toggleSelectAllFiltered = () => {
-    setSelectedCredentialIds((current) => {
-      if (allFilteredSelected) {
-        return current.filter((id) => !filteredIdSet.has(id));
-      }
-      const merged = new Set(current);
-      for (const credential of filteredCredentials) merged.add(credential.id);
-      return [...merged];
-    });
-  };
+  const name = provider.Name || provider.ID;
+  const health = providerHealth(provider, credentials, Boolean(catalog.noAuth));
+  const checked = relativeAge(provider.LastChecked);
 
   // Fetch proxy pools once for the EditConnectionModal binding dropdown.
   useEffect(() => {
@@ -372,133 +80,16 @@ export function ProviderDetail({
     return () => { cancelled = true; };
   }, [secret]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchCredentialProxyUsage(secret, "today")
-      .then((result) => {
-        if (!cancelled) setProxyUsageById(result.by_credential || {});
-      })
-      .catch(() => {
-        if (!cancelled) setProxyUsageById({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [secret, credentials]);
-
-  const credentialIdsKey = useMemo(
-    () => credentials.map((credential) => credential.id).slice().sort().join("\u0000"),
-    [credentials],
-  );
-  const loadOrderIds = useMemo(
-    () => sortedCredentials.map((credential) => credential.id),
-    [sortedCredentials],
-  );
-  const loadOrderRef = useRef(loadOrderIds);
-  loadOrderRef.current = loadOrderIds;
-  const settledRef = useRef(settledQuotaIds);
-  settledRef.current = settledQuotaIds;
-
-  const quotaDataReady =
-    !supportsUpstreamQuota || loadOrderIds.every((id) => settledQuotaIds.has(id));
-  const quotaPassSettledCount = loadOrderIds.filter((id) => settledQuotaIds.has(id)).length;
-
-  const markSettled = useCallback((credentialId: string) => {
-    settledRef.current = new Set(settledRef.current).add(credentialId);
-    setSettledQuotaIds((current) => {
-      if (current.has(credentialId)) return current;
-      const next = new Set(current);
-      next.add(credentialId);
-      return next;
-    });
-  }, []);
-
-  const loadQuota = useCallback(
-    async (credentialId: string, silent = true, force = false) => {
-      if (!supportsUpstreamQuota) return;
-      if (!force && (settledRef.current.has(credentialId) || inFlightIdsRef.current.has(credentialId))) return;
-      inFlightIdsRef.current.add(credentialId);
-      setQuotaBusyById((current) => ({ ...current, [credentialId]: true }));
-      try {
-        const cached = await loadCredentialQuotaOnce(secret, credentialId, force);
-        if (cached.error) {
-          setQuotaById((current) => ({
-            ...current,
-            [credentialId]: { badges: [], plan: "", message: cached.error || "Quota check failed" },
-          }));
-          if (!silent) onError(cached.error);
-          return;
-        }
-        const quota = cached.quota;
-        if (!quota) return;
-        const badges = quotaBadgesFromQuota(quota);
-        const message = quota.message || "";
-        setQuotaById((current) => ({
-          ...current,
-          [credentialId]: {
-            badges,
-            plan: formatServicePlanLabel(quota.plan),
-            message,
-          },
-        }));
-        if (!silent && message && badges.length === 0) {
-          onNotice(`${maskAccountText(credentialId, masked)}: ${message}`);
-        }
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "Quota check failed";
-        setQuotaById((current) => ({
-          ...current,
-          [credentialId]: { badges: [], plan: "", message },
-        }));
-        if (!silent) onError(message);
-      } finally {
-        inFlightIdsRef.current.delete(credentialId);
-        setQuotaBusyById((current) => ({ ...current, [credentialId]: false }));
-        markSettled(credentialId);
-      }
-    },
-    [markSettled, onError, onNotice, secret, supportsUpstreamQuota],
-  );
-
-  const ensureLoaded = useCallback(async () => {
-    if (!supportsUpstreamQuota || passRunningRef.current) return;
-    if (loadOrderRef.current.length === 0) return;
-    if (loadOrderRef.current.every((id) => settledRef.current.has(id))) return;
-    passRunningRef.current = true;
-    try {
-      while (true) {
-        if (cancelledRef.current) return;
-        const nextId = loadOrderRef.current.find(
-          (id) => !settledRef.current.has(id) && !inFlightIdsRef.current.has(id),
-        );
-        if (!nextId) break;
-        await loadQuota(nextId, true, false);
-      }
-    } finally {
-      passRunningRef.current = false;
-    }
-  }, [loadQuota, supportsUpstreamQuota]);
-
-  ensureLoadedRef.current = ensureLoaded;
-
-  useEffect(() => {
-    cancelledRef.current = false;
-    void ensureLoadedRef.current();
-    return () => {
-      cancelledRef.current = true;
-      passRunningRef.current = false;
-    };
-  }, [credentialIdsKey, supportsUpstreamQuota, provider.ID]);
-
   const handleHealth = async () => {
     setHealthBusy(true);
     try {
       const result = await checkProviderHealth(secret, provider.ID);
       const summary =
         result.checked != null
-          ? `${result.healthy ?? 0}/${result.checked} healthy`
-          : result.status || "checked";
-      onNotice(result.ok ? `${provider.ID}: ${summary}` : `${provider.ID}: ${summary}${result.last_error ? ` — ${result.last_error}` : ""}`);
+          ? t("providers.list.checkSummary", { healthy: result.healthy ?? 0, checked: result.checked })
+          : result.status || t("providers.providerHealthStatusChecked");
+      const suffix = !result.ok && result.last_error ? t("providers.providerHealthSummarySuffix", { error: result.last_error }) : "";
+      onNotice(`${t("providers.providerHealthSummary", { id: provider.ID, summary })}${suffix}`);
       onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
@@ -524,6 +115,15 @@ export function ProviderDetail({
     }
   };
 
+  const handleCopyId = async () => {
+    try {
+      await navigator.clipboard.writeText(provider.ID);
+      onNotice(t("providers.list.copiedId", { id: provider.ID }));
+    } catch {
+      onError(t("providers.list.copyFailed"));
+    }
+  };
+
   const handleConnectionMethod = (method: ConnectionMethod) => {
     if (!method.available) {
       onError(method.unavailableReason || t("providers.connectionMethodUnavailable"));
@@ -541,20 +141,14 @@ export function ProviderDetail({
         setCredentialMethod(method);
         setShowAddCredential(true);
         break;
-      case "import_cliproxy":
-        onOpenImport?.("cliproxy");
-        break;
-      case "import_sub2api":
-        onOpenImport?.("sub2api");
+      case "import_data":
+        onOpenImport?.();
         break;
       case "import_cursor":
         setShowCursorImport(true);
         break;
       case "connect_kiro":
         setShowKiroOAuth(true);
-        break;
-      case "import_9router":
-        onOpenImport?.("9router");
         break;
       default: {
         const _exhaustive: never = method.kind;
@@ -563,324 +157,92 @@ export function ProviderDetail({
     }
   };
 
-  const handleDeleteCredential = async () => {
-    if (!confirmDeleteCred) return;
-    const cred = confirmDeleteCred;
-    setConfirmDeleteCred(null);
-    try {
-      await deleteCredential(secret, cred.id);
-      setSelectedCredentialIds((current) => current.filter((id) => id !== cred.id));
-      onNotice(t("providers.credentialDeleted", { id: cred.id }));
-      onMutated();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
-    }
-  };
-
-  const handleExportCredentials = async (credentialIds: string[]) => {
-    const ids = [...new Set(credentialIds.map((id) => id.trim()).filter(Boolean))];
-    if (ids.length === 0) return;
-    setBulkExportBusy(true);
-    try {
-      const blob = await exportSub2apiAccounts(secret, ids);
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      downloadSub2apiExport(blob, `sub2api-accounts-${stamp}.json`);
-      onNotice(t("providers.sub2apiExportSuccess", { count: ids.length }));
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : t("providers.sub2apiExportFailed"));
-    } finally {
-      setBulkExportBusy(false);
-    }
-  };
-
-  const handleBulkDeleteCredentials = async () => {
-    const ids = [...selectedCredentialIds];
-    if (ids.length === 0) return;
-    setConfirmBulkDelete(false);
-    setBulkDeleteBusy(true);
-    let deleted = 0;
-    const failures: string[] = [];
-    try {
-      for (const id of ids) {
-        try {
-          await deleteCredential(secret, id);
-          deleted += 1;
-        } catch (cause) {
-          failures.push(cause instanceof Error ? cause.message : id);
-        }
-      }
-      setSelectedCredentialIds([]);
-      if (deleted > 0) onMutated();
-      if (failures.length === 0) {
-        onNotice(`Deleted ${deleted} account${deleted === 1 ? "" : "s"}`);
-      } else {
-        onError(`Deleted ${deleted}/${ids.length}. Failed: ${failures[0]}`);
-      }
-    } finally {
-      setBulkDeleteBusy(false);
-    }
-  };
+  const lastError = provider.LastError?.trim();
 
   return (
-    <div>
-      <button className="detail-back" onClick={onBack}>
-        <span className="material-symbols-outlined">arrow_back</span>
-        Back to providers
-      </button>
-
-      {/* Header */}
-      <div className="detail-header">
-        <ProviderLogo
-          className="provider-logo"
-          providerId={provider.ID}
-          providerType={provider.Type}
-          style={{ color: catalog.color }}
-          alt={`${provider.Name || provider.ID} logo`}
-        />
-        <div className="detail-title-block">
-          <h2>{provider.Name || provider.ID}</h2>
-          <div className="detail-meta">
-            <Badge variant="primary" size="sm">{provider.Type}</Badge>
-            <Badge variant={provider.Enabled ? "success" : "default"} size="sm" dot>
-              {provider.Enabled ? "enabled" : "disabled"}
-            </Badge>
-            {provider.Status && (
-              <Badge variant={provider.Status === "healthy" ? "success" : provider.Status === "auth_required" ? "error" : "warning"} size="sm">
-                {provider.Status}
-              </Badge>
-            )}
-          </div>
-          <div className="detail-meta" style={{ marginTop: 8 }}>
-            {provider.BaseURL && <span className="detail-url">{provider.BaseURL}</span>}
-            {catalog.website && (
-              <a className="detail-link" href={catalog.website} target="_blank" rel="noreferrer">
-                Website <span className="material-symbols-outlined" style={{ fontSize: 14 }}>open_in_new</span>
-              </a>
-            )}
-            {catalog.apiKeyUrl && (
-              <a className="detail-link" href={catalog.apiKeyUrl} target="_blank" rel="noreferrer">
-                Get API key <span className="material-symbols-outlined" style={{ fontSize: 14 }}>key</span>
-              </a>
-            )}
-          </div>
-        </div>
-        <div className="detail-header-actions">
-          <Button variant="outline" size="md" icon="monitor_heart" onClick={handleHealth} loading={healthBusy}>
-            Health check
-          </Button>
-          <Button variant="outline" size="md" icon="search" onClick={handleDiscover}>
-            Discover models
-          </Button>
-          <Button variant="danger" size="md" icon="delete" onClick={() => setConfirmDeleteProvider(true)}>
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      {/* Connections card */}
-      <Card
-        pad="md"
-        className="section"
-        title={
-          <span className="connection-card-head-title">
-            Connections
-            <ConnectionStatsInline credentials={credentials} />
-          </span>
-        }
-        icon="vpn_key"
-        action={
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <ModelAvailabilityBadge credentials={credentials} />
-            <ProviderConnectionActions
-              profile={connectionProfile}
-              onMethod={handleConnectionMethod}
-              placement="footer"
-            />
-          </div>
-        }
-      >
-        {credentials.length === 0 ? (
-          <EmptyState
-            icon="key_off"
-            text="No connections yet."
-            hint={connectionProfile.noAuth ? "Add a no-auth connection to enable routing." : "Choose a connection method above — OAuth, API key, or cookie."}
-          />
-        ) : (
-          <>
-            <div className="connections-toolbar">
-              <Input
-                icon="search"
-                value={accountQuery}
-                onChange={(event) => setAccountQuery(event.target.value)}
-                placeholder="Search accounts by email, label, or id…"
-                aria-label="Search accounts"
-              />
-              <Select
-                className="connections-error-filter"
-                value={errorCodeFilter}
-                onChange={(event) => setErrorCodeFilter(event.target.value)}
-                aria-label="Filter by error code"
-              >
-                <option value="">All error codes</option>
-                <option value="__any__">Any error</option>
-                {erroredWithoutCodeCount > 0 ? (
-                  <option value="__none__">Error without code ({erroredWithoutCodeCount})</option>
-                ) : null}
-                {errorCodeOptions.map(({ code, count }) => (
-                  <option key={code} value={code}>
-                    {code} ({count})
-                  </option>
-                ))}
-              </Select>
-              {accountQuery.trim() || errorCodeFilter ? (
-                <span className="connections-toolbar-meta">
-                  {filteredCredentials.length}/{credentials.length}
-                </span>
-              ) : null}
-            </div>
-            {supportsUpstreamQuota && !quotaDataReady && loadOrderIds.length > 0 ? (
-              <p className="connections-order-hint">
-                <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
-                {t("quota.loadingQuotaProgress", {
-                  current: quotaPassSettledCount,
-                  total: loadOrderIds.length,
-                })}
-              </p>
-            ) : sortedCredentials.length > 1 ? (
-              <p className="connections-order-hint">
-                <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-                Drag accounts into the order tproxy should try them. The first account is used first.
-              </p>
-            ) : null}
-            {filteredCredentials.length === 0 ? (
-              <EmptyState
-                icon="search_off"
-                text="No accounts match your filters."
-                hint="Try email, label, credential id, status, or error code."
-              />
-            ) : (
-              <>
-                <div className="connections-selection-bar">
-                  <label className="connections-select-all">
-                    <input
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      ref={(node) => {
-                        if (node) node.indeterminate = someFilteredSelected;
-                      }}
-                      onChange={toggleSelectAllFiltered}
-                      aria-label="Select all visible accounts"
-                    />
-                    <span>
-                      {allFilteredSelected
-                        ? "Deselect all"
-                        : someFilteredSelected
-                          ? `${selectedInView.length} selected`
-                          : "Select all"}
-                    </span>
-                  </label>
-                  {selectedCredentialIds.length > 0 ? (
-                    <div className="connections-selection-actions">
-                      <span className="connections-toolbar-meta">
-                        {t("providers.selectedCount", { count: selectedCredentialIds.length })}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        icon="download"
-                        loading={bulkExportBusy}
-                        disabled={bulkDeleteBusy}
-                        onClick={() => void handleExportCredentials(selectedCredentialIds)}
-                      >
-                        {t("providers.exportSelected")}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        icon="delete"
-                        loading={bulkDeleteBusy}
-                        disabled={bulkExportBusy}
-                        onClick={() => setConfirmBulkDelete(true)}
-                      >
-                        {t("providers.deleteSelected")}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setSelectedCredentialIds([])}
-                        disabled={bulkDeleteBusy || bulkExportBusy}
-                      >
-                        {t("providers.clearSelection")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-                {filteredCredentials.map((cred) => (
-                <ConnectionRow
-                  key={cred.id}
-                  providerId={provider.ID}
-                  credential={cred}
-                  accountNumber={credentialAccountNumbers.get(cred.id)}
-                  secret={secret}
-                  selected={selectedCredentialIds.includes(cred.id)}
-                  onSelectedChange={toggleCredentialSelected}
-                  supportsUpstreamQuota={supportsUpstreamQuota}
-                  quotaBusy={Boolean(quotaBusyById[cred.id])}
-                  quotaPlan={quotaById[cred.id]?.plan || ""}
-                  quotaBadges={quotaById[cred.id]?.badges || []}
-                  quotaMessage={quotaById[cred.id]?.message || ""}
-                  onRefreshQuota={() => loadQuota(cred.id, false, true)}
-                  proxyUsage={proxyUsageById[cred.id]}
-                  supportsOAuth={connectionProfile.methods.some((method) => method.kind === "oauth" && method.available)}
-                  onEdit={(c) => setEditingCredential(c)}
-                  onExport={(c) => void handleExportCredentials([c.id])}
-                  onDeleted={(c) => setConfirmDeleteCred(c)}
-                  onReAuth={(c) => setReAuthCredential(c)}
-                  onShowModels={(c) => setModelsCredential(c)}
-                  onMutated={onMutated}
-                  onCredentialRefreshed={handleCredentialRefreshed}
-                  dragging={draggingCredentialId === cred.id}
-                  dragOver={dragOverCredentialId === cred.id}
-                  dragDisabled={reorderingCredentials}
-                  onDragStart={handleCredentialDragStart}
-                  onDragOver={(event, id) => {
-                    if (!reorderingCredentials && draggingCredentialId && draggingCredentialId !== id) {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDragOverCredentialId(id);
-                    }
-                  }}
-                  onDrop={handleCredentialDrop}
-                  onDragEnd={() => {
-                    setDraggingCredentialId(null);
-                    setDragOverCredentialId(null);
-                  }}
-                  onNotice={onNotice}
-                  onError={onError}
-                />
-              ))}
-              </>
-            )}
-          </>
-        )}
-      </Card>
-
-      <ProviderRotationCard
+    <section className="cp-page pv-detail">
+      <ProviderIdentity
+        name={name}
+        code={provider.ID}
         providerId={provider.ID}
-        providerName={provider.Name || provider.ID}
-        accountCount={credentials.length}
+        providerType={provider.Type}
+        logoId={providerLogoId(provider.ID, provider.Type, Boolean(preset))}
+        color={catalog.color}
+        baseUrl={provider.BaseURL}
+        website={catalog.website}
+        apiKeyUrl={catalog.apiKeyUrl}
+        onBack={onBack}
+        tags={
+          <>
+            <HealthPill health={health} />
+            {provider.Type !== provider.ID ? <Tag tone="primary">{provider.Type}</Tag> : null}
+            {(provider.ProxyPoolIDs?.length ?? 0) > 0 ? (
+              <Tag tone="neutral" title={provider.ProxyPoolIDs?.join(", ")}>{t("providers.list.proxyPools", { count: provider.ProxyPoolIDs!.length })}</Tag>
+            ) : null}
+            <span className="pv-identity-checked" title={provider.LastChecked ? new Date(provider.LastChecked).toLocaleString() : undefined}>
+              {checked ? t("providers.list.checkedAgo", { time: checked }) : t("providers.list.neverChecked")}
+            </span>
+          </>
+        }
+        description={
+          lastError && health !== "healthy" && health !== "off" ? (
+            <span className="pv-identity-error">
+              <span className="material-symbols-outlined" aria-hidden>error</span>
+              {lastError}
+            </span>
+          ) : null
+        }
+        actions={
+          <>
+            <ToolButton icon="monitor_heart" spinning={healthBusy} disabled={healthBusy} onClick={() => void handleHealth()} title={t("providers.identity.healthHint")}>
+              {t("providers.healthCheck")}
+            </ToolButton>
+            <ActionMenu
+              label={t("providers.menu.more")}
+              items={[
+                { key: "discover", icon: "travel_explore", label: t("providers.discoverModels"), hint: t("providers.identity.discoverHint"), onSelect: handleDiscover },
+                { key: "copy", icon: "content_copy", label: t("providers.menu.copyId"), hint: provider.ID, onSelect: () => void handleCopyId() },
+                catalog.website ? { key: "site", icon: "open_in_new", label: t("providers.website"), hint: catalog.website, onSelect: () => window.open(catalog.website, "_blank", "noopener,noreferrer") } : null,
+                onOpenImport ? { key: "import", icon: "upload_file", label: t("import.cardTitle"), hint: t("providers.list.importHint"), onSelect: onOpenImport } : null,
+                { key: "delete", icon: "delete", label: t("providers.deleteProvider"), danger: true, onSelect: () => setConfirmDeleteProvider(true) },
+              ]}
+            />
+          </>
+        }
+      />
+
+      <ProviderAccounts
+        provider={provider}
+        credentials={credentials}
         secret={secret}
-        onSaved={onNotice}
+        presets={presets}
+        connectionProfile={connectionProfile}
+        onMethod={handleConnectionMethod}
+        onEdit={setEditingCredential}
+        onModels={setModelsCredential}
+        onReAuth={setReAuthCredential}
+        onMutated={onMutated}
+        onNotice={onNotice}
         onError={onError}
       />
 
-      {/* Models routing + aliases */}
-      <ModelsSection
-        providerId={provider.ID}
-        credentials={credentials}
-        secret={secret}
-        discoverNonce={discoverNonce}
-      />
+      <div className="pv-detail-grid">
+        <ModelsSection
+          providerId={provider.ID}
+          credentials={credentials}
+          secret={secret}
+          discoverNonce={discoverNonce}
+          onDiscover={handleDiscover}
+        />
+        <ProviderRotationCard
+          providerId={provider.ID}
+          providerName={name}
+          accountCount={credentials.length}
+          secret={secret}
+          onSaved={onNotice}
+          onError={onError}
+        />
+      </div>
 
       {/* Modals */}
       <CredentialModelsModal
@@ -901,7 +263,7 @@ export function ProviderDetail({
           setCredentialMethod(null);
         }}
         onSaved={() => {
-          onNotice("Credential saved");
+          onNotice(t("providers.credentialSaved"));
           onMutated();
         }}
       />
@@ -917,7 +279,7 @@ export function ProviderDetail({
           setOauthAutoStart(false);
         }}
         onComplete={() => {
-          onNotice("OAuth credential connected");
+          onNotice(t("providers.account.oauthConnected"));
           setOauthAutoStart(false);
           onMutated();
         }}
@@ -929,7 +291,7 @@ export function ProviderDetail({
         providerId={provider.ID}
         onClose={() => setShowCursorImport(false)}
         onComplete={() => {
-          onNotice("Cursor token imported");
+          onNotice(t("providers.cursorImported"));
           onMutated();
         }}
         onError={onError}
@@ -941,7 +303,7 @@ export function ProviderDetail({
         providerType={provider.Type}
         onClose={() => setShowKiroOAuth(false)}
         onComplete={() => {
-          onNotice("Kiro credential connected");
+          onNotice(t("providers.kiroConnected"));
           onMutated();
         }}
         onError={onError}
@@ -958,7 +320,7 @@ export function ProviderDetail({
         autoStart
         onClose={() => setReAuthCredential(null)}
         onComplete={() => {
-          onNotice(`Credential ${maskAccountText(reAuthCredential?.id ?? "", masked)} re-authenticated`);
+          onNotice(t("providers.credentialReAuthenticated", { id: maskAccountText(reAuthCredential?.id ?? "", masked) }));
           setReAuthCredential(null);
           onMutated();
         }}
@@ -972,345 +334,20 @@ export function ProviderDetail({
         secret={secret}
         onClose={() => setEditingCredential(null)}
         onSaved={() => {
-          onNotice("Credential updated");
+          onNotice(t("providers.credentialUpdated"));
           onMutated();
         }}
       />
       <ConfirmDialog
         open={confirmDeleteProvider}
-        title={`Delete provider ${provider.ID}?`}
-        message="This removes the provider and unbinds its credentials. Credentials are not deleted."
-        confirmText="Delete provider"
+        title={t("providers.deleteProviderConfirm", { id: provider.ID })}
+        message={t("providers.identity.deleteMessage")}
+        confirmText={t("providers.deleteProvider")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onConfirm={handleDeleteProvider}
         onClose={() => setConfirmDeleteProvider(false)}
       />
-      <ConfirmDialog
-        open={confirmDeleteCred !== null}
-        title={`Delete credential ${maskAccountText(confirmDeleteCred?.id ?? "", masked)}?`}
-        message="This permanently removes the credential and its encrypted secret."
-        confirmText="Delete credential"
-        variant="danger"
-        onConfirm={handleDeleteCredential}
-        onClose={() => setConfirmDeleteCred(null)}
-      />
-      <ConfirmDialog
-        open={confirmBulkDelete}
-        title={`Delete ${selectedCredentialIds.length} account${selectedCredentialIds.length === 1 ? "" : "s"}?`}
-        message="This permanently removes the selected credentials and their encrypted secrets."
-        confirmText={`Delete ${selectedCredentialIds.length}`}
-        variant="danger"
-        onConfirm={() => void handleBulkDeleteCredentials()}
-        onClose={() => setConfirmBulkDelete(false)}
-      />
-    </div>
+    </section>
   );
-}
-
-/** A single credential row inside the connections card. */
-function ConnectionRow({
-  providerId,
-  credential,
-  accountNumber,
-  secret,
-  selected,
-  onSelectedChange,
-  supportsUpstreamQuota,
-  quotaBusy,
-  quotaPlan,
-  quotaBadges,
-  quotaMessage,
-  onRefreshQuota,
-  proxyUsage,
-  supportsOAuth,
-  onDeleted,
-  onMutated,
-  onCredentialRefreshed,
-  dragging,
-  dragOver,
-  dragDisabled,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  onEdit,
-  onExport,
-  onReAuth,
-  onShowModels,
-  onNotice,
-  onError,
-}: {
-  providerId: string;
-  credential: Credential;
-  accountNumber?: number;
-  secret: string;
-  selected: boolean;
-  onSelectedChange: (credentialId: string, selected: boolean) => void;
-  supportsUpstreamQuota: boolean;
-  quotaBusy: boolean;
-  quotaPlan: string;
-  quotaBadges: QuotaBadge[];
-  quotaMessage: string;
-  onRefreshQuota: () => void | Promise<void>;
-  proxyUsage?: CredentialProxyUsage;
-  supportsOAuth: boolean;
-  onEdit: (credential: Credential) => void;
-  onExport: (credential: Credential) => void;
-  onDeleted: (credential: Credential) => void;
-  onReAuth: (credential: Credential) => void;
-  onShowModels: (credential: Credential) => void;
-  onMutated: () => void;
-  onCredentialRefreshed?: (credentialId: string, status?: string) => void;
-  dragging: boolean;
-  dragOver: boolean;
-  dragDisabled: boolean;
-  onDragStart: (event: React.DragEvent<HTMLButtonElement>, credentialId: string) => void;
-  onDragOver: (event: React.DragEvent<HTMLDivElement>, credentialId: string) => void;
-  onDrop: (event: React.DragEvent<HTMLDivElement>, credentialId: string) => void;
-  onDragEnd: () => void;
-  onNotice: (message: string) => void;
-  onError: (message: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [busy, setBusy] = useState(false);
-  const { masked } = useAccountMask();
-  const status = credentialStatusLabel(credential);
-  const authIcon = credential.auth_type === "oauth" ? "lock_person" : credential.auth_type === "none" ? "lock_open" : "key";
-  const hasProxy = (credential.proxy_pool_ids?.length ?? 0) > 0;
-  const onCooldown = credential.cooldown_until && isOnCooldown(credential.cooldown_until);
-  const needsReAuth = credential.status === "auth_required" && credential.auth_type === "oauth";
-  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
-  const connectionTitle = credential.email || credential.label || credential.id;
-
-  const handleToggle = async () => {
-    setBusy(true);
-    try {
-      // Re-save with toggled enabled flag via the credential save endpoint.
-      await saveCredential(secret, {
-        provider_id: providerId,
-        credential: {
-          id: credential.id,
-          label: credential.label,
-          email: credential.email,
-          auth_type: credential.auth_type as "api_key" | "oauth" | "service_account" | "none",
-          priority: credential.priority ?? 0,
-          weight: credential.weight ?? 1,
-          enabled: !credential.enabled,
-          proxy_pools: credential.proxy_pool_ids,
-        },
-      });
-      onNotice(`Credential ${credential.id} ${credential.enabled ? "disabled" : "enabled"}`);
-      onMutated();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Toggle failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleHealthCheck = async () => {
-    setBusy(true);
-    try {
-      const result = await checkCredentialHealth(secret, credential.id);
-      onNotice(
-        result.ok
-          ? `${credential.id} is ${result.status || "healthy"}`
-          : `${credential.id}: ${result.status || "failed"}${result.last_error ? ` — ${result.last_error}` : ""}`,
-      );
-      onMutated();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Health check failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    setBusy(true);
-    try {
-      const result = await refreshCredential(secret, credential.id);
-      if (onCredentialRefreshed) {
-        onCredentialRefreshed(credential.id, result.status?.status);
-      } else {
-        onMutated();
-      }
-      onNotice(`Token refreshed for ${credential.id}`);
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Token refresh failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleClearCooldown = async () => {
-    setBusy(true);
-    try {
-      await clearCredentialCooldown(secret, credential.id);
-      onNotice(`Cooldown cleared for ${maskAccountText(credential.id, masked)}`);
-      onMutated();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Clear cooldown failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div
-      className={`connection-row${credential.enabled ? " is-enabled" : " is-disabled"}${selected ? " is-selected" : ""}${credential.last_validated_at ? " has-updated-at" : ""}${dragging ? " is-dragging" : ""}${dragOver ? " is-drag-over" : ""}`}
-      onDragOver={(event) => onDragOver(event, credential.id)}
-      onDrop={(event) => void onDrop(event, credential.id)}
-    >
-      {credential.last_validated_at ? (
-        <span
-          className="connection-updated-at"
-          title={`Last updated: ${new Date(credential.last_validated_at).toLocaleString()}`}
-        >
-          Updated {formatRelativeTime(credential.last_validated_at)}
-        </span>
-      ) : null}
-      <button
-        type="button"
-        className="connection-drag-handle"
-        draggable={!dragDisabled}
-        onDragStart={(event) => onDragStart(event, credential.id)}
-        onDragEnd={onDragEnd}
-        disabled={dragDisabled}
-        aria-label={`Drag ${maskAccountText(connectionTitle, masked)} to change account order`}
-        title="Drag to change account order"
-      >
-        <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-      </button>
-      <label className="connection-select">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={(event) => onSelectedChange(credential.id, event.target.checked)}
-          aria-label={`Select ${maskAccountText(credential.email || credential.label || credential.id, masked)}`}
-        />
-      </label>
-      <span
-        className={`connection-plan-badge${quotaPlan ? "" : " connection-plan-badge--fallback"}`}
-        title={quotaPlan ? `Service plan: ${quotaPlan}` : credential.auth_type}
-      >
-        {supportsUpstreamQuota && quotaBusy && !quotaPlan ? (
-          <span className="connection-plan-badge-loading" aria-hidden="true">…</span>
-        ) : quotaPlan ? (
-          quotaPlan
-        ) : (
-          <span className="material-symbols-outlined">{authIcon}</span>
-        )}
-      </span>
-      <div className="connection-main">
-        <div className="connection-label">
-          {accountNumber ? <span className="connection-label-index">#{accountNumber}</span> : null}
-          <span className="connection-label-text">{maskAccountText(connectionTitle, masked)}</span>
-        </div>
-        {(credential.email || credential.label || credential.created_at) && (
-          <div className="connection-sub" title={`Credential ID: ${maskAccountText(credential.id, masked)}`}>
-            Added {formatCredentialAddedAt(credential.created_at)}
-          </div>
-        )}
-        {credential.last_error && <div className="connection-error">{credential.last_error}</div>}
-        <div className="connection-badges">
-          <Badge variant={status.tone} size="sm" dot>{status.label}</Badge>
-          {credential.last_error_code ? (
-            <Badge variant="error" size="sm" title={credential.last_error || credential.last_error_code}>
-              {credential.last_error_code}
-            </Badge>
-          ) : null}
-          {quotaBadges.map((badge) => (
-            <Badge key={badge.key} variant={badge.tone} size="sm" icon="donut_large" title={quotaMessage || badge.label}>
-              {badge.label}
-            </Badge>
-          ))}
-          {supportsUpstreamQuota && !quotaBusy && quotaBadges.length === 0 && quotaMessage ? (
-            <Badge variant="warning" size="sm" title={quotaMessage}>
-              quota unavailable
-            </Badge>
-          ) : null}
-          {proxyUsageLabel ? (
-            <Badge variant="default" size="sm" icon="monitoring" title="Usage through tproxy today">
-              {proxyUsageLabel}
-            </Badge>
-          ) : null}
-          <Badge variant="default" size="sm">{credential.auth_type}</Badge>
-          {(credential.priority ?? 0) > 0 && (
-            <Badge variant="default" size="sm">prio {credential.priority}</Badge>
-          )}
-          {(credential.consecutive_use_count ?? 0) > 0 && (
-            <Badge variant="info" size="sm">sticky {credential.consecutive_use_count}</Badge>
-          )}
-          {credential.last_used_at && (
-            <Badge variant="default" size="sm" title={new Date(credential.last_used_at).toLocaleString()}>
-              used {formatRelativeTime(credential.last_used_at)}
-            </Badge>
-          )}
-          {hasProxy && (
-            <Badge variant="info" size="sm" icon="lan">{credential.proxy_pool_ids!.length} proxy</Badge>
-          )}
-          {credential.cooldown_until && isOnCooldown(credential.cooldown_until) && (
-            <CooldownTimer until={credential.cooldown_until} onExpire={onMutated} />
-          )}
-        </div>
-      </div>
-      <div className="connection-actions">
-        <Button variant="ghost" size="sm" icon="apps" onClick={() => onShowModels(credential)} aria-label="Supported models" title="View supported models" />
-        <Button variant="ghost" size="sm" icon="monitor_heart" onClick={handleHealthCheck} loading={busy} aria-label="Health check" title="Health check this connection" />
-        {supportsUpstreamQuota ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="donut_large"
-            onClick={() => void onRefreshQuota()}
-            loading={quotaBusy}
-            aria-label="Refresh quota"
-            title="Refresh upstream quota / balance"
-          />
-        ) : null}
-        {credential.auth_type === "oauth" && (
-          <Button variant="ghost" size="sm" icon="sync" onClick={handleRefresh} loading={busy} aria-label="Refresh token" title="Force OAuth token refresh" />
-        )}
-        {onCooldown && (
-          <Button variant="ghost" size="sm" icon="timer_off" onClick={handleClearCooldown} loading={busy} aria-label="Clear cooldown" title="Clear cooldown" />
-        )}
-        {needsReAuth && supportsOAuth && (
-          <Button variant="ghost" size="sm" icon="lock_reset" onClick={() => onReAuth(credential)} aria-label="Re-authenticate" title="Re-authenticate OAuth" />
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="download"
-          onClick={() => onExport(credential)}
-          aria-label={t("providers.exportAccount")}
-          title={t("providers.exportAccount")}
-        />
-        <Button variant="ghost" size="sm" icon="edit" onClick={() => onEdit(credential)} aria-label="Edit credential" />
-        <Toggle checked={credential.enabled} onChange={handleToggle} disabled={busy} aria-label="Toggle credential" />
-        <Button variant="ghost" size="sm" icon="delete" onClick={() => onDeleted(credential)} aria-label="Delete credential" />
-      </div>
-    </div>
-  );
-}
-
-function downloadSub2apiExport(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function formatRelativeTime(value: string) {
-  const target = Date.parse(value);
-  if (Number.isNaN(target)) return "recently";
-  const deltaMs = Date.now() - target;
-  const minutes = Math.round(deltaMs / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
 }

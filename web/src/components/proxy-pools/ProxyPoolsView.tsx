@@ -1,18 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+import { Button, ConfirmDialog } from "../ui";
 import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  Field,
-  Input,
-  Modal,
-  Textarea,
-  Toggle,
-  cn,
-} from "../ui";
+  BulkBar,
+  BulkButton,
+  EmptyPanel,
+  FilterTabs,
+  GuideToggle,
+  LegendItem,
+  PageGuide,
+  PageStats,
+  ProgressLine,
+  SearchField,
+  Segmented,
+  SelectField,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarRow,
+  ToolButton,
+  usePageGuide,
+  useStoredState,
+} from "../page-kit";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useAccountMask } from "../../hooks/useAccountMask";
+import { maskAccountText } from "../../lib/accountMask";
+import { credentialLabel, formatAgo, type SnapshotCredential, type SnapshotProvider } from "../upstreams/health";
 import {
   createProxyPool,
   deleteProxyPool,
@@ -20,14 +33,32 @@ import {
   testProxyPool,
   updateProxyPool,
   type ProxyPoolRow,
+  type ProxyPoolTestResult,
 } from "./api";
-import { formatDateTime, parseProxyLine, statusVariant, suggestPoolId } from "./utils";
+import { ProxyPoolCard, ProxyPoolListRow, type ProxyPoolHandlers, type ProxyPoolView } from "./ProxyPoolItem";
+import { ProxyPoolFormModal, ProxyPoolImportModal, normalizeFormData, type ProxyPoolFormData } from "./ProxyPoolModals";
+import {
+  POOL_HEALTH_ORDER,
+  POOL_HEALTH_TONE,
+  parsePoolFilter,
+  parseProxyLine,
+  poolHealth,
+  proxyEndpoint,
+  suggestPoolId,
+  type PoolHealth,
+} from "./utils";
 
-type FormData = {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
+type Filter = PoolHealth | "all";
+type SortMode = "status" | "name" | "usage" | "tested";
+type ViewMode = "grid" | "list";
+const SORT_MODES = ["status", "name", "usage", "tested"] as const;
+const VIEW_MODES = ["grid", "list"] as const;
+
+const HEALTH_ICON: Record<PoolHealth, string> = {
+  healthy: "check_circle",
+  failing: "error",
+  untested: "help",
+  off: "power_settings_new",
 };
 
 type Props = {
@@ -35,38 +66,50 @@ type Props = {
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onMutated?: () => void;
+  /** Snapshot data, used only to name what each pool is bound to. */
+  providers?: SnapshotProvider[];
+  credentials?: Record<string, SnapshotCredential[]>;
 };
 
-function normalizeFormData(pool?: ProxyPoolRow): FormData {
-  return {
-    id: pool?.id || "",
-    name: pool?.name || "",
-    url: "",
-    enabled: pool?.enabled !== false,
-  };
-}
+type ConfirmState = {
+  title: string;
+  message: string;
+  confirmText: string;
+  onConfirm: () => void;
+};
 
-export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) {
-  const { t } = useTranslation();
+export function ProxyPoolsView({ secret, onError, onNotice, onMutated, providers = [], credentials = {} }: Props) {
+  const { t, i18n } = useTranslation();
+  const { masked } = useAccountMask();
+  const { copy } = useCopyToClipboard();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filter = parsePoolFilter(searchParams.get("status"));
   const [pools, setPools] = useState<ProxyPoolRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useStoredState<SortMode>("tproxy.proxyPools.sort", "status", SORT_MODES);
+  const [viewMode, setViewMode] = useStoredState<ViewMode>("tproxy.proxyPools.view", "grid", VIEW_MODES);
+  const guide = usePageGuide("proxy-pools");
   const [showFormModal, setShowFormModal] = useState(false);
   const [showBatchImportModal, setShowBatchImportModal] = useState(false);
   const [editingPool, setEditingPool] = useState<ProxyPoolRow | null>(null);
-  const [formData, setFormData] = useState<FormData>(normalizeFormData());
+  const [formData, setFormData] = useState<ProxyPoolFormData>(normalizeFormData());
   const [batchImportText, setBatchImportText] = useState("");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingIds, setTestingIds] = useState<Set<string>>(() => new Set());
+  const [results, setResults] = useState<Record<string, ProxyPoolTestResult>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [healthChecking, setHealthChecking] = useState(false);
   const [healthProgress, setHealthProgress] = useState({ current: 0, total: 0 });
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [confirmState, setConfirmState] = useState<{
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  } | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -84,8 +127,21 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
   }, [load]);
 
   useEffect(() => {
-    setSelectedIds((prev) => prev.filter((id) => pools.some((pool) => pool.id === id)));
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => pools.some((pool) => pool.id === id));
+      return next.length === prev.length ? prev : next;
+    });
   }, [pools]);
+
+  const setFilter = (next: Filter) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (next === "all") params.delete("status");
+      else params.set("status", next);
+      return params;
+    }, { replace: true });
+  };
+  const toggleFilter = (next: Filter) => setFilter(filter === next ? "all" : next);
 
   const resetForm = () => {
     setEditingPool(null);
@@ -150,6 +206,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         pool.usage_count > 0
           ? t("proxyPools.confirmDeleteMessage", { name: pool.name, count: pool.usage_count })
           : t("proxyPools.confirmDeleteMessageSimple", { name: pool.name }),
+      confirmText: t("proxyPools.deletePool"),
       onConfirm: async () => {
         setConfirmState(null);
         try {
@@ -169,16 +226,26 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     });
   };
 
-  const handleTest = async (poolId: string) => {
-    setTestingId(poolId);
+  const markTesting = (id: string, testing: boolean) => {
+    setTestingIds((current) => {
+      const next = new Set(current);
+      if (testing) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleTest = async (pool: ProxyPoolRow) => {
+    markTesting(pool.id, true);
     try {
-      const result = await testProxyPool(secret, poolId);
+      const result = await testProxyPool(secret, pool.id);
+      setResults((current) => ({ ...current, [pool.id]: result }));
       await load();
-      onNotice(result.ok ? t("proxyPools.noticeTestPassed") : result.error || t("proxyPools.noticeTestFailed"));
+      onNotice(result.ok ? t("proxyPools.noticeTestPassedNamed", { name: pool.name, ms: result.elapsed_ms ?? 0 }) : result.error || t("proxyPools.noticeTestFailed"));
     } catch (error) {
       onError(error instanceof Error ? error.message : t("proxyPools.errorTestFailed"));
     } finally {
-      setTestingId(null);
+      markTesting(pool.id, false);
     }
   };
 
@@ -194,11 +261,9 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     }
   };
 
-  const allSelected = pools.length > 0 && selectedIds.length === pools.length;
-  const toggleSelect = (id: string) =>
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
-  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : pools.map((pool) => pool.id));
   const clearSelection = () => setSelectedIds([]);
+  const toggleSelection = (ids: string[], select: boolean) =>
+    setSelectedIds((prev) => (select ? [...new Set([...prev, ...ids])] : prev.filter((id) => !ids.includes(id))));
 
   const bulkSetEnabled = async (enabled: boolean) => {
     const targets = selectedIds.length > 0 ? selectedIds : pools.map((pool) => pool.id);
@@ -229,9 +294,11 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
 
   const bulkDelete = () => {
     if (selectedIds.length === 0) return;
+    const ids = [...selectedIds];
     setConfirmState({
       title: t("proxyPools.confirmBulkDeleteTitle"),
-      message: t("proxyPools.confirmBulkDeleteMessage", { count: selectedIds.length }),
+      message: t("proxyPools.confirmBulkDeleteMessage", { count: ids.length }),
+      confirmText: t("proxyPools.delete"),
       onConfirm: async () => {
         setConfirmState(null);
         setBulkBusy(true);
@@ -239,7 +306,7 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         let blocked = 0;
         let failed = 0;
         try {
-          for (const id of selectedIds) {
+          for (const id of ids) {
             try {
               await deleteProxyPool(secret, id);
               ok += 1;
@@ -267,12 +334,14 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     });
   };
 
+  /** Tests the selection (or every pool), then offers to turn the dead ones off. */
   const handleHealthCheck = async () => {
     const targets = selectedIds.length > 0 ? pools.filter((pool) => selectedIds.includes(pool.id)) : pools;
-    if (targets.length === 0) return;
+    if (targets.length === 0 || healthChecking) return;
 
     setHealthChecking(true);
     setHealthProgress({ current: 0, total: targets.length });
+    setTestingIds(new Set(targets.map((pool) => pool.id)));
     let alive = 0;
     const deadIds: string[] = [];
     let done = 0;
@@ -284,12 +353,14 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
         if (!pool) break;
         try {
           const result = await testProxyPool(secret, pool.id);
+          setResults((current) => ({ ...current, [pool.id]: result }));
           if (result.ok) alive += 1;
           else deadIds.push(pool.id);
         } catch {
           deadIds.push(pool.id);
         } finally {
           done += 1;
+          markTesting(pool.id, false);
           setHealthProgress({ current: done, total: targets.length });
         }
       }
@@ -300,31 +371,34 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     setHealthChecking(false);
     setHealthProgress({ current: 0, total: 0 });
 
-    if (deadIds.length > 0) {
+    // Only pools that are still on can be turned off.
+    const enabledDead = deadIds.filter((id) => targets.find((pool) => pool.id === id)?.enabled);
+    if (enabledDead.length > 0) {
       setConfirmState({
         title: t("proxyPools.confirmDisableDeadTitle"),
-        message: t("proxyPools.confirmDisableDeadMessage", { alive, dead: deadIds.length }),
+        message: t("proxyPools.confirmDisableDeadMessage", { alive, dead: enabledDead.length, count: enabledDead.length }),
+        confirmText: t("proxyPools.turnOffDead", { count: enabledDead.length }),
         onConfirm: async () => {
           setConfirmState(null);
           setBulkBusy(true);
           try {
-            for (const id of deadIds) {
+            for (const id of enabledDead) {
               try {
                 await updateProxyPool(secret, id, { enabled: false });
               } catch {
-                // ignore per-pool failures
+                // A pool that fails to update keeps its state; the list reload shows it.
               }
             }
             await load();
             onMutated?.();
-            onNotice(t("proxyPools.noticeDisabled", { count: deadIds.length }));
+            onNotice(t("proxyPools.noticeDisabled", { count: enabledDead.length }));
           } finally {
             setBulkBusy(false);
           }
         },
       });
     } else {
-      onNotice(t("proxyPools.noticeHealthDone", { alive }));
+      onNotice(deadIds.length ? t("proxyPools.noticeHealthDoneDead", { alive, dead: deadIds.length }) : t("proxyPools.noticeHealthDone", { alive }));
     }
   };
 
@@ -396,257 +470,346 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated }: Props) 
     }
   };
 
-  const activeCount = useMemo(() => pools.filter((pool) => pool.enabled).length, [pools]);
+  // Which providers and accounts route through each pool, by name.
+  const usedByPool = useMemo(() => {
+    const names: Record<string, string[]> = {};
+    const add = (poolId: string, name: string) => {
+      (names[poolId] ||= []).push(name);
+    };
+    for (const provider of providers) {
+      for (const poolId of provider.ProxyPoolIDs || []) add(poolId, provider.Name || provider.ID);
+    }
+    for (const [providerId, list] of Object.entries(credentials)) {
+      for (const credential of list || []) {
+        for (const poolId of credential.proxy_pool_ids || []) add(poolId, `${maskAccountText(credentialLabel(credential), masked)} (${providerId})`);
+      }
+    }
+    return names;
+  }, [providers, credentials, masked]);
 
-  if (loading) {
-    return (
-      <section className="section proxy-pools-page">
-        <div className="proxy-pools-loading">
-          <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          {t("proxyPools.loading")}
-        </div>
-      </section>
+  const views = useMemo<ProxyPoolView[]>(
+    () =>
+      pools.map((pool) => {
+        const endpoint = proxyEndpoint(pool.url);
+        return {
+          pool,
+          name: pool.name || pool.id,
+          health: poolHealth(pool),
+          scheme: endpoint.scheme,
+          host: endpoint.host,
+          usedBy: usedByPool[pool.id] || [],
+          lastTested: formatAgo(pool.last_tested_at, i18n.language, clock),
+          lastResult: results[pool.id],
+          testing: testingIds.has(pool.id),
+          busy: bulkBusy || testingIds.has(pool.id),
+          selected: selectedIds.includes(pool.id),
+        };
+      }),
+    [pools, usedByPool, results, testingIds, bulkBusy, selectedIds, i18n.language, clock],
+  );
+
+  const searched = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return views;
+    return views.filter((view) =>
+      [view.name, view.pool.id, view.host, view.pool.last_error, ...view.usedBy].some((value) => value?.toLowerCase().includes(query)),
     );
-  }
+  }, [views, search]);
 
-  return (
-    <section className="section proxy-pools-page">
-      <div className="proxy-pools-toolbar">
-        <div>
-          <p className="eyebrow">{t("proxyPools.subtitle")}</p>
-          <h2>{t("proxyPools.title")}</h2>
-          <p>{t("proxyPools.description")}</p>
-        </div>
-        <div className="proxy-pools-toolbar-actions">
-          <Button variant="secondary" size="sm" icon="upload" onClick={() => setShowBatchImportModal(true)}>
-            {t("proxyPools.batchImport")}
-          </Button>
-          <Button size="sm" icon="add" onClick={openCreateModal}>
-            {t("proxyPools.addProxyPool")}
-          </Button>
-        </div>
-      </div>
+  const counts = useMemo(() => {
+    const result: Record<PoolHealth, number> = { healthy: 0, failing: 0, untested: 0, off: 0 };
+    for (const view of searched) result[view.health] += 1;
+    return result;
+  }, [searched]);
 
-      <Card pad="md">
-        <div className="proxy-pools-summary">
-          {pools.length > 0 ? (
-            <label className="proxy-pools-select-all">
-              <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
-              {allSelected ? t("proxyPools.unselectAll") : t("proxyPools.selectAll")}
-            </label>
-          ) : null}
-          <Badge variant="default">{t("proxyPools.total", { count: pools.length })}</Badge>
-          <Badge variant="success">{t("proxyPools.active", { count: activeCount })}</Badge>
-        </div>
+  const usage = useMemo(() => {
+    const inUse = searched.filter((view) => (view.pool.usage_count || 0) > 0);
+    return { pools: inUse.length, bindings: inUse.reduce((sum, view) => sum + view.pool.usage_count, 0) };
+  }, [searched]);
 
-        {(selectedIds.length > 0 || healthChecking) && (
-          <div className="proxy-pools-bulk-bar">
-            <span className="material-symbols-outlined">checklist</span>
-            <span>{selectedIds.length > 0 ? t("proxyPools.selected", { count: selectedIds.length }) : t("proxyPools.allPools")}</span>
-            <div className="proxy-pools-bulk-actions">
-              <Button
-                size="sm"
-                icon={healthChecking ? "progress_activity" : "health_and_safety"}
-                onClick={() => void handleHealthCheck()}
-                disabled={healthChecking || bulkBusy || pools.length === 0}
-                loading={healthChecking}
-              >
-                {healthChecking ? t("proxyPools.checking", { current: healthProgress.current, total: healthProgress.total }) : t("proxyPools.healthCheck")}
-              </Button>
-              {selectedIds.length > 0 ? (
-                <>
-                  <Button size="sm" variant="secondary" icon="toggle_on" onClick={() => void bulkSetEnabled(true)} disabled={bulkBusy || healthChecking}>
-                    {t("proxyPools.activate")}
-                  </Button>
-                  <Button size="sm" variant="secondary" icon="toggle_off" onClick={() => void bulkSetEnabled(false)} disabled={bulkBusy || healthChecking}>
-                    {t("proxyPools.deactivate")}
-                  </Button>
-                  <Button size="sm" variant="secondary" icon="delete" onClick={bulkDelete} disabled={bulkBusy || healthChecking}>
-                    {t("proxyPools.delete")}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={clearSelection} disabled={bulkBusy || healthChecking}>
-                    {t("proxyPools.clear")}
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </div>
-        )}
+  const visible = useMemo(() => {
+    const list = filter === "all" ? [...searched] : searched.filter((view) => view.health === filter);
+    const byName = (a: ProxyPoolView, b: ProxyPoolView) => a.name.localeCompare(b.name);
+    if (sortMode === "name") return list.sort(byName);
+    if (sortMode === "usage") return list.sort((a, b) => (b.pool.usage_count || 0) - (a.pool.usage_count || 0) || byName(a, b));
+    if (sortMode === "tested") {
+      const time = (view: ProxyPoolView) => Date.parse(view.pool.last_tested_at || "") || 0;
+      return list.sort((a, b) => time(a) - time(b) || byName(a, b));
+    }
+    return list.sort((a, b) => POOL_HEALTH_ORDER.indexOf(a.health) - POOL_HEALTH_ORDER.indexOf(b.health) || byName(a, b));
+  }, [searched, filter, sortMode]);
 
-        {pools.length === 0 ? (
-          <EmptyState icon="lan" text={t("proxyPools.emptyTitle")} hint={t("proxyPools.emptyHint")} />
-        ) : (
-          <div className="proxy-pools-list">
-            {pools.map((pool) => (
-              <div key={pool.id} className="proxy-pools-row">
-                <div className="proxy-pools-row-main">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(pool.id)}
-                    onChange={() => toggleSelect(pool.id)}
-                  />
-                  <div className="proxy-pools-row-body">
-                    <div className="proxy-pools-row-title">
-                      <strong>{pool.name || pool.id}</strong>
-                      <Badge variant={statusVariant(pool.status)} size="sm">{pool.status || t("proxyPools.statusUnknown")}</Badge>
-                      <Badge variant={pool.enabled ? "success" : "default"} size="sm">
-                        {pool.enabled ? t("proxyPools.statusActive") : t("proxyPools.statusInactive")}
-                      </Badge>
-                      <Badge variant="default" size="sm">{t("proxyPools.bound", { count: pool.usage_count || 0 })}</Badge>
-                    </div>
-                    <p className="proxy-pools-row-url">{pool.url}</p>
-                    <p className="proxy-pools-row-meta">
-                      <code>{pool.id}</code>
-                      <span>{t("proxyPools.lastTested")} {formatDateTime(pool.last_tested_at)}</span>
-                      {pool.last_error ? <span>{pool.last_error}</span> : null}
-                    </p>
-                  </div>
-                </div>
-                <div className="proxy-pools-row-actions">
-                  <Toggle checked={pool.enabled} onChange={() => void handleToggleEnabled(pool)} />
-                  <button
-                    type="button"
-                    className="proxy-pools-icon-btn"
-                    onClick={() => void handleTest(pool.id)}
-                    disabled={testingId === pool.id}
-                    title={t("proxyPools.testProxy")}
-                    aria-label={t("proxyPools.testProxy")}
-                  >
-                    <span className={cn("material-symbols-outlined", testingId === pool.id && "animate-spin")}>
-                      {testingId === pool.id ? "progress_activity" : "science"}
-                    </span>
-                  </button>
-                  <button type="button" className="proxy-pools-icon-btn" onClick={() => openEditModal(pool)} title={t("proxyPools.edit")} aria-label={t("proxyPools.edit")}>
-                    <span className="material-symbols-outlined">edit</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="proxy-pools-icon-btn danger"
-                    onClick={() => handleDelete(pool)}
-                    title={t("proxyPools.delete")}
-                    aria-label={t("proxyPools.delete")}
-                  >
-                    <span className="material-symbols-outlined">delete</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+  const allVisibleSelected = visible.length > 0 && visible.every((view) => selectedIds.includes(view.pool.id));
+  const someVisibleSelected = !allVisibleSelected && visible.some((view) => selectedIds.includes(view.pool.id));
 
-      <Modal
+  const handlers: ProxyPoolHandlers = {
+    edit: openEditModal,
+    select: (pool, select) => toggleSelection([pool.id], select),
+    setEnabled: (pool) => void handleToggleEnabled(pool),
+    test: (pool) => void handleTest(pool),
+    copyId: (pool) => {
+      copy(pool.id, `pool_${pool.id}`);
+      onNotice(t("proxyPools.idCopied", { id: pool.id }));
+    },
+    remove: handleDelete,
+  };
+
+  const hasFilters = filter !== "all" || search.trim() !== "";
+  const clearFilters = () => {
+    setSearch("");
+    setFilter("all");
+  };
+
+  const modals = (
+    <>
+      <ProxyPoolFormModal
         open={showFormModal}
+        editingPool={editingPool}
+        formData={formData}
+        setFormData={setFormData}
+        saving={saving}
+        onSave={() => void handleSave()}
         onClose={closeFormModal}
-        title={editingPool ? t("proxyPools.editProxyPool") : t("proxyPools.addProxyPoolTitle")}
-        size="md"
-        footer={
-          <>
-            <Button variant="secondary" onClick={closeFormModal} disabled={saving}>{t("proxyPools.cancel")}</Button>
-            <Button
-              onClick={() => void handleSave()}
-              loading={saving}
-              disabled={!formData.name.trim() || (!editingPool && (!formData.url.trim() || !formData.id.trim()))}
-            >
-              {t("proxyPools.save")}
-            </Button>
-          </>
-        }
-      >
-        <div className="proxy-pools-form">
-          {!editingPool ? (
-            <Field label={t("proxyPools.poolId")} required hint={t("proxyPools.poolIdHint")}>
-              <Input
-                value={formData.id}
-                onChange={(event) => setFormData((prev) => ({ ...prev, id: event.target.value }))}
-                placeholder={t("proxyPools.poolIdPlaceholder")}
-                required
-              />
-            </Field>
-          ) : (
-            <Field label={t("proxyPools.poolId")}>
-              <Input value={formData.id} disabled />
-            </Field>
-          )}
-          <Field label={t("proxyPools.name")} required>
-            <Input
-              value={formData.name}
-              onChange={(event) => {
-                const name = event.target.value;
-                setFormData((prev) => ({
-                  ...prev,
-                  name,
-                  id: !editingPool && !prev.id ? suggestPoolId(name) : prev.id,
-                }));
-              }}
-              placeholder={t("proxyPools.namePlaceholder")}
-              required
-            />
-          </Field>
-          <Field
-            label={t("proxyPools.proxyUrl")}
-            required={!editingPool}
-            hint={editingPool ? t("proxyPools.proxyUrlHintEdit") : t("proxyPools.proxyUrlHintCreate")}
-          >
-            <Input
-              type="password"
-              value={formData.url}
-              onChange={(event) => setFormData((prev) => ({ ...prev, url: event.target.value }))}
-              placeholder={editingPool ? t("proxyPools.proxyUrlPlaceholderEdit") : t("proxyPools.proxyUrlPlaceholderCreate")}
-            />
-          </Field>
-          <div className="proxy-pools-toggle-row">
-            <div>
-              <strong>{t("proxyPools.activeField")}</strong>
-              <p>{t("proxyPools.activeFieldHint")}</p>
-            </div>
-            <Toggle
-              checked={formData.enabled}
-              onChange={(event) => setFormData((prev) => ({ ...prev, enabled: event.target.checked }))}
-              disabled={saving}
-            />
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
+      />
+      <ProxyPoolImportModal
         open={showBatchImportModal}
-        onClose={() => {
-          if (!importing) setShowBatchImportModal(false);
-        }}
-        title={t("proxyPools.batchImportTitle")}
-        size="md"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowBatchImportModal(false)} disabled={importing}>{t("proxyPools.cancel")}</Button>
-            <Button onClick={() => void handleBatchImport()} loading={importing} disabled={!batchImportText.trim()}>
-              {t("proxyPools.import")}
-            </Button>
-          </>
-        }
-      >
-        <Field
-          label={t("proxyPools.pasteProxyList")}
-          hint={t("proxyPools.pasteProxyListHint")}
-        >
-          <Textarea
-            value={batchImportText}
-            onChange={(event) => setBatchImportText(event.target.value)}
-            placeholder={t("proxyPools.pasteProxyPlaceholder")}
-            rows={8}
-          />
-        </Field>
-      </Modal>
-
+        text={batchImportText}
+        setText={setBatchImportText}
+        importing={importing}
+        onImport={() => void handleBatchImport()}
+        onClose={() => setShowBatchImportModal(false)}
+      />
       <ConfirmDialog
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
         onConfirm={() => confirmState?.onConfirm()}
-        title={confirmState?.title || "Confirm"}
+        title={confirmState?.title || t("proxyPools.confirm")}
         message={confirmState?.message}
-        confirmText={t("proxyPools.confirm")}
+        confirmText={confirmState?.confirmText || t("proxyPools.confirm")}
+        cancelText={t("proxyPools.cancel")}
         variant="danger"
       />
+    </>
+  );
+
+  if (!loading && pools.length === 0) {
+    return (
+      <section className="cp-page">
+        <EmptyPanel
+          icon="lan"
+          title={t("proxyPools.emptyTitle")}
+          description={t("proxyPools.emptyHint")}
+          action={
+            <div className="pp-empty-actions">
+              <Button variant="primary" icon="add" onClick={openCreateModal}>{t("proxyPools.addProxyPool")}</Button>
+              <Button variant="secondary" icon="upload" onClick={() => setShowBatchImportModal(true)}>{t("proxyPools.batchImport")}</Button>
+            </div>
+          }
+        />
+        {modals}
+      </section>
+    );
+  }
+
+  const tile = (health: PoolHealth) => ({
+    key: health,
+    icon: HEALTH_ICON[health],
+    tone: POOL_HEALTH_TONE[health],
+    label: t(`proxyPools.health.${health}`),
+    value: loading ? "—" : counts[health],
+    hint: t(`proxyPools.tileHint.${health}`),
+    muted: counts[health] === 0,
+    active: filter === health,
+    onClick: () => toggleFilter(health),
+    title: t(`proxyPools.healthHint.${health}`),
+  });
+
+  const testTargets = selectedIds.length || pools.length;
+
+  return (
+    <section className="cp-page">
+      <PageStats
+        label={t("proxyPools.statsLabel")}
+        items={[
+          {
+            key: "all",
+            icon: "lan",
+            label: t("proxyPools.stats.pools"),
+            value: loading ? "—" : searched.length,
+            hint: t("proxyPools.stats.poolsHint", { count: searched.length - counts.off }),
+            active: filter === "all",
+            onClick: () => setFilter("all"),
+          },
+          tile("healthy"),
+          tile("failing"),
+          tile("untested"),
+          tile("off"),
+          {
+            key: "in-use",
+            icon: "link",
+            label: t("proxyPools.stats.inUse"),
+            value: loading ? "—" : usage.pools,
+            hint: t("proxyPools.stats.inUseHint", { count: usage.bindings, unused: searched.length - usage.pools }),
+            muted: usage.pools === 0,
+          },
+        ]}
+      />
+
+      <Toolbar>
+        <ToolbarRow>
+          <FilterTabs
+            label={t("proxyPools.filterLabel")}
+            value={filter}
+            onChange={toggleFilter}
+            items={[
+              { value: "all", icon: "apps", label: t("proxyPools.filterAll"), count: searched.length },
+              ...POOL_HEALTH_ORDER.map((health) => ({
+                value: health,
+                icon: HEALTH_ICON[health],
+                tone: POOL_HEALTH_TONE[health],
+                label: t(`proxyPools.health.${health}`),
+                count: counts[health],
+              })),
+            ]}
+          />
+          <ToolbarEnd>
+            <ToolButton icon="upload" onClick={() => setShowBatchImportModal(true)}>{t("proxyPools.batchImport")}</ToolButton>
+            <Button variant="primary" size="sm" icon="add" onClick={openCreateModal}>{t("proxyPools.addProxyPool")}</Button>
+          </ToolbarEnd>
+        </ToolbarRow>
+        <ToolbarRow>
+          <SearchField value={search} onChange={setSearch} placeholder={t("proxyPools.searchPlaceholder")} />
+          <ToolbarEnd>
+            <SelectField
+              label={t("proxyPools.sortLabel")}
+              value={sortMode}
+              onChange={setSortMode}
+              options={[
+                { value: "status", label: t("proxyPools.sort.status") },
+                { value: "name", label: t("proxyPools.sort.name") },
+                { value: "usage", label: t("proxyPools.sort.usage") },
+                { value: "tested", label: t("proxyPools.sort.tested") },
+              ]}
+            />
+            <Segmented
+              label={t("proxyPools.viewMode")}
+              value={viewMode}
+              onChange={setViewMode}
+              items={[
+                { value: "grid", icon: "grid_view", label: t("proxyPools.viewGrid") },
+                { value: "list", icon: "view_list", label: t("proxyPools.viewList") },
+              ]}
+            />
+            <ToolButton
+              icon="network_check"
+              spinning={healthChecking}
+              disabled={healthChecking || bulkBusy || pools.length === 0}
+              onClick={() => void handleHealthCheck()}
+              title={t("proxyPools.testAllHint")}
+            >
+              {selectedIds.length ? t("proxyPools.testSelected", { count: testTargets }) : t("proxyPools.testAll")}
+            </ToolButton>
+            <GuideToggle open={guide.open} onToggle={guide.toggle} />
+          </ToolbarEnd>
+        </ToolbarRow>
+        {healthChecking ? (
+          <ProgressLine value={healthProgress.current} total={healthProgress.total}>
+            {t("proxyPools.checking", { current: healthProgress.current, total: healthProgress.total })}
+          </ProgressLine>
+        ) : null}
+      </Toolbar>
+
+      <PageGuide
+        open={guide.open}
+        onDismiss={guide.dismiss}
+        title={t("proxyPools.guide.title")}
+        steps={[
+          { icon: "lan", text: t("proxyPools.guide.what") },
+          { icon: "network_check", text: t("proxyPools.guide.test") },
+          { icon: "link", text: t("proxyPools.guide.bind") },
+        ]}
+        legend={
+          <>
+            <LegendItem tone="success">{t("proxyPools.health.healthy")}</LegendItem>
+            <LegendItem tone="danger">{t("proxyPools.health.failing")}</LegendItem>
+            <LegendItem tone="neutral">{t("proxyPools.health.untested")}</LegendItem>
+            <LegendItem tone="muted">{t("proxyPools.health.off")}</LegendItem>
+          </>
+        }
+      />
+
+      {loading ? (
+        <div className="cp-grid" style={{ ["--cp-card-min" as string]: "300px" }} aria-label={t("proxyPools.loading")}>
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="cp-card pp-skeleton-card">
+              <div className="cp-skeleton"><span /><span /><span /></div>
+            </div>
+          ))}
+        </div>
+      ) : visible.length === 0 ? (
+        <EmptyPanel
+          icon="filter_alt_off"
+          title={t("proxyPools.noMatch")}
+          description={t("proxyPools.noMatchHint")}
+          action={hasFilters ? <Button variant="secondary" icon="filter_alt_off" onClick={clearFilters}>{t("proxyPools.clearFilters")}</Button> : null}
+        />
+      ) : viewMode === "grid" ? (
+        <div className="cp-grid" style={{ ["--cp-card-min" as string]: "300px" }}>
+          {visible.map((view) => <ProxyPoolCard key={view.pool.id} view={view} handlers={handlers} />)}
+        </div>
+      ) : (
+        <div className="cp-list pp-list">
+          <div className="cp-list-head" aria-hidden>
+            <span>
+              <input
+                type="checkbox"
+                className="cp-check"
+                tabIndex={-1}
+                checked={allVisibleSelected}
+                ref={(element) => {
+                  if (element) element.indeterminate = someVisibleSelected;
+                }}
+                onChange={(event) => toggleSelection(visible.map((view) => view.pool.id), event.target.checked)}
+                aria-label={t("proxyPools.selectAll")}
+              />
+            </span>
+            <span>{t("proxyPools.columns.pool")}</span>
+            <span>{t("proxyPools.columns.status")}</span>
+            <span>{t("proxyPools.columns.endpoint")}</span>
+            <span>{t("proxyPools.columns.usedBy")}</span>
+            <span>{t("proxyPools.columns.lastTest")}</span>
+            <span>{t("proxyPools.columns.on")}</span>
+            <span />
+          </div>
+          {visible.map((view) => <ProxyPoolListRow key={view.pool.id} view={view} handlers={handlers} />)}
+        </div>
+      )}
+
+      <BulkBar
+        count={selectedIds.length}
+        busy={bulkBusy || healthChecking}
+        onClear={clearSelection}
+        selectAll={
+          allVisibleSelected
+            ? null
+            : { label: t("proxyPools.selectAllVisible", { count: visible.length }), onSelect: () => toggleSelection(visible.map((view) => view.pool.id), true) }
+        }
+      >
+        <BulkButton icon="network_check" spinning={healthChecking} disabled={bulkBusy || healthChecking} onClick={() => void handleHealthCheck()}>
+          {t("proxyPools.bulkTest")}
+        </BulkButton>
+        <BulkButton icon="toggle_on" disabled={bulkBusy || healthChecking} onClick={() => void bulkSetEnabled(true)}>
+          {t("proxyPools.activate")}
+        </BulkButton>
+        <BulkButton icon="toggle_off" disabled={bulkBusy || healthChecking} onClick={() => void bulkSetEnabled(false)}>
+          {t("proxyPools.deactivate")}
+        </BulkButton>
+        <BulkButton icon="delete" tone="danger" disabled={bulkBusy || healthChecking} onClick={bulkDelete}>
+          {t("proxyPools.delete")}
+        </BulkButton>
+      </BulkBar>
+
+      {modals}
     </section>
   );
 }

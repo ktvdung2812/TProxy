@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useApiKeySecrets } from "../../hooks/useApiKeySecrets";
 import { getStoredApiKeySecret, maskApiKeySecret } from "../../lib/apiKeySecrets";
 import { deleteApiKey, fetchApiKeyUsage, toggleApiKey } from "../apis/api";
 import type { ApiKeyRecord, ApiKeyUsage } from "../apis/types";
 import { formatLimitSummary } from "../apis/utils";
-import { Card, ConfirmDialog, EmptyState, Toggle, cn } from "../ui";
+import { Button, ConfirmDialog, Toggle, cn } from "../ui";
+import { ActionMenu, EmptyPanel, IconAction, SectionHead, ToolButton } from "../page-kit";
+import { compactNumber, formatUsd } from "../upstreams/health";
 
 type Props = {
   secret: string;
@@ -23,20 +25,9 @@ type ConfirmState = {
   onConfirm: () => void;
 };
 
-function usd(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 4,
-  }).format(value || 0);
-}
-
-function compact(value: number) {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
-}
-
 export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   useApiKeySecrets();
   const { copied, copy } = useCopyToClipboard();
   const [usageById, setUsageById] = useState<Record<string, ApiKeyUsage>>({});
@@ -80,8 +71,8 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
   const handleRevoke = (key: ApiKeyRecord) => {
     setConfirmState({
       title: t("apis.revokeKey"),
-      message: `Revoke "${key.name || key.id}"? Clients using this key will lose access immediately.`,
-      confirmText: "Revoke",
+      message: t("overview.keys.revokeMessage", { name: key.name || key.id }),
+      confirmText: t("overview.keys.revoke"),
       onConfirm: () => {
         void (async () => {
           try {
@@ -96,103 +87,134 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
     });
   };
 
+  // Pausing cuts clients off immediately, so it asks first; resuming does not.
+  const requestToggle = (key: ApiKeyRecord, next: boolean) => {
+    if (key.enabled && !next) {
+      setConfirmState({
+        title: t("overview.keys.pauseTitle"),
+        message: t("overview.keys.pauseMessage", { name: key.name || key.id }),
+        confirmText: t("overview.keys.pause"),
+        onConfirm: () => void handleToggle(key, false),
+      });
+      return;
+    }
+    void handleToggle(key, next);
+  };
+
+  const enabledCount = apiKeys.filter((key) => key.enabled).length;
+  const totals = apiKeys.reduce(
+    (sum, key) => ({
+      requests: sum.requests + (usageById[key.id]?.requests_today || 0),
+      cost: sum.cost + (usageById[key.id]?.cost_usd_today || 0),
+    }),
+    { requests: 0, cost: 0 },
+  );
+
   return (
-    <Card className="overview-api-keys-card" pad="md">
-      <div className="overview-api-keys-head">
-        <div>
-          <h3 className="overview-api-keys-title">
-            <span className="material-symbols-outlined">vpn_key</span>
-            API keys
-          </h3>
-          <p className="overview-api-keys-desc">Client keys for OpenAI-compatible access.</p>
-        </div>
-        <div className="overview-api-keys-actions">
-          <span className="meta">{apiKeys.length} keys</span>
-          <Link to="/apis" className={cn("btn", "btn-outline", "btn-sm")}>
-            <span className="material-symbols-outlined">open_in_new</span>
-            Manage
-          </Link>
-        </div>
-      </div>
+    <section className="cp-panel ov-panel ov-keys" aria-label={t("overview.keys.title")}>
+      <SectionHead
+        leading={<span className="cp-section-icon material-symbols-outlined" aria-hidden>vpn_key</span>}
+        title={t("overview.keys.title")}
+        subtitle={
+          apiKeys.length
+            ? t("overview.keys.summary", { count: apiKeys.length, on: enabledCount })
+            : t("overview.keys.subtitle")
+        }
+        meta={
+          apiKeys.length && !loadingUsage ? (
+            <span className="ov-keys-today">{t("overview.keys.today", { requests: compactNumber(totals.requests), cost: formatUsd(totals.cost) })}</span>
+          ) : null
+        }
+        actions={
+          <ToolButton icon="open_in_new" onClick={() => navigate("/apis")} title={t("overview.keys.manageHint")}>
+            {t("overview.keys.manage")}
+          </ToolButton>
+        }
+      />
 
       {apiKeys.length === 0 ? (
-        <EmptyState icon="api" text={t("overview.noApiKeys")} hint={t("apis.createKeyHint")} />
+        <EmptyPanel
+          compact
+          icon="vpn_key"
+          title={t("overview.noApiKeys")}
+          description={t("overview.keys.emptyHint")}
+          action={<Button variant="primary" size="sm" icon="add" onClick={() => navigate("/apis")}>{t("overview.keys.create")}</Button>}
+        />
       ) : (
-        <div className="overview-api-keys-list">
+        <div className="cp-list ov-keys-list">
+          <div className="cp-list-head" aria-hidden>
+            <span>{t("overview.keys.columns.key")}</span>
+            <span>{t("overview.keys.columns.models")}</span>
+            <span>{t("overview.keys.columns.limits")}</span>
+            <span>{t("overview.keys.columns.today")}</span>
+            <span>{t("overview.keys.columns.on")}</span>
+            <span />
+          </div>
           {apiKeys.map((key) => {
             const usage = usageById[key.id];
-            const requests = usage?.requests_today || 0;
-            const spent = usage?.cost_usd_today || 0;
-            const models = key.models?.length ? key.models.join(", ") : "*";
             const storedSecret = getStoredApiKeySecret(key.id);
-            const usageText = loadingUsage
-              ? t("apis.loadingUsage")
-              : `${compact(requests)} requests today · ${usd(spent)}`;
-
+            const models = key.models?.length ? key.models : null;
+            const copyId = `secret_${key.id}`;
             return (
-              <div key={key.id} className={key.enabled ? "overview-api-key-row" : "overview-api-key-row is-paused"}>
-                <div className="overview-api-key-main">
-                  <p className="overview-api-key-name">{key.name || key.id}</p>
-                  <div className="overview-api-key-meta-row">
-                    <p className="overview-api-key-meta">
-                      <span className="overview-api-key-id">
-                        {storedSecret ? (
-                          <>
-                            <code>{maskApiKeySecret(storedSecret)}</code>
-                            <button
-                              type="button"
-                              className="endpoint-row-copy small"
-                              onClick={() => copy(storedSecret, `secret_${key.id}`)}
-                              aria-label={t("apis.copySecret")}
-                            >
-                              <span className="material-symbols-outlined">
-                                {copied === `secret_${key.id}` ? "check" : "content_copy"}
-                              </span>
-                            </button>
-                          </>
-                        ) : (
-                          <span className="apis-key-secret-missing">Secret not saved</span>
-                        )}
-                      </span>
-                      <span className="overview-api-key-sep">·</span>
-                      <span>{models}</span>
-                      <span className="overview-api-key-sep">·</span>
-                      <span>{formatLimitSummary(key, t)}</span>
-                      <span className="overview-api-key-sep">·</span>
-                      <span className="overview-api-key-usage">{usageText}</span>
-                    </p>
-                    <div className="overview-api-key-actions">
-                      <Toggle
-                        label=""
-                        checked={key.enabled}
-                        disabled={togglingId === key.id}
-                        aria-label={key.enabled ? "Disable API key" : "Enable API key"}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          if (key.enabled && !next) {
-                            setConfirmState({
-                              title: "Pause API key",
-                              message: `Pause "${key.name || key.id}"? Clients using this key will stop working immediately.`,
-                              confirmText: "Pause",
-                              onConfirm: () => void handleToggle(key, false),
-                            });
-                            return;
-                          }
-                          void handleToggle(key, next);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="overview-api-key-revoke"
-                        onClick={() => handleRevoke(key)}
-                        aria-label={`Revoke ${key.name || key.id}`}
-                      >
-                        <span className="material-symbols-outlined">block</span>
-                        Revoke
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              <div key={key.id} className={cn("cp-list-row ov-key-row", key.enabled ? "is-on" : "is-off")}>
+                <span className="cp-cell cp-cell-main ov-key-name">
+                  <strong title={key.name || key.id}>{key.name || key.id}</strong>
+                  {storedSecret ? (
+                    <small className="ov-key-secret">
+                      <code>{maskApiKeySecret(storedSecret)}</code>
+                    </small>
+                  ) : (
+                    <small title={t("overview.keys.secretMissingHint")}>{t("overview.keys.secretMissing")}</small>
+                  )}
+                </span>
+                <span className="cp-cell cp-cell-mono ov-key-models" data-label={t("overview.keys.columns.models")} title={models?.join("\n")}>
+                  {models ? (models.length === 1 ? models[0] : t("overview.keys.modelsCount", { count: models.length })) : t("overview.keys.allModels")}
+                </span>
+                <span className="cp-cell cp-cell-mono ov-key-limits" data-label={t("overview.keys.columns.limits")} title={formatLimitSummary(key, t)}>
+                  {formatLimitSummary(key, t)}
+                </span>
+                <span className="cp-cell cp-cell-mono ov-key-today" data-label={t("overview.keys.columns.today")}>
+                  {loadingUsage && !usage
+                    ? t("apis.loadingUsage")
+                    : t("overview.keys.usage", { requests: compactNumber(usage?.requests_today || 0), cost: formatUsd(usage?.cost_usd_today || 0, 4) })}
+                </span>
+                <span className="cp-cell cp-keep-bright ov-key-toggle">
+                  <Toggle
+                    checked={key.enabled}
+                    disabled={togglingId === key.id}
+                    aria-label={key.enabled ? t("overview.keys.disable") : t("overview.keys.enable")}
+                    title={key.enabled ? t("overview.keys.disable") : t("overview.keys.enable")}
+                    onChange={(event) => requestToggle(key, event.target.checked)}
+                  />
+                </span>
+                <span className="cp-cell cp-cell-actions cp-keep-bright">
+                  {storedSecret ? (
+                    <IconAction
+                      icon={copied === copyId ? "check" : "content_copy"}
+                      label={t("apis.copySecret")}
+                      onClick={() => copy(storedSecret, copyId)}
+                    />
+                  ) : null}
+                  <ActionMenu
+                    label={t("overview.keys.more")}
+                    items={[
+                      {
+                        key: "edit",
+                        icon: "tune",
+                        label: t("overview.keys.edit"),
+                        hint: t("overview.keys.editHint"),
+                        onSelect: () => navigate("/apis"),
+                      },
+                      {
+                        key: "revoke",
+                        icon: "block",
+                        label: t("overview.keys.revoke"),
+                        danger: true,
+                        onSelect: () => handleRevoke(key),
+                      },
+                    ]}
+                  />
+                </span>
               </div>
             );
           })}
@@ -204,13 +226,14 @@ export function OverviewApiKeysCard({ secret, apiKeys, onError, onMutated }: Pro
         title={confirmState?.title || ""}
         message={confirmState?.message || ""}
         variant="danger"
-        confirmText={confirmState?.confirmText || "Confirm"}
+        confirmText={confirmState?.confirmText || t("common.confirm")}
+        cancelText={t("common.cancel")}
         onClose={() => setConfirmState(null)}
         onConfirm={() => {
           confirmState?.onConfirm();
           setConfirmState(null);
         }}
       />
-    </Card>
+    </section>
   );
 }

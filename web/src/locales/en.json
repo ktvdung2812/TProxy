@@ -1,4 +1,15 @@
 {
+  "kit": {
+    "clearSearch": "Clear search",
+    "searchShortcut": "Press / to search",
+    "autoRefresh": "Auto-refresh",
+    "guideToggle": "How this page works",
+    "guideKicker": "// QUICK GUIDE",
+    "guideDismiss": "Got it, hide the guide",
+    "bulkToolbar": "Bulk actions",
+    "selected": "selected",
+    "clearSelection": "Clear selection"
+  },
   "auth": {
     "login": "Login",
     "password": "Password",
@@ -129,7 +140,134 @@
     "estimatedCostHint": "models.dev pricing",
     "activeCredentials": "Active credentials",
     "activeCredentialsHint": "available account records",
-    "noApiKeys": "No API keys yet"
+    "noApiKeys": "No API keys yet",
+    "connectProvider": "Connect provider",
+    "quickStart": "Quick start",
+    "quick": {
+      "cliTools": "Set up a CLI tool",
+      "chat": "Try in chat",
+      "logs": "Request logs"
+    },
+    "stats": {
+      "label": "Gateway at a glance",
+      "open": "Open {{page}}",
+      "tokensHint": "{{input}} in · {{output}} out tokens",
+      "noErrors": "No failed attempts",
+      "errorRate": "{{rate}}% of requests",
+      "savedShare": "{{rate}}% of input tokens",
+      "savedNone": "Token saver has not saved yet",
+      "activeAccounts": "Active accounts",
+      "accountsHint": "of {{total}} accounts",
+      "accountsAttention": "{{count}} of {{total}} need attention"
+    },
+    "guide": {
+      "title": "How the gateway works",
+      "connect": "Connect a provider (Claude, Codex, Gemini…) and sign in one or more accounts — tproxy rotates between them.",
+      "keys": "Create an API key and point your app or CLI tool at the gateway URL. Models keep the same IDs whichever upstream serves them.",
+      "watch": "Check \"Needs attention\" here: every item links to the page that fixes it.",
+      "legendOk": "Working",
+      "legendWarn": "Degraded, still serving",
+      "legendDanger": "Blocked, needs action"
+    },
+    "attention": {
+      "title": "Needs attention",
+      "summary_one": "{{count}} item keeps traffic from flowing smoothly",
+      "summary_other": "{{count}} items keep traffic from flowing smoothly",
+      "summaryNone": "Nothing is blocking traffic",
+      "toneDanger": "Blocked",
+      "toneWarning": "Degraded",
+      "toneInfo": "Info",
+      "showAll": "Show all {{count}}",
+      "showFewer": "Show fewer",
+      "noProviders": "No provider connected yet",
+      "noProvidersHint": "Connect a provider and sign in an account to start routing requests.",
+      "allClear": "All clear",
+      "allClearHint": "Every provider, account and proxy pool is working.",
+      "kind": {
+        "provider": "Provider",
+        "account": "Account",
+        "pool": "Proxy pool",
+        "model": "Model"
+      },
+      "providerAuth": "{{name}} needs a new sign-in",
+      "accountsAffected_one": "{{count}} account affected",
+      "accountsAffected_other": "{{count}} accounts affected",
+      "signIn": "Sign in",
+      "providerDegraded": "{{name}} is degraded",
+      "providerDegradedHint": "Recent health checks failed",
+      "checkHealth": "Check health",
+      "providerUnchecked": "{{name}} has not been checked",
+      "providerUncheckedHint": "Run a health check to confirm it works",
+      "providerDisabled": "{{name}} is turned off",
+      "disabledRoutes_one": "{{count}} model route points to it",
+      "disabledRoutes_other": "{{count}} model routes point to it",
+      "disabledHint": "Not used for routing",
+      "openProvider": "Open provider",
+      "accountAuth": "{{account}} needs a new sign-in",
+      "accountCooldown": "{{account}} is cooling down",
+      "backIn": "back {{time}}",
+      "clearCooldown": "Review cooldown",
+      "accountError": "{{account}} is failing",
+      "poolFailing": "Proxy pool {{name}} is failing",
+      "poolInUse_one": "used by {{count}} account",
+      "poolInUse_other": "used by {{count}} accounts",
+      "poolUnused": "not used by any account",
+      "testPool": "Test pool",
+      "modelNoRoute": "{{name}} has no working route",
+      "modelNoRouteHint": "Requests for this model will fail",
+      "addRoute": "Add route"
+    },
+    "summary": {
+      "title": "Gateway",
+      "subtitle": "What can route right now",
+      "open": "Open {{name}}",
+      "providers": "Providers",
+      "accounts": "Accounts",
+      "accountsOk": "Ready",
+      "accountsWarn": "Cooldown or error",
+      "accountsAuth": "Needs sign-in",
+      "models": "Models",
+      "modelsDetail": "{{on}} on · {{routes}} routes",
+      "combos": "Combos",
+      "proxyPools": "Proxy pools",
+      "poolsDetail": "{{on}} on · {{inUse}} in use",
+      "apiKeys": "API keys",
+      "onCount": "{{count}} on"
+    },
+    "keys": {
+      "title": "API keys",
+      "subtitle": "Keys your apps use to call the gateway",
+      "summary_one": "{{count}} key · {{on}} on",
+      "summary_other": "{{count}} keys · {{on}} on",
+      "today": "Today: {{requests}} req · {{cost}}",
+      "manage": "Manage",
+      "manageHint": "Open the APIs page to create keys and set limits",
+      "create": "Create API key",
+      "emptyHint": "Create a key, then use it as the bearer token for the gateway URL.",
+      "columns": {
+        "key": "Key",
+        "models": "Models",
+        "limits": "Limits",
+        "today": "Today",
+        "on": "On"
+      },
+      "secretMissing": "secret not stored in this browser",
+      "secretMissingHint": "The full key is shown only once, when it is created. Create a new key if you lost it.",
+      "allModels": "All models",
+      "modelsCount_one": "{{count}} model",
+      "modelsCount_other": "{{count}} models",
+      "usage": "{{requests}} req · {{cost}}",
+      "enable": "Turn key on",
+      "disable": "Turn key off",
+      "pause": "Turn off",
+      "pauseTitle": "Turn off this key?",
+      "pauseMessage": "Apps using \"{{name}}\" will get 401 errors until you turn it back on.",
+      "more": "More actions",
+      "edit": "Edit limits",
+      "editHint": "Opens the APIs page",
+      "revoke": "Revoke",
+      "revokeMessage": "Revoke \"{{name}}\"? Apps using it stop working immediately. This cannot be undone."
+    }
   },
   "providers": {
     "healthOk": "{{id}} is healthy",
@@ -535,7 +673,359 @@
     "freeTierProviders": "Free Tier Providers",
     "oauthCredentialHint": "OAuth credential — secret is managed by the token refresh flow.",
     "leaveSecretBlank": "Leave secret blank to keep the current value.",
-    "leaveEmptyKeepSecret": "Leave empty to keep existing secret"
+    "leaveEmptyKeepSecret": "Leave empty to keep existing secret",
+    "stats": {
+      "label": "Provider health",
+      "connected": "Providers",
+      "connectedHint": "Every configured provider",
+      "connectedOf": "Filtered from {{count}} configured",
+      "healthy": "Healthy",
+      "healthyHint": "Serving traffic normally",
+      "attention": "Needs attention",
+      "attentionHint": "Degraded or blocked",
+      "off": "Turned off",
+      "offHint": "Disabled, never routed",
+      "accounts": "Accounts",
+      "accountsHint": "{{on}} on · {{off}} off",
+      "cooldown": "Cooling down",
+      "cooldownNext": "Next clears in {{time}}",
+      "cooldownNone": "No account rate limited"
+    },
+    "kind": {
+      "all": "All",
+      "oauth": "OAuth",
+      "apikey": "API key",
+      "custom": "Custom",
+      "other": "Media & plugins"
+    },
+    "kindTitle": {
+      "oauth": "OAuth & subscriptions",
+      "apikey": "API key providers",
+      "custom": "Custom endpoints",
+      "other": "Media & plugins"
+    },
+    "health": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "attention": "Needs attention",
+      "idle": "No account",
+      "off": "Off",
+      "unknown": "Not checked"
+    },
+    "healthHint": {
+      "healthy": "Serving traffic normally",
+      "degraded": "Serving, but some accounts or the upstream report problems",
+      "attention": "Cannot serve until someone acts: sign in again or fix the failing accounts",
+      "idle": "Enabled, but no account is connected yet",
+      "off": "Provider is disabled and never routed",
+      "unknown": "No health check has run yet"
+    },
+    "accountState": {
+      "ready": "Ready",
+      "cooldown": "Cooldown",
+      "degraded": "Degraded",
+      "attention": "Needs attention",
+      "off": "Off",
+      "unknown": "Not checked"
+    },
+    "accountStateHint": {
+      "ready": "Healthy and picked by the router",
+      "cooldown": "Rate limited; skipped until the cooldown ends",
+      "degraded": "Works, but the last check reported problems",
+      "attention": "Failing or signed out; not routed until fixed",
+      "off": "Turned off; never routed",
+      "unknown": "Not checked yet; routed normally"
+    },
+    "columns": {
+      "provider": "Provider",
+      "kind": "Kind",
+      "status": "Status",
+      "accounts": "Accounts",
+      "checked": "Checked",
+      "account": "Account",
+      "quota": "Quota",
+      "today": "Today",
+      "on": "On"
+    },
+    "list": {
+      "kindFilter": "Provider kind",
+      "import": "Import",
+      "addProvider": "Add provider",
+      "searchPlaceholder": "Search providers and the catalog…",
+      "sortBy": "Sort providers",
+      "sort": {
+        "attention": "Problems first",
+        "accounts": "Most accounts",
+        "name": "Name"
+      },
+      "viewMode": "View",
+      "viewGrid": "Cards",
+      "viewList": "List",
+      "quickActions": "Quick actions",
+      "checkAttention": "Check providers needing attention",
+      "checkAttentionHint_one": "{{count}} provider",
+      "checkAttentionHint_other": "{{count}} providers",
+      "checkAll": "Health check every provider",
+      "checkAllHint_one": "{{count}} enabled provider",
+      "checkAllHint_other": "{{count}} enabled providers",
+      "exportHint": "OAuth tokens of every provider as one JSON bundle",
+      "importHint": "sub2api, CLIProxyAPI, 9router or tproxy exports",
+      "emptyTitle": "No provider connected yet",
+      "emptyHint": "Pick a provider from the catalog below and sign in, or import accounts you exported from another tool.",
+      "noMatch": "No provider matches",
+      "noMatchSearch": "Nothing configured matches your search. The catalog below may still have it.",
+      "noMatchHint": "Try another kind or status, or clear the filters.",
+      "clearFilters": "Clear filters",
+      "groupProviders_one": "{{count}} provider",
+      "groupProviders_other": "{{count}} providers",
+      "groupAccounts_one": "{{count}} account",
+      "groupAccounts_other": "{{count}} accounts",
+      "groupHealth": "Health in this group",
+      "checkGroup": "Check group",
+      "checkGroupHint_one": "Health check {{count}} enabled provider",
+      "checkGroupHint_other": "Health check {{count}} enabled providers",
+      "noAuthNeeded": "Works without credentials",
+      "noAccountsYet": "No account connected yet",
+      "accountsSummary_one": "{{count}} account · {{on}} on",
+      "accountsSummary_other": "{{count}} accounts · {{on}} on",
+      "cooldownClears": "Next cooldown clears in {{time}}",
+      "cooldownFor": "{{count}} cooling · {{time}}",
+      "cooldownCount": "{{count}} cooling down",
+      "attentionCount_one": "{{count}} needs attention",
+      "attentionCount_other": "{{count}} need attention",
+      "openNamed": "Open {{name}}",
+      "checkedAgo": "checked {{time}} ago",
+      "neverChecked": "never checked",
+      "proxyPools_one": "{{count}} proxy pool",
+      "proxyPools_other": "{{count}} proxy pools",
+      "accountsShort": "{{on}}/{{count}} on",
+      "noAuthShort": "no auth needed",
+      "checkSummary": "{{healthy}}/{{checked}} accounts healthy",
+      "copiedId": "Copied {{id}}",
+      "copyFailed": "Could not copy to the clipboard"
+    },
+    "menu": {
+      "open": "Open details",
+      "openHint": "Accounts, models and rotation",
+      "checkHint": "Pings every enabled account",
+      "checkNamed": "Health check {{name}}",
+      "copyId": "Copy provider ID",
+      "more": "More actions",
+      "moreAccount": "More account actions"
+    },
+    "guide": {
+      "title": "Providers are the upstreams tproxy routes to",
+      "connected": "Each card is one provider. Its colour says whether it can serve traffic; the bar shows how its accounts are doing.",
+      "health": "Click a red or amber tile to see only those providers, then run a health check from the card or from Quick actions.",
+      "add": "To connect a new one, pick it in the catalog at the bottom and sign in — the provider is created for you."
+    },
+    "detailGuide": {
+      "title": "How this provider's accounts are used",
+      "order": "The router tries accounts top to bottom. Drag the # handle to change the order; the switch takes an account out of rotation.",
+      "states": "Green is routed, amber is cooling down and clears on its own, red needs you: sign in again or check the error.",
+      "bulk": "Tick several accounts to turn them on or off, health check, export or delete them together. Esc clears the selection."
+    },
+    "identity": {
+      "healthHint": "Check every enabled account of this provider",
+      "discoverHint": "Ask the upstream for its current model list",
+      "deleteMessage": "Removes the provider and its routing settings. Its accounts stay stored but are no longer used.",
+      "logoAlt": "{{name}} logo"
+    },
+    "account": {
+      "cooldownFor": "Cooldown · {{time}}",
+      "editHint": "Label, priority, secret, limits and proxy pools",
+      "rankHint": "Routing position {{rank}}",
+      "rankDragHint": "Routing position {{rank}} — drag to reorder",
+      "dragNamed": "Drag to reorder {{label}}",
+      "turnOff": "Turn off (stop routing)",
+      "turnOn": "Turn on",
+      "checkingQuota": "Checking quota…",
+      "resetsIn": "Resets in {{time}}",
+      "showLess": "Show less",
+      "showMore": "Show {{count}} more",
+      "editNamed": "Edit {{label}}",
+      "plan": "Plan: {{plan}}",
+      "addedOn": "Added {{date}}",
+      "usedAgo": "used {{time}} ago",
+      "stickyHint": "Requests served in a row by this account (sticky rotation)",
+      "quotaFailed": "Could not load quota",
+      "exported_one": "Exported {{count}} account",
+      "exported_other": "Exported {{count}} accounts",
+      "bulkEnabled_one": "Turned on {{count}} account",
+      "bulkEnabled_other": "Turned on {{count}} accounts",
+      "bulkDisabled_one": "Turned off {{count}} account",
+      "bulkDisabled_other": "Turned off {{count}} accounts",
+      "bulkDeleted_one": "Deleted {{count}} account",
+      "bulkDeleted_other": "Deleted {{count}} accounts",
+      "bulkPartial": "Updated {{done}}/{{total}}. Failed: {{error}}",
+      "orderSaved": "Routing order saved",
+      "orderFailed": "Could not save the routing order",
+      "oauthConnected": "Account connected",
+      "connectTitle": "Connect an account",
+      "connectHint": "Pick how to sign in. The highlighted option is the recommended one.",
+      "statsLabel": "Account health",
+      "stats": {
+        "all": "Accounts",
+        "allHint": "{{on}} on · {{off}} off",
+        "ready": "Ready",
+        "readyHint": "Healthy and routed",
+        "cooldown": "Cooldown",
+        "cooldownHint": "Clears on its own",
+        "attention": "Needs attention",
+        "attentionHint": "Failing, degraded or signed out",
+        "off": "Turned off",
+        "offHint": "Not routed",
+        "usage": "Today",
+        "usageHint": "{{tokens}} through tproxy today"
+      },
+      "errorFilter": "Filter by error code",
+      "selectVisible": "Select all {{count}} shown",
+      "selectAttention": "Select accounts needing attention",
+      "selectAttentionHint_one": "{{count}} account",
+      "selectAttentionHint_other": "{{count}} accounts",
+      "exportAll": "Export all {{count}} (sub2api)",
+      "exportHint": "sub2api JSON you can import again later",
+      "summary_one": "{{count}} account · {{on}} on",
+      "summary_other": "{{count}} accounts · {{on}} on",
+      "summaryFiltered": "{{shown}} of {{count}} shown",
+      "orderHint": "Drag the # handle of an account to change which one the router tries first",
+      "orderShort": "Drag # to reorder",
+      "bulkEnable": "Turn on",
+      "bulkDisable": "Turn off",
+      "bulkDeleteTitle_one": "Delete {{count}} account?",
+      "bulkDeleteTitle_other": "Delete {{count}} accounts?"
+    },
+    "catalog": {
+      "title": "Add a provider",
+      "subtitle": "{{count}} ready-made integrations",
+      "matches": "{{count}} of {{total}} match your search",
+      "loading": "Loading catalog…",
+      "tabsLabel": "Catalog section",
+      "tab": {
+        "oauth": "OAuth",
+        "freeTier": "Free tier",
+        "apikey": "API key",
+        "media": "Media",
+        "plugin": "Plugins",
+        "custom": "Custom"
+      },
+      "hint": {
+        "oauth": "Sign in with a subscription account — no API key needed. Connected providers are marked with a check.",
+        "freeTier": "Providers with a free quota; most only need a sign-in or a free key.",
+        "apikey": "Paste a key from the provider's console.",
+        "media": "Image, video, speech and search providers.",
+        "plugin": "Extensions served through HTTP plugins."
+      },
+      "auth": {
+        "oauth": "OAuth sign-in",
+        "apikey": "API key",
+        "cookie": "Browser cookie",
+        "serviceAccount": "Service account",
+        "noAuth": "No auth needed"
+      },
+      "customHint": "Point tproxy at any OpenAI- or Anthropic-compatible endpoint, such as a self-hosted gateway.",
+      "customOpenAIHint": "Any /v1/chat/completions API",
+      "customAnthropicHint": "Any /v1/messages API",
+      "noMatch": "Nothing in the catalog matches",
+      "noMatchHint": "Try another name, or add a custom endpoint.",
+      "openConnected": "Open {{name}} — already connected",
+      "connectNamed": "Connect {{name}}",
+      "connectedAccounts_one": "Connected · {{count}} account",
+      "connectedAccounts_other": "Connected · {{count}} accounts"
+    },
+    "method": {
+      "moreWays": "More ways to connect",
+      "recommended": "Recommended",
+      "signInWith": "Sign in with {{name}}",
+      "addAccount": "Add account",
+      "grokCliDevice": "Grok CLI device login",
+      "githubOAuth": "GitHub OAuth",
+      "googleSignIn": "Google sign-in",
+      "githubDevice": "GitHub device login",
+      "addOllamaHost": "Add Ollama host",
+      "addCookie": "Add cookie",
+      "addApiKey": "Add API key",
+      "addServiceAccount": "Add service account",
+      "addNoAuth": "Add no-auth connection",
+      "connectCursor": "Connect Cursor IDE",
+      "connectKiro": "Connect Kiro",
+      "desc": {
+        "noAuth": "Use proxy pools and routing without upstream credentials.",
+        "cursor": "Detects the access token and machine ID from Cursor's local database.",
+        "importData": "Pick JSON files; the format is detected and converted automatically.",
+        "kiro": "AWS Builder ID, IAM Identity Center, API key, token import or CLIProxyAPI JSON.",
+        "cookie": "Paste the session cookie from your browser.",
+        "oauthDevice": "Device authorization — finish signing in in the browser tab that opens.",
+        "oauthBrowser": "Browser OAuth — sign in with your provider account.",
+        "byoKeyNoUrl": "Paste your API key and the provider base URL.",
+        "byoKey": "Paste your API key and use the provider base URL (for example {{url}}).",
+        "ollamaHost": "Set the Ollama host URL. The API key is optional for local instances.",
+        "apiKey": "Paste an API key from the provider console.",
+        "serviceAccount": "Paste the Google Cloud service account JSON."
+      },
+      "notice": {
+        "noAuth": "This provider works without API credentials. Add a no-auth connection or enable the provider to route traffic.",
+        "cursor": "Open Cursor IDE and sign in, then import the access token and machine ID from state.vscdb.",
+        "kiro": "Choose AWS Builder ID, IAM Identity Center, an API key, or import a token from Kiro IDE.",
+        "oauthUnavailable": "Interactive OAuth is not available for this provider yet. Use Import data if you already have exported credentials."
+      }
+    },
+    "models": {
+      "summary_one": "{{count}} model from {{accounts}} enabled account(s)",
+      "summary_other": "{{count}} models from {{accounts}} enabled account(s)",
+      "testResults": "Test results",
+      "reachable": "Reachable",
+      "unreachable": "Not reachable",
+      "searchPlaceholder": "Filter models…",
+      "colTest": "Last test",
+      "accounts_one": "{{count}} account",
+      "accounts_other": "{{count}} accounts",
+      "ok": "OK",
+      "okLatency": "OK · {{ms}} ms",
+      "failed": "Failed",
+      "testFailedFor": "Test failed for {{id}}",
+      "onAccount_one": "{{count}} model available on this account",
+      "onAccount_other": "{{count}} models available on this account",
+      "loadingAccount": "Loading supported models…",
+      "noneOnAccount": "No models discovered for this account."
+    },
+    "rotation": {
+      "subtitle": "Decides which account serves the next request",
+      "effective": "In effect",
+      "stickyLimit": "Sticky limit",
+      "globalDefault": "Global default",
+      "useGlobal": "Global default ({{strategy}})",
+      "globalValue": "Global ({{value}})",
+      "stickyDisabled": "Not used by fill-first",
+      "unsaved": "Unsaved changes",
+      "save": "Save rotation",
+      "strategy": {
+        "fillFirst": "Fill first (priority order)",
+        "roundRobin": "Sticky round-robin",
+        "weighted": "Weighted round-robin",
+        "expiringFirst": "Expiring first (soonest renewal)"
+      }
+    },
+    "typeDetail": {
+      "notConfigured": "Not connected",
+      "advanced": "Advanced setup",
+      "advancedHint": "Create the provider with a custom ID and base URL first",
+      "connectHint": "Choose how to connect. The highlighted option is the recommended one.",
+      "autoCreate": "tproxy creates this provider for you as soon as the first account connects."
+    },
+    "editConnection": {
+      "expiryHint": "RFC3339, e.g. 2026-12-31T23:59:59+07:00"
+    },
+    "oauth": {
+      "callbackHintDevin": "After signing in, paste the authorization code Devin shows in the browser.",
+      "placeholderDevin": "Paste the authorization code…"
+    },
+    "kiroAuth": {
+      "apiKeyPlaceholder": "Kiro API key"
+    },
+    "cursorImport": {
+      "dbHint": "Sign in to Cursor IDE first. Tokens are read from state.vscdb in Cursor's globalStorage folder."
+    }
   },
   "proxyPools": {
     "title": "Proxy pools",
@@ -628,7 +1118,110 @@
     "deletedSummary": "Deleted {{ok}}",
     "deletedSummaryFull": "Deleted {{ok}}, {{blocked}} bound, {{failed}} failed",
     "deletedSummaryBlocked": "Deleted {{ok}}, {{blocked}} bound",
-    "deletedSummaryFailed": "Deleted {{ok}}, {{failed}} failed"
+    "deletedSummaryFailed": "Deleted {{ok}}, {{failed}} failed",
+    "statsLabel": "Proxy pool health",
+    "stats": {
+      "pools": "Pools",
+      "poolsHint": "{{count}} turned on",
+      "inUse": "In use",
+      "inUseHint": "{{count}} bindings · {{unused}} unused"
+    },
+    "health": {
+      "healthy": "Working",
+      "failing": "Failing",
+      "untested": "Not tested",
+      "off": "Turned off"
+    },
+    "tileHint": {
+      "healthy": "Last test passed",
+      "failing": "Last test failed",
+      "untested": "No test result yet",
+      "off": "Ignored at runtime"
+    },
+    "healthHint": {
+      "healthy": "The last connectivity test passed.",
+      "failing": "The last connectivity test failed. Requests through this pool will fail.",
+      "untested": "Run a test to confirm the proxy works.",
+      "off": "Turned off: providers and accounts bound to it connect directly."
+    },
+    "filterLabel": "Filter by health",
+    "filterAll": "All",
+    "searchPlaceholder": "Search name, ID, host or binding…",
+    "sortLabel": "Sort pools",
+    "sort": {
+      "status": "Problems first",
+      "name": "Name A–Z",
+      "usage": "Most used first",
+      "tested": "Stalest test first"
+    },
+    "viewMode": "View",
+    "viewGrid": "Cards",
+    "viewList": "List",
+    "testAll": "Test all",
+    "testSelected_one": "Test {{count}} selected",
+    "testSelected_other": "Test {{count}} selected",
+    "testAllHint": "Test connectivity, then offer to turn off pools that fail",
+    "testing": "Testing…",
+    "guide": {
+      "title": "How proxy pools work",
+      "what": "A proxy pool is an outbound proxy (HTTP, HTTPS or SOCKS5). Requests to upstreams go out through it instead of this machine's IP.",
+      "test": "Test pools before using them. \"Test all\" checks every pool in parallel and offers to turn off the ones that fail.",
+      "bind": "Bind a pool to a provider or a single account on the Providers page. The \"Used by\" column shows where each pool is bound."
+    },
+    "noMatch": "No proxy pool matches",
+    "noMatchHint": "Try another search or health filter.",
+    "clearFilters": "Clear filters",
+    "selectAllVisible": "Select all {{count}} shown",
+    "selectPool": "Select {{name}}",
+    "columns": {
+      "pool": "Pool",
+      "status": "Status",
+      "endpoint": "Endpoint",
+      "usedBy": "Used by",
+      "lastTest": "Last test",
+      "on": "On"
+    },
+    "bulkTest": "Test",
+    "turnOn": "Turn pool on",
+    "turnOff": "Turn pool off",
+    "notBound": "Not bound",
+    "boundCount_one": "{{count}} binding",
+    "boundCount_other": "{{count}} bindings",
+    "usedByMore": "{{name}} +{{count}}",
+    "neverTested": "Never tested",
+    "testedAgo": "{{time}}",
+    "testedAgoLatency": "{{time}} · {{ms}} ms",
+    "editHint": "Rename, replace URL or turn off",
+    "editNamed": "Edit {{name}}",
+    "copyId": "Copy pool ID",
+    "idCopied": "Copied pool ID {{id}}",
+    "moreActions": "More actions",
+    "deletePool": "Delete pool",
+    "deleteBoundHint_one": "Unbind it from {{count}} provider or account first",
+    "deleteBoundHint_other": "Unbind it from {{count}} providers or accounts first",
+    "turnOffDead_one": "Turn off {{count}} pool",
+    "turnOffDead_other": "Turn off {{count}} pools",
+    "noticeTestPassedNamed": "{{name}} works · {{ms}} ms",
+    "noticeHealthDoneDead": "Test done: {{alive}} working, {{dead}} failing",
+    "noticeDisabled_one": "Turned off {{count}} failing pool",
+    "noticeDisabled_other": "Turned off {{count}} failing pools",
+    "confirmDisableDeadMessage_one": "{{alive}} working, {{dead}} failing. Turn off the failing pool so traffic stops going through it?",
+    "confirmDisableDeadMessage_other": "{{alive}} working, {{dead}} failing. Turn off the failing pools so traffic stops going through them?",
+    "confirmBulkDeleteMessage_one": "Delete {{count}} proxy pool? Pools that are still bound are skipped.",
+    "confirmBulkDeleteMessage_other": "Delete {{count}} proxy pools? Pools that are still bound are skipped.",
+    "confirmDeleteMessage_one": "Delete \"{{name}}\"? It is bound to {{count}} provider or account.",
+    "confirmDeleteMessage_other": "Delete \"{{name}}\"? It is bound to {{count}} providers or accounts.",
+    "form": {
+      "create": "Create pool",
+      "createSubtitle": "The URL is stored encrypted and never shown again.",
+      "editSubtitle": "Pool ID {{id}} · leave the URL blank to keep it",
+      "importSubtitle": "One proxy per line; duplicates are skipped.",
+      "importCount_one": "Import {{count}} proxy",
+      "importCount_other": "Import {{count}} proxies",
+      "previewValid_one": "{{count}} valid line, ready to import",
+      "previewValid_other": "{{count}} valid lines, ready to import",
+      "previewInvalid": "{{valid}} valid, {{invalid}} invalid — fix the invalid lines before importing"
+    }
   },
   "apis": {
     "title": "APIs & Keys",
@@ -641,7 +1234,9 @@
       "openPort": "Open port for LAN access",
       "copyCommand": "Copy command",
       "howToOpen": "How to open this port",
-      "openPortFirst": "Open the port before accessing"
+      "openPortFirst": "Open the port before accessing",
+      "osLabel": "Operating system",
+      "footer": "Make sure <code>server.host</code> is <code>0.0.0.0</code> in <code>config.yaml</code>, then restart tproxy after opening the port."
     },
     "apiKeyName": "API key name",
     "models": "Models",
@@ -680,8 +1275,19 @@
     "capacityPerRequestHint": "Capacity is shared with other keys. Input and output ceilings depend on the model and route used.",
     "quotaUnknown": "Quota is unknown for {{count}} accounts; known limits still apply.",
     "quotaStale": "Some quota data is awaiting refresh. The last known values are retained.",
-    "limitStates": {"finite": "Limited", "unbounded": "No configured source ceiling", "unknown": "Unknown", "unavailable": "No available source"},
-    "limitSources": {"global": "Gateway", "team": "Team", "key": "API key", "provider": "Provider", "account": "Account"},
+    "limitStates": {
+      "finite": "Limited",
+      "unbounded": "No configured source ceiling",
+      "unknown": "Unknown",
+      "unavailable": "No available source"
+    },
+    "limitSources": {
+      "global": "Gateway",
+      "team": "Team",
+      "key": "API key",
+      "provider": "Provider",
+      "account": "Account"
+    },
     "rateLimits": "Rate limits",
     "requestsPerMin": "Requests / min",
     "concurrentStreams": "Concurrent streams",
@@ -696,7 +1302,7 @@
     "exampleRequest": "Example request",
     "copyCurl": "Copy curl",
     "supportedRoutes": "Supported routes",
-    "apiKeys": "API Keys",
+    "apiKeys": "API keys",
     "clientAuth": "Client authentication",
     "clientAuthDesc": "Requests from non-local hosts require a valid API key. Keys are shown only once at creation.",
     "noApiKeys": "No API keys yet",
@@ -749,8 +1355,8 @@
     "noLanIp": "No private IPv4 address found",
     "lanRestartWarning": "Set server.host to 0.0.0.0 in config.yaml and restart the server so LAN devices can connect.",
     "noKeysRemoteWarning": "No client API keys configured. Remote clients must authenticate with a valid key.",
-    "noKeysForExample": "No API keys yet. Create one below to generate curl examples.",
-    "secretNotSavedForExample": "Secret for this key is not saved in this browser. Create a new key below and save the secret when it is shown.",
+    "noKeysForExample": "No API keys yet. Create one above to generate curl examples.",
+    "secretNotSavedForExample": "The secret for this key is not saved in this browser. Open the key above and paste its secret, or create a new key and save the secret when it is shown.",
     "noModels": "No models yet",
     "copyEndpoint": "Copy {{label}}",
     "firewallHelp": "{{label}} firewall help",
@@ -814,16 +1420,486 @@
       "dashboard": "Dashboard",
       "activeNoKeys": "Tunnel is active but no API keys exist. Create a key so remote clients can authenticate.",
       "tunnel": "Cloudflare",
-      "tailscale": "Tailscale"
+      "tailscale": "Tailscale",
+      "start": "Start",
+      "stop": "Stop",
+      "service": "Local service",
+      "cloudflareTitle": "Cloudflare Tunnel",
+      "cloudflareCardDesc": "Your own domain through your Cloudflare account. The URL stays the same across restarts.",
+      "tailscaleTitle": "Tailscale Funnel",
+      "tailscaleCardDesc": "A public *.ts.net URL from this machine's Tailscale node. No domain needed.",
+      "dashboardExposed": "Exposed",
+      "dashboardOnHint": "The dashboard is reachable through the public URL. Keep a strong management password.",
+      "dashboardOffHint": "Only the API is published; the dashboard stays local.",
+      "state": {
+        "checking": "Checking",
+        "off": "Off",
+        "busy": "Starting",
+        "online": "Online",
+        "unreachable": "Unreachable",
+        "reconnecting": "Reconnecting",
+        "error": "Error"
+      }
     },
     "createKeyHint": "Create your first API key to authenticate clients.",
     "failedRevokeKey": "Failed to revoke API key",
     "revokeKey": "Revoke API key",
     "revoke": "Revoke",
     "modelMappingTitle": "Apply model mapping",
-    "modelMappingHint": "When on, global custom model mappings rewrite this key's requested models."
+    "modelMappingHint": "When on, global custom model mappings rewrite this key's requested models.",
+    "statsLabel": "API key summary",
+    "stats": {
+      "keys": "API keys",
+      "keysHint_one": "{{count}} secret saved in this browser",
+      "keysHint_other": "{{count}} secrets saved in this browser",
+      "activeHint": "Accepting client requests",
+      "nearBudgetHint_one": "{{count}} near its daily budget",
+      "nearBudgetHint_other": "{{count}} near their daily budget",
+      "attentionHint": "No models, budget spent or no accounts",
+      "pausedHint": "Clients are rejected",
+      "today": "Requests today",
+      "todayHint": "{{spend}} spent today",
+      "remote": "Remote access",
+      "remoteOn": "Online",
+      "remoteOff": "Off",
+      "remoteOffHint": "Reachable on this machine and LAN only"
+    },
+    "filterLabel": "Filter API keys by status",
+    "filter": {
+      "all": "All",
+      "active": "Active",
+      "attention": "Needs attention",
+      "paused": "Paused"
+    },
+    "health": {
+      "active": "Active",
+      "nearBudget": "Near budget",
+      "paused": "Paused",
+      "noModels": "No models",
+      "overBudget": "Budget spent",
+      "noAccounts": "No accounts"
+    },
+    "healthHint": {
+      "active": "Enabled and able to serve requests.",
+      "nearBudget": "Has used 80% or more of today's budget.",
+      "paused": "Disabled: requests with this key are rejected.",
+      "noModels": "No model is allowed, so every request is rejected. Edit the key to grant models.",
+      "overBudget": "Today's budget is spent; requests are rejected until the daily reset.",
+      "noAccounts": "No enabled account can serve the models this key allows."
+    },
+    "refreshUsage": "Refresh",
+    "refreshUsageHint": "Reload today's usage and limits (refreshes every 30 s)",
+    "searchPlaceholder": "Search name, ID, team or model…",
+    "sortLabel": "Sort API keys",
+    "sort": {
+      "status": "Status",
+      "name": "Name",
+      "requests": "Requests today",
+      "spend": "Spend today"
+    },
+    "guide": {
+      "title": "Connect a client in three steps",
+      "endpoint": "Point your client at a base URL below. Local works on this machine; LAN and remote URLs work from other devices.",
+      "keys": "Create an API key and save its secret right away — it is shown once. Requests from other hosts must send it as a Bearer token.",
+      "remote": "Need access from anywhere? Start a Cloudflare Tunnel or Tailscale Funnel under Remote access, then use its public URL."
+    },
+    "keysCount_one": "{{count}} key",
+    "keysCount_other": "{{count}} keys",
+    "keysShown": "{{shown}} of {{total}} shown",
+    "emptyHint": "Create a key, then use it as the Bearer token from your apps, scripts and CLI tools.",
+    "noMatch": "No API keys match",
+    "noMatchHint": "Try another search or status filter.",
+    "clearFilters": "Clear filters",
+    "selectAllCount": "Select all {{count}}",
+    "idCopied": "Copied ID {{id}}",
+    "capacityTitle": "Capacity · {{name}}",
+    "capacitySubtitle": "What this key can use right now: its own ceilings and the account pool it shares.",
+    "sharedCapacity_one": "Shared capacity · {{count}} account",
+    "sharedCapacity_other": "Shared capacity · {{count}} accounts",
+    "selectedModelsShort_one": "{{count}} model",
+    "selectedModelsShort_other": "{{count}} models",
+    "bulk": {
+      "resume": "Resume",
+      "pause": "Pause",
+      "resumed_one": "Resumed {{count}} API key",
+      "resumed_other": "Resumed {{count}} API keys",
+      "paused_one": "Paused {{count}} API key",
+      "paused_other": "Paused {{count}} API keys",
+      "revoked_one": "Revoked {{count}} API key",
+      "revoked_other": "Revoked {{count}} API keys",
+      "pauseTitle_one": "Pause {{count}} API key",
+      "pauseTitle_other": "Pause {{count}} API keys",
+      "pauseConfirm_one": "Clients using this key will stop working immediately.",
+      "pauseConfirm_other": "Clients using these {{count}} keys will stop working immediately.",
+      "revokeTitle_one": "Revoke {{count}} API key",
+      "revokeTitle_other": "Revoke {{count}} API keys",
+      "revokeConfirm_one": "Delete {{names}}? Clients using it lose access immediately. This cannot be undone.",
+      "revokeConfirm_other": "Delete {{count}} keys ({{names}})? Clients using them lose access immediately. This cannot be undone.",
+      "partialFailure": "{{failed}} failed: {{error}}"
+    },
+    "columns": {
+      "key": "Key",
+      "status": "Status",
+      "secret": "Secret",
+      "access": "Access & limits",
+      "today": "Today",
+      "on": "On"
+    },
+    "limitShort": {
+      "rpm": "{{value}} req/min",
+      "streams": "{{value}} streams",
+      "inputBytes": "{{value}} bytes in",
+      "outputTokens": "{{value}} tokens out",
+      "mediaJobs": "{{value}} media jobs",
+      "budget": "${{value}}/day"
+    },
+    "menu": {
+      "more": "More actions for {{name}}",
+      "edit": "Edit key",
+      "editHint": "Name, models, accounts and limits",
+      "capacity": "View capacity",
+      "example": "Use in example",
+      "exampleHint": "Fill the curl example with this key",
+      "copyId": "Copy key ID"
+    },
+    "accountsShort_one": "{{count}} account",
+    "accountsShort_other": "{{count}} accounts",
+    "endpointsShort_one": "{{count}} endpoint",
+    "endpointsShort_other": "{{count}} endpoints",
+    "openKey": "Edit {{name}}",
+    "selectKey": "Select {{name}}",
+    "selectAllVisible": "Select all shown keys",
+    "teamShort": "team {{team}}",
+    "ownLimitsTag": "Own limits",
+    "ownLimitsHint": "This key has its own ceilings on top of the shared account capacity.",
+    "secretSavedHint": "Secret saved in this browser",
+    "secretNotSavedShort": "Not saved here",
+    "secretNotSavedHint": "The secret is not saved in this browser. Open the key and paste it to enable copy and examples.",
+    "requestsShort": "req",
+    "budgetUsed": "{{spent}} of {{budget}} used today",
+    "ofBudget": "of {{budget}}",
+    "pauseKey": "Pause key",
+    "resumeKey": "Resume key",
+    "createKeySubtitle": "Clients send the key as a Bearer token. The secret is shown only once.",
+    "keyNameHint": "A label you will recognise, e.g. the app or person using it.",
+    "advancedOptionsHint": "ID, models, team, endpoints and limits",
+    "keyIdHint": "optional · generated when empty",
+    "allowedEndpointsHint": "optional · comma separated",
+    "secretKeptInBrowser": "A copy is kept in this browser so the list and examples can use it.",
+    "endpoints": {
+      "title": "Endpoints",
+      "subtitle": "Base URLs for OpenAI, Anthropic and Gemini compatible clients · click to copy",
+      "localHint": "This machine only",
+      "lanHint": "Other devices on your network · TCP {{port}} must be open",
+      "ready": "Ready",
+      "network": "Network",
+      "restartNeeded": "Restart needed",
+      "remoteOff": "Not running · set up remote access"
+    },
+    "remote": {
+      "title": "Remote access",
+      "subtitle": "Publish the gateway over HTTPS without opening router ports"
+    },
+    "quickStart": {
+      "title": "Quick start",
+      "subtitle": "A ready-to-run request for one of your keys and models",
+      "jump": "Example",
+      "routesCount_one": "{{count}} route",
+      "routesCount_other": "{{count}} routes",
+      "route": "Route",
+      "methods": "Methods",
+      "description": "Description",
+      "copyRoute": "Copy full URL"
+    },
+    "routeDesc": {
+      "models": "List virtual models available to the client.",
+      "modelsInfo": "Detailed model metadata and routing hints.",
+      "chatCompletions": "OpenAI-compatible chat completions.",
+      "responses": "OpenAI Responses API (Codex CLI wire_api=responses).",
+      "responsesCompact": "Compact Responses API context (Codex).",
+      "responsesWs": "WebSocket transport for the Responses API.",
+      "responsesAlias": "Responses API alias (Codex-compatible).",
+      "codexAlias": "Codex CLI alias to the Responses API.",
+      "messages": "Anthropic-compatible Messages API.",
+      "countTokens": "Token counting for Anthropic messages.",
+      "embeddings": "Text embeddings.",
+      "imageGenerations": "Image generation.",
+      "imageEdits": "Image edits.",
+      "speech": "Text-to-speech.",
+      "transcriptions": "Speech-to-text.",
+      "voices": "Voice catalog and management.",
+      "videos": "Video generation (async job).",
+      "videoGenerations": "Video generation alias.",
+      "videoStatus": "Poll an async video job.",
+      "search": "Web search proxy.",
+      "webFetch": "Fetch and extract web page content."
+    }
   },
   "models": {
+    "loading": "Loading public models…",
+    "failedUpdate": "Failed to update model",
+    "filterByProvider": "Filter by provider",
+    "allProviders": "All providers",
+    "providerTabHint": "Provider status: {{status}}",
+    "sortBy": "Sort models",
+    "sort": {
+      "default": "Configured order",
+      "attention": "Needs attention first",
+      "name": "Name A–Z",
+      "routes": "Most working providers"
+    },
+    "viewMode": "View mode",
+    "viewGrid": "Cards",
+    "viewList": "Compact list",
+    "quickActions": "Quick actions",
+    "quick": {
+      "resetPaused": "Resume paused providers",
+      "resetPausedHint_one": "{{count}} provider paused by failover",
+      "resetPausedHint_other": "{{count}} providers paused by failover",
+      "selectVisible": "Select all {{count}} shown"
+    },
+    "selectAllVisible": "Select all shown models",
+    "selectModel": "Select {{name}}",
+    "openPriorityFor": "Open the fallback chain of {{name}}",
+    "clearFilters": "Clear filters",
+    "stats": {
+      "label": "Model health",
+      "models": "Public models",
+      "modelsHint": "{{enabled}} on · {{aliases}} aliases",
+      "modelsTitle": "Model IDs that clients can call",
+      "serving": "Serving",
+      "servingHint": "Primary provider is ready",
+      "degraded": "Degraded",
+      "degradedHint": "A provider in the chain is paused",
+      "attention": "No route",
+      "attentionHint": "Requests to these IDs fail",
+      "disabled": "Turned off",
+      "disabledHint_one": "{{count}} route switched off",
+      "disabledHint_other": "{{count}} routes switched off",
+      "discovered": "From accounts",
+      "discoveredHint": "Not public yet — add in one click"
+    },
+    "health": {
+      "serving": "Serving",
+      "degraded": "Degraded",
+      "attention": "No route",
+      "disabled": "Off"
+    },
+    "healthHint": {
+      "serving": "Requests are served by the first provider in the chain.",
+      "degraded": "A provider is paused or unhealthy; the next one in the chain takes the traffic.",
+      "attention": "No enabled provider with an account can serve this model, so requests fail.",
+      "disabled": "This model ID is turned off; clients get a model-not-found error."
+    },
+    "step": {
+      "ok": "ready",
+      "suggested": "new",
+      "off": "off",
+      "paused": "paused",
+      "pausedFor": "paused · {{time}}",
+      "probing": "probing",
+      "failing": "{{failures}}/{{threshold}} fails",
+      "provider-off": "provider off"
+    },
+    "stepHint": {
+      "ok": "{{provider}} takes traffic in this order",
+      "suggested": "{{provider}} can serve this model but is not in the saved chain yet",
+      "off": "Route switched off — {{provider}} is skipped",
+      "paused": "Paused after repeated failures; traffic moves to the next provider",
+      "probing": "The next request tests whether {{provider}} has recovered",
+      "failing": "Recent failures — a few more will pause {{provider}}",
+      "provider-off": "{{provider}} is disabled on the Providers page",
+      "unhealthy": "{{provider}} reported a problem on its last health check"
+    },
+    "providerStatus": {
+      "healthy": "healthy",
+      "degraded": "degraded",
+      "auth_required": "sign-in needed",
+      "unknown": "unchecked",
+      "error": "error",
+      "unhealthy": "unhealthy",
+      "failed": "failed",
+      "expired": "expired"
+    },
+    "accountCount_one": "{{count}} account",
+    "accountCount_other": "{{count}} accounts",
+    "chainTitle": "Fallback chain",
+    "chainServing_one": "{{count}} working",
+    "chainServing_other": "{{count}} working",
+    "moreSteps": "+{{count}} more",
+    "suggestedRoutes_one": "+{{count}} provider can join",
+    "suggestedRoutes_other": "+{{count}} providers can join",
+    "suggestedHint": "Discovered providers that also serve this model. Open the chain and save to add them.",
+    "hiddenRoutes_one": "{{count}} route hidden (no account)",
+    "hiddenRoutes_other": "{{count}} routes hidden (no account)",
+    "hiddenRoutesHint": "Saved routes whose provider has no enabled account. They rejoin automatically once an account is added.",
+    "noAliases": "No aliases",
+    "noAliasesHint": "Clients must call this exact model ID",
+    "aliasesHint": "Also answers to: {{aliases}}",
+    "menu": {
+      "more": "More actions",
+      "editPriority": "Edit fallback chain",
+      "editPriorityHint": "Reorder providers, switch routes on or off",
+      "editDetails": "Edit name & aliases",
+      "editDetailsHint": "Display name, aliases, capabilities",
+      "enable": "Turn model on",
+      "enableHint": "Clients can call it again",
+      "disable": "Turn model off",
+      "disableHint": "Keeps the chain, rejects requests",
+      "copyId": "Copy model ID"
+    },
+    "deleteModels_one": "Delete {{count}} model",
+    "deleteModels_other": "Delete {{count}} models",
+    "deleteConfirm": "Delete \"{{name}}\"? Clients using this model ID will stop working immediately.",
+    "deleteConfirmMany": "Delete {{count}} models? Clients using these model IDs will stop working immediately.",
+    "configured": {
+      "title": "Public models",
+      "summary_one": "{{count}} model · {{enabled}} on",
+      "summary_other": "{{count}} models · {{enabled}} on",
+      "summaryFiltered": "{{shown}} of {{count}} shown"
+    },
+    "columns": {
+      "model": "Model",
+      "status": "Status",
+      "chain": "Fallback chain",
+      "aliases": "Aliases",
+      "enabled": "On"
+    },
+    "empty": {
+      "title": "No public models yet",
+      "description": "Create one from a provider model, or add a model your accounts already expose from the list below.",
+      "noMatch": "No models match",
+      "noMatchHint": "Try another provider, status or search term."
+    },
+    "bulk": {
+      "enable": "Turn on",
+      "disable": "Turn off",
+      "delete": "Delete"
+    },
+    "notice": {
+      "created": "Model \"{{name}}\" created — review its fallback chain",
+      "prioritySaved": "Fallback chain saved for \"{{name}}\"",
+      "updated": "Model \"{{name}}\" updated",
+      "enabled": "\"{{name}}\" turned on",
+      "disabled": "\"{{name}}\" turned off",
+      "deleted": "Model \"{{name}}\" deleted",
+      "bulkEnabled_one": "{{count}} model turned on",
+      "bulkEnabled_other": "{{count}} models turned on",
+      "bulkDisabled_one": "{{count}} model turned off",
+      "bulkDisabled_other": "{{count}} models turned off",
+      "bulkDeleted_one": "{{count}} model deleted",
+      "bulkDeleted_other": "{{count}} models deleted",
+      "bulkFailed_one": "{{count}} change failed",
+      "bulkFailed_other": "{{count}} changes failed",
+      "pausedReset_one": "{{count}} paused provider resumed",
+      "pausedReset_other": "{{count}} paused providers resumed",
+      "copied": "Copied {{id}}"
+    },
+    "guide": {
+      "title": "How the Provider Priority Manager works",
+      "models": "A public model is the stable name clients send, like claude-sonnet-4-6. Aliases are extra names for the same model. Turn a model off to reject it without losing its setup.",
+      "chain": "Each model has a fallback chain: provider 1 serves first; if it fails or hits a limit, the next one takes over. Providers that keep failing are paused automatically and retried later.",
+      "fast": "Fastest path: under \"From provider accounts\" click Add on a model your accounts already offer, then check the chain. Click any card to reorder providers. Press / to search.",
+      "legendServing": "Serving",
+      "legendDegraded": "Fallback in use",
+      "legendAttention": "No working route",
+      "legendSuggested": "Can be added"
+    },
+    "discovered": {
+      "title": "From provider accounts",
+      "scanning": "Asking providers for their model lists…",
+      "summary_one": "{{count}} model your accounts expose that no public model uses yet",
+      "summary_other": "{{count}} models your accounts expose that no public model uses yet",
+      "summaryFiltered": "{{shown}} of {{count}} shown",
+      "rescan": "Rescan providers",
+      "rescanHint": "Ask every provider for its current model list",
+      "providerError": "could not list models: {{message}}",
+      "noMatch": "No discovered models match",
+      "allConfigured": "Everything your accounts offer is already public",
+      "allConfiguredHint": "New models appear here when a provider starts offering them.",
+      "add": "Add",
+      "addHint": "Create a public model for {{name}} and open its chain"
+    },
+    "form": {
+      "createTitle": "Create public model",
+      "editTitle": "Edit model details",
+      "subtitle": "One stable model ID for clients. The fallback chain is edited separately.",
+      "saveChanges": "Save changes",
+      "idHint": "Stable ID clients call, e.g. td-coder-pro",
+      "idLocked": "The ID cannot change after creation — clients depend on it",
+      "idRequired": "Model ID is required",
+      "idAllowed": "Only letters, numbers, -, _, and . allowed",
+      "idInUse": "This ID is already in use",
+      "aliasesHint": "Comma-separated extra names, e.g. coder, gpt-latest",
+      "enabled": "Model is on",
+      "capabilitiesHint": "Shown to clients that list models; does not change routing"
+    },
+    "select": {
+      "title": "Create public model",
+      "subtitle": "Pick a model one of your providers offers. ID, name and the first route are filled in for you.",
+      "add": "Create model",
+      "noProviders": "No providers configured yet",
+      "setUpProviders": "Set up providers first",
+      "search": "Search provider models…",
+      "loading": "Loading provider models…",
+      "available_one": "{{count}} available",
+      "available_other": "{{count}} available",
+      "discovering": "Asking every provider for its model list…",
+      "noMatch": "No provider models match your search.",
+      "groupCount_one": "{{count}} model",
+      "groupCount_other": "{{count}} models",
+      "groupEmpty": "No new models",
+      "preview": "Will be created as",
+      "provider": "Provider",
+      "upstream": "Upstream model",
+      "openProviders": "Open Providers",
+      "noneAvailable": "No new provider models are available. Check provider accounts or run discovery on the Providers page."
+    },
+    "priority": {
+      "title": "Fallback chain",
+      "subtitle": "Configure the provider fallback order",
+      "save": "Save chain",
+      "unsaved": "Unsaved changes",
+      "unsavedHint": "Includes newly discovered providers added at the bottom",
+      "selectModel": "Select a model to manage its fallback chain.",
+      "publicId": "Public ID",
+      "upstream": "Upstream model",
+      "compatible": "Compatible",
+      "checking": "Checking…",
+      "compatibleCount_one": "{{count}} provider",
+      "compatibleCount_other": "{{count}} providers",
+      "primary": "Serves first",
+      "noPrimary": "No enabled provider",
+      "help": "P1 serves first; on errors or limits the next provider takes over. Drag rows or use the arrows to reorder, switch a route off to skip it. Failing providers pause automatically and are retried after a short backoff.",
+      "noProviders": "No providers configured yet. Set up providers first, then come back to arrange the chain.",
+      "openProviders": "Open Providers",
+      "noCompatible": "No provider currently offers upstream model \"{{model}}\".",
+      "noRoutesYet": "This model has no provider routes yet. Configure providers, then map them here.",
+      "discovering": "Looking for providers that offer \"{{model}}\"…",
+      "allHidden": "Every provider in this chain has 0 accounts, so none can serve a request. Add an account and it rejoins at its saved position.",
+      "tableLabel": "Provider fallback order",
+      "colOrder": "Order",
+      "colProvider": "Provider · upstream model",
+      "colHealth": "Accounts & health",
+      "colEnabled": "On",
+      "dragHint": "Drag to reorder",
+      "upstreamHint": "Model name sent to this provider",
+      "lastStatus": "last status {{status}}",
+      "pausedHint_one": "Paused after {{count}} failed attempt",
+      "pausedHint_other": "Paused after {{count}} failed attempts",
+      "probingHint": "The next request is a probe; success puts this provider back in rotation.",
+      "failingHint_one": "{{count}} more failure will pause this provider",
+      "failingHint_other": "{{count}} more failures will pause this provider",
+      "reenable": "Resume now",
+      "reenabling": "Resuming…",
+      "enableRoute": "Use {{provider}} in this chain",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "removeRoute": "Remove from chain",
+      "hiddenNote_one": "{{count}} provider is hidden because it has no account. Its saved position is kept.",
+      "hiddenNote_other": "{{count}} providers are hidden because they have no account. Their saved positions are kept.",
+      "manageProviders": "Manage providers"
+    },
     "title": "Models",
     "subtitle": "Provider Priority Manager",
     "description": "Define public model IDs and routing priorities.",
@@ -906,9 +1982,319 @@
     "idRequired": "Combo ID is required",
     "idAllowed": "Only letters, numbers, -, _, and . allowed",
     "idInUse": "This ID is already in use",
-    "comboSubtitle": "Ordered fallback across virtual models. Earlier steps are tried first."
+    "comboSubtitle": "Ordered fallback across virtual models. Earlier steps are tried first.",
+    "loading": "Loading combos…",
+    "copied": "Copied",
+    "copyName": "{{name}} (copy)",
+    "openCombo": "Edit combo {{name}}",
+    "selectCombo": "Select {{name}}",
+    "selectAllVisible": "Select all shown combos",
+    "clearFilters": "Clear filters",
+    "search": "Search combos or their models…",
+    "sortBy": "Sort combos",
+    "sort": {
+      "default": "Configured order",
+      "attention": "Needs attention first",
+      "name": "Name A–Z",
+      "steps": "Most steps"
+    },
+    "viewMode": "View mode",
+    "viewGrid": "Cards",
+    "viewList": "Compact list",
+    "quickActions": "Quick actions",
+    "quick": {
+      "fromPreset": "New from preset: {{name}}",
+      "selectVisible": "Select all {{count}} shown"
+    },
+    "filterByClient": "Filter by client",
+    "allClients": "All clients",
+    "client": {
+      "claude-code": "Claude Code",
+      "cowork": "Cowork",
+      "general": "Any client"
+    },
+    "clientHint": {
+      "claude-code": "Tuned for Claude Code over Anthropic /v1/messages",
+      "cowork": "Tuned for Claude Desktop Cowork third-party inference",
+      "general": "Works with any OpenAI- or Anthropic-compatible client"
+    },
+    "stats": {
+      "label": "Combo health",
+      "combos": "Combos",
+      "combosHint": "{{enabled}} on",
+      "ready": "Ready",
+      "readyHint": "Every step can serve",
+      "partial": "Partly usable",
+      "partialHint": "Some steps are skipped",
+      "broken": "Broken",
+      "brokenHint": "No step can serve — requests fail",
+      "paused": "Turned off",
+      "pausedHint": "Clients get model-not-found",
+      "models": "Models used",
+      "modelsHint": "Distinct targets across combos"
+    },
+    "health": {
+      "ready": "Ready",
+      "partial": "Partly usable",
+      "broken": "Broken",
+      "paused": "Off"
+    },
+    "healthHint": {
+      "ready": "Every step points at an enabled model, so the whole fallback order is available.",
+      "partial": "Some steps point at a model that is off or missing; they are skipped.",
+      "broken": "No step can serve a request, so calls to this combo ID fail.",
+      "paused": "This combo is turned off; clients get a model-not-found error."
+    },
+    "chainTitle": "Fallback order",
+    "chainUsable": "{{usable}}/{{count}} usable",
+    "noSteps": "No steps yet",
+    "moreSteps": "+{{count}} more",
+    "stepKind": {
+      "model": "model",
+      "combo": "combo",
+      "provider": "provider",
+      "unknown": "unknown"
+    },
+    "stepState": {
+      "ok": "ready",
+      "direct": "direct",
+      "off": "off",
+      "missing": "missing"
+    },
+    "stepHint": {
+      "ok": "Enabled target — tried in this order",
+      "direct": "Sent straight to a provider model; checked when the request runs",
+      "off": "The target is turned off, so this step is skipped",
+      "missing": "No model or combo has this ID any more; edit the combo to replace it"
+    },
+    "routingOrdered": "Ordered fallback",
+    "routingHint": "Steps are tried top to bottom until one succeeds",
+    "rewriteOn": "Reports combo ID",
+    "rewriteOff": "Reports real model",
+    "rewriteOnHint": "Responses name the combo ID instead of the model that answered",
+    "rewriteOffHint": "Responses keep the name of the model that answered",
+    "menu": {
+      "more": "More actions",
+      "edit": "Edit combo",
+      "editHint": "Name, steps and their order",
+      "duplicate": "Duplicate",
+      "duplicateHint": "Start a new combo from this one",
+      "enable": "Turn combo on",
+      "enableHint": "Clients can call it again",
+      "disable": "Turn combo off",
+      "disableHint": "Keeps the steps, rejects requests"
+    },
+    "deleteCombos_one": "Delete {{count}} combo",
+    "deleteCombos_other": "Delete {{count}} combos",
+    "deleteCombosMessage": "Delete {{count}} combos? Clients using these combo IDs will stop working immediately.",
+    "listTitle": "Combos",
+    "summary_one": "{{count}} combo · {{enabled}} on",
+    "summary_other": "{{count}} combos · {{enabled}} on",
+    "summaryFiltered": "{{shown}} of {{count}} shown",
+    "columns": {
+      "combo": "Combo",
+      "status": "Status",
+      "client": "Client",
+      "chain": "Fallback order",
+      "enabled": "On"
+    },
+    "empty": {
+      "noMatch": "No combos match",
+      "noMatchHint": "Try another client, status or search term."
+    },
+    "bulk": {
+      "enable": "Turn on",
+      "disable": "Turn off",
+      "delete": "Delete"
+    },
+    "notice": {
+      "enabled": "\"{{name}}\" turned on",
+      "disabled": "\"{{name}}\" turned off",
+      "copied": "Copied {{id}}",
+      "bulkEnabled_one": "{{count}} combo turned on",
+      "bulkEnabled_other": "{{count}} combos turned on",
+      "bulkDisabled_one": "{{count}} combo turned off",
+      "bulkDisabled_other": "{{count}} combos turned off",
+      "bulkDeleted_one": "{{count}} combo deleted",
+      "bulkDeleted_other": "{{count}} combos deleted",
+      "bulkFailed_one": "{{count}} change failed",
+      "bulkFailed_other": "{{count}} changes failed"
+    },
+    "guide": {
+      "title": "How combos work",
+      "what": "A combo is one model ID that tries several models in order: if step 1 fails or hits a limit, step 2 answers, and so on. Steps can be public models, other combos or provider models.",
+      "clients": "Use the combo ID wherever a client asks for a model — e.g. ANTHROPIC_DEFAULT_SONNET_MODEL for Claude Code, or the allowed models list in Cowork. Setup guides are under Quick actions.",
+      "fast": "Fastest path: pick a preset below, review the order and save. Click any card to edit it, use the copy button to grab its ID. Press / to search.",
+      "legendPartial": "Some steps skipped",
+      "legendBroken": "No usable step"
+    },
+    "setupGuide": "Setup guide",
+    "anyClient": "Any OpenAI-compatible client",
+    "presets": {
+      "claude-code-fallback": {
+        "title": "Claude Code fallback",
+        "description": "Ordered fallback for Claude Code via Anthropic /v1/messages. Use the combo ID as ANTHROPIC_DEFAULT_SONNET_MODEL."
+      },
+      "cowork-fallback": {
+        "title": "Cowork fallback",
+        "description": "Ordered fallback for Claude Desktop Cowork third-party inference. Add the combo ID to allowed models."
+      },
+      "general-fallback": {
+        "title": "General fallback",
+        "description": "Default ordered fallback across your public models for any OpenAI-compatible client."
+      }
+    },
+    "form": {
+      "unsaved": "Unsaved changes",
+      "idLocked": "The ID cannot change after creation — clients depend on it",
+      "enabled": "Combo is on",
+      "enabledHint": "Off keeps the steps but rejects requests",
+      "rewriteHint": "Responses name the combo ID instead of the model that answered",
+      "orderHint": "Step 1 is tried first; later steps answer only when earlier ones fail.",
+      "stepModel": "Model for step {{index}}",
+      "firstStep": "Tried first",
+      "unknownTarget": "{{id}} (not found)",
+      "offTarget": "{{id}} (turned off)",
+      "offHint": "This target is turned off, so the step is skipped until it is back on.",
+      "unknownHint": "This target no longer exists; pick another model."
+    },
+    "optionGroup": {
+      "models": "Public models",
+      "combos": "Combos",
+      "suggested": "Suggested",
+      "providers": "Provider models"
+    },
+    "validation": {
+      "idRequired": "Combo ID is required",
+      "idInvalid": "Only letters, numbers, -, _, and . allowed in the ID",
+      "idInUse": "This combo ID is already in use",
+      "nameRequired": "Add a display name to save",
+      "noSteps": "Add at least one step to save",
+      "stepModel": "Every step needs a model"
+    }
   },
   "logs": {
+    "request": "Request",
+    "route": "Model → provider",
+    "attemptN_one": "attempt {{count}}",
+    "attemptN_other": "attempt {{count}}",
+    "openRequest": "Open request {{id}}",
+    "noRoute": "Not routed to a model",
+    "copyRequestId": "Copy request ID",
+    "moreActions": "More actions",
+    "pauseHint": "Pause the stream so rows stop moving while you read",
+    "resumeHint": "Resume the live stream",
+    "resume": "Resume live stream",
+    "pausedNote": "Stream paused — the list is frozen until you resume.",
+    "pausedNotePending_one": "Stream paused — {{count}} new request is waiting.",
+    "pausedNotePending_other": "Stream paused — {{count}} new requests are waiting.",
+    "protocolOther": "Admin & other",
+    "viewLabel": "Choose log",
+    "filterByProtocol": "Filter by protocol",
+    "allProtocols": "All protocols",
+    "searchRequests": "Search request ID, model, provider, account or key…",
+    "searchAudit": "Search action, resource or actor…",
+    "sortLabel": "Sort",
+    "summary_one": "{{count}} request in the live buffer",
+    "summary_other": "{{count}} requests in the live buffer",
+    "summaryFiltered": "{{shown}} of {{count}} shown",
+    "connectClient": "Connect a client",
+    "noMatch": "Nothing matches these filters",
+    "noMatchHint": "Try another protocol or a shorter search.",
+    "clearFilters": "Clear filters",
+    "ago": {
+      "now": "just now",
+      "seconds_one": "{{count}}s ago",
+      "seconds_other": "{{count}}s ago",
+      "minutes_one": "{{count}}m ago",
+      "minutes_other": "{{count}}m ago",
+      "hours_one": "{{count}}h ago",
+      "hours_other": "{{count}}h ago",
+      "days_one": "{{count}}d ago",
+      "days_other": "{{count}}d ago"
+    },
+    "sort": {
+      "newest": "Newest first",
+      "oldest": "Oldest first",
+      "slowest": "Slowest first",
+      "status": "Errors first",
+      "action": "Action A–Z"
+    },
+    "stats": {
+      "label": "Log statistics",
+      "requests": "Requests",
+      "requestsHint": "Show every request in scope",
+      "requestsLive_one": "Live · newest {{count}}",
+      "requestsLive_other": "Live · newest {{count}}",
+      "requestsPaused_one": "Paused · {{count}} new",
+      "requestsPaused_other": "Paused · {{count}} new",
+      "errorRate": "Error rate",
+      "errorCount_one": "{{count}} failed request",
+      "errorCount_other": "{{count}} failed requests",
+      "errorHint": "Show only 4xx and 5xx responses",
+      "rateLimited": "Rate limited",
+      "rateLimitedHint": "HTTP 429 from an upstream or a key limit",
+      "p95": "p95 latency",
+      "latencyHint": "avg {{avg}} · p50 {{p50}}",
+      "noData": "No data yet",
+      "filters": "Active filters",
+      "filtersClear": "Click to clear them",
+      "filtersNone": "Showing everything",
+      "events": "Events",
+      "eventsHint": "Recent admin changes",
+      "failed": "Failed",
+      "failedHint": "Changes that returned an error",
+      "actors": "Actors",
+      "actorsHint": "Who made changes",
+      "latest": "Last change"
+    },
+    "menu": {
+      "details": "View details",
+      "filterModel": "Show this model only",
+      "filterProvider": "Show this provider only",
+      "filterKey": "Show this API key only",
+      "openProvider": "Open provider"
+    },
+    "detail": {
+      "metadata": "Metadata",
+      "openProvider": "Open provider",
+      "copyJson": "Copy JSON",
+      "requestId": "Request ID",
+      "protocol": "Protocol",
+      "model": "Model",
+      "provider": "Provider",
+      "account": "Account",
+      "attempt": "Attempt",
+      "apiKey": "API key",
+      "latency": "Latency",
+      "filterModel": "Filter by model",
+      "filterKey": "Filter by API key"
+    },
+    "auditView": {
+      "title": "Audit",
+      "summary_one": "{{count}} recent admin change",
+      "summary_other": "{{count}} recent admin changes",
+      "action": "Action",
+      "resource": "Resource",
+      "resourceType": "Resource type",
+      "resourceId": "Resource ID",
+      "open": "Open {{action}}",
+      "filterByType": "Filter by resource type",
+      "allTypes": "All resources",
+      "filterResource": "Show this resource only",
+      "filterActor": "Show this actor only",
+      "refresh": "Refresh",
+      "autoRefreshHint": "Reload audit events every 30 seconds"
+    },
+    "guide": {
+      "title": "Watch traffic and admin changes",
+      "stream": "Every request through the gateway appears here live — the newest 50 from an in-memory buffer that resets when tproxy restarts. A coloured stripe marks failed requests.",
+      "filter": "Click Error rate or Rate limited to narrow the list, pick a protocol tab, or search a request ID, model, provider, account or key. Press / to jump to search.",
+      "inspect": "Pause the stream to read without rows moving, and click a row for full details. Switch to Audit to see who changed what in the dashboard.",
+      "legendOk": "2xx/3xx ok",
+      "legendClient": "4xx client or rate limit",
+      "legendServer": "5xx server error"
+    },
     "title": "Logs & audit",
     "subtitle": "Observability",
     "description": "Recent requests and admin changes.",
@@ -1007,7 +2393,128 @@
       "oauthSessions": "OAuth sessions",
       "cleanupInterval": "Cleanup interval"
     },
-    "allowLanAccess": "Allow LAN dashboard access"
+    "allowLanAccess": "Allow LAN dashboard access",
+    "strategy": {
+      "fill-first": {
+        "label": "Fill first",
+        "hint": "Always use the first healthy account in priority order. The next one takes over only when it is exhausted or failing."
+      },
+      "round-robin": {
+        "label": "Sticky round-robin",
+        "hint": "Stay on one account for a few requests, then move to the next. Spreads load and keeps prompt caches warm."
+      },
+      "weighted-round-robin": {
+        "label": "Weighted round-robin",
+        "hint": "Rotate across accounts in proportion to their weights."
+      },
+      "expiring-first": {
+        "label": "Expiring first",
+        "hint": "Use the accounts whose quota renews soonest first, so expiring allowance is not wasted."
+      }
+    },
+    "page": {
+      "guideTitle": "Gateway-wide settings in one place",
+      "guideStep1": "Rotation decides which account serves the next request when a provider has several. Sticky round-robin is the safe default.",
+      "guideStep2": "Edits are collected until you press Save changes (or Ctrl+S). Sections with unsaved edits are marked in the index.",
+      "guideStep3": "Export a backup before big changes. Import and Reload replace the running configuration, so they ask first.",
+      "sectionIndex": "On this page",
+      "nav": {
+        "rotation": "Account rotation",
+        "access": "Network access",
+        "password": "Dashboard password",
+        "backup": "Backup & reload",
+        "features": "Gateway features",
+        "retention": "Data retention"
+      },
+      "unsaved": "Unsaved",
+      "readOnly": "Read-only",
+      "readOnlyHint": "Read-only here: change it in config.yaml or on the linked page",
+      "default": "Default",
+      "saveBar": "Unsaved changes",
+      "unsavedCount_one": "{{count}} unsaved change",
+      "unsavedCount_other": "{{count}} unsaved changes",
+      "discard": "Discard",
+      "keepEditing": "Keep editing",
+      "saveChanges": "Save changes",
+      "saving": "Saving…",
+      "saveFailed": "Failed to save settings",
+      "discardConfirmTitle": "Discard unsaved changes?",
+      "discardConfirmMessage_one": "{{count}} change will be reverted to the saved value.",
+      "discardConfirmMessage_other": "{{count}} changes will be reverted to the saved values.",
+      "unsavedLost": "Unsaved edits on this page will be replaced by the loaded values.",
+      "rotationSubtitle": "How tproxy picks an account when a provider has several",
+      "strategyHint": "Applies to every provider without its own override.",
+      "stickyHint": "Requests sent to the same account before rotating to the next one.",
+      "stickyHintInactive": "Only used by sticky round-robin. Kept for when you switch back.",
+      "requestsPerAccount": "requests per account",
+      "overridesLabel": "Provider overrides",
+      "overridesHint": "Providers with their own strategy ignore the default above. Change them on the provider page.",
+      "noOverrides": "None — every provider uses the default.",
+      "inheritsStrategy": "Default strategy",
+      "stickyShort_one": "sticky {{count}} request",
+      "stickyShort_other": "sticky {{count}} requests",
+      "resetConfirmTitle": "Reset rotation runtime state?",
+      "resetConfirmMessage": "tproxy forgets which account each provider is currently on and clears temporary model-capacity marks, so routing starts again from the first account. Saved settings do not change.",
+      "accessTitle": "Network access",
+      "accessSubtitle": "Who can reach this dashboard and how clients find the gateway",
+      "lanHint": "Lets devices on your network open the dashboard at http://<this-machine-ip>:{{port}}/dashboard/ with the dashboard password.",
+      "lanOn": "LAN allowed",
+      "lanOff": "This machine only",
+      "lanLoopbackNote": "The server listens on <code>{{host}}</code>. Set <code>server.host: 0.0.0.0</code> in config.yaml and restart so LAN devices can connect.",
+      "lanUrls": "Dashboard addresses on your LAN",
+      "lanRestartNotice": "LAN access enabled. Set server.host to 0.0.0.0 in config.yaml and restart the server.",
+      "lanEnabledNotice": "LAN dashboard access enabled",
+      "lanDisabledNotice": "LAN dashboard access disabled",
+      "publicBaseUrl": "Public base URL",
+      "publicBaseUrlHint": "Used by CLI tools such as Cursor. It must be reachable from the internet (tunnel, Tailscale Funnel or reverse proxy), e.g. https://api.example.com.",
+      "publicUrlInvalid": "This does not look like an http(s) URL. It will be saved as typed.",
+      "remoteHint": "Management API access from other hosts. Set in config.yaml.",
+      "passwordTitle": "Dashboard password",
+      "passwordSubtitle": "Saved on its own — not part of Save changes",
+      "passwordIntro": "Signs you in to this dashboard. The default is <code>123123</code>; change it after your first login.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "passwordRule_one": "At least {{count}} character.",
+      "passwordRule_other": "At least {{count}} characters.",
+      "passwordTooShort_one": "The new password must have at least {{count}} character",
+      "passwordTooShort_other": "The new password must have at least {{count}} characters",
+      "passwordMismatch": "The new passwords do not match",
+      "passwordChanged": "Dashboard password changed",
+      "passwordFailed": "Failed to change the password",
+      "showPasswords": "Show passwords",
+      "hidePasswords": "Hide passwords",
+      "clearFields": "Clear",
+      "changePassword": "Change password",
+      "backupTitle": "Backup & reload",
+      "backupSubtitle": "Routing configuration, including OAuth tokens",
+      "exportLabel": "Export",
+      "exportHint": "Downloads providers, accounts, models and routes. API keys stay as environment placeholders.",
+      "importLabel": "Import",
+      "importHint": "Loads a JSON or YAML export into the database. Matching entries are overwritten.",
+      "reloadLabel": "Reload config.yaml",
+      "reloadHint": "Re-reads the config file on disk and applies it without restarting the process.",
+      "importConfirmTitle": "Import configuration?",
+      "importConfirmMessage": "\"{{file}}\" will be loaded into the running gateway. Providers, accounts and routes with the same id are overwritten.",
+      "importConfirm": "Import",
+      "reloadConfirmTitle": "Reload configuration?",
+      "reloadConfirmMessage": "The gateway re-reads config.yaml and applies it right away.",
+      "exported": "Exported {{file}}",
+      "imported": "Imported {{file}}",
+      "reloadedFrom": "Reloaded {{path}}",
+      "featuresTitle": "Gateway features",
+      "featuresSubtitle": "Status of runtime switches",
+      "bindAddress": "Listen address",
+      "bindAddressHint": "server.host and server.port of the running process.",
+      "payloadCaptureHint": "When enabled, request and response bodies are kept in logs. Turn it off outside debugging.",
+      "tokenSaverHint": "Compresses large tool outputs before they reach the model.",
+      "retentionSubtitle": "How long tproxy keeps history before cleanup",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "daysHours_one": "{{count}} day {{hours}} h",
+      "daysHours_other": "{{count}} days {{hours}} h",
+      "legendReadOnly": "Read-only, edited in config.yaml"
+    }
   },
   "mapping": {
     "loading": "Loading mapping…",
@@ -1095,9 +2602,208 @@
     "claudeHaiku": "Claude Haiku",
     "modelsDescription": "Rewrite any client model name globally — e.g. <code>gpt-5.6-sol</code> → <code>deepseek-v4-pro</code>. Applied to every endpoint before tier placeholders. Individual API keys can opt out.",
     "modelsPanelDescription": "Exact-name rewrites applied to <strong>all</strong> requests before Claude/Codex tier routing. Targets may be virtual models or <code>provider:upstream-model</code>; Provider Priority Manager decides where the target is served from.",
-    "modelIdentityRejected": "Identity mapping for \"{source}\" is a no-op and was rejected.",
-    "savedModelMappings": "Saved {count} model mappings",
-    "clearedAllModelMappings": "Cleared all model mappings"
+    "modelIdentityRejected": "Mapping \"{{source}}\" to itself does nothing, so it was rejected.",
+    "savedModelMappings": "Saved {{count}} model mappings",
+    "clearedAllModelMappings": "Cleared all model mappings",
+    "savedModelMappings_one": "Saved {{count}} model mapping",
+    "savedModelMappings_other": "Saved {{count}} model mappings",
+    "selectBothForAddModel": "Enter a client model and pick a target before adding",
+    "selectBothForSaveModel": "Finish the new row (client model and target) or clear it before saving",
+    "rowNeedsTarget": "Pick a target for {{source}} or remove it before saving",
+    "statsLabel": "Mapping summary",
+    "tabsLabel": "Client",
+    "tabs": {
+      "claude": "Claude Code",
+      "codex": "Codex CLI",
+      "cursor": "Cursor",
+      "models": "Global models"
+    },
+    "tabHint": {
+      "claude": "Claude tier placeholders (default, fable, opus, sonnet, haiku)",
+      "codex": "Codex GPT codenames (gpt-sol, gpt-terra, gpt-luna)",
+      "cursor": "Cursor model IDs mapped to tproxy models",
+      "models": "Exact-name rewrites applied to every request"
+    },
+    "stats": {
+      "tiersHint": "Tiers overridden · the rest use defaults",
+      "codexHint": "Codenames share the Claude tier targets",
+      "cursorHint_one": "Saved · of {{count}} Cursor model",
+      "cursorHint_other": "Saved · of {{count}} Cursor models",
+      "cursorHintStatic_one": "Saved · {{count}} model, static catalog",
+      "cursorHintStatic_other": "Saved · {{count}} models, static catalog",
+      "modelsHint": "Saved · applied before tier routing",
+      "unsaved": "Unsaved",
+      "allSaved": "Everything is saved"
+    },
+    "section": {
+      "tiers": "Claude & Codex tiers",
+      "cursor": "Cursor",
+      "models": "Global models"
+    },
+    "reload": "Reload",
+    "reloadHint": "Reload every mapping from the server",
+    "searchPlaceholder": {
+      "tiers": "Search tier, alias or target…",
+      "cursor": "Search Cursor model or target…",
+      "models": "Search client model or target…"
+    },
+    "guide": {
+      "title": "How model mapping works",
+      "what": "A mapping rewrites the model name a client sends — Claude Code asks for “sonnet”, Codex for “gpt-sol” — into the model tproxy really serves. The client config never has to change.",
+      "fast": "Fastest way: pick the client tab, choose a target in the row (a virtual model or provider:model) and press Save (Ctrl+S). On Cursor and Global models, use the Add row at the top of the list.",
+      "client": "Then copy the generated config below into the client once. It keeps the placeholder names, so you can retarget them here later without touching the client again."
+    },
+    "status": {
+      "changed": "Changed",
+      "override": "Override",
+      "env": "Env",
+      "default": "Default",
+      "saved": "Saved",
+      "new": "New",
+      "incomplete": "No target"
+    },
+    "statusHint": {
+      "changed": "Edited here but not saved yet",
+      "override": "A saved override routes this tier",
+      "env": "Routed by an environment variable on the tproxy process",
+      "default": "No override — the built-in default target is used",
+      "saved": "Saved on the server",
+      "new": "Added here but not saved yet",
+      "incomplete": "Pick a target or remove this row before saving"
+    },
+    "tierPanel": {
+      "claudeTitle": "Claude Code tiers",
+      "claudeSubtitle": "Point each tier placeholder at a virtual model or provider:model",
+      "codexTitle": "Codex GPT codenames",
+      "codexSubtitle": "Each codename shares the target of a Claude tier"
+    },
+    "route": {
+      "virtualModel": "Virtual model",
+      "claudeNative": "Claude native",
+      "codexBridge": "Codex bridge"
+    },
+    "action": {
+      "revert": "Undo changes",
+      "revertHint": "Back to the saved value",
+      "discardRow": "Discard new row",
+      "resetTier": "Reset to default",
+      "resetTierHint": "Clears the override · default {{target}}",
+      "copyRouted": "Copy routed target",
+      "copyCodename": "Copy codename",
+      "copyEnvVar": "Copy env variable name",
+      "copySource": "Copy source model ID",
+      "copySourceShort": "Copy model ID",
+      "copyTarget": "Copy target",
+      "test": "Test resolution",
+      "testHint": "Preview the saved rewrite chain",
+      "remove": "Remove mapping",
+      "removeHint": "Applied when you save"
+    },
+    "aliasesHint": "Client model names that use this tier",
+    "sharedWith": "Same as {{tier}}",
+    "sharedWithHint": "Codex codenames and Claude tiers share one target — editing one changes both",
+    "effortTag": "Effort: {{effort}}",
+    "envTag": "Env: {{target}}",
+    "targetFor": "Target model for {{name}}",
+    "effortFor": "Reasoning effort for {{name}}",
+    "effortLabel": "Reasoning effort",
+    "effort": {
+      "default": "Default effort",
+      "none": "None",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
+    "routesNow": "Routes now to",
+    "moreActions": "More actions",
+    "livePlaceholderClaude": "Live on the server · saved Claude placeholders",
+    "livePlaceholderCodex": "Live on the server · saved Codex codenames",
+    "noPlaceholdersHint": "Save a tier target to see the live rewrite here.",
+    "noMatch": "Nothing matches your search",
+    "noMatchHint": "Try another model name or clear the search.",
+    "clearSearch": "Clear search",
+    "selectAll": "Select all visible mappings",
+    "selectAllVisible_one": "Select all {{count}} visible",
+    "selectAllVisible_other": "Select all {{count}} visible",
+    "selectRow": "Select {{name}}",
+    "columns": {
+      "cursorModel": "Cursor model",
+      "clientModel": "Client model",
+      "target": "Target model"
+    },
+    "cursorPanelSubtitle": "Cursor sends these IDs · tproxy routes them to your models",
+    "emptyCursorTitle": "No Cursor mappings yet",
+    "emptyCursorHint": "Pick a Cursor model and a target in the row above, press Add, then Save.",
+    "globalModelMap": "Global model map",
+    "modelsPanelSubtitle": "Exact-name rewrites for every request, applied before tier routing",
+    "modelTargetPlaceholder": "deepseek-v4-pro or provider:model",
+    "emptyModelsTitle": "No global rewrites yet",
+    "emptyModelsHint": "Type the model name a client sends, pick what it should become, press Add, then Save.",
+    "catalog": {
+      "title": "Cursor catalog",
+      "subtitle": "Sources you can map",
+      "models": "Models",
+      "unmapped": "Not mapped",
+      "source": "Source",
+      "provider": "Provider",
+      "publicUrlNote": "Cursor only reaches public URLs — use a tunnel, then add each mapped ID in Cursor → Settings → Models."
+    },
+    "resolve": {
+      "title": "Test resolution",
+      "subtitle": "Preview the saved rewrite chain",
+      "placeholder": "e.g. gpt-5.6-sol",
+      "run": "Resolve",
+      "chain": "Rewrite chain",
+      "requested": "Asked",
+      "final": "Served",
+      "hint": "Type a model name and press Enter to see what it is rewritten to. Uses the saved map."
+    },
+    "contentProtocolDescShort_one": "{{count}} translation layer · read-only reference",
+    "contentProtocolDescShort_other": "{{count}} translation layers · read-only reference",
+    "noProtocolMapping": "No translation layers reported",
+    "codexAuthFormatHint": "Paste into ~/.codex/auth.json (same folder as config.toml). Codex sends OPENAI_API_KEY to tproxy as the API key.",
+    "noCursorTargets": "No Cursor mappings yet — add one above.",
+    "formatLabel": "Config format",
+    "shellExports": "Shell exports",
+    "shellLabel": "Shell",
+    "copiedValue": "Copied {{value}}",
+    "save": {
+      "region": "Unsaved changes",
+      "unsaved_one": "{{count}} unsaved change",
+      "unsaved_other": "{{count}} unsaved changes",
+      "alsoUnsaved": "also unsaved: {{list}}",
+      "discard": "Discard",
+      "save": "Save changes",
+      "shortcut": "Save (Ctrl+S / ⌘S)"
+    },
+    "bulk": {
+      "setTarget": "Set target…",
+      "remove": "Remove",
+      "setTargetTitle_one": "Set target for {{count}} mapping",
+      "setTargetTitle_other": "Set target for {{count}} mappings",
+      "setTargetHint": "Every selected source will route to this model once you save.",
+      "apply_one": "Apply to {{count}}",
+      "apply_other": "Apply to {{count}}"
+    },
+    "cancel": "Cancel",
+    "confirm": {
+      "ok": "Confirm",
+      "removeTitle_one": "Remove {{count}} mapping?",
+      "removeTitle_other": "Remove {{count}} mappings?",
+      "removeMessage_one": "Saving removes {{list}}. Clients asking for it will no longer be rewritten.",
+      "removeMessage_other": "Saving removes {{count}} mappings: {{list}}. Clients asking for them will no longer be rewritten.",
+      "removeConfirm_one": "Save and remove",
+      "removeConfirm_other": "Save and remove {{count}}",
+      "discardTitle": "Discard unsaved changes?",
+      "discardMessage_one": "{{count}} change to {{section}} will be lost.",
+      "discardMessage_other": "{{count}} changes to {{section}} will be lost.",
+      "reloadTitle": "Reload and lose your edits?",
+      "reloadMessage_one": "You have {{count}} unsaved change. Reloading replaces it with what the server has.",
+      "reloadMessage_other": "You have {{count}} unsaved changes. Reloading replaces them with what the server has.",
+      "reloadConfirm": "Discard and reload"
+    }
   },
   "chat": {
     "newChat": "New chat",
@@ -1108,17 +2814,17 @@
     "selectModel": "Select model",
     "noModelsConfigured": "No models configured",
     "searchModels": "Search models…",
-    "noModelsAvailable": "No models available. Connect providers or configure models.",
+    "noModelsAvailable": "Connect a provider account or add a virtual model, then come back here.",
     "noModelsMatchSearch": "No models match your search.",
     "settings": "Settings",
     "clientApiKey": "Client API key",
     "tproxyApiKeyPlaceholder": "tproxy API key",
     "settingsHint": "Uses <code>/v1/chat/completions</code> with a client API key from APIs — not the dashboard management password.",
-    "startConversation": "Start a conversation",
-    "chatDescription": "Chat with virtual models, combos, or any model discovered from your configured provider accounts.",
+    "startConversation": "Test a model",
+    "chatDescription": "Send a prompt through the gateway to check routing, streaming and the model's answer.",
     "you": "You",
     "assistant": "Assistant",
-    "messageAI": "Message AI…",
+    "messageAI": "Message the model…",
     "responsesStream": "Responses stream through your tproxy gateway.",
     "noConversations": "No conversations yet.",
     "emptyChat": "Empty chat",
@@ -1133,13 +2839,99 @@
     "copied": "Copied",
     "copyMessage": "Copy message",
     "noModel": "No model",
-    "apiKeyRequired": "API key required. Set your tproxy client API key in chat settings.",
+    "apiKeyRequired": "Add a client API key in chat settings to send messages.",
     "failedToSend": "Failed to send message",
     "invalidApiKey": "Client API key is invalid. The saved key was cleared; use a current key from APIs.",
     "invalidApiKeyError": "Client API key is invalid. The saved key was cleared; use a current key from APIs.",
     "discoveringModels": "Discovering supported models…",
     "nAvailable": "{{count}} available",
-    "discoveringMore": " · discovering more…"
+    "discoveringMore": " · discovering more…",
+    "code": "code",
+    "copyCode": "Copy code",
+    "groupVirtual": "Virtual models",
+    "groupCombos": "Combos",
+    "noModelsTitle": "No models to chat with",
+    "openProviders": "Open Providers",
+    "openModels": "Open PPM",
+    "vision": "vision",
+    "discoveryFailed": "Could not discover models from your provider accounts. Virtual models and combos still work.",
+    "settingsTitle": "Chat settings",
+    "apiKeyHint": "Requests go to <code>/v1/chat/completions</code> with a client API key from <link>APIs</link> — not the dashboard password.",
+    "keysWithoutSecret_one": "{{count}} more enabled key has no secret saved in this browser. Reveal it on the APIs page to use it here.",
+    "keysWithoutSecret_other": "{{count}} more enabled keys have no secret saved in this browser. Reveal them on the APIs page to use them here.",
+    "customKey": "Paste a key",
+    "customKeyInUse": "Key in use",
+    "customKeyShort": "Custom key",
+    "showKey": "Show key",
+    "hideKey": "Hide key",
+    "forgetKey": "Forget this key",
+    "noKey": "No API key",
+    "parameters": "Parameters",
+    "resetParameters": "Reset",
+    "parametersHint": "Leave a field empty to use the model's default. Applies to the next message.",
+    "systemPrompt": "System prompt",
+    "systemPromptPlaceholder": "e.g. You are a concise assistant.",
+    "temperature": "Temperature",
+    "maxTokens": "Max tokens",
+    "modelDefault": "Default",
+    "shortcuts": "Shortcuts",
+    "shortcutSend": "Send",
+    "shortcutNewline": "New line",
+    "shortcutStop": "Stop the answer",
+    "shortcutModel": "Change model",
+    "history": "Chat history",
+    "historyActions": "History actions",
+    "deleteAll": "Delete all chats",
+    "deleteAllHint_one": "{{count}} conversation in this browser",
+    "deleteAllHint_other": "{{count}} conversations in this browser",
+    "searchHistory": "Search chats",
+    "noHistoryMatch": "No chats match.",
+    "now": "now",
+    "deleteConfirmTitle": "Delete this chat?",
+    "deleteConfirmMessage": "\"{{title}}\" and its messages are removed from this browser.",
+    "deleteAllConfirmTitle": "Delete all chats?",
+    "deleteAllConfirmMessage_one": "{{count}} conversation is removed from this browser. This cannot be undone.",
+    "deleteAllConfirmMessage_other": "{{count}} conversations are removed from this browser. This cannot be undone.",
+    "preset": {
+      "explain": {
+        "label": "Explain simply",
+        "prompt": "Explain what an API gateway does in three short sentences."
+      },
+      "code": {
+        "label": "Write code",
+        "prompt": "Write a TypeScript function that retries a fetch call with exponential backoff."
+      },
+      "summarize": {
+        "label": "Summarize",
+        "prompt": "Summarize the pros and cons of streaming responses in chat apps as a short bullet list."
+      },
+      "ping": {
+        "label": "Routing check",
+        "prompt": "Reply with \"pong\" and the name of the model you are."
+      }
+    },
+    "readiness": "Ready to send",
+    "readyModel": "Model",
+    "keyReady": "Ready",
+    "keyMissingAction": "Add a key",
+    "firstToken": "first token {{time}}",
+    "totalTime": "total {{time}}",
+    "streaming": "Streaming",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "retry": "Retry",
+    "regenerate": "Regenerate",
+    "changeModel": "Change model",
+    "composerHint": "Enter to send · Shift+Enter for a new line",
+    "imageMessage": "Image",
+    "systemShort": "system",
+    "maxShort": "max {{count}}",
+    "blockedNoModel": "Pick a model to start",
+    "blockedNoKey": "Add a client API key to send",
+    "guideTitle": "Test models through your gateway",
+    "guideStep1": "Pick a virtual model, combo or a model discovered from a provider account (Ctrl+K). Switching models starts a new chat.",
+    "guideStep2": "Chats are sent with a client API key, like any app would. Pick a saved key or paste one in chat settings (the tune icon).",
+    "guideStep3": "Enter sends, Shift+Enter adds a line and Esc stops the answer. Each answer shows time to first token and total time."
   },
   "quota": {
     "servicePlan": "Plan: {{plan}}",
@@ -1188,8 +2980,8 @@
     "tryChangingFilter": "Try changing the provider or account status filter.",
     "expiringFirst": "Expiring first",
     "expiringFirstBanner": "Expiring-first reorders accounts on this page by earliest quota reset time.",
-    "turnOffEmpty": "Turn off Empty",
-    "turnOnAvailable": "Turn on Available",
+    "turnOffEmpty": "Turn off depleted accounts",
+    "turnOnAvailable": "Turn on accounts with quota",
     "autoRefresh": "Auto-refresh",
     "refreshAll": "Refresh all",
     "resetCodexLimit": "Reset Codex limit?",
@@ -1246,7 +3038,137 @@
     "hideQuotaRow": "Hide this quota row",
     "hideQuota": "Hide quota",
     "failedToLoadHistory": "Failed to load request history",
-    "clearCooldown": "Clear cooldown"
+    "clearCooldown": "Clear cooldown",
+    "percentLeft": "{{value}}% left",
+    "percentUsed": "{{value}}% used",
+    "resetsIn": "Resets in {{time}}",
+    "resetsAt": "Resets at {{time}}",
+    "hideQuotaNamed": "Hide quota {{name}}",
+    "showLess": "Show less",
+    "showMoreQuotas": "Show {{count}} more",
+    "hiddenCount": "{{count}} hidden",
+    "showQuotaRow": "Show this quota again",
+    "checkingQuota": "Checking quota…",
+    "retry": "Retry",
+    "renewsOn": "Subscription renews {{date}}",
+    "rankHint": "#{{rank}} in routing order",
+    "rankDragHint": "#{{rank}} in routing order — tried before the accounts below it. Drag to reorder.",
+    "dragToReorder": "Drag {{label}} to change routing order",
+    "toggleLocked": "Available once the quota check finishes",
+    "toggleLockedShort": "on/off switches unlock when it finishes",
+    "orderSaved": "Account order saved",
+    "orderSaveFailed": "Failed to save account order",
+    "connectProvidersAction": "Connect a provider",
+    "filterByProvider": "Filter by provider",
+    "refreshAllHint": "Re-check quota for every account now",
+    "autoRefreshHint": "Re-check quota every 60 seconds (Claude every 3 minutes to respect its rate limit)",
+    "searchPlaceholder": "Search email, label or plan…",
+    "clearSearch": "Clear search",
+    "searchShortcut": "Press / to search",
+    "sortBy": "Sort accounts",
+    "sortNote": "Display order only — routing still follows the # order.",
+    "sortBackToRouting": "Back to routing order",
+    "viewMode": "Layout",
+    "viewGrid": "Card view",
+    "viewList": "Compact list",
+    "quickActions": "Quick actions",
+    "turnOffEmptyHint_one": "{{count}} turned-on account with a window at ≤5%",
+    "turnOffEmptyHint_other": "{{count}} turned-on accounts with a window at ≤5%",
+    "turnOnAvailableHint_one": "{{count}} turned-off account with quota left",
+    "turnOnAvailableHint_other": "{{count}} turned-off accounts with quota left",
+    "selectVisibleHint": "Select every account in view for bulk actions",
+    "clearFilters": "Clear filters",
+    "deleteConfirmMessage": "Delete {{label}}? Its credentials are removed from tproxy and it stops receiving traffic. This cannot be undone.",
+    "sort": {
+      "default": "Routing order",
+      "expiring": "Resets soonest",
+      "lowest": "Lowest quota first"
+    },
+    "health": {
+      "ready": "Available",
+      "nodata": "No quota data",
+      "low": "Running low",
+      "exhausted": "Exhausted",
+      "cooldown": "Cooldown",
+      "cooldownFor": "Cooldown · {{time}}",
+      "paused": "Auto-paused",
+      "error": "Check failed",
+      "off": "Off",
+      "loading": "Checking…"
+    },
+    "healthHint": {
+      "ready": "Turned on with quota left — the router can use it.",
+      "nodata": "Turned on, but the provider reports no quota windows.",
+      "low": "Turned on, but at least one quota window is below 30%.",
+      "exhausted": "Quota is used up. The router skips this account until it resets.",
+      "cooldown": "Skipped for a while after upstream errors. Refresh to clear the cooldown.",
+      "paused": "Paused automatically because quota reached 0%.",
+      "error": "The last quota check failed. Retry or open the account for details.",
+      "off": "Turned off. The router does not use this account.",
+      "loading": "Checking quota with the provider…"
+    },
+    "overview": {
+      "all": "Accounts",
+      "allHint": "Every account in view",
+      "available": "Available",
+      "availableHint": "On and able to serve",
+      "low": "Running low",
+      "lowHint": "A window is below 30%",
+      "attention": "Needs attention",
+      "attentionHint": "Exhausted, cooldown or error",
+      "inactive": "Turned off",
+      "inactiveHint": "Not used for routing",
+      "checking": "Checking {{count}}…",
+      "nextReset": "Next reset",
+      "nextResetNone": "No upcoming resets"
+    },
+    "menu": {
+      "more": "More actions",
+      "details": "View details",
+      "detailsHint": "Usage chart, request history, test chat",
+      "useResetCredit": "Use a Codex reset credit",
+      "creditsAvailable": "{{count}} available",
+      "editProvider": "Edit in Providers",
+      "editProviderHint": "Label, priority, proxy pool"
+    },
+    "bulk": {
+      "toolbar": "Bulk actions",
+      "selected": "selected",
+      "selectAllVisible": "Select all {{count}}",
+      "refresh": "Refresh",
+      "enable": "Turn on",
+      "disable": "Turn off",
+      "allSucceeded": "{{title}}: all {{count}} succeeded",
+      "resultSummary": "{{ok}} succeeded · {{failed}} failed"
+    },
+    "group": {
+      "select": "Select all {{name}} accounts",
+      "summary_one": "{{count}} account · {{on}} on",
+      "summary_other": "{{count}} accounts · {{on}} on",
+      "summaryFiltered": "Showing {{shown}} of {{count}} · {{on}} on",
+      "health": "Health breakdown",
+      "refresh": "Refresh",
+      "refreshHint": "Re-check quota for these {{name}} accounts"
+    },
+    "columns": {
+      "account": "Account",
+      "status": "Status",
+      "quota": "Quota left",
+      "usage": "Proxy usage",
+      "routing": "On"
+    },
+    "guide": {
+      "toggle": "How this page works",
+      "kicker": "// QUICK GUIDE",
+      "title": "How Quota Tracker works",
+      "cards": "Each card is one upstream account. Bars show the quota left in each window and when it resets; the badge tells you at a glance whether the account can serve traffic.",
+      "routing": "Within a provider, tproxy tries accounts from #1 down and skips any that are off, cooling down or out of quota. Drag the # handle to change the order.",
+      "actions": "Click a card for usage history and a test chat. Tick the checkboxes to refresh, clear cooldowns or switch many accounts at once. Press / to search.",
+      "legendHigh": "≥ 70% left",
+      "legendMid": "30–70%",
+      "legendLow": "< 30%",
+      "dismiss": "Got it, hide the guide"
+    }
   },
   "updates": {
     "newVersionTitle": "New version available: v{{version}}",
@@ -1326,7 +3248,194 @@
     "providerActivity": "Provider activity",
     "providerActivityDesc": "Live routing through configured upstream providers.",
     "noProvidersWithConnections": "No providers with connections",
-    "errorStatus": "error"
+    "errorStatus": "error",
+    "retry": "Retry",
+    "costNote": "Costs are estimates from the model price list, not your provider's bill. Input includes cached tokens.",
+    "period": {
+      "today": "Today",
+      "24h": "24h",
+      "7d": "7 days",
+      "30d": "30 days",
+      "60d": "60 days"
+    },
+    "time": {
+      "never": "Never",
+      "justNow": "Just now",
+      "minutesAgo_one": "{{count}}m ago",
+      "minutesAgo_other": "{{count}}m ago",
+      "hoursAgo_one": "{{count}}h ago",
+      "hoursAgo_other": "{{count}}h ago"
+    },
+    "stream": {
+      "hint": "Recent requests and in-flight traffic stream live from the gateway",
+      "off": "Offline",
+      "connecting": "Connecting",
+      "live": "Live",
+      "retrying": "Reconnecting"
+    },
+    "stats": {
+      "label": "Usage summary",
+      "requests": "Requests",
+      "inFlight_one": "{{count}} in flight now",
+      "inFlight_other": "{{count}} in flight now",
+      "idle": "Nothing in flight",
+      "tokens": "Tokens",
+      "tokensHint": "In {{input}} · out {{output}}",
+      "cache": "Cache hit",
+      "cacheHint": "{{read}} read · {{write}} write",
+      "cacheTitle": "Share of input tokens served from the provider's prompt cache",
+      "cost": "Est. cost",
+      "errors": "Recent errors",
+      "errorsHint_one": "In the last {{count}} request",
+      "errorsHint_other": "In the last {{count}} requests",
+      "errorsHintLast_one": "Of last {{count}} · latest {{model}}",
+      "errorsHintLast_other": "Of last {{count}} · latest {{model}}",
+      "errorsNone": "No requests yet",
+      "errorsTitle": "Show only failed requests; click again to show all"
+    },
+    "toolbar": {
+      "view": "Usage view",
+      "requestLog": "Request log",
+      "period": "Time range",
+      "search": "Filter models, accounts, API keys…",
+      "groupBy": "Group breakdown by",
+      "sort": "Sort breakdown",
+      "measure": "Measure"
+    },
+    "groupBy": {
+      "model": "By model",
+      "account": "By account",
+      "apiKey": "By API key",
+      "endpoint": "By upstream model"
+    },
+    "sort": {
+      "cost_desc": "Highest cost",
+      "cost_asc": "Lowest cost",
+      "tokens_desc": "Most tokens",
+      "tokens_asc": "Fewest tokens",
+      "requests_desc": "Most requests",
+      "requests_asc": "Fewest requests",
+      "lastUsed_desc": "Recently used",
+      "lastUsed_asc": "Least recently used",
+      "name_asc": "Name A–Z",
+      "name_desc": "Name Z–A"
+    },
+    "guide": {
+      "title": "See how much traffic, cost and errors — and where they come from",
+      "range": "Pick a time range: the tiles, chart, providers and breakdown all follow it. Cost is an estimate from model prices, not your provider's bill.",
+      "providers": "Providers shows where this range's traffic went; click one to filter the breakdown. Live activity streams in-flight and just-finished requests.",
+      "breakdown": "Group the breakdown by model, account, API key or upstream model to see who uses what. Open Request log for single requests with latency, status and routing reason.",
+      "legendVolume": "Volume",
+      "legendOk": "Succeeded",
+      "legendError": "Failed"
+    },
+    "chart": {
+      "title_tokens": "Tokens over time",
+      "title_cost": "Cost over time",
+      "metric_tokens": "tokens",
+      "metric_cost": "est. cost",
+      "subtitle": "{{bucket}} · total {{total}} · peak {{peak}} at {{at}}",
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "hour": "Hour",
+      "day": "Day",
+      "view": "Chart or table",
+      "asChart": "Chart",
+      "asTable": "Table",
+      "failed": "Failed to load chart",
+      "emptyHint": "Requests in this range will show up here."
+    },
+    "providers": {
+      "title": "Providers",
+      "subtitle_one": "{{count}} with traffic · click to filter",
+      "subtitle_other": "{{count}} with traffic · click to filter",
+      "view": "List or map",
+      "asList": "List",
+      "asMap": "Routing map",
+      "emptyHint": "Connect a provider and send a request to see traffic here.",
+      "shareCost": "Share of cost",
+      "shareTokens": "Share of tokens",
+      "clearFilter": "Clear provider filter",
+      "filterHint": "Show only {{name}} in the breakdown",
+      "inFlight_one": "{{count}} in flight",
+      "inFlight_other": "{{count}} in flight",
+      "lastFailed": "Last request failed",
+      "idle": "No traffic in this range"
+    },
+    "live": {
+      "title": "Live activity",
+      "subtitle_one": "Last {{count}} request · not limited by range",
+      "subtitle_other": "Last {{count}} requests · not limited by range",
+      "filter": "Show",
+      "all": "All",
+      "errors_one": "Errors {{count}}",
+      "errors_other": "Errors {{count}}",
+      "inFlight": "In flight",
+      "nothingInFlight": "Nothing right now",
+      "noErrors": "No failed requests",
+      "emptyHint": "Requests appear here as soon as they finish.",
+      "showAll": "Show all requests"
+    },
+    "table": {
+      "sortBy": "Sort by {{column}}",
+      "unknown": "Unknown",
+      "providersCount_one": "{{count}} provider",
+      "providersCount_other": "{{count}} providers",
+      "modelsCount_one": "{{count}} model",
+      "modelsCount_other": "{{count}} models",
+      "subtitle": "{{groups}} groups · {{rows}} rows · {{requests}} requests",
+      "providerChip": "Provider: {{name}}",
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all",
+      "noMatch": "Nothing matches the filters",
+      "emptyHint": "Usage shows up after the first request in this range.",
+      "empty_model": "No usage recorded yet",
+      "empty_account": "No account usage recorded yet",
+      "empty_apiKey": "No API key usage recorded yet",
+      "empty_endpoint": "No upstream model usage recorded yet",
+      "name_model": "Model / provider",
+      "name_account": "Account / model",
+      "name_apiKey": "API key / model",
+      "name_endpoint": "Upstream / virtual model",
+      "inputTokens": "Input",
+      "cachedTokens": "Cached",
+      "outputTokens": "Output",
+      "inputCost": "Input cost",
+      "cachedCost": "Cached cost",
+      "outputCost": "Output cost",
+      "total": "Total"
+    },
+    "log": {
+      "failed": "Failed to load usage events",
+      "localKey": "Local (no key)",
+      "subtitle_one": "{{count}} request · newest first · {{errors}} failed on this page",
+      "subtitle_other": "{{count}} requests · newest first · {{errors}} failed on this page",
+      "noMatchPage": "Nothing on this page matches",
+      "noMatchPageHint": "Status and search filter the loaded page; try the next page or clear the filters.",
+      "emptyHint": "Each upstream attempt is recorded here with tokens, latency and cost.",
+      "modelRoute": "Model / route",
+      "inOut": "In / out",
+      "openRow": "Open details for {{model}} at {{time}}",
+      "ttft": "TTFT {{value}}",
+      "attemptN_one": "attempt {{count}}",
+      "attemptN_other": "attempt {{count}}",
+      "pageFilterNote": "Status and search narrow the 20 requests on this page; the provider filter searches all requests.",
+      "search": "Filter this page by model, request ID, key…",
+      "allProviders": "All providers",
+      "status": {
+        "all": "All statuses",
+        "errors": "Failed only",
+        "ok": "Succeeded only"
+      }
+    },
+    "request": {
+      "copyId": "Copy request ID",
+      "ok": "Succeeded · {{status}}",
+      "failed": "Failed · {{status}}",
+      "routing": "Routing",
+      "timing": "Timing",
+      "tokens": "Tokens and cost"
+    }
   },
   "cliTools": {
     "eyebrow": "External clients",
@@ -1417,11 +3526,527 @@
     "tierOverridesDesc": "Leave blank to use the placeholder rewrite configured in Mapping.",
     "coworkPlugins": "Managed MCP servers",
     "coworkPluginsDesc": "Written into Claude Desktop's Cowork config and auto-approved.",
-    "coworkRestart": "Applied. Quit and reopen Claude Desktop for it to take effect."
+    "coworkRestart": "Applied. Quit and reopen Claude Desktop for it to take effect.",
+    "statsLabel": "CLI tools summary",
+    "stats": {
+      "tools": "Tools",
+      "toolsHint_one": "{{count}} can be applied in one click",
+      "toolsHint_other": "{{count}} can be applied in one click",
+      "endpoint": "Endpoint",
+      "endpointHint": "New setups point at {{url}}. Change it on any tool's setup page."
+    },
+    "endpointKind": {
+      "local": "Localhost",
+      "lan": "LAN",
+      "tunnel": "Tunnel",
+      "tailscale": "Tailscale"
+    },
+    "endpointHint": {
+      "local": "Use this when the tool runs on the same machine as tproxy.",
+      "lan": "Reachable from other devices on your local network.",
+      "tunnel": "Public URL — works from anywhere, including cloud-routed tools like Cursor.",
+      "tailscale": "Reachable from devices on your tailnet."
+    },
+    "bucket": {
+      "connected": "Connected",
+      "setup": "Needs setup",
+      "missing": "Not detected",
+      "manual": "Manual setup"
+    },
+    "bucketHint": {
+      "connected": "Already pointed at tproxy",
+      "setup": "Installed, not using tproxy yet",
+      "missing": "Not installed on this machine",
+      "manual": "Paste values into the tool"
+    },
+    "state": {
+      "connected": "Connected",
+      "other": "Other endpoint",
+      "not_configured": "Not configured",
+      "not_installed": "Not detected",
+      "manual": "Manual setup",
+      "unknown": "Status unknown",
+      "checking": "Checking…",
+      "unsupported": "Not supported"
+    },
+    "stateHint": {
+      "connected": "The local config already points at tproxy.",
+      "other": "Installed, but pointed at an endpoint this dashboard does not hand out.",
+      "not_configured": "Installed on this machine, not pointed at tproxy yet.",
+      "not_installed": "Not found on this machine — install it, or copy the config to another one.",
+      "manual": "tproxy can't write this tool's config — paste the base URL, key and model yourself.",
+      "unknown": "The gateway did not report this tool's local status.",
+      "checking": "Checking the local installation…",
+      "unsupported": "tproxy does not intercept this product — connect it under Providers instead."
+    },
+    "next": {
+      "connected": "Review",
+      "other": "Point at tproxy",
+      "not_configured": "Set up",
+      "not_installed": "Install & set up",
+      "manual": "Get config",
+      "unknown": "Open setup",
+      "checking": "Open setup",
+      "unsupported": "Details"
+    },
+    "kind": {
+      "auto": "One-click",
+      "autoHint": "tproxy can write this tool's config file for you.",
+      "manual": "Copy & paste",
+      "manualHint": "Configured inside the tool; tproxy gives you the values."
+    },
+    "configInApp": "Configured in the app",
+    "menu": {
+      "more": "More actions for {{name}}",
+      "openSetup": "Open setup",
+      "viewDetails": "View details",
+      "copyBaseUrl": "Copy base URL",
+      "copyBaseUrlHint": "The endpoint new setups use",
+      "copyConfigPath": "Copy config path",
+      "docs": "Open documentation",
+      "reset": "Remove tproxy config",
+      "resetHint": "Removes the tproxy entries from the local config file",
+      "resetNothing": "Nothing to remove — not pointed at tproxy"
+    },
+    "notice": {
+      "baseUrlCopied": "Copied {{url}}",
+      "pathCopied": "Copied {{path}}",
+      "reset": "Removed tproxy settings from {{name}}'s local config."
+    },
+    "resetConfirmTitle": "Remove tproxy from {{name}}?",
+    "resetConfirmMessage": "This deletes the tproxy entries tproxy wrote to {{path}}. {{name}} will stop sending requests through this gateway until you apply again.",
+    "columns": {
+      "tool": "Tool",
+      "status": "Status",
+      "pointsAt": "Points at",
+      "config": "Config file",
+      "setup": "Setup"
+    },
+    "filterLabel": "Filter tools by status",
+    "filterAll": "All",
+    "refreshStatus": "Refresh status",
+    "refreshHint": "Check again which tools are installed and where they point",
+    "searchPlaceholder": "Search tools, config paths or endpoints…",
+    "sortLabel": "Sort tools",
+    "sort": {
+      "catalog": "Popular first",
+      "status": "Needs attention first",
+      "name": "Name"
+    },
+    "viewMode": "View mode",
+    "viewGrid": "Cards",
+    "viewList": "List",
+    "guide": {
+      "title": "Point a coding tool at tproxy in three steps",
+      "key": "Create a client API key on the APIs page first — every tool sends it with each request, so usage and limits are tracked per key.",
+      "pick": "Pick a tool. Green ones already use tproxy; amber ones are installed but not pointed here yet — start with those.",
+      "apply": "One-click tools are written for you with Apply. For the rest, copy the values or the one-shot script and paste them on the machine where the tool runs."
+    },
+    "statusLoadFailed": "Couldn't read local tool status: {{message}}",
+    "noMatch": "No tools match",
+    "noMatchHint": "Try another search or status filter.",
+    "clearFilters": "Clear filters",
+    "sections": {
+      "tools": "Coding tools",
+      "toolsSub_one": "{{count}} tool · {{auto}} one-click",
+      "toolsSub_other": "{{count}} tools · {{auto}} one-click",
+      "mitmSub_one": "{{count}} product · reference only",
+      "mitmSub_other": "{{count}} products · reference only",
+      "mitmNote": "tproxy does not intercept traffic (9Router-style MITM is out of scope). Connect Antigravity, Kiro and similar products under Providers with OAuth or an API key."
+    },
+    "toolNotFoundHint": "The link may be outdated. Pick a tool from the list instead.",
+    "hero": {
+      "pointsAt": "Points at",
+      "model": "Model",
+      "docs": "Docs"
+    },
+    "detailGuide": {
+      "title": "Set up {{name}} in four steps",
+      "values": "Pick the API key and the base URL {{name}} should use. Localhost is right when it runs on this machine; use LAN, Tunnel or Tailscale from elsewhere.",
+      "model": "Choose a virtual model or combo. A combo gives ordered fallback when a provider is down or out of quota.",
+      "apply": "Press Apply to write the config on this machine. Need it elsewhere? Copy the one-shot script on the right and run it there.",
+      "copy": "Copy the values, the config file or the one-shot script and paste them where the tool runs.",
+      "mitmTitle": "This product is not supported through MITM",
+      "mitmWhat": "9Router captured this product's traffic with a MITM proxy. tproxy deliberately doesn't.",
+      "mitmProviders": "Add the account under Providers with OAuth or an API key — tproxy then routes it like any other upstream.",
+      "mitmSlots": "The model slots below are kept as a migration reference only."
+    },
+    "steps": {
+      "title": "Setup",
+      "progress": "{{done}} of {{total}} done",
+      "done": "Done",
+      "key": "Choose an API key",
+      "keyDesc": "{{name}} sends this client key with every request.",
+      "manageKeys": "Manage keys",
+      "baseUrl": "Pick the base URL",
+      "baseUrlDesc": "Where {{name}} reaches tproxy.",
+      "model": "Pick a model",
+      "modelDesc": "A virtual model or combo ID. Combos fall back in order when a provider fails.",
+      "noModels": "No models yet.",
+      "addModel": "Add a model",
+      "addCombo": "Add a combo",
+      "apply": "Apply to {{name}}",
+      "applyDesc": "Writes the config file on this machine. Run it again any time you change the steps above.",
+      "copy": "Copy the config to {{name}}",
+      "copyDesc": "This dashboard isn't running on the tool's machine, so copy the config or the one-shot script there.",
+      "paste": "Paste into {{name}}",
+      "pasteDesc": "Copy these values into {{name}}'s settings, following the steps on the right.",
+      "noKeyYet": "Choose a key with a saved secret",
+      "noModelYet": "Choose a model"
+    },
+    "apply": {
+      "notDetected": "{{name}} wasn't found on this machine.",
+      "useManual": "Use manual config instead",
+      "installDocs": "Installation docs",
+      "writesTo": "Writes to",
+      "reapply": "Apply again",
+      "remoteSteps": "Open Manual config to copy the file contents, then paste them on the machine where {{name}} runs. Client keys are created in",
+      "needKey": "Choose an API key with a saved secret first.",
+      "needModel": "Choose a model first."
+    },
+    "publicUrl": {
+      "desc": "{{name}} calls tproxy from its own servers, so it needs a public URL. Enter one here, or set it permanently in",
+      "settingsLink": "Settings → Gateway"
+    },
+    "options": {
+      "title": "More options",
+      "hint": "Optional — the defaults suit most setups"
+    },
+    "removeModelNamed": "Remove {{model}}",
+    "tierDefault": "Default",
+    "tierPlaceholder": "{{tier}} (placeholder)",
+    "lanAddress": "LAN address",
+    "copyBaseUrl": "Copy base URL",
+    "output": {
+      "title": "Commands & config",
+      "inTool": "In {{name}}",
+      "inToolHint": "Do these inside the tool itself.",
+      "preview": "Config preview",
+      "previewHint": "Updates live as you change the setup steps.",
+      "run": "Then run",
+      "runHint": "Start {{name}} from your terminal."
+    },
+    "script": {
+      "shell": "Shell",
+      "needsKey": "Choose an API key and a model to enable copying."
+    },
+    "manualModal": {
+      "hint_one": "Paste this file on the machine where the tool runs. Existing settings in it are overwritten.",
+      "hint_other": "Paste these {{count}} files on the machine where the tool runs. Existing settings in them are overwritten.",
+      "copyFile": "Copy {{file}}"
+    },
+    "mitm": {
+      "openProviders": "Open Providers",
+      "domain": "Intercepted domain",
+      "domainHint": "Listed only as a migration note from 9Router."
+    },
+    "keySelect": {
+      "customKey": "Custom key",
+      "customKeyHint": "Not saved in this browser — used for this apply only.",
+      "noKeys": "No API keys yet. Create one in <0>APIs</0> before configuring this CLI tool.",
+      "usingKey": "Using key <0>{{name}}</0>. Manage keys in <1>APIs</1>.",
+      "secretMissing": "The secret for this key isn't saved in this browser. Create a new key in <0>APIs</0> and save the secret when it's shown."
+    },
+    "catalog": {
+      "claude": {
+        "description": "Anthropic Claude Code CLI",
+        "notes": {
+          "0": "Set ANTHROPIC_BASE_URL to your tproxy endpoint and use a client API key from APIs.",
+          "1": "Use a combo ID (for example claude-code-fallback) as your default model to get ordered fallback across virtual models."
+        },
+        "steps": {
+          "1": {
+            "title": "Install Claude Code",
+            "desc": "npm install -g @anthropic-ai/claude-code"
+          }
+        },
+        "install": {
+          "0": "Install the Claude Code CLI, then run `claude` once to verify."
+        }
+      },
+      "openclaw": {
+        "description": "Open Claw AI Assistant",
+        "notes": {
+          "0": "Open Claw stores provider config under models.providers. Add a tproxy provider entry with your base URL and API key."
+        },
+        "steps": {
+          "1": {
+            "title": "Install Open Claw",
+            "desc": "Follow the Open Claw installation guide for your platform."
+          },
+          "5": {
+            "title": "Provider name",
+            "desc": "Use provider id \"tproxy\" in your Open Claw config."
+          }
+        },
+        "install": {
+          "0": "Install Open Claw, then run `openclaw` once to create ~/.openclaw/openclaw.json."
+        }
+      },
+      "codex": {
+        "description": "OpenAI Codex CLI",
+        "notes": {
+          "0": "Codex reads ~/.codex/config.toml. Point base_url at tproxy's OpenAI-compatible /v1 endpoint."
+        },
+        "steps": {
+          "1": {
+            "title": "Install Codex",
+            "desc": "Follow OpenAI's Codex CLI installation guide."
+          }
+        },
+        "install": {
+          "0": "Install the Codex CLI, then run `codex` once to verify."
+        }
+      },
+      "opencode": {
+        "description": "OpenCode AI Terminal Assistant",
+        "notes": {
+          "0": "Configure OpenCode to use tproxy as an OpenAI-compatible provider."
+        },
+        "install": {
+          "0": "Install OpenCode, then run `opencode` once to create its config."
+        }
+      },
+      "cowork": {
+        "description": "Claude Desktop Cowork (third-party inference)",
+        "notes": {
+          "0": "Cowork routes Claude Desktop through a custom inference endpoint. Point it at tproxy with your API key and allowed models.",
+          "1": "Add a combo ID such as cowork-fallback to allowed models for ordered fallback across virtual models."
+        },
+        "steps": {
+          "1": {
+            "title": "Open Cowork settings",
+            "desc": "Configure third-party inference in Claude Desktop Cowork."
+          },
+          "5": {
+            "title": "Allowed models",
+            "desc": "Add one or more tproxy virtual model IDs to the allowed models list."
+          }
+        },
+        "install": {
+          "0": "Install Claude Desktop and open it once.",
+          "1": "Applying switches it into Cowork (3p) mode, then quit and reopen the app."
+        }
+      },
+      "hermes": {
+        "description": "Nous Research self-improving AI agent",
+        "notes": {
+          "0": "Hermes Agent uses a model config with base_url, api_key, and model fields."
+        },
+        "install": {
+          "0": "Install the Hermes agent, then run `hermes` once to create ~/.hermes/config.yaml."
+        }
+      },
+      "droid": {
+        "description": "Factory Droid AI Assistant",
+        "notes": {
+          "0": "Droid supports custom model providers. Add a tproxy entry under customModels."
+        },
+        "install": {
+          "0": "Install Factory Droid via the official installer script."
+        }
+      },
+      "cursor": {
+        "description": "Cursor AI Code Editor",
+        "notes": {
+          "0": "Requires Cursor Pro account to use this feature.",
+          "1": "Cursor routes requests through its own server, so a local-only endpoint is not supported. Use a publicly reachable tproxy URL."
+        },
+        "steps": {
+          "1": {
+            "title": "Open Settings",
+            "desc": "Go to Settings → Models"
+          },
+          "2": {
+            "title": "Enable OpenAI API",
+            "desc": "Enable the \"OpenAI API key\" option"
+          },
+          "5": {
+            "title": "Add Custom Model",
+            "desc": "Click \"View All Models\" → \"Add Custom Model\""
+          },
+          "7": {
+            "title": "Use model ID",
+            "desc": "Enter the virtual model ID from tproxy as the custom model name in Cursor."
+          }
+        }
+      },
+      "cline": {
+        "description": "Cline AI Coding Assistant — use tproxy as OpenAI Compatible, or enroll Cline/ClinePass OAuth under Providers for cline.bot models.",
+        "notes": {
+          "0": "For Cline/ClinePass account models (anthropic/*, cline-pass/*), add a Cline or ClinePass provider with OAuth in Dashboard → Providers. For routing through tproxy virtual models, use OpenAI Compatible below."
+        },
+        "steps": {
+          "1": {
+            "title": "Open Cline settings",
+            "desc": "Choose API Provider → OpenAI Compatible (for tproxy) or Cline (for direct cline.bot)"
+          }
+        },
+        "install": {
+          "0": "Install the Cline extension in VS Code, then open it once so ~/.cline is created."
+        }
+      },
+      "kilo": {
+        "description": "Kilo Code AI Assistant",
+        "notes": {
+          "0": "Kilo Code VS Code extension supports OpenAI-compatible endpoints."
+        },
+        "steps": {
+          "1": {
+            "title": "Open Kilo settings",
+            "desc": "Select API Provider → OpenAI Compatible"
+          }
+        },
+        "install": {
+          "0": "Install the Kilo Code extension, then sign in once so its auth file is created."
+        }
+      },
+      "roo": {
+        "description": "Roo AI Assistant",
+        "steps": {
+          "1": {
+            "title": "Open Settings",
+            "desc": "Go to Roo Settings panel"
+          },
+          "2": {
+            "title": "Select Provider",
+            "desc": "Choose API Provider → Ollama"
+          }
+        }
+      },
+      "continue": {
+        "description": "Continue AI Assistant",
+        "steps": {
+          "1": {
+            "title": "Open Config",
+            "desc": "Open Continue configuration file"
+          },
+          "4": {
+            "title": "Add Model Config",
+            "desc": "Add the following configuration to your models array:"
+          }
+        }
+      },
+      "amp": {
+        "description": "Sourcegraph Amp coding assistant CLI",
+        "notes": {
+          "0": "Use tproxy virtual model IDs to keep Amp shorthand mappings stable across provider updates.",
+          "1": "Suggested shorthand examples: g25p → gemini-2.5-pro, g25f → gemini-2.5-flash, cs45 → claude-sonnet-4-5."
+        },
+        "steps": {
+          "1": {
+            "title": "Install Amp",
+            "desc": "Install the Amp CLI using the package manager supported by your environment."
+          },
+          "5": {
+            "title": "Add Shorthands",
+            "desc": "Map Amp shorthand names such as g25p or cs45 to tproxy model IDs in your local config."
+          }
+        }
+      },
+      "qwen": {
+        "description": "Alibaba Qwen Code CLI — supports OpenAI, Anthropic & Gemini providers via tproxy",
+        "notes": {
+          "0": "Qwen Code supports multiple provider types (openai, anthropic, gemini) via modelProviders in settings.json. tproxy works as an OpenAI-compatible endpoint.",
+          "1": "Any model available in tproxy can be used — not just Qwen models.",
+          "2": "Config path: Linux/macOS ~/.qwen/settings.json • Windows %USERPROFILE%\\.qwen\\settings.json",
+          "3": "Qwen OAuth free tier was discontinued. Use tproxy with your configured upstream providers instead."
+        },
+        "steps": {
+          "1": {
+            "title": "Install Qwen Code",
+            "desc": "npm install -g @qwen-code/qwen-code"
+          },
+          "5": {
+            "title": "Save Config",
+            "desc": "Copy the JSON below to your ~/.qwen/settings.json file."
+          }
+        }
+      },
+      "deepseek-tui": {
+        "description": "DeepSeek Terminal Coding Agent (Rust TUI)",
+        "notes": {
+          "0": "DeepSeek TUI uses ~/.deepseek/config.toml. Set the provider to openai mode with your base_url, api_key, and model.",
+          "1": "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml"
+        },
+        "steps": {
+          "1": {
+            "title": "Install DeepSeek TUI",
+            "desc": "Follow the DeepSeek TUI installation guide."
+          }
+        },
+        "install": {
+          "0": "Install DeepSeek TUI, then run `deepseek` once to create ~/.deepseek/config.toml."
+        }
+      },
+      "jcode": {
+        "description": "High-performance Rust-based coding agent harness",
+        "notes": {
+          "0": "jcode is a Rust-based coding agent with semantic memory, multi-agent swarms, and extreme performance.",
+          "1": "Configure tproxy as an OpenAI-compatible provider to route all jcode requests through tproxy.",
+          "2": "Install via: curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash"
+        },
+        "steps": {
+          "1": {
+            "title": "Install jcode",
+            "desc": "Run the install script from the jcode repository."
+          }
+        },
+        "install": {
+          "0": "Install jcode via the official installer script."
+        }
+      },
+      "grok-build": {
+        "description": "xAI Grok Build TUI coding agent",
+        "notes": {
+          "0": "Grok Build uses ~/.grok/config.toml. TProxy writes a [model.tproxy] custom model and sets it as the default.",
+          "1": "After Apply, run grok (or /model tproxy) to use the routed model. Switch back anytime with /model grok-build.",
+          "2": "Config path: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml"
+        },
+        "steps": {
+          "1": {
+            "title": "Install Grok Build",
+            "desc": "Follow xAI's Grok CLI installation guide."
+          }
+        },
+        "install": {
+          "0": "Install Grok Build, then run `grok` once to create ~/.grok/config.toml."
+        }
+      },
+      "copilot": {
+        "description": "GitHub Copilot Chat with a custom model provider",
+        "notes": {
+          "0": "Adds tproxy as a BYOK provider in VS Code. Restart VS Code, then pick the model from the Copilot Chat model picker.",
+          "1": "Config path: Linux ~/.config/Code/User/chatLanguageModels.json • Windows %APPDATA%\\Code\\User\\chatLanguageModels.json"
+        },
+        "steps": {
+          "1": {
+            "title": "Install Copilot Chat",
+            "desc": "Install the GitHub Copilot Chat extension in VS Code."
+          }
+        },
+        "install": {
+          "0": "Install VS Code and the GitHub Copilot Chat extension.",
+          "1": "tproxy writes a BYOK provider into chatLanguageModels.json; pick it from the model picker."
+        }
+      },
+      "antigravity": {
+        "description": "Google Antigravity IDE with MITM",
+        "notes": {
+          "0": "MITM proxy is not yet available in tproxy. Model mappings below show the slots Antigravity expects once MITM ships."
+        }
+      },
+      "kiro": {
+        "description": "Kiro IDE with MITM",
+        "notes": {
+          "0": "MITM proxy is not yet available in tproxy. Kiro dispatches concrete model IDs — each slot below should map to a tproxy virtual model."
+        }
+      }
+    }
   },
   "import": {
     "title": "Import data",
-    "subtitle": "Migrate credentials and routing from 9router, CLIProxyAPI, or sub2api",
+    "subtitle": "Select JSON files. The app detects their format and prepares them for import.",
     "cancel": "Cancel",
     "previewing": "Previewing…",
     "preview": "Preview",
@@ -1432,7 +4057,7 @@
     "source9routerDesc": "Migrate provider credentials, client API keys, combos, and virtual models from a full 9router export.",
     "sourceCliproxyTitle": "CLIProxyAPI auth",
     "sourceCliproxyDesc": "Import OAuth credentials exported from the CLIProxyAPI auth directory.",
-    "autoDetect": "Auto-detects format when possible",
+    "autoDetect": "Select one or more files, including different formats. Preview does not save data.",
     "chooseFile": "Choose JSON file",
     "lastResult": "Last result:",
     "previewReady": "Preview ready: {{summary}}",
@@ -1440,7 +4065,7 @@
     "importFailed": "Import failed",
     "failedToImport": "Failed to import file",
     "cardTitle": "Import data",
-    "cardDesc": "Migrate from 9router-backup-*.json, CLIProxyAPI auth files such as codex-*.json, or a sub2api accounts export.",
+    "cardDesc": "Import 9router, CLIProxyAPI, sub2api, ChatGPT OAuth files, or tproxy OAuth bundles in one place.",
     "cardButton": "Import…",
     "failed": "Import failed",
     "failedFile": "Failed to import file",
@@ -1458,7 +4083,30 @@
     "sub2apiNoAccounts": "{{name}} has no importable accounts",
     "sub2apiBatchPreview": "Previewed {{files}} file(s): {{summary}}",
     "sub2apiBatchDone": "Imported {{files}} file(s): {{summary}}",
-    "back": "Back"
+    "back": "Back",
+    "supportedFormats": "Supports 9router, CLIProxyAPI, sub2api, ChatGPT OAuth tokens, and tproxy OAuth bundles.",
+    "chooseFiles": "Choose JSON files",
+    "close": "Close",
+    "fileTooLarge": "This file exceeds the 32 MB limit.",
+    "invalidJSON": "This file is not valid JSON.",
+    "noRecords": "No supported records found.",
+    "batchDone": "Imported {{count}} file(s).",
+    "checkFileErrors": "Some files could not be processed. Review the errors in the import dialog.",
+    "skipDuplicates": "Skip existing accounts in sub2api and ChatGPT token files",
+    "removeFile": "Remove {{name}}",
+    "accountCount": "Accounts to import from the start of the list ({{total}} found)",
+    "fileImported": "Imported",
+    "fileReady": "Ready to import · no data saved",
+    "previewRequired": "Options changed. Preview again before importing.",
+    "counts": {
+      "providers": "{{count}} provider(s)",
+      "credentials": "{{count}} account(s)",
+      "api_keys": "{{count}} API key(s)",
+      "models": "{{count}} model(s)",
+      "combos": "{{count}} combo(s)",
+      "proxy_pools": "{{count}} proxy pool(s)",
+      "skipped": "{{count}} skipped"
+    }
   },
   "topology": {
     "requestFlow": "Request flow topology",
@@ -1494,9 +4142,183 @@
     "off": "OFF",
     "failedLoad": "Failed to load token saver settings",
     "failedUpdate": "Failed to update compression mode",
-    "copyFailed": "Could not copy command"
+    "copyFailed": "Could not copy command",
+    "modeSaved": "Compression mode set to {{mode}}",
+    "pipelineSubtitle": "Pick a mode · saved instantly · applies to every request without an override",
+    "saving": "Saving…",
+    "active": "Active",
+    "recommended": "Recommended",
+    "noEngines": "No compression",
+    "installStep": "Install the RTK binary",
+    "hookStep": "Enable the auto-rewrite hook",
+    "cliHookSubtitle": "Compress shell output on your machine, before it reaches the prompt",
+    "upstreamProject": "RTK project on GitHub",
+    "stats": {
+      "label": "Token saver summary",
+      "mode": "Mode",
+      "modeOffHint": "Prompts pass through unchanged",
+      "saved": "Tokens saved",
+      "sampleHint_one": "In the last {{count}} request",
+      "sampleHint_other": "In the last {{count}} requests",
+      "rate": "Saving rate",
+      "rateHint": "Of input before compression",
+      "rateTitle": "Tokens saved ÷ (input sent + tokens saved), successful requests only",
+      "compressed": "Compressed",
+      "compressedHint": "Successful requests that got smaller",
+      "override": "Per-request override",
+      "overrideOn": "Allowed",
+      "overrideOff": "Off",
+      "overrideHint": "Clients can pick a mode or opt out by header"
+    },
+    "guide": {
+      "title": "Send fewer tokens upstream without changing your clients",
+      "what": "The gateway shrinks prompts before they reach providers: RTK trims tool output (logs, git, builds), Caveman shortens long prose, Headroom compacts JSON arrays.",
+      "pick": "Click a mode to switch; it saves right away. Stacked is the best default for coding agents; Full and Ultra squeeze harder at more risk of losing detail.",
+      "override": "Clients can override per request with a header, and the optional RTK CLI hook compresses shell output on your machine before it even becomes a prompt.",
+      "legendActive": "Active mode",
+      "legendOff": "Compression off"
+    },
+    "modes": {
+      "stacked": {
+        "name": "Stacked",
+        "hint": "Best savings for agentic sessions (~30–70%): RTK on tool output, then Caveman on long prose."
+      },
+      "full": {
+        "name": "Full",
+        "hint": "All structural engines without LLMLingua."
+      },
+      "ultra": {
+        "name": "Ultra",
+        "hint": "Maximum savings; adds heuristic LLMLingua-2 pruning, which can drop detail."
+      },
+      "rtk": {
+        "name": "RTK only",
+        "hint": "Tool-output filtering for shell, git and build logs."
+      },
+      "caveman": {
+        "name": "Caveman",
+        "hint": "Terse prose compression on long assistant text."
+      },
+      "lite": {
+        "name": "Lite",
+        "hint": "Compacts homogeneous JSON tool arrays (Headroom)."
+      },
+      "off": {
+        "name": "Off",
+        "hint": "Disable gateway compression; prompts are forwarded as sent."
+      }
+    },
+    "override": {
+      "title": "Per-request control",
+      "subtitle": "Send one of these headers with a request",
+      "forceMode": "Use a specific mode for this request",
+      "optOut": "Skip compression for this request",
+      "disabled": "Per-request opt-out is disabled on this gateway."
+    },
+    "chart": {
+      "title": "Tokens saved per hour",
+      "subtitle_one": "Last {{count}} request · {{total}} saved",
+      "subtitle_other": "Last {{count}} requests · {{total}} saved",
+      "saved": "tokens saved",
+      "requests": "requests",
+      "empty": "No savings recorded yet",
+      "emptyHint": "Savings appear here once compressed requests go through the gateway."
+    }
   },
   "operations": {
+    "statsLabel": "Operations summary",
+    "stats": {
+      "critical": "Critical",
+      "criticalHint": "Requests are failing now",
+      "criticalNone": "Nothing is failing",
+      "warning": "Warnings",
+      "warningHint": "Degraded; traffic fails over",
+      "warningNone": "No warnings",
+      "filterHint": "Show only these alerts; click again to show all",
+      "attempts": "Attempts · 5 min",
+      "attemptsHint": "{{errors}} errors · {{fallbacks}} fallbacks",
+      "errorRate": "Upstream error rate",
+      "errorRateHint": "Alerts at 20% over 20+ attempts",
+      "p95": "Slowest p95",
+      "p95None": "No attempts yet",
+      "load": "In flight",
+      "loadHint_one": "{{waiting}} waiting · {{count}} account",
+      "loadHint_other": "{{waiting}} waiting · {{count}} accounts"
+    },
+    "filterByProvider": "Filter by provider",
+    "allProviders": "All providers",
+    "attemptsTab_one": "{{count}} attempt in the last 5 minutes",
+    "attemptsTab_other": "{{count}} attempts in the last 5 minutes",
+    "updatedAt": "Updated {{time}}",
+    "autoRefreshHint": "Reload every 15 seconds",
+    "sortBy": "Sort lists",
+    "sort": {
+      "attention": "Needs attention first",
+      "busiest": "Busiest first",
+      "slowest": "Slowest first",
+      "name": "Name"
+    },
+    "guide": {
+      "title": "Spot problems early and jump straight to the fix",
+      "alerts": "An alert opens when an account can't sign in, runs out of quota or expires, a model has no usable route, or an upstream fails 20% of 20+ attempts.",
+      "fix": "Each alert has a button to the page that fixes it. Critical means requests fail now; a warning means traffic is failing over to other accounts.",
+      "metrics": "Request metrics cover the last 5 minutes per model and account; account load shows live in-flight and queued requests. Everything reloads every 15 seconds.",
+      "legendCritical": "Critical / failing",
+      "legendWarning": "Warning / strained",
+      "legendHealthy": "Healthy"
+    },
+    "alertsTitle": "Active alerts",
+    "alertsSubtitle": "Evaluated {{time}} · rechecked every 30–60 s",
+    "severity": {
+      "critical": "Critical",
+      "warning": "Warning"
+    },
+    "alertHelp": {
+      "high_error_rate": "20%+ of attempts failed upstream in the last 5 minutes.",
+      "quota_exhausted": "Paused automatically until its quota resets.",
+      "authentication_failed": "Sign-in expired or was revoked; requests skip this account.",
+      "account_expired": "Past its configured expiry date, so it is no longer used.",
+      "route_unavailable": "No enabled route reaches a working provider, so requests fail."
+    },
+    "fix": {
+      "quota": "Open quota",
+      "routes": "Fix routes",
+      "reauth": "Re-authenticate",
+      "account": "Update account",
+      "provider": "Open provider"
+    },
+    "firstSeen": "First seen {{time}}",
+    "showMetrics": "Show related metrics",
+    "copyId": "Copy resource ID",
+    "moreActions": "More actions",
+    "modelResource": "Public model",
+    "noAlertsHint": "Accounts, routes and upstream error rates look healthy.",
+    "noAlertsMatch": "No alerts match these filters",
+    "clearFilters": "Clear filters",
+    "noMatch": "Nothing matches these filters",
+    "metricsSubtitle_one": "Last 5 minutes · {{count}} model/account pair",
+    "metricsSubtitle_other": "Last 5 minutes · {{count}} model/account pairs",
+    "highErrors": "High error rate",
+    "someErrors": "Some errors",
+    "errorsCount_one": "{{count}} error",
+    "errorsCount_other": "{{count}} errors",
+    "inputOutput": "Input / output",
+    "cacheReadWrite": "Cache read / write",
+    "openProvider": "Open provider",
+    "noRequestsHint": "Rows appear as requests flow through the gateway.",
+    "accountsSubtitle_one": "Live from memory · {{count}} account",
+    "accountsSubtitle_other": "Live from memory · {{count}} accounts",
+    "accountsFailing": "Failing or out of quota",
+    "accountsStrained": "Queueing or low quota",
+    "accountColumn": "Account",
+    "noAccounts": "No account activity yet",
+    "noAccountsHint": "Accounts appear here once they serve a request.",
+    "quotaUnknown": "Not reported",
+    "staleHint": "Quota last observed {{age}} ago",
+    "loading": "Loading operations…",
+    "loadFailed": "Could not load operations",
+    "loadFailedStale": "Refresh failed — showing data evaluated at {{time}}.",
+    "retry": "Retry",
     "title": "Operations",
     "hint": "Last 5 minutes · refreshes every 15 seconds. Alerts require 20 attempts and a 20% upstream error rate; evaluated every 30–60 seconds.",
     "updated": "Alerts evaluated",
@@ -1554,6 +4376,317 @@
     "outbound": "Upstream body",
     "copy": "Copy",
     "title_page_title": "Translation diagnostics",
-    "title_page_desc": "Inspect protocol conversion without upstream requests."
+    "title_page_desc": "Inspect protocol conversion without upstream requests.",
+    "from": "From",
+    "to": "To",
+    "sourceTitle": "What your client sends to {{endpoint}}",
+    "targetTitle": {
+      "openai": "Body sent to OpenAI-compatible upstreams",
+      "codex": "Body sent to Codex (ChatGPT Responses)",
+      "claude": "Body sent to Anthropic Messages upstreams",
+      "gemini": "Body sent to Gemini generateContent"
+    },
+    "modelHint": "The upstream model name written into the translated body",
+    "modelPlaceholder": "e.g. gpt-5.5",
+    "guide": {
+      "title": "See exactly what tproxy sends upstream",
+      "input": "Pick the protocol your client speaks under From, then paste its request JSON — or start from the example.",
+      "output": "Pick an upstream format under To and press Preview. Switching format re-runs it, so comparing takes one click.",
+      "offline": "Nothing leaves this server: no upstream call, no quota used, nothing saved. Secret fields are redacted."
+    },
+    "inputTitle": "Client request",
+    "jsonValid": "Valid JSON",
+    "jsonInvalid": "Invalid JSON",
+    "format": "Format JSON",
+    "loadExample": "Load {{label}} example",
+    "notObject": "The body must be a JSON object.",
+    "inputStats_one": "{{count}} line · {{size}}",
+    "inputStats_other": "{{count}} lines · {{size}}",
+    "shortcut": "to preview",
+    "outputTitle": "Translated request",
+    "viewLabel": "Result view",
+    "copyView": "Copy {{view}}",
+    "rerun": "Run again",
+    "staleNote": "The input changed since this preview.",
+    "running": "Translating…",
+    "failed": "Translation failed",
+    "facts": {
+      "model": "Upstream model",
+      "messages": "Messages",
+      "system": "System prompt",
+      "tools": "Tools",
+      "stream": "Stream",
+      "maxTokens": "Max tokens",
+      "size": "Body size"
+    },
+    "yes": "Yes",
+    "no": "No",
+    "offline": "Offline preview",
+    "emptyTitle": "No preview yet",
+    "emptyDesc": "Press Preview or {{shortcut}} to see the body tproxy would send upstream."
+  },
+  "upstreams": {
+    "loading": "Loading providers…",
+    "emptyTitle": "No provider connected",
+    "emptyHint": "Health checks appear here once you connect a provider.",
+    "connectProvider": "Connect provider",
+    "statsLabel": "Provider health",
+    "stats": {
+      "providers": "Providers",
+      "providersHint": "{{count}} turned on",
+      "unchecked_one": "{{count}} never checked",
+      "unchecked_other": "{{count}} never checked",
+      "lastCheck": "Last check",
+      "oldestCheck": "oldest {{time}}",
+      "noChecks": "No check has run yet"
+    },
+    "health": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "auth_required": "Needs sign-in",
+      "disabled": "Turned off",
+      "unchecked": "Not checked"
+    },
+    "tileHint": {
+      "healthy": "Last check passed",
+      "degraded": "Errors or rate limits",
+      "auth_required": "Token expired or revoked",
+      "disabled": "Not used for routing",
+      "unchecked": "No result yet"
+    },
+    "healthHint": {
+      "healthy": "The last health check passed.",
+      "degraded": "Recent checks returned errors or rate limits. Requests may fail over to other providers.",
+      "auth_required": "The upstream rejected the credentials. Sign in again on the provider page.",
+      "disabled": "Turned off: requests never route here.",
+      "unchecked": "No health check has run yet. Run one to confirm the provider works."
+    },
+    "filterLabel": "Filter by health",
+    "filterAll": "All",
+    "checkAll": "Check all",
+    "checkAllHint": "Run a health check on every provider",
+    "checkingAll": "Checking…",
+    "searchPlaceholder": "Search name, type, URL or error…",
+    "sortLabel": "Sort providers",
+    "sort": {
+      "attention": "Problems first",
+      "name": "Name A–Z",
+      "checked": "Stalest check first"
+    },
+    "viewMode": "View",
+    "viewList": "List",
+    "viewGrid": "Cards",
+    "manageProviders": "Providers",
+    "manageProvidersHint": "Add providers and manage accounts",
+    "guide": {
+      "title": "Reading provider health",
+      "status": "Each provider shows the result of its last health check. Click a tile above to see only providers in that state.",
+      "actions": "Use the heart icon to re-check one provider, or select several and check or discover models in bulk.",
+      "fix": "Click a row to open the provider: sign in again, add accounts or change its settings there."
+    },
+    "noMatch": "No provider matches",
+    "noMatchHint": "Try another search or health filter.",
+    "clearFilters": "Clear filters",
+    "selectVisible": "Select all shown",
+    "selectAllVisible": "Select all {{count}} shown",
+    "selectProvider": "Select {{name}}",
+    "columns": {
+      "provider": "Provider",
+      "status": "Status",
+      "accounts": "Accounts",
+      "routes": "Routes",
+      "lastCheck": "Last check"
+    },
+    "bulkCheck": "Check health",
+    "bulkDiscover": "Discover models",
+    "deleteTitle": "Delete provider?",
+    "deleteMessage_one": "Delete \"{{name}}\" and its {{count}} account? Model routes that use it stop working. This cannot be undone.",
+    "deleteMessage_other": "Delete \"{{name}}\" and its {{count}} accounts? Model routes that use it stop working. This cannot be undone.",
+    "deleteProvider": "Delete provider",
+    "checking": "Checking…",
+    "checkHealth": "Check health",
+    "discover": "Discover models",
+    "discoverHint": "List the models this upstream offers",
+    "discovering": "Discovering models…",
+    "openProvider": "Open provider",
+    "openProviderHint": "Accounts, sign-in and settings",
+    "openNamed": "Open {{name}}",
+    "moreActions": "More actions",
+    "modelsFound_one": "{{count}} model found",
+    "modelsFound_other": "{{count}} models found",
+    "noAccounts": "No accounts",
+    "accountsOn_one": "{{on}}/{{count}} account on",
+    "accountsOn_other": "{{on}}/{{count}} accounts on",
+    "accountIssues_one": "{{count}} with issues",
+    "accountIssues_other": "{{count}} with issues",
+    "routesCount_one": "{{count}} route",
+    "routesCount_other": "{{count}} routes",
+    "noRoutes": "No routes",
+    "localTransport": "Local transport",
+    "typeHint": "Provider type: {{type}}",
+    "checkedAgo": "checked {{time}}",
+    "neverChecked": "never checked",
+    "never": "never",
+    "proxyCount_one": "{{count}} proxy pool",
+    "proxyCount_other": "{{count}} proxy pools"
+  },
+  "skills": {
+    "tabsLabel": "Skill category",
+    "category": {
+      "all": "All",
+      "setup": "Setup",
+      "text": "Text",
+      "media": "Media",
+      "web": "Web"
+    },
+    "searchPlaceholder": "Search skill, endpoint or path…",
+    "copySetupPrompt": "Copy entry prompt",
+    "copySetupPromptHint": "Prompt for the tproxy entry skill — it indexes every other skill",
+    "guide": {
+      "title": "How agent skills work",
+      "what": "A skill is a short instruction file (SKILL.md) that teaches an AI agent — Claude, Cursor, ChatGPT — how to call tproxy. It is not a plugin and runs nothing on the server.",
+      "fast": "Fastest way: press “Copy entry prompt” and paste it into your agent. The entry skill indexes all the others, so the agent picks the right one itself.",
+      "env": "Give the agent TPROXY_URL and TPROXY_KEY once (block below). Create the key on the APIs page."
+    },
+    "setup": {
+      "title": "Configure once",
+      "subtitle": "The agent reads these two variables",
+      "copy": "Copy",
+      "copied": "Copied",
+      "keyLink": "Create a client key in APIs",
+      "note": "Prefer OAuth, API keys or web cookies in Providers — MITM capture is not supported by tproxy."
+    },
+    "card": {
+      "copyPrompt": "Copy agent prompt",
+      "copied": "Prompt copied",
+      "copyPath": "Copy file path",
+      "copyLink": "Copy GitHub raw link",
+      "copyLinkHint": "For agents that fetch URLs",
+      "openGithub": "Open on GitHub",
+      "more": "More actions",
+      "entry": "Start here"
+    },
+    "copiedNotice": "Copied {{value}}",
+    "noMatch": "No skill matches",
+    "noMatchHint": "Try another capability or endpoint, e.g. “image” or “/v1/audio”.",
+    "clearFilters": "Clear filters",
+    "items": {
+      "tproxy": {
+        "name": "tproxy (entry)",
+        "description": "Set up TPROXY_URL / TPROXY_KEY and index every capability skill."
+      },
+      "tproxy-chat": {
+        "name": "Chat / code-gen",
+        "description": "OpenAI chat completions, Anthropic messages, Responses API."
+      },
+      "tproxy-image": {
+        "name": "Image generation",
+        "description": "/v1/images/generations and edits."
+      },
+      "tproxy-video": {
+        "name": "Video generation",
+        "description": "/v1/videos endpoints and job polling."
+      },
+      "tproxy-tts": {
+        "name": "Text-to-speech",
+        "description": "/v1/audio/speech for TTS providers."
+      },
+      "tproxy-stt": {
+        "name": "Speech-to-text",
+        "description": "/v1/audio/transcriptions multipart STT."
+      },
+      "tproxy-embeddings": {
+        "name": "Embeddings",
+        "description": "/v1/embeddings for vector models."
+      },
+      "tproxy-web-search": {
+        "name": "Web search",
+        "description": "/v1/search (Tavily and compatible)."
+      },
+      "tproxy-web-fetch": {
+        "name": "Web fetch",
+        "description": "URL → content patterns via gateway-safe tools."
+      }
+    }
+  },
+  "freeTiers": {
+    "failedLoad": "Failed to load free-tier catalog",
+    "filterByAccess": "Filter by access",
+    "allAccess": "All",
+    "openProviders": "Open providers",
+    "search": "Search providers, models, limits…",
+    "sortBy": "Sort catalog",
+    "sort": {
+      "status": "Connected first",
+      "name": "Name A–Z",
+      "limit": "Known limits first"
+    },
+    "viewMode": "View",
+    "viewGrid": "Cards",
+    "viewList": "List",
+    "noMatch": "No free tier matches the filters",
+    "empty": "The catalog is empty",
+    "emptyHint": "This gateway build ships no zero-cost presets.",
+    "openCombos": "Open combos",
+    "strategiesNote": "Tip: put several free tiers in one combo to spread their daily limits. Strategies: {{strategies}}.",
+    "getKey": "Get an API key (opens the provider's console)",
+    "open": "Open",
+    "setUp": "Set up",
+    "openHint": "Open {{name}} in Providers",
+    "moreModels_one": "+{{count}} more",
+    "moreModels_other": "+{{count}} more",
+    "dailyLimit": "Daily limit",
+    "resets": "Resets",
+    "notPublished": "Not published",
+    "provider": "Provider",
+    "access": "Access",
+    "models": "Models",
+    "statusLabel": "Status",
+    "stats": {
+      "label": "Free tier summary",
+      "all": "Free providers",
+      "allHint_one": "{{count}} with a published daily limit",
+      "allHint_other": "{{count}} with a published daily limit",
+      "allTitle": "Show the whole catalog",
+      "configured": "Connected",
+      "configuredHint": "Ready for routing now",
+      "available": "Not set up",
+      "availableHint": "Add a key or sign in to use them",
+      "noKey": "No key needed",
+      "noKeyHint": "Local or keyless adapters",
+      "filterHint": "Show only these; click again to show all"
+    },
+    "group": {
+      "configured": "Connected",
+      "configuredSubtitle_one": "{{count}} provider in use",
+      "configuredSubtitle_other": "{{count}} providers in use",
+      "available": "Available to add",
+      "availableSubtitle_one": "{{count}} provider · set up to start routing",
+      "availableSubtitle_other": "{{count}} providers · set up to start routing"
+    },
+    "status": {
+      "configured": "Connected",
+      "available": "Not set up"
+    },
+    "auth": {
+      "api_key": "API key",
+      "oauth": "OAuth sign-in",
+      "none": "No key",
+      "service_account": "Service account"
+    },
+    "category": {
+      "free": "Always free",
+      "freeTier": "Free tier"
+    },
+    "reset": {
+      "provider_defined": "Set by provider",
+      "utc_midnight": "UTC midnight"
+    },
+    "guide": {
+      "title": "Find zero-cost providers and connect them in a minute",
+      "what": "Always free providers cost nothing; Free tier providers are paid APIs with a free daily allowance that resets on their schedule.",
+      "connect": "Click a card or Set up to open the provider and paste a key or sign in. The key icon opens the provider's console to create one.",
+      "combine": "Combine several free tiers in a combo so traffic moves on when one hits its daily limit. Use the Connected tile to see what is ready now."
+    }
   }
 }

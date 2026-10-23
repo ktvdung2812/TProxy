@@ -5,40 +5,74 @@ import { clearCredentialCooldown, deleteCredential, reorderProviderCredentials, 
 import { getProviderTypeInfo } from "../providers/catalog";
 import { ProviderLogo } from "../providers/ProviderLogo";
 import { useUsageStream } from "../usage/useUsageStream";
-import { Button, ConfirmDialog, Modal, Toggle, cn } from "../ui";
+import { Button, ConfirmDialog, Modal, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
 import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
+import { QuotaAccountCard, QuotaAccountRow, type QuotaAccountHandlers, type QuotaAccountView, type QuotaCredential } from "./QuotaAccountItem";
+import {
+  ActionMenu,
+  AutoRefreshToggle,
+  BulkBar,
+  BulkButton,
+  EmptyPanel,
+  FilterTabs,
+  GuideToggle,
+  LegendItem,
+  LinkButton,
+  PageGuide,
+  PageNote,
+  PageStats,
+  ProgressLine,
+  SearchField,
+  SectionHead,
+  Segmented,
+  SelectField,
+  ToneCounts,
+  Toolbar,
+  ToolbarEnd,
+  ToolbarRow,
+  ToolButton,
+  usePageGuide,
+  useStoredState,
+} from "../page-kit";
+import type { QuotaMeterRow } from "./QuotaMeters";
 import { runQuotaActions, consumeCodexResetCredit, fetchCredentialProxyUsage, type CredentialProxyUsage, type CredentialQuota } from "./api";
 import { clearCachedQuota, loadCredentialQuotaOnce, peekCachedQuota } from "./quotaOnce";
-import { QuotaRingGrid } from "./QuotaRingGrid";
-import { QuotaStackedBar } from "./QuotaStackedBar";
-import { QuotaTable } from "./QuotaTable";
 import { formatServicePlanLabel, isOnCooldown, moveCredentialBefore } from "../providers/types";
 import { maskAccountText } from "../../lib/accountMask";
 import { useAccountMask } from "../../hooks/useAccountMask";
 import {
-  ACCOUNT_FILTER_OPTIONS,
   AUTO_REFRESH_STORAGE_KEY,
+  QUOTA_VIEW_MODE_KEY,
   QUOTA_VISIBILITY_KEY,
   CLAUDE_REFRESH_INTERVAL_MS,
   REFRESH_INTERVAL_MS,
   type AccountFilter,
+  type AccountHealth,
+  type AccountHealthBucket,
   type QuotaVisibility,
+  accountHealthBucket,
   buildProviderCountMap,
   earliestResetAt,
   filterQuotasByVisibility,
+  findEarliestQuotaReset,
+  formatProxyUsageLabel,
+  formatQuotaName,
+  formatResetTime,
+  getAccountHealth,
   getConnectionLabel,
   getHiddenQuotaRows,
   getQuotaVisibilityKey,
   isConnectionAtZero,
   isConnectionDepleted,
-  isQuotaExpiringSort,
+  lowestRemaining,
+  matchesAccountFilter,
   parseQuotaAccountFilter,
+  parseQuotaSort,
   patchQuotaSearchParams,
   quotaEntries,
   resolveQuotaProviderFilter,
   compareQuotaAccountOrder,
-  usesQuotaRingLayout,
   usesQuotaStackedLayout,
   type QuotaUrlSort,
 } from "./utils";
@@ -79,20 +113,12 @@ function supportsQuotaTracker(item: Pick<CredentialRow, "providerId" | "provider
   return QUOTA_PROVIDER_TYPES.has(item.providerId) || QUOTA_PROVIDER_TYPES.has(item.providerType);
 }
 
-type CredentialRow = {
-  id: string;
-  providerId: string;
-  providerType: string;
-  label?: string;
-  email?: string;
-  enabled: boolean;
-  auth_type: string;
-  priority?: number;
-  weight?: number;
-  proxy_pool_ids?: string[];
-  created_at?: string;
-  cooldown_until?: string;
-};
+type CredentialRow = QuotaCredential;
+
+type ViewMode = "grid" | "list";
+const VIEW_MODES = ["grid", "list"] as const;
+
+type OverviewCounts = Record<AccountHealthBucket, number> & { total: number; checking: number };
 
 type Props = {
   secret: string;
@@ -103,10 +129,30 @@ type Props = {
   onMutated?: () => void;
 };
 
-function loadVisibility(): QuotaVisibility {
-  if (typeof window === "undefined") return {};
+const EMPTY_USAGE: CredentialProxyUsage = { requests: 0, promptTokens: 0, completionTokens: 0 };
+const GROK_PRODUCT_BREAKDOWN_PREFIX = "product_";
+
+function readStorage(key: string): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    return JSON.parse(window.localStorage.getItem(QUOTA_VISIBILITY_KEY) || "{}") as QuotaVisibility;
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Private mode or a full quota: the preference just does not persist.
+  }
+}
+
+function loadVisibility(): QuotaVisibility {
+  try {
+    return JSON.parse(readStorage(QUOTA_VISIBILITY_KEY) || "{}") as QuotaVisibility;
   } catch {
     return {};
   }
@@ -138,12 +184,16 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   const [settledQuotaCredentialIds, setSettledQuotaCredentialIds] = useState<Set<string>>(() => new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refreshingAll, setRefreshingAll] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [countdown, setCountdown] = useState(60);
-  const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(() => readStorage(AUTO_REFRESH_STORAGE_KEY) !== "false");
+  const [nextRefreshAt, setNextRefreshAt] = useState(() => Date.now() + REFRESH_INTERVAL_MS);
+  const [clock, setClock] = useState(() => Date.now());
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useStoredState<ViewMode>(QUOTA_VIEW_MODE_KEY, "grid", VIEW_MODES);
+  const guide = usePageGuide("quota");
   const [bulkToggling, setBulkToggling] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirmCredential, setDeleteConfirmCredential] = useState<CredentialRow | null>(null);
   const [quotaVisibility, setQuotaVisibility] = useState<QuotaVisibility>(() => loadVisibility());
   const [resetConfirmCredential, setResetConfirmCredential] = useState<CredentialRow | null>(null);
   const [bulkResetConfirmOpen, setBulkResetConfirmOpen] = useState(false);
@@ -183,6 +233,12 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   }, []);
 
   useUsageStream(secret, true, applyLiveUsage);
+
+  // Relative reset times and cooldowns are recomputed twice a minute.
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const eligible = useMemo(
     () => credentials.filter((item) => supportsQuotaTracker(item)),
@@ -228,7 +284,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     [searchParams],
   );
 
-  const expiringFirst = isQuotaExpiringSort(searchParams.get("sort"));
+  const sortMode = parseQuotaSort(searchParams.get("sort"));
 
   const updateQuotaFilters = useCallback(
     (patch: Partial<{ provider: string; status: AccountFilter; sort: QuotaUrlSort }>) => {
@@ -245,19 +301,6 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     }
   }, [providerOptions, searchParams, setSearchParams]);
 
-  const filteredCredentials = useMemo(() => {
-    let rows = eligible;
-    if (providerFilter !== "all") {
-      rows = rows.filter((item) => quotaProviderKey(item) === providerFilter);
-    }
-    if (accountFilter === "active") {
-      rows = rows.filter((item) => item.enabled);
-    } else if (accountFilter === "inactive") {
-      rows = rows.filter((item) => !item.enabled);
-    }
-    return rows;
-  }, [eligible, providerFilter, accountFilter]);
-
   const providerCounts = useMemo(
     () => buildProviderCountMap(eligible, quotaProviderKey),
     [eligible],
@@ -271,19 +314,54 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     return counts;
   }, [eligible]);
 
-  const scopeCredentials = useMemo(() => {
-    if (providerFilter === "all") return eligible;
-    return eligible.filter((item) => quotaProviderKey(item) === providerFilter);
-  }, [eligible, providerFilter]);
+  const resolveQuota = useCallback(
+    (credentialId: string) => quotaById[credentialId] || peekCachedQuota(credentialId)?.quota,
+    [quotaById],
+  );
 
-  const accountStats = useMemo(() => {
-    const enabled = scopeCredentials.filter((item) => item.enabled).length;
-    return {
-      total: scopeCredentials.length,
-      enabled,
-      disabled: scopeCredentials.length - enabled,
-    };
-  }, [scopeCredentials]);
+  const healthById = useMemo(() => {
+    const result: Record<string, AccountHealth> = {};
+    for (const credential of eligible) {
+      result[credential.id] = getAccountHealth({
+        enabled: credential.enabled,
+        quota: resolveQuota(credential.id),
+        providerType: quotaProviderKey(credential),
+        error: errors[credential.id],
+        settled: settledQuotaCredentialIds.has(credential.id),
+        onCooldown: isOnCooldown(credential.cooldown_until),
+      });
+    }
+    return result;
+    // clock re-evaluates cooldowns that expire while the page is open.
+  }, [eligible, resolveQuota, errors, settledQuotaCredentialIds, clock]);
+
+  // Provider + search scope. The overview counts and the routing lock are
+  // computed over this, so clicking a status tile does not change either.
+  const scopeCredentials = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return eligible.filter((item) => {
+      if (providerFilter !== "all" && quotaProviderKey(item) !== providerFilter) return false;
+      if (!query) return true;
+      const plan = resolveQuota(item.id)?.plan || "";
+      return [item.label, item.email, item.id, item.providerId, plan]
+        .some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [eligible, providerFilter, search, resolveQuota]);
+
+  const overviewCounts = useMemo<OverviewCounts>(() => {
+    const counts: OverviewCounts = { total: scopeCredentials.length, available: 0, low: 0, attention: 0, off: 0, checking: 0 };
+    for (const credential of scopeCredentials) {
+      const bucket = accountHealthBucket(healthById[credential.id]);
+      if (bucket) counts[bucket] += 1;
+      else counts.checking += 1;
+    }
+    return counts;
+  }, [scopeCredentials, healthById]);
+
+  const filteredCredentials = useMemo(
+    () => scopeCredentials.filter((item) => matchesAccountFilter(accountFilter, healthById[item.id], item.enabled)),
+    [scopeCredentials, accountFilter, healthById],
+  );
 
   const accountOrderOptions = useMemo(
     () => ({
@@ -294,15 +372,22 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     [providerCounts, credentialOrderByProvider],
   );
 
-  const listOrderCredentials = useMemo(
-    () => [...filteredCredentials].sort((a, b) => compareQuotaAccountOrder(a, b, accountOrderOptions)),
-    [filteredCredentials, accountOrderOptions],
-  );
-
   const loadOrderCredentials = useMemo(
     () => [...eligible].sort((a, b) => compareQuotaAccountOrder(a, b, accountOrderOptions)),
     [eligible, accountOrderOptions],
   );
+
+  // Position of each account in its provider's routing order — what the
+  // router tries first — independent of filters and display sort.
+  const rankById = useMemo(() => {
+    const ranks: Record<string, number> = {};
+    const seen: Record<string, number> = {};
+    for (const credential of loadOrderCredentials) {
+      seen[credential.providerId] = (seen[credential.providerId] || 0) + 1;
+      ranks[credential.id] = seen[credential.providerId];
+    }
+    return ranks;
+  }, [loadOrderCredentials]);
 
   const loadOrderRef = useRef(loadOrderCredentials);
   loadOrderRef.current = loadOrderCredentials;
@@ -315,12 +400,12 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     [eligible],
   );
 
-  // Account routing controls stay locked until every account currently shown
-  // on the page has completed its first quota request. A failed request still
-  // counts as settled because its error is visible and the operator can retry.
+  // Account routing controls stay locked until every account in scope has
+  // completed its first quota request. A failed request still counts as
+  // settled because its error is visible and the operator can retry.
   const quotaDataReady = useMemo(
-    () => listOrderCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
-    [listOrderCredentials, settledQuotaCredentialIds],
+    () => scopeCredentials.every((credential) => settledQuotaCredentialIds.has(credential.id)),
+    [scopeCredentials, settledQuotaCredentialIds],
   );
   const quotaPassReady = useMemo(
     () =>
@@ -331,15 +416,32 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   quotaPassReadyRef.current = quotaPassReady;
 
   const sortedCredentials = useMemo(() => {
-    if (!expiringFirst || !quotaDataReady) return listOrderCredentials;
-    const resetAtById: Record<string, number> = {};
-    for (const row of listOrderCredentials) {
-      resetAtById[row.id] = earliestResetAt(quotaById[row.id]);
+    const ordered = [...filteredCredentials].sort((a, b) => compareQuotaAccountOrder(a, b, accountOrderOptions));
+    // Re-sorting while quota is still arriving would shuffle cards under the cursor.
+    if (sortMode === "default" || !quotaDataReady) return ordered;
+    const keyById: Record<string, number> = {};
+    for (const row of ordered) {
+      if (sortMode === "expiring") keyById[row.id] = earliestResetAt(resolveQuota(row.id));
+      else keyById[row.id] = lowestRemaining(quotaEntries(resolveQuota(row.id))) ?? Number.POSITIVE_INFINITY;
     }
-    return [...listOrderCredentials].sort((a, b) =>
-      compareQuotaAccountOrder(a, b, { ...accountOrderOptions, resetAtById }),
-    );
-  }, [expiringFirst, quotaDataReady, listOrderCredentials, quotaById, accountOrderOptions]);
+    return ordered.sort((a, b) => compareQuotaAccountOrder(a, b, { ...accountOrderOptions, resetAtById: keyById }));
+  }, [filteredCredentials, accountOrderOptions, sortMode, quotaDataReady, resolveQuota]);
+
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, CredentialRow[]>();
+    for (const credential of sortedCredentials) {
+      const items = byProvider.get(credential.providerId) || [];
+      items.push(credential);
+      byProvider.set(credential.providerId, items);
+    }
+    return [...byProvider.entries()]
+      .map(([providerId, items]) => ({ providerId, quotaKey: quotaProviderKey(items[0]), items }))
+      .sort((a, b) =>
+        (accountCountByProviderId[b.providerId] || 0) - (accountCountByProviderId[a.providerId] || 0)
+        || getProviderTypeInfo(a.quotaKey).name.localeCompare(getProviderTypeInfo(b.quotaKey).name)
+        || a.providerId.localeCompare(b.providerId),
+      );
+  }, [sortedCredentials, accountCountByProviderId]);
 
   const selectedCredentials = useMemo(
     () => eligible.filter((credential) => selectedCredentialIds.has(credential.id)),
@@ -488,7 +590,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     settledRef.current = new Set(skippedIds);
     setSettledQuotaCredentialIds(new Set(skippedIds));
     setRefreshingAll(true);
-    setCountdown(60);
+    setNextRefreshAt(Date.now() + REFRESH_INTERVAL_MS);
     try {
       await loadProxyUsage();
       if (cancelledRef.current) return;
@@ -517,36 +619,22 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   }, [eligibleIdsKey]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
-    if (stored !== null) setAutoRefresh(stored === "true");
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, String(autoRefresh));
+    writeStorage(AUTO_REFRESH_STORAGE_KEY, String(autoRefresh));
   }, [autoRefresh]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(QUOTA_VISIBILITY_KEY, JSON.stringify(quotaVisibility));
-    }
+    writeStorage(QUOTA_VISIBILITY_KEY, JSON.stringify(quotaVisibility));
   }, [quotaVisibility]);
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const refreshTimer = window.setInterval(() => {
+    const timer = window.setTimeout(() => {
+      setNextRefreshAt(Date.now() + REFRESH_INTERVAL_MS);
       if (!quotaPassReadyRef.current || passRunningRef.current) return;
       void refreshAllRef.current({ auto: true });
-    }, REFRESH_INTERVAL_MS);
-    const countdownTimer = window.setInterval(() => {
-      setCountdown((value) => (value <= 1 ? 60 : value - 1));
-    }, 1000);
-    return () => {
-      window.clearInterval(refreshTimer);
-      window.clearInterval(countdownTimer);
-    };
-  }, [autoRefresh]);
+    }, Math.max(1000, nextRefreshAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [autoRefresh, nextRefreshAt]);
 
   const setCredentialEnabled = async (credential: CredentialRow, enabled: boolean) => {
     if (!quotaDataReady) return;
@@ -574,7 +662,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   };
 
   const handleDelete = async (credential: CredentialRow) => {
-    if (!window.confirm(t("quota.deleteConnectionConfirm"))) return;
+    setDeleteConfirmCredential(null);
     setDeletingId(credential.id);
     try {
       await deleteCredential(secret, credential.id);
@@ -617,7 +705,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     setReorderingProviderId(target.providerId);
     try {
       await reorderProviderCredentials(secret, target.providerId, nextIds);
-      onNotice?.("Account order saved");
+      onNotice?.(t("quota.orderSaved"));
       onMutated?.();
     } catch (cause) {
       setCredentialOrderByProvider((current) => {
@@ -626,7 +714,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         else delete nextState[target.providerId];
         return nextState;
       });
-      onError(cause instanceof Error ? cause.message : "Failed to save account order");
+      onError(cause instanceof Error ? cause.message : t("quota.orderSaveFailed"));
     } finally {
       setReorderingProviderId(null);
     }
@@ -642,19 +730,16 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     }
   };
 
-  const handleDisableDepleted = () => {
-    const targets = sortedCredentials.filter(
-      (credential) => credential.enabled && isConnectionDepleted(quotaById[credential.id]),
-    );
-    void bulkSetEnabled(targets, false);
-  };
-
-  const handleEnableAvailable = () => {
-    const targets = sortedCredentials.filter(
-      (credential) => !credential.enabled && !isConnectionAtZero(quotaById[credential.id], quotaProviderKey(credential)),
-    );
-    void bulkSetEnabled(targets, true);
-  };
+  const depletedTargets = useMemo(
+    () => sortedCredentials.filter((credential) => credential.enabled && isConnectionDepleted(resolveQuota(credential.id))),
+    [sortedCredentials, resolveQuota],
+  );
+  const availableTargets = useMemo(
+    () => sortedCredentials.filter(
+      (credential) => !credential.enabled && !isConnectionAtZero(resolveQuota(credential.id), quotaProviderKey(credential)),
+    ),
+    [sortedCredentials, resolveQuota],
+  );
 
   const handleHideQuota = (providerType: string, key: string) => {
     setQuotaVisibility((current) => {
@@ -678,7 +763,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     try {
       const result = await consumeCodexResetCredit(secret, credential.id);
       if (!result.ok) {
-        onError(result.message || "No Codex reset credits available.");
+        onError(result.message || t("quota.noResetCreditsToast"));
         return;
       }
       await loadQuota(credential.id, true).then((changed) => {
@@ -706,6 +791,18 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     }
   };
 
+  // A cooled-down account cannot be used until the cooldown is cleared, so
+  // "refresh" on one clears it and rechecks instead of only re-reading quota.
+  const refreshCredential = (credential: CredentialRow) => {
+    if (credential.cooldown_until && isOnCooldown(credential.cooldown_until)) {
+      void handleClearCooldown(credential);
+      return;
+    }
+    void loadQuota(credential.id, true).then((changed) => {
+      if (changed) onMutated?.();
+    });
+  };
+
   const runBulkQuotaAction = async (
     action: "refresh" | "cooldown" | "codex-reset",
     targets: CredentialRow[] = selectedCredentials,
@@ -715,19 +812,42 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     const results: NonNullable<typeof bulkResults>["items"] = [];
     let credentialStateChanged = false;
     try {
-      for (let offset=0;offset<targets.length;offset+=100) {
-        const chunk=targets.slice(offset,offset+100);
+      for (let offset = 0; offset < targets.length; offset += 100) {
+        const chunk = targets.slice(offset, offset + 100);
         try {
-          const items=await runQuotaActions(secret,action==="cooldown"?"clear-cooldown":action==="codex-reset"?"reset-upstream":"refresh",chunk.map(c=>c.id));
-          clearCachedQuota(chunk.map(c=>c.id));
-          for(const item of items){
-            const credential=chunk.find(c=>c.id===item.credential_id)!;
-            if(item.quota){setQuotaById(current=>({...current,[credential.id]:item.quota!}));markSettled(credential.id);credentialStateChanged ||= item.quota.credential_enabled!==undefined&&credential.enabled!==item.quota.credential_enabled;}
-            const message=item.ok?t(action==="refresh"?"quota.refreshed":action==="cooldown"?"quota.cooldownClearedAndRefreshed":"quota.resetAndRefreshed"):item.action_applied?t(action==="cooldown"?"quota.cooldownClearedRefreshFailed":"quota.resetRefreshFailed",{error:item.error}):item.error||t("quota.bulkActionFailed");
-            setErrors(current=>({...current,[credential.id]:item.ok?"":message}));
-            results.push({id:credential.id,label:maskAccountText(getConnectionLabel(credential)||credential.email||credential.id,masked),ok:item.ok,message});
+          const items = await runQuotaActions(
+            secret,
+            action === "cooldown" ? "clear-cooldown" : action === "codex-reset" ? "reset-upstream" : "refresh",
+            chunk.map((credential) => credential.id),
+          );
+          clearCachedQuota(chunk.map((credential) => credential.id));
+          for (const item of items) {
+            const credential = chunk.find((candidate) => candidate.id === item.credential_id);
+            if (!credential) continue;
+            if (item.quota) {
+              const quota = item.quota;
+              setQuotaById((current) => ({ ...current, [credential.id]: quota }));
+              markSettled(credential.id);
+              credentialStateChanged ||= quota.credential_enabled !== undefined && credential.enabled !== quota.credential_enabled;
+            }
+            const message = item.ok
+              ? t(action === "refresh" ? "quota.refreshed" : action === "cooldown" ? "quota.cooldownClearedAndRefreshed" : "quota.resetAndRefreshed")
+              : item.action_applied
+                ? t(action === "cooldown" ? "quota.cooldownClearedRefreshFailed" : "quota.resetRefreshFailed", { error: item.error })
+                : item.error || t("quota.bulkActionFailed");
+            setErrors((current) => ({ ...current, [credential.id]: item.ok ? "" : message }));
+            results.push({ id: credential.id, label: maskAccountText(getConnectionLabel(credential) || credential.email || credential.id, masked), ok: item.ok, message });
           }
-        }catch(cause){for(const credential of chunk)results.push({id:credential.id,label:maskAccountText(getConnectionLabel(credential)||credential.email||credential.id,masked),ok:false,message:cause instanceof Error?cause.message:t("quota.bulkActionFailed")});}
+        } catch (cause) {
+          for (const credential of chunk) {
+            results.push({
+              id: credential.id,
+              label: maskAccountText(getConnectionLabel(credential) || credential.email || credential.id, masked),
+              ok: false,
+              message: cause instanceof Error ? cause.message : t("quota.bulkActionFailed"),
+            });
+          }
+        }
       }
       if (credentialStateChanged) onMutated?.();
       const title = action === "refresh"
@@ -735,18 +855,22 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         : action === "cooldown"
           ? t("quota.bulkCooldownResults")
           : t("quota.bulkResetResults");
-      setBulkResults({ title, items: results });
+      // Only interrupt with a results dialog when something needs reading.
+      if (results.every((item) => item.ok)) onNotice?.(t("quota.bulk.allSucceeded", { title, count: results.length }));
+      else setBulkResults({ title, items: results });
       if (action === "codex-reset") setBulkResetConfirmOpen(false);
     } finally {
       setQuotaBulkBusy(false);
     }
   };
 
-  const toggleVisibleSelection = () => {
+  const toggleSelection = (targets: CredentialRow[], select: boolean) => {
     setSelectedCredentialIds((current) => {
       const next = new Set(current);
-      if (allVisibleSelected) sortedCredentials.forEach((credential) => next.delete(credential.id));
-      else sortedCredentials.forEach((credential) => next.add(credential.id));
+      for (const credential of targets) {
+        if (select) next.add(credential.id);
+        else next.delete(credential.id);
+      }
       return next;
     });
   };
@@ -756,571 +880,519 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     [credentials, detailCredential],
   );
 
-  const selectedProviderLabel =
-    providerFilter === "all" ? t("quota.allProviders") : getProviderTypeInfo(providerFilter).name;
+  const nextReset = useMemo(() => {
+    // Prefer the account that comes back soonest among those that need it;
+    // otherwise the next window to roll over anywhere in scope.
+    const candidates = scopeCredentials.filter((credential) => credential.enabled);
+    const pick = (items: CredentialRow[]) => {
+      let best: { time: number; credential: CredentialRow; name: string; resetAt: string } | null = null;
+      for (const credential of items) {
+        const earliest = findEarliestQuotaReset(quotaEntries(resolveQuota(credential.id)));
+        if (earliest && (!best || earliest.time < best.time)) best = { ...earliest, credential };
+      }
+      return best;
+    };
+    const needy = candidates.filter((credential) => {
+      const bucket = accountHealthBucket(healthById[credential.id]);
+      return bucket === "low" || bucket === "attention";
+    });
+    const best = pick(needy) || pick(candidates);
+    if (!best) return null;
+    const providerName = getProviderTypeInfo(quotaProviderKey(best.credential)).name;
+    const account = maskAccountText(getConnectionLabel(best.credential) || best.credential.id, masked);
+    return {
+      time: formatResetTime(best.resetAt),
+      label: `${providerName} · ${formatQuotaName(best.name)} · ${account}`,
+    };
+  }, [scopeCredentials, resolveQuota, healthById, masked, clock]);
+
+  const buildView = (credential: CredentialRow): QuotaAccountView => {
+    const quotaKey = quotaProviderKey(credential);
+    const quota = resolveQuota(credential.id);
+    const allEntries = quotaEntries(quota);
+    const rows: QuotaMeterRow[] = filterQuotasByVisibility(quotaKey, allEntries, quotaVisibility);
+    const hiddenRows: QuotaMeterRow[] = getHiddenQuotaRows(quotaKey, allEntries, quotaVisibility);
+    const stacked = usesQuotaStackedLayout(quotaKey) && rows.some((row) => row.key === "weekly");
+    const meterRows = usesQuotaStackedLayout(quotaKey)
+      ? rows.filter((row) => !row.key.startsWith(GROK_PRODUCT_BREAKDOWN_PREFIX))
+      : rows;
+    const connectionLabel = getConnectionLabel(credential) || credential.id;
+    const secondary = credential.email && credential.label && credential.email !== credential.label ? credential.email : null;
+    const isCodex = quotaKey === "codex" || credential.providerType === "codex";
+    const busy = deletingId === credential.id || togglingId === credential.id || resettingLimitId === credential.id
+      || clearingCooldownId === credential.id || quotaBulkBusy || bulkToggling;
+    const showRank = (accountCountByProviderId[credential.providerId] || 0) > 1;
+    return {
+      credential,
+      quotaKey,
+      label: maskAccountText(connectionLabel, masked),
+      secondary: secondary ? maskAccountText(secondary, masked) : null,
+      plan: formatServicePlanLabel(quota?.plan) || quota?.plan?.trim() || undefined,
+      health: healthById[credential.id] ?? "loading",
+      quota,
+      error: errors[credential.id] || undefined,
+      loading: Boolean(loading[credential.id]),
+      busy,
+      live: activeCredentialIds.has(credential.id),
+      rank: showRank ? rankById[credential.id] ?? null : null,
+      canReorder: showRank && sortMode === "default",
+      rows,
+      meterRows,
+      hiddenRows,
+      stacked,
+      usageLabel: formatProxyUsageLabel(proxyUsageById[credential.id] ?? EMPTY_USAGE),
+      renewalDate: formatRenewalDate(quota?.renews_at),
+      isCodex,
+      resetCredits: getCodexResetCreditCount(quota),
+      resettingCredit: resettingLimitId === credential.id,
+      refreshing: Boolean(loading[credential.id]) || clearingCooldownId === credential.id,
+      deleting: deletingId === credential.id,
+      selected: selectedCredentialIds.has(credential.id),
+      dragging: draggingCredentialId === credential.id,
+      dragOver: dragOverCredentialId === credential.id,
+    };
+  };
+
+  const handlers: QuotaAccountHandlers = {
+    open: (credential) => setDetailCredential(credential),
+    select: (credential, select) => toggleSelection([credential], select),
+    setEnabled: (credential, enabled) => void setCredentialEnabled(credential, enabled),
+    refresh: refreshCredential,
+    consumeResetCredit: (credential) => setResetConfirmCredential(credential),
+    viewResetCredits: (credential) => setResetCreditsCredential(credential),
+    edit: (credential) => navigate(`/providers/${encodeURIComponent(credential.providerId)}`),
+    remove: (credential) => setDeleteConfirmCredential(credential),
+    hideRow: (quotaKey, row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row)),
+    showRow: (quotaKey, row) => handleShowQuota(quotaKey, getQuotaVisibilityKey(row)),
+    dragStart: (credential, event) => {
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", credential.id);
+      setDraggingCredentialId(credential.id);
+      setDragOverCredentialId(null);
+    },
+    dragEnd: () => {
+      setDraggingCredentialId(null);
+      setDragOverCredentialId(null);
+    },
+    dragOver: (credential, event) => {
+      const source = credentials.find((item) => item.id === draggingCredentialId);
+      if (!reorderingProviderId && source && source.providerId === credential.providerId && source.id !== credential.id) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setDragOverCredentialId(credential.id);
+      }
+    },
+    drop: (credential, event) => void handleCredentialDrop(event, credential),
+  };
+
+  const hasActiveFilters = accountFilter !== "all" || providerFilter !== "all" || search.trim() !== "";
+  const clearFilters = () => {
+    setSearch("");
+    updateQuotaFilters({ provider: "all", status: "all" });
+  };
 
   if (eligible.length === 0) {
     return (
-      <section className="quota-tracker-page">
-        <div className="quota-tracker-empty">
-          {accountsLoading ? (
-            <>
-              <span className="material-symbols-outlined animate-spin">progress_activity</span>
-              <h3>{t("quota.loadingAccounts")}</h3>
-              <p>{t("quota.loadingAccountsHint")}</p>
-            </>
-          ) : (
-            <>
-              <span className="material-symbols-outlined">cloud_off</span>
-              <h3>No Providers Connected</h3>
-              <p>Connect Codex, Claude, Copilot, or Antigravity accounts to track upstream quota limits.</p>
-            </>
-          )}
-        </div>
+      <section className="cp-page">
+        {accountsLoading ? (
+          <EmptyPanel loading title={t("quota.loadingAccounts")} description={t("quota.loadingAccountsHint")} />
+        ) : (
+          <EmptyPanel
+            icon="cloud_off"
+            title={t("quota.noProvidersConnected")}
+            description={t("quota.connectProviders")}
+            action={
+              <Button variant="primary" icon="add_link" onClick={() => navigate("/providers")}>
+                {t("quota.connectProvidersAction")}
+              </Button>
+            }
+          />
+        )}
       </section>
     );
   }
 
+  const toggleLocked = !quotaDataReady;
+  const reorderLocked = Boolean(reorderingProviderId);
+  const quickActionCount = (quotaPassReady ? depletedTargets.length + availableTargets.length : 0);
+  const filterTile = (status: AccountFilter) => ({
+    active: accountFilter === status,
+    onClick: () => updateQuotaFilters({ status: accountFilter === status && status !== "all" ? "all" : status }),
+    title: t(`quota.overview.${status}Hint`),
+  });
+
   return (
-    <section className="quota-tracker-page">
-      <div className="quota-tracker-controls">
-        <div className="quota-tracker-stats" aria-label={t("quota.accountStatistics")}>
-          <span className="quota-tracker-stat quota-tracker-stat-on">
-            <span className="quota-tracker-stat-dot" aria-hidden="true" />
-            <strong>{accountStats.enabled}</strong> on
-          </span>
-          <span className="quota-tracker-stat quota-tracker-stat-off">
-            <span className="quota-tracker-stat-dot" aria-hidden="true" />
-            <strong>{accountStats.disabled}</strong> off
-          </span>
-          {providerFilter === "all" ? (
-            <>
-              <span className="quota-tracker-stats-divider" aria-hidden="true" />
-              <div className="quota-tracker-provider-stats">
-                {providerOptions.map((providerType) => {
-                  const info = getProviderTypeInfo(providerType);
-                  const count = providerCounts[providerType] || 0;
-                  const enabledCount = eligible.filter(
-                    (item) => quotaProviderKey(item) === providerType && item.enabled,
-                  ).length;
-                  return (
-                    <span
-                      key={providerType}
-                      className="quota-tracker-provider-stat"
-                      title={`${info.name}: ${count} accounts (${enabledCount} on, ${count - enabledCount} off)`}
-                    >
-                      <ProviderLogo
-                        className="quota-tracker-provider-icon"
-                        providerType={providerType}
-                        style={{ color: info.color }}
-                      />
-                      <span className="quota-tracker-provider-stat-name">{info.name}</span>
-                      <span className="quota-tracker-provider-stat-count">{count}</span>
-                    </span>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <span className="quota-tracker-stat-meta">
-              {accountStats.total} in {selectedProviderLabel}
-            </span>
-          )}
-        </div>
-        <div className="quota-tracker-filter-group">
-          <button
-            type="button"
-            className="quota-tracker-chip"
-            disabled={!sortedCredentials.length || quotaBulkBusy}
-            onClick={toggleVisibleSelection}
-            aria-pressed={allVisibleSelected}
-            title={t("quota.selectVisible")}
-          >
-            <span className="material-symbols-outlined">{allVisibleSelected ? "check_box" : "check_box_outline_blank"}</span>
-            <span>{t("quota.selectVisibleCount", { count: sortedCredentials.length })}</span>
-          </button>
-          {selectedCredentials.length > 0 ? (
-            <>
-              <span className="quota-tracker-countdown">{t("quota.selectedCount", { count: selectedCredentials.length })}</span>
-              <button type="button" className="quota-tracker-chip" disabled={quotaBulkBusy || refreshingAll} onClick={() => void runBulkQuotaAction("refresh")}>
-                <span className={cn("material-symbols-outlined", quotaBulkBusy && "animate-spin")}>refresh</span>
-                <span>{t("quota.refreshSelected")}</span>
-              </button>
-              <button type="button" className="quota-tracker-chip" disabled={quotaBulkBusy || refreshingAll} onClick={() => void runBulkQuotaAction("cooldown")}>
-                <span className="material-symbols-outlined">restart_alt</span>
-                <span>{t("quota.clearCooldownSelected")}</span>
-              </button>
-              {selectedCodexResetCredentials.length > 0 ? (
-                <button type="button" className="quota-tracker-chip quota-tracker-chip-amber" disabled={quotaBulkBusy || refreshingAll} onClick={() => setBulkResetConfirmOpen(true)}>
-                  <span className="material-symbols-outlined">bolt</span>
-                  <span>{t("quota.resetCodexSelected", { count: selectedCodexResetCredentials.length })}</span>
-                </button>
-              ) : null}
-              <button type="button" className="quota-tracker-chip" disabled={quotaBulkBusy} onClick={() => setSelectedCredentialIds(new Set())}>
-                <span>{t("quota.clearSelection")}</span>
-              </button>
-            </>
-          ) : null}
-          <div className="quota-tracker-dropdown">
-            <button
-              type="button"
-              className="quota-tracker-chip"
-              onClick={() => setProviderMenuOpen((open) => !open)}
-              aria-expanded={providerMenuOpen}
+    <section className="cp-page">
+      <PageStats
+        label={t("quota.accountStatistics")}
+        items={[
+          {
+            key: "all",
+            icon: "stacks",
+            label: t("quota.overview.all"),
+            value: overviewCounts.total,
+            hint: overviewCounts.checking > 0 ? t("quota.overview.checking", { count: overviewCounts.checking }) : t("quota.overview.allHint"),
+            ...filterTile("all"),
+          },
+          {
+            key: "available",
+            icon: "check_circle",
+            tone: "success",
+            label: t("quota.overview.available"),
+            value: overviewCounts.available,
+            hint: t("quota.overview.availableHint"),
+            muted: overviewCounts.available === 0,
+            ...filterTile("available"),
+          },
+          {
+            key: "low",
+            icon: "battery_2_bar",
+            tone: "warning",
+            label: t("quota.overview.low"),
+            value: overviewCounts.low,
+            hint: t("quota.overview.lowHint"),
+            muted: overviewCounts.low === 0,
+            ...filterTile("low"),
+          },
+          {
+            key: "attention",
+            icon: "report",
+            tone: "danger",
+            label: t("quota.overview.attention"),
+            value: overviewCounts.attention,
+            hint: t("quota.overview.attentionHint"),
+            muted: overviewCounts.attention === 0,
+            ...filterTile("attention"),
+          },
+          {
+            key: "inactive",
+            icon: "power_settings_new",
+            tone: "muted",
+            label: t("quota.overview.inactive"),
+            value: overviewCounts.off,
+            hint: t("quota.overview.inactiveHint"),
+            ...filterTile("inactive"),
+          },
+          {
+            key: "next-reset",
+            icon: "update",
+            label: t("quota.overview.nextReset"),
+            value: nextReset ? nextReset.time : "—",
+            hint: nextReset ? nextReset.label : t("quota.overview.nextResetNone"),
+            title: nextReset?.label,
+            mono: true,
+          },
+        ]}
+      />
+
+      <Toolbar>
+        <ToolbarRow>
+          <FilterTabs
+            label={t("quota.filterByProvider")}
+            value={providerFilter}
+            onChange={(provider) => updateQuotaFilters({ provider: provider === providerFilter ? "all" : provider })}
+            items={[
+              { value: "all", icon: "apps", label: t("quota.allProviders"), count: eligible.length },
+              ...providerOptions.map((providerType) => {
+                const info = getProviderTypeInfo(providerType);
+                return {
+                  value: providerType,
+                  label: info.name,
+                  count: providerCounts[providerType] || 0,
+                  logo: <ProviderLogo className="cp-tab-logo" providerType={providerType} style={{ color: info.color }} />,
+                };
+              }),
+            ]}
+          />
+          <ToolbarEnd>
+            <AutoRefreshToggle
+              enabled={autoRefresh}
+              nextAt={nextRefreshAt}
+              title={t("quota.autoRefreshHint")}
+              onToggle={() => {
+                setNextRefreshAt(Date.now() + REFRESH_INTERVAL_MS);
+                setAutoRefresh((value) => !value);
+              }}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              icon="refresh"
+              loading={refreshingAll}
+              onClick={() => void refreshAll()}
+              title={t("quota.refreshAllHint")}
             >
-              <span className="material-symbols-outlined">apps</span>
-              <span className="quota-tracker-chip-label">{selectedProviderLabel}</span>
-              <span className="material-symbols-outlined">expand_more</span>
-            </button>
-            {providerMenuOpen ? (
-              <>
-                <button type="button" className="quota-tracker-backdrop" aria-label={t("quota.closeProviderFilter")} onClick={() => setProviderMenuOpen(false)} />
-                <div className="quota-tracker-menu">
-                  <button
-                    type="button"
-                    className={cn("quota-tracker-menu-item", providerFilter === "all" && "is-active")}
-                    onClick={() => {
-                      updateQuotaFilters({ provider: "all" });
-                      setProviderMenuOpen(false);
-                    }}
-                  >
-                    <span className="material-symbols-outlined">apps</span>
-                    <span className="quota-tracker-menu-item-text">All providers</span>
-                    <span className="quota-tracker-menu-count">{eligible.length}</span>
-                  </button>
-                  {providerOptions.map((providerType) => {
-                    const info = getProviderTypeInfo(providerType);
-                    return (
-                      <button
-                        key={providerType}
-                        type="button"
-                        className={cn("quota-tracker-menu-item", providerFilter === providerType && "is-active")}
-                        onClick={() => {
-                          updateQuotaFilters({ provider: providerType });
-                          setProviderMenuOpen(false);
-                        }}
-                      >
-                        <ProviderLogo
-                          className="quota-tracker-provider-icon"
-                          providerType={providerType}
-                          style={{ color: info.color }}
-                        />
-                        <span className="quota-tracker-menu-item-text">{info.name}</span>
-                        <span className="quota-tracker-menu-count">{providerCounts[providerType] || 0}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            ) : null}
-          </div>
+              {t("quota.refreshAll")}
+            </Button>
+          </ToolbarEnd>
+        </ToolbarRow>
 
-          <select
-            className="quota-tracker-select"
-            value={accountFilter}
-            onChange={(event) => updateQuotaFilters({ status: event.target.value as AccountFilter })}
-            aria-label={t("quota.filterByStatus")}
-          >
-            {ACCOUNT_FILTER_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-                {option.value === "all"
-                  ? ` (${accountStats.total})`
-                  : option.value === "active"
-                    ? ` (${accountStats.enabled})`
-                    : ` (${accountStats.disabled})`}
-              </option>
-            ))}
-          </select>
+        <ToolbarRow>
+          <SearchField value={search} onChange={setSearch} placeholder={t("quota.searchPlaceholder")} />
+          <ToolbarEnd>
+            <SelectField
+              label={t("quota.sortBy")}
+              value={sortMode}
+              onChange={(sort) => updateQuotaFilters({ sort })}
+              options={[
+                { value: "default", label: t("quota.sort.default") },
+                { value: "expiring", label: t("quota.sort.expiring") },
+                { value: "lowest", label: t("quota.sort.lowest") },
+              ]}
+            />
+            <Segmented
+              label={t("quota.viewMode")}
+              value={viewMode}
+              onChange={setViewMode}
+              items={[
+                { value: "grid", icon: "grid_view", label: t("quota.viewGrid") },
+                { value: "list", icon: "view_list", label: t("quota.viewList") },
+              ]}
+            />
+            <ActionMenu
+              label={t("quota.quickActions")}
+              text={t("quota.quickActions")}
+              icon="auto_fix_high"
+              badge={quickActionCount || undefined}
+              items={[
+                {
+                  key: "disable-depleted",
+                  icon: "block",
+                  label: t("quota.turnOffEmpty"),
+                  hint: t("quota.turnOffEmptyHint", { count: depletedTargets.length }),
+                  disabled: bulkToggling || toggleLocked || depletedTargets.length === 0,
+                  onSelect: () => void bulkSetEnabled(depletedTargets, false),
+                },
+                {
+                  key: "enable-available",
+                  icon: "check_circle",
+                  label: t("quota.turnOnAvailable"),
+                  hint: t("quota.turnOnAvailableHint", { count: availableTargets.length }),
+                  disabled: bulkToggling || toggleLocked || availableTargets.length === 0,
+                  onSelect: () => void bulkSetEnabled(availableTargets, true),
+                },
+                {
+                  key: "select-visible",
+                  icon: "select_all",
+                  label: t("quota.selectVisibleCount", { count: sortedCredentials.length }),
+                  hint: t("quota.selectVisibleHint"),
+                  disabled: sortedCredentials.length === 0 || allVisibleSelected,
+                  onSelect: () => toggleSelection(sortedCredentials, true),
+                },
+              ]}
+            />
+            <GuideToggle open={guide.open} onToggle={guide.toggle} />
+          </ToolbarEnd>
+        </ToolbarRow>
 
-          <button
-            type="button"
-            className={cn("quota-tracker-chip", expiringFirst && "quota-tracker-chip-amber")}
-            onClick={() => updateQuotaFilters({ sort: expiringFirst ? "default" : "expiring" })}
-            aria-pressed={expiringFirst}
-          >
-            <span className="material-symbols-outlined">hourglass_top</span>
-            <span>Expiring first</span>
-          </button>
+        {!quotaPassReady && loadOrderCredentials.length > 0 ? (
+          <ProgressLine value={quotaPassSettledCount} total={loadOrderCredentials.length}>
+            {t("quota.loadingQuotaProgress", { current: quotaPassSettledCount, total: loadOrderCredentials.length })}
+            {" · "}
+            {t("quota.toggleLockedShort")}
+          </ProgressLine>
+        ) : null}
+      </Toolbar>
 
-          <button
-            type="button"
-            className="quota-tracker-chip quota-tracker-chip-danger"
-            disabled={bulkToggling || !quotaDataReady}
-            onClick={handleDisableDepleted}
-          >
-            <span className="material-symbols-outlined">block</span>
-            <span>Turn off Empty</span>
-          </button>
+      <PageGuide
+        open={guide.open}
+        onDismiss={guide.dismiss}
+        title={t("quota.guide.title")}
+        steps={[
+          { icon: "account_circle", text: t("quota.guide.cards") },
+          { icon: "low_priority", text: t("quota.guide.routing") },
+          { icon: "bolt", text: t("quota.guide.actions") },
+        ]}
+        legend={
+          <>
+            <LegendItem tone="success">{t("quota.guide.legendHigh")}</LegendItem>
+            <LegendItem tone="warning">{t("quota.guide.legendMid")}</LegendItem>
+            <LegendItem tone="danger">{t("quota.guide.legendLow")}</LegendItem>
+          </>
+        }
+      />
 
-          <button
-            type="button"
-            className="quota-tracker-chip quota-tracker-chip-success"
-            disabled={bulkToggling || !quotaDataReady}
-            onClick={handleEnableAvailable}
-          >
-            <span className="material-symbols-outlined">check_circle</span>
-            <span>Turn on Available</span>
-          </button>
-
-          <button
-            type="button"
-            className="quota-tracker-chip"
-            onClick={() => setAutoRefresh((value) => !value)}
-          >
-            <span className={cn("material-symbols-outlined", autoRefresh && "quota-tracker-icon-active")}>
-              {autoRefresh ? "toggle_on" : "toggle_off"}
-            </span>
-            <span>Auto-refresh</span>
-            {autoRefresh ? <span className="quota-tracker-countdown">({countdown}s)</span> : null}
-          </button>
-
-          <button
-            type="button"
-            className="quota-tracker-chip"
-            disabled={refreshingAll}
-            onClick={() => void refreshAll()}
-            aria-label={t("quota.refreshAll")}
-          >
-            <span className={cn("material-symbols-outlined", refreshingAll && "animate-spin")}>refresh</span>
-          </button>
-        </div>
-      </div>
-
-      {!quotaPassReady ? (
-        <div className="quota-tracker-banner quota-tracker-order-hint">
-          <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
-          {t("quota.loadingQuotaProgress", {
-            current: quotaPassSettledCount,
-            total: loadOrderCredentials.length,
-          })}
-        </div>
-      ) : expiringFirst ? (
-        <div className="quota-tracker-banner">
-          Expiring-first reorders accounts on this page by earliest quota reset time.
-        </div>
-      ) : accountStats.total > 1 ? (
-        <div className="quota-tracker-banner quota-tracker-order-hint">
-          <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-          Drag accounts within a provider to choose the order tproxy tries them. The first account is used first.
-        </div>
+      {sortMode !== "default" && groups.some((group) => group.items.length > 1) ? (
+        <PageNote action={<LinkButton onClick={() => updateQuotaFilters({ sort: "default" })}>{t("quota.sortBackToRouting")}</LinkButton>}>
+          {t("quota.sortNote")}
+        </PageNote>
       ) : null}
 
-      {sortedCredentials.length === 0 ? (
-        <div className="quota-tracker-empty">
-          <span className="material-symbols-outlined">filter_alt_off</span>
-          <h3>No accounts match this filter</h3>
-          <p>Try changing the provider or account status filter.</p>
-        </div>
+      {groups.length === 0 ? (
+        <EmptyPanel
+          icon="filter_alt_off"
+          title={t("quota.noAccountsMatch")}
+          description={t("quota.tryChangingFilter")}
+          action={hasActiveFilters ? <Button variant="secondary" icon="filter_alt_off" onClick={clearFilters}>{t("quota.clearFilters")}</Button> : null}
+        />
       ) : (
-        <div className="quota-tracker-grid">
-          {sortedCredentials.map((credential) => {
-            const quotaKey = quotaProviderKey(credential);
-            const info = getProviderTypeInfo(quotaKey);
-            const quota = quotaById[credential.id] || peekCachedQuota(credential.id)?.quota;
-            const quotaPlan = formatServicePlanLabel(quota?.plan) || quota?.plan?.trim();
-            const busy = loading[credential.id];
-            const error = errors[credential.id];
-            const rowBusy = deletingId === credential.id || togglingId === credential.id || resettingLimitId === credential.id || clearingCooldownId === credential.id || quotaBulkBusy;
-            const allEntries = quotaEntries(quota);
-            const visibleEntries = filterQuotasByVisibility(quotaKey, allEntries, quotaVisibility);
-            const hiddenEntries = getHiddenQuotaRows(quotaKey, allEntries, quotaVisibility);
-            const secondary = credential.email && credential.label && credential.email !== credential.label ? credential.email : null;
-            const connectionLabel = getConnectionLabel(credential) || credential.id;
-            const displayLabel = maskAccountText(connectionLabel, masked);
-            const displaySecondary = secondary ? maskAccountText(secondary, masked) : null;
-            const isCodex = quotaKey === "codex" || credential.providerType === "codex";
-            const resetCreditCount = getCodexResetCreditCount(quota);
-            const isResettingLimit = resettingLimitId === credential.id;
-            const renewalDate = formatRenewalDate(quota?.renews_at);
-
-            const isQuotaAutoDisabled = quota?.quota_auto_disabled === true;
-            const isQuotaDataEmpty = Boolean(quota) && allEntries.length === 0;
-            const isAllQuotaRowsHidden = allEntries.length > 0 && visibleEntries.length === 0;
-            const isQuotaContentEmpty = isQuotaDataEmpty || isAllQuotaRowsHidden;
-            const isCardMuted = !credential.enabled || isQuotaAutoDisabled || isQuotaContentEmpty;
-            const canReorder = !expiringFirst && (accountCountByProviderId[credential.providerId] || 0) > 1;
-            const isDragging = draggingCredentialId === credential.id;
-            const isDragOver = dragOverCredentialId === credential.id;
-
+        <div className="qt-groups">
+          {groups.map((group) => {
+            const info = getProviderTypeInfo(group.quotaKey);
+            const total = accountCountByProviderId[group.providerId] || group.items.length;
+            const enabledCount = eligible.filter((item) => item.providerId === group.providerId && item.enabled).length;
+            const groupSelected = group.items.every((item) => selectedCredentialIds.has(item.id));
+            const groupPartlySelected = !groupSelected && group.items.some((item) => selectedCredentialIds.has(item.id));
+            const buckets = { available: 0, low: 0, attention: 0 };
+            for (const item of group.items) {
+              const bucket = accountHealthBucket(healthById[item.id]);
+              if (bucket && bucket !== "off") buckets[bucket] += 1;
+            }
+            const views = group.items.map(buildView);
             return (
-              <article
-                key={credential.id}
-                className={cn(
-                  "quota-tracker-card",
-                  "quota-tracker-card-selectable",
-                  !credential.enabled && "quota-tracker-card-inactive",
-                  isQuotaAutoDisabled && "quota-tracker-card-auto-paused",
-                  isQuotaContentEmpty && "quota-tracker-card-empty",
-                  isCardMuted && "quota-tracker-card-muted",
-                  detailCredential?.id === credential.id && "quota-tracker-card-selected",
-                  isDragging && "is-dragging",
-                  isDragOver && "is-drag-over",
+              <section key={group.providerId} className="qt-group" aria-label={info.name}>
+                <SectionHead
+                  leading={
+                    <>
+                      <input
+                        type="checkbox"
+                        className="cp-check"
+                        checked={groupSelected}
+                        ref={(element) => {
+                          if (element) element.indeterminate = groupPartlySelected;
+                        }}
+                        onChange={(event) => toggleSelection(group.items, event.target.checked)}
+                        aria-label={t("quota.group.select", { name: info.name })}
+                      />
+                      <ProviderLogo className="cp-section-logo" providerType={group.quotaKey} style={{ color: info.color }} />
+                    </>
+                  }
+                  title={info.name}
+                  titleExtra={group.providerId !== group.quotaKey ? <code>{group.providerId}</code> : null}
+                  subtitle={
+                    group.items.length === total
+                      ? t("quota.group.summary", { count: total, on: enabledCount })
+                      : t("quota.group.summaryFiltered", { shown: group.items.length, count: total, on: enabledCount })
+                  }
+                  meta={
+                    <ToneCounts
+                      label={t("quota.group.health")}
+                      items={[
+                        { tone: "success", count: buckets.available, label: t("quota.overview.available") },
+                        { tone: "warning", count: buckets.low, label: t("quota.overview.low") },
+                        { tone: "danger", count: buckets.attention, label: t("quota.overview.attention") },
+                      ]}
+                    />
+                  }
+                  actions={
+                    <ToolButton
+                      icon="refresh"
+                      disabled={quotaBulkBusy || refreshingAll}
+                      onClick={() => void runBulkQuotaAction("refresh", group.items)}
+                      title={t("quota.group.refreshHint", { name: info.name })}
+                    >
+                      {t("quota.group.refresh")}
+                    </ToolButton>
+                  }
+                />
+
+                {viewMode === "grid" ? (
+                  <div className="cp-grid" style={{ ["--cp-card-min" as string]: "330px" }}>
+                    {views.map((view) => (
+                      <QuotaAccountCard
+                        key={view.credential.id}
+                        view={view}
+                        handlers={handlers}
+                        toggleLocked={toggleLocked}
+                        reorderLocked={reorderLocked}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="cp-list qt-list">
+                    <div className="cp-list-head" aria-hidden>
+                      <span />
+                      <span>#</span>
+                      <span>{t("quota.columns.account")}</span>
+                      <span>{t("quota.columns.status")}</span>
+                      <span>{t("quota.columns.quota")}</span>
+                      <span>{t("quota.columns.usage")}</span>
+                      <span>{t("quota.columns.routing")}</span>
+                      <span />
+                    </div>
+                    {views.map((view) => (
+                      <QuotaAccountRow
+                        key={view.credential.id}
+                        view={view}
+                        handlers={handlers}
+                        toggleLocked={toggleLocked}
+                        reorderLocked={reorderLocked}
+                      />
+                    ))}
+                  </div>
                 )}
-                role="button"
-                tabIndex={0}
-                aria-label={`View details for ${displayLabel}`}
-                onDragOver={(event) => {
-                  const source = credentials.find((item) => item.id === draggingCredentialId);
-                  if (!reorderingProviderId && source && source.providerId === credential.providerId && source.id !== credential.id) {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    setDragOverCredentialId(credential.id);
-                  }
-                }}
-                onDrop={(event) => void handleCredentialDrop(event, credential)}
-                onClick={() => setDetailCredential(credential)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setDetailCredential(credential);
-                  }
-                }}
-              >
-                <div
-                  className="quota-tracker-card-head"
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  <div className="quota-tracker-card-head-row">
-                    <input
-                      type="checkbox"
-                      className="quota-tracker-card-select"
-                      checked={selectedCredentialIds.has(credential.id)}
-                      disabled={quotaBulkBusy}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => {
-                        event.stopPropagation();
-                        setSelectedCredentialIds((current) => {
-                          const next = new Set(current);
-                          if (event.target.checked) next.add(credential.id);
-                          else next.delete(credential.id);
-                          return next;
-                        });
-                      }}
-                      aria-label={t("quota.selectAccount", { label: displayLabel })}
-                    />
-                    {canReorder ? (
-                      <button
-                        type="button"
-                        className="quota-tracker-drag-handle"
-                        draggable={!reorderingProviderId && !expiringFirst}
-                        disabled={Boolean(reorderingProviderId) || expiringFirst}
-                        onClick={(event) => event.stopPropagation()}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", credential.id);
-                          setDraggingCredentialId(credential.id);
-                          setDragOverCredentialId(null);
-                        }}
-                        onDragEnd={() => {
-                          setDraggingCredentialId(null);
-                          setDragOverCredentialId(null);
-                        }}
-                        aria-label={`Drag ${displayLabel} to change account order`}
-                        title="Drag to change account order"
-                      >
-                        <span className="material-symbols-outlined" aria-hidden="true">drag_indicator</span>
-                      </button>
-                    ) : null}
-                    <div className="quota-tracker-card-ident">
-                      <ProviderLogo
-                        className="quota-tracker-provider-icon quota-tracker-provider-icon-lg"
-                        providerType={quotaKey}
-                        style={{ color: info.color }}
-                      />
-                      <div className="quota-tracker-card-titles">
-                        <h3>{info.name}</h3>
-                        <div className="quota-tracker-card-meta">
-                          <span className="quota-tracker-card-account" title={displayLabel}>{displayLabel}</span>
-                          {displaySecondary ? <span className="quota-tracker-card-secondary" title={displaySecondary}>{displaySecondary}</span> : null}
-                          {!credential.enabled ? <span className="quota-tracker-card-state">{t("quota.off")}</span> : null}
-                          {isQuotaAutoDisabled ? <span className="quota-tracker-card-state">{t("quota.autoPaused")}</span> : null}
-                        </div>
-                      </div>
-                    </div>
-                    {quotaPlan ? (
-                      <span
-                        className="quota-tracker-card-plan"
-                        title={t("quota.servicePlan", { plan: quotaPlan })}
-                      >
-                        {quotaPlan}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="quota-tracker-card-actions">
-                    <Toggle
-                      checked={credential.enabled}
-                      disabled={rowBusy || !quotaDataReady}
-                      onChange={(event) => void setCredentialEnabled(credential, event.target.checked)}
-                      aria-label={credential.enabled ? "Disable connection" : "Enable connection"}
-                    />
-                    {isCodex ? (
-                      <>
-                        <button
-                          type="button"
-                          className={cn(
-                            "quota-tracker-reset-btn",
-                            resetCreditCount > 0 && "quota-tracker-reset-btn-active",
-                          )}
-                          disabled={resetCreditCount <= 0 || busy || rowBusy}
-                          onClick={() => setResetConfirmCredential(credential)}
-                          aria-label={
-                            resetCreditCount > 0
-                              ? `Use one Codex reset credit. ${resetCreditCount} available.`
-                              : "No Codex reset credits available"
-                          }
-                          title={
-                            resetCreditCount > 0
-                              ? `Use one Codex reset credit (${resetCreditCount} available)`
-                              : "No Codex reset credits available"
-                          }
-                        >
-                          <span className={cn("material-symbols-outlined", isResettingLimit && "animate-spin")}>
-                            {isResettingLimit ? "progress_activity" : "restart_alt"}
-                          </span>
-                          <span>{resetCreditCount}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="quota-tracker-icon-btn"
-                          disabled={busy || rowBusy}
-                          onClick={() => setResetCreditsCredential(credential)}
-                          aria-label={t("quota.viewResetExpiry")}
-                          title={t("quota.viewResetExpiry")}
-                        >
-                          <span className="material-symbols-outlined">schedule</span>
-                        </button>
-                      </>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="quota-tracker-icon-btn"
-                      disabled={busy || rowBusy}
-                      onClick={() => {
-                        if (credential.cooldown_until && isOnCooldown(credential.cooldown_until)) {
-                          void handleClearCooldown(credential);
-                        } else {
-                          void loadQuota(credential.id, true).then((changed) => {
-                            if (changed) onMutated?.();
-                          });
-                        }
-                      }}
-                      aria-label={t("quota.refreshQuota")}
-                      title={t("quota.refreshQuota")}
-                    >
-                      <span className={cn("material-symbols-outlined", (busy || clearingCooldownId === credential.id) && "animate-spin")}>refresh</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="quota-tracker-icon-btn"
-                      disabled={rowBusy}
-                      onClick={() => navigate(`/providers/${encodeURIComponent(credential.providerId)}`)}
-                      aria-label={t("quota.editConnection")}
-                      title={t("quota.editConnection")}
-                    >
-                      <span className="material-symbols-outlined">edit</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="quota-tracker-icon-btn quota-tracker-icon-btn-danger"
-                      disabled={rowBusy}
-                      onClick={() => void handleDelete(credential)}
-                      aria-label={t("quota.deleteConnection")}
-                      title={t("quota.deleteConnection")}
-                    >
-                      <span className={cn("material-symbols-outlined", deletingId === credential.id && "animate-pulse")}>delete</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="quota-tracker-card-body">
-                  {busy && !quota ? (
-                    <div className="quota-tracker-card-loading">
-                      <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                    </div>
-                  ) : error ? (
-                    <div className="quota-tracker-card-error">
-                      <span className="material-symbols-outlined">error</span>
-                      <p>{error}</p>
-                    </div>
-                  ) : isQuotaDataEmpty ? (
-                    <div className="quota-tracker-card-empty-state">
-                      <span className="material-symbols-outlined">data_usage</span>
-                      <span>{quota?.message || t("quota.noQuotaData")}</span>
-                    </div>
-                  ) : isAllQuotaRowsHidden ? (
-                    <div className="quota-tracker-card-empty-state">
-                      <span className="material-symbols-outlined">visibility_off</span>
-                      <span>{t("quota.allQuotaRowsHidden")}</span>
-                    </div>
-                  ) : (
-                    usesQuotaStackedLayout(quotaKey) ? (
-                      <QuotaStackedBar
-                        rows={visibleEntries}
-                        proxyUsage={
-                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
-                        }
-                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
-                      />
-                    ) : usesQuotaRingLayout(quotaKey) ? (
-                      <QuotaRingGrid
-                        rows={visibleEntries}
-                        proxyUsage={
-                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
-                        }
-                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
-                      />
-                    ) : (
-                      <QuotaTable
-                        rows={visibleEntries}
-                        credentialActive={activeCredentialIds.has(credential.id)}
-                        proxyUsage={
-                          proxyUsageById[credential.id] ?? { requests: 0, promptTokens: 0, completionTokens: 0 }
-                        }
-                        onHide={(row) => handleHideQuota(quotaKey, getQuotaVisibilityKey(row))}
-                      />
-                    )
-                  )}
-
-                  {hiddenEntries.length > 0 ? (
-                    <div className="quota-tracker-hidden">
-                      <span className="material-symbols-outlined">visibility_off</span>
-                      <span>Hidden:</span>
-                      {hiddenEntries.map((row) => (
-                        <button
-                          key={row.key}
-                          type="button"
-                          className="quota-tracker-hidden-chip"
-                          onClick={() => handleShowQuota(quotaKey, getQuotaVisibilityKey(row))}
-                        >
-                          {row.name}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {renewalDate ? (
-                    <div className="quota-tracker-card-renewal">
-                      <span className="material-symbols-outlined">event_repeat</span>
-                      <span>Renews {renewalDate}</span>
-                    </div>
-                  ) : null}
-                </div>
-              </article>
+              </section>
             );
           })}
         </div>
       )}
 
+      <BulkBar
+        count={selectedCredentials.length}
+        busy={quotaBulkBusy || bulkToggling}
+        onClear={() => setSelectedCredentialIds(new Set())}
+        selectAll={
+          allVisibleSelected
+            ? null
+            : { label: t("quota.bulk.selectAllVisible", { count: sortedCredentials.length }), onSelect: () => toggleSelection(sortedCredentials, true) }
+        }
+      >
+        <BulkButton icon="refresh" spinning={quotaBulkBusy} disabled={quotaBulkBusy || bulkToggling} onClick={() => void runBulkQuotaAction("refresh")}>
+          {t("quota.bulk.refresh")}
+        </BulkButton>
+        <BulkButton icon="restart_alt" disabled={quotaBulkBusy || bulkToggling} onClick={() => void runBulkQuotaAction("cooldown")}>
+          {t("quota.clearCooldownSelected")}
+        </BulkButton>
+        <BulkButton
+          icon="toggle_on"
+          disabled={quotaBulkBusy || bulkToggling || toggleLocked}
+          onClick={() => void bulkSetEnabled(selectedCredentials.filter((item) => !item.enabled), true)}
+        >
+          {t("quota.bulk.enable")}
+        </BulkButton>
+        <BulkButton
+          icon="toggle_off"
+          disabled={quotaBulkBusy || bulkToggling || toggleLocked}
+          onClick={() => void bulkSetEnabled(selectedCredentials.filter((item) => item.enabled), false)}
+        >
+          {t("quota.bulk.disable")}
+        </BulkButton>
+        {selectedCodexResetCredentials.length > 0 ? (
+          <BulkButton icon="bolt" tone="warning" disabled={quotaBulkBusy || bulkToggling} onClick={() => setBulkResetConfirmOpen(true)}>
+            {t("quota.resetCodexSelected", { count: selectedCodexResetCredentials.length })}
+          </BulkButton>
+        ) : null}
+      </BulkBar>
+
+      <ConfirmDialog
+        open={Boolean(deleteConfirmCredential)}
+        title={t("quota.deleteConnection")}
+        message={
+          deleteConfirmCredential
+            ? t("quota.deleteConfirmMessage", {
+                label: maskAccountText(getConnectionLabel(deleteConfirmCredential) || deleteConfirmCredential.id, masked),
+              })
+            : ""
+        }
+        confirmText={t("quota.deleteConnection")}
+        cancelText={t("common.cancel")}
+        variant="danger"
+        onClose={() => setDeleteConfirmCredential(null)}
+        onConfirm={() => {
+          if (deleteConfirmCredential) void handleDelete(deleteConfirmCredential);
+        }}
+      />
+
       <ConfirmDialog
         open={Boolean(resetConfirmCredential)}
-        title={t("quota.resetCodexConfirm")}
+        title={t("quota.resetCodexLimit")}
         message={
           resetConfirmCredential
-            ? `Use 1 Codex reset credit for ${maskAccountText(getConnectionLabel(resetConfirmCredential) || resetConfirmCredential.email || "this account", masked)}. This cannot be undone. Remaining credits: ${getCodexResetCreditCount(quotaById[resetConfirmCredential.id])}.`
+            ? t("quota.resetCodexConfirm", {
+                label: maskAccountText(getConnectionLabel(resetConfirmCredential) || resetConfirmCredential.email || resetConfirmCredential.id, masked),
+                count: getCodexResetCreditCount(quotaById[resetConfirmCredential.id]),
+              })
             : ""
         }
         confirmText={t("quota.resetLimit")}
@@ -1354,19 +1426,31 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         open={Boolean(bulkResults)}
         onClose={() => setBulkResults(null)}
         title={bulkResults?.title || t("quota.bulkActionResults")}
+        subtitle={
+          bulkResults
+            ? t("quota.bulk.resultSummary", {
+                ok: bulkResults.items.filter((item) => item.ok).length,
+                failed: bulkResults.items.filter((item) => !item.ok).length,
+              })
+            : undefined
+        }
         size="md"
         footer={<Button variant="secondary" onClick={() => setBulkResults(null)}>{t("common.close")}</Button>}
       >
         <div className="quota-bulk-results">
-          {bulkResults?.items.map((item) => (
-            <div key={item.id} className={cn("quota-bulk-result", item.ok ? "quota-bulk-result-ok" : "quota-bulk-result-error")}>
-              <span className="material-symbols-outlined" aria-hidden="true">{item.ok ? "check_circle" : "error"}</span>
-              <div>
-                <strong>{item.label}</strong>
-                <span>{item.message}</span>
-              </div>
-            </div>
-          ))}
+          {bulkResults
+            ? [...bulkResults.items]
+                .sort((a, b) => Number(a.ok) - Number(b.ok))
+                .map((item) => (
+                  <div key={item.id} className={cn("quota-bulk-result", item.ok ? "quota-bulk-result-ok" : "quota-bulk-result-error")}>
+                    <span className="material-symbols-outlined" aria-hidden="true">{item.ok ? "check_circle" : "error"}</span>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <span>{item.message}</span>
+                    </div>
+                  </div>
+                ))
+            : null}
         </div>
       </Modal>
 
@@ -1392,15 +1476,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
           if (selectedCredential) void setCredentialEnabled(selectedCredential, enabled);
         }}
         onClearCooldown={() => {
-          if (selectedCredential) {
-            if (selectedCredential.cooldown_until && isOnCooldown(selectedCredential.cooldown_until)) {
-              void handleClearCooldown(selectedCredential);
-            } else {
-              void loadQuota(selectedCredential.id, true).then((changed) => {
-                if (changed) onMutated?.();
-              });
-            }
-          }
+          if (selectedCredential) refreshCredential(selectedCredential);
         }}
         clearingCooldown={selectedCredential ? clearingCooldownId === selectedCredential.id : false}
         resetCreditCount={selectedCredential ? getCodexResetCreditCount(quotaById[selectedCredential.id]) : 0}
@@ -1412,7 +1488,7 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
           if (!selectedCredential) return;
           setQuotaById((current) => ({ ...current, [selectedCredential.id]: quota }));
         }}
-        refreshCountdown={countdown}
+        clock={clock}
       />
     </section>
   );

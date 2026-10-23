@@ -86,15 +86,15 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
     <Modal
       open={open}
       onClose={onClose}
-      title="Connect Cursor IDE"
-      subtitle="Read from Cursor's local database or paste tokens manually"
+      title={t("providers.cursorImportTitle")}
+      subtitle={t("providers.cursorImportSubtitle")}
       icon="edit"
       size="md"
       footer={
         detecting ? null : (
           <>
             <Button variant="ghost" size="sm" onClick={onClose} disabled={importing}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               variant="primary"
@@ -104,36 +104,36 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
               disabled={!accessToken.trim() || !machineId.trim()}
               onClick={() => void handleImport()}
             >
-              {importing ? "Importing…" : "Import token"}
+              {importing ? t("providers.cursorImportImporting") : t("providers.cursorImportToken")}
             </Button>
           </>
         )
       }
     >
       {detecting ? (
-        <div className="cursor-import-detecting" style={{ textAlign: "center", padding: "24px 0" }}>
+        <div className="cursor-import-detecting pv-detecting">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          <p className="cursor-import-detecting-title">Auto-detecting tokens…</p>
-          <p className="cli-tool-hint">Reading from Cursor IDE database</p>
+          <p className="cursor-import-detecting-title">{t("providers.cursorImportAutoDetecting")}</p>
+          <p className="cli-tool-hint">{t("providers.cursorImportReadingDb")}</p>
         </div>
       ) : (
         <>
           {autoDetected ? (
             <div className="cli-tool-note cli-tool-note-info">
               <span className="material-symbols-outlined">check_circle</span>
-              <p>Tokens auto-detected from Cursor IDE.</p>
+              <p>{t("providers.cursorImportDetected")}</p>
             </div>
           ) : null}
           {windowsManual ? (
             <div className="cli-tool-note cli-tool-note-warning">
               <span className="material-symbols-outlined">info</span>
               <div>
-                <p>Could not read the Cursor database automatically.</p>
+                <p>{t("providers.cursorImportCouldNotRead")}</p>
                 <p className="cli-tool-hint">
-                  Open Cursor IDE at least once, then click Retry. If it still fails, paste your tokens manually below.
+                  {t("providers.cursorImportWindowsHint")}
                 </p>
                 <Button variant="outline" size="sm" icon="refresh" onClick={() => void runAutoDetect()}>
-                  Retry
+                  {t("providers.cursorImportRetry")}
                 </Button>
               </div>
             </div>
@@ -147,14 +147,14 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
           {!autoDetected && !windowsManual && !errorMsg ? (
             <div className="cli-tool-note cli-tool-note-info">
               <span className="material-symbols-outlined">info</span>
-              <p>Cursor IDE not detected. Paste your tokens manually or retry auto-detect.</p>
+              <p>{t("providers.cursorImportNotDetected")}</p>
             </div>
           ) : null}
           <div className="settings-form-grid">
-            <Field label="Label">
+            <Field label={t("providers.label")}>
               <Input value={label} onChange={(event) => setLabel(event.target.value)} />
             </Field>
-            <Field label="Access token">
+            <Field label={t("providers.cursorImportAccessToken")}>
               <textarea
                 className="input"
                 rows={3}
@@ -163,7 +163,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
                 placeholder="cursorAuth/accessToken"
               />
             </Field>
-            <Field label="Machine ID">
+            <Field label={t("providers.cursorImportMachineId")}>
               <Input
                 value={machineId}
                 onChange={(event) => setMachineId(event.target.value)}
@@ -173,11 +173,11 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
           </div>
           {!windowsManual ? (
             <Button variant="outline" size="sm" icon="refresh" disabled={detecting} onClick={() => void runAutoDetect()}>
-              Retry auto-detect
+              {t("providers.cursorImportRetryAutoDetect")}
             </Button>
           ) : null}
           <p className="cli-tool-hint">
-            Open Cursor IDE and sign in first. Tokens are read from <code>state.vscdb</code> in Cursor&apos;s globalStorage folder.
+            {t("providers.cursorImport.dbHint")}
           </p>
         </>
       )}

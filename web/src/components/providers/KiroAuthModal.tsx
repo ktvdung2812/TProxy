@@ -147,7 +147,7 @@ export function KiroAuthModal({
       onComplete?.();
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "CLIProxyAPI import failed";
+      const message = error instanceof Error ? error.message : t("providers.kiroAuthCliProxyImportFailed");
       setErrorMsg(message);
       onError?.(message);
     } finally {
@@ -157,7 +157,7 @@ export function KiroAuthModal({
 
   const handleApiKeyImport = async () => {
     if (!apiKey.trim()) {
-      setErrorMsg("Please enter an API key");
+      setErrorMsg(t("providers.kiroAuthApiKeyRequired"));
       return;
     }
     setBusy(true);
@@ -171,7 +171,7 @@ export function KiroAuthModal({
       onComplete?.();
       onClose();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "API key import failed";
+      const message = error instanceof Error ? error.message : t("providers.kiroAuthApiKeyImportFailed");
       setErrorMsg(message);
       onError?.(message);
     } finally {
@@ -181,7 +181,7 @@ export function KiroAuthModal({
 
   const handleIdcContinue = () => {
     if (!idcStartUrl.trim()) {
-      setErrorMsg("Please enter your IDC start URL");
+      setErrorMsg(t("providers.kiroAuthIdcUrlRequired"));
       return;
     }
     onDeviceFlow({
@@ -195,16 +195,16 @@ export function KiroAuthModal({
     method === "idc" ? (
       <>
         <Button variant="ghost" size="sm" onClick={() => setMethod(null)}>
-          Back
+          {t("common.back")}
         </Button>
         <Button variant="primary" size="sm" onClick={handleIdcContinue}>
-          Continue
+          {t("providers.kiroAuthContinue")}
         </Button>
       </>
     ) : method === "import" ? (
       <>
         <Button variant="ghost" size="sm" onClick={() => setMethod(null)} disabled={busy || autoDetecting}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           variant="primary"
@@ -214,13 +214,13 @@ export function KiroAuthModal({
           disabled={autoDetecting || !refreshToken.trim()}
           onClick={() => void handleImportToken()}
         >
-          Import token
+          {t("providers.kiroAuthImportToken")}
         </Button>
       </>
     ) : method === "import-cli-proxy" ? (
       <>
         <Button variant="ghost" size="sm" onClick={() => setMethod(null)} disabled={busy}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           variant="primary"
@@ -230,13 +230,13 @@ export function KiroAuthModal({
           disabled={!cliProxyJson.trim()}
           onClick={() => void handleImportCLIProxy()}
         >
-          Import JSON
+          {t("providers.kiroAuthImportJson")}
         </Button>
       </>
     ) : method === "api-key" ? (
       <>
         <Button variant="ghost" size="sm" onClick={() => setMethod(null)} disabled={busy}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           variant="primary"
@@ -246,12 +246,12 @@ export function KiroAuthModal({
           disabled={!apiKey.trim()}
           onClick={() => void handleApiKeyImport()}
         >
-          Save API key
+          {t("providers.kiroAuthSaveApiKey")}
         </Button>
       </>
     ) : (
       <Button variant="ghost" size="sm" onClick={onClose}>
-        Cancel
+        {t("common.cancel")}
       </Button>
     );
 
@@ -259,48 +259,48 @@ export function KiroAuthModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Connect Kiro"
-      subtitle="Choose your authentication method"
+      title={t("providers.kiroAuthTitle")}
+      subtitle={t("providers.kiroAuthSubtitle")}
       icon="shield"
       size="lg"
       footer={footer}
     >
       {!method ? (
         <div className="kiro-auth-methods">
-          <p className="oauth-step-hint">Choose how you want to authenticate with Kiro / CodeWhisperer.</p>
+          <p className="oauth-step-hint">{t("providers.kiroAuthChooseMethod")}</p>
           <button type="button" className="kiro-auth-method" onClick={() => onDeviceFlow({ authMethod: "builder-id" })}>
             <span className="material-symbols-outlined">shield</span>
             <span>
-              <strong>AWS Builder ID</strong>
-              <small>Recommended for most users. Free AWS account required.</small>
+              <strong>{t("providers.kiroAuthBuilderId")}</strong>
+              <small>{t("providers.kiroAuthBuilderIdDesc")}</small>
             </span>
           </button>
           <button type="button" className="kiro-auth-method" onClick={() => setMethod("idc")}>
             <span className="material-symbols-outlined">business</span>
             <span>
-              <strong>AWS IAM Identity Center</strong>
-              <small>For enterprise users with custom AWS IAM Identity Center.</small>
+              <strong>{t("providers.kiroAuthIdc")}</strong>
+              <small>{t("providers.kiroAuthIdcDesc")}</small>
             </span>
           </button>
           <button type="button" className="kiro-auth-method" onClick={() => setMethod("api-key")}>
             <span className="material-symbols-outlined">key</span>
             <span>
-              <strong>API Key</strong>
-              <small>Long-lived Kiro / CodeWhisperer API key (headless auth).</small>
+              <strong>{t("providers.kiroAuthApiKey")}</strong>
+              <small>{t("providers.kiroAuthApiKeyDesc")}</small>
             </span>
           </button>
           <button type="button" className="kiro-auth-method" onClick={() => setMethod("import")}>
             <span className="material-symbols-outlined">file_upload</span>
             <span>
-              <strong>Import Token</strong>
-              <small>Paste refresh token from Kiro IDE or auto-detect from AWS SSO cache.</small>
+              <strong>{t("providers.kiroAuthImportTokenHeader")}</strong>
+              <small>{t("providers.kiroAuthImportTokenDesc")}</small>
             </span>
           </button>
           <button type="button" className="kiro-auth-method" onClick={() => setMethod("import-cli-proxy")}>
             <span className="material-symbols-outlined">data_object</span>
             <span>
-              <strong>Import CLIProxyAPI JSON</strong>
-              <small>external_idp auth JSON from CLIProxyAPI / Microsoft login.</small>
+              <strong>{t("providers.kiroAuthImportCliProxy")}</strong>
+              <small>{t("providers.kiroAuthImportCliProxyDesc")}</small>
             </span>
           </button>
         </div>
@@ -308,14 +308,14 @@ export function KiroAuthModal({
 
       {method === "idc" ? (
         <div className="oauth-connect">
-          <Field label="IDC Start URL" hint="Your organization's AWS IAM Identity Center URL">
+          <Field label={t("providers.kiroAuthIdcStartUrl")} hint={t("providers.kiroAuthIdcStartUrlHint")}>
             <Input
               value={idcStartUrl}
               onChange={(e) => setIdcStartUrl(e.target.value)}
               placeholder="https://your-org.awsapps.com/start"
             />
           </Field>
-          <Field label="AWS Region" hint="Default: us-east-1">
+          <Field label={t("providers.kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
             <Input value={idcRegion} onChange={(e) => setIdcRegion(e.target.value)} placeholder="us-east-1" />
           </Field>
           {errorMsg ? <p className="oauth-inline-error">{errorMsg}</p> : null}
@@ -327,21 +327,21 @@ export function KiroAuthModal({
           {autoDetecting ? (
             <div className="oauth-status pending">
               <span className="material-symbols-outlined animate-spin">progress_activity</span>
-              <span>Auto-detecting token from AWS SSO cache…</span>
+              <span>{t("providers.kiroAuthAutoDetecting")}</span>
             </div>
           ) : null}
           {autoDetected ? (
             <div className="cli-tool-note cli-tool-note-info">
               <span className="material-symbols-outlined">check_circle</span>
-              <p>Token auto-detected from Kiro IDE / AWS SSO cache.</p>
+              <p>{t("providers.kiroAuthTokenDetected")}</p>
             </div>
           ) : null}
-          <Field label="Refresh token">
+          <Field label={t("providers.kiroAuthRefreshToken")}>
             <Input value={refreshToken} onChange={(e) => setRefreshToken(e.target.value)} placeholder="aorAAAAAG..." />
           </Field>
           {!autoDetecting ? (
             <Button variant="outline" size="sm" icon="refresh" onClick={() => void runAutoDetect()}>
-              Retry auto-detect
+              {t("providers.kiroAuthRetryAutoDetect")}
             </Button>
           ) : null}
           {errorMsg ? <p className="oauth-inline-error">{errorMsg}</p> : null}
@@ -350,7 +350,7 @@ export function KiroAuthModal({
 
       {method === "import-cli-proxy" ? (
         <div className="oauth-connect">
-          <Field label="CLIProxyAPI auth JSON">
+          <Field label={t("providers.kiroAuthCliProxyJson")}>
             <textarea
               className="input kiro-json-input"
               rows={8}
@@ -365,10 +365,10 @@ export function KiroAuthModal({
 
       {method === "api-key" ? (
         <div className="oauth-connect">
-          <Field label="API key">
-            <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Kiro API key" />
+          <Field label={t("providers.kiroAuthApiKeyField")}>
+            <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t("providers.kiroAuth.apiKeyPlaceholder")} />
           </Field>
-          <Field label="AWS Region" hint="Default: us-east-1">
+          <Field label={t("providers.kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
             <Input value={apiKeyRegion} onChange={(e) => setApiKeyRegion(e.target.value)} placeholder="us-east-1" />
           </Field>
           {errorMsg ? <p className="oauth-inline-error">{errorMsg}</p> : null}

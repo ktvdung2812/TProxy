@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal, Toggle } from "../ui";
 import type { ModelFormData } from "./types";
 import { CAPABILITY_OPTIONS, MODEL_ID_REGEX, emptyModelForm, validateModelForm } from "./utils";
@@ -22,6 +23,7 @@ export function ModelFormModal({
   onClose,
   onSubmit,
 }: Props) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<ModelFormData>(emptyModelForm());
   const [idError, setIdError] = useState("");
 
@@ -36,15 +38,15 @@ export function ModelFormModal({
   const handleIdChange = (value: string) => {
     setForm((current) => ({ ...current, id: value }));
     if (!value.trim()) {
-      setIdError("Model ID is required");
+      setIdError(t("models.form.idRequired"));
       return;
     }
     if (!MODEL_ID_REGEX.test(value.trim())) {
-      setIdError("Only letters, numbers, -, _, and . allowed");
+      setIdError(t("models.form.idAllowed"));
       return;
     }
     if (!editing && existingIds.includes(value.trim())) {
-      setIdError("This ID is already in use");
+      setIdError(t("models.form.idInUse"));
       return;
     }
     setIdError("");
@@ -66,15 +68,15 @@ export function ModelFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Edit virtual model" : "Create virtual model"}
-      subtitle="Expose one stable model ID to clients. Configure provider priority separately."
+      title={editing ? t("models.form.editTitle") : t("models.form.createTitle")}
+      subtitle={t("models.form.subtitle")}
       icon="apps"
       size="md"
       className="model-form-modal"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -84,14 +86,14 @@ export function ModelFormModal({
             disabled={!!validationError || !!idError}
             onClick={() => onSubmit(form)}
           >
-            {editing ? "Save changes" : "Create model"}
+            {editing ? t("models.form.saveChanges") : t("models.createModel")}
           </Button>
         </>
       }
     >
       <div className="model-form">
         <div className="model-form-grid">
-          <Field label="Model ID" hint="Stable ID clients call, e.g. td-coder-pro">
+          <Field label={t("models.modelId")} hint={editing ? t("models.form.idLocked") : t("models.form.idHint")}>
             <Input
               value={form.id}
               disabled={editing}
@@ -100,7 +102,7 @@ export function ModelFormModal({
             />
             {idError ? <p className="field-error">{idError}</p> : null}
           </Field>
-          <Field label="Display name">
+          <Field label={t("models.displayName")}>
             <Input
               value={form.display_name}
               onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
@@ -109,7 +111,7 @@ export function ModelFormModal({
           </Field>
         </div>
 
-        <Field label="Aliases" hint="Comma-separated alternate IDs, e.g. coder, gpt-latest">
+        <Field label={t("models.aliases")} hint={t("models.form.aliasesHint")}>
           <Input
             value={form.aliases}
             onChange={(event) => setForm((current) => ({ ...current, aliases: event.target.value }))}
@@ -121,18 +123,18 @@ export function ModelFormModal({
           <Toggle
             checked={form.enabled}
             onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-            label="Enabled"
+            label={t("models.form.enabled")}
           />
           <Toggle
             checked={form.rewrite_response_model}
             onChange={(event) =>
               setForm((current) => ({ ...current, rewrite_response_model: event.target.checked }))
             }
-            label="Rewrite response model"
+            label={t("models.rewriteResponse")}
           />
         </div>
 
-        <Field label="Capabilities">
+        <Field label={t("models.capabilities")} hint={t("models.form.capabilitiesHint")}>
           <div className="model-form-capabilities">
             {CAPABILITY_OPTIONS.map((capability) => (
               <button

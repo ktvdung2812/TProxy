@@ -59,3 +59,37 @@ export function useProviderFailover(secret: string, modelId: string | undefined,
 
   return { failoverByProvider: byProvider, failoverError: error, resetFailover: reset, reloadFailover: load };
 }
+
+/**
+ * Failover state for every model at once, for the PPM overview: cards show a
+ * paused provider without opening each model's priority editor.
+ */
+export function useFailoverOverview(secret: string) {
+  const [states, setStates] = useState<FailoverState[]>([]);
+
+  const load = useCallback(async () => {
+    if (!secret) return;
+    try {
+      setStates(await fetchFailoverState(secret));
+    } catch {
+      // Older gateways without /api/admin/failover simply show no failover state.
+      setStates([]);
+    }
+  }, [secret]);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), POLL_INTERVAL_MS * 3);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const reset = useCallback(
+    async (modelId: string, providerId: string) => {
+      await resetFailoverState(secret, modelId, providerId);
+      await load();
+    },
+    [secret, load],
+  );
+
+  return { failoverStates: states, reloadFailover: load, resetFailover: reset };
+}

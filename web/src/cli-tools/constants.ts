@@ -594,8 +594,10 @@ export const MITM_TOOLS: Record<string, CLITool> = {
     configType: "mitm",
     mitmDomain: "daily-cloudcode-pa.googleapis.com",
     defaultModels: [
-      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium) / Default", alias: "gemini-3.5-flash-low" },
-      { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)", alias: "gemini-3-flash-agent" },
+      { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High) / Default", alias: "gemini-3.8-flash-high" },
+      { id: "gemini-4-argon", name: "Gemini 4 Argon", alias: "gemini-4-argon" },
+      { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", alias: "gemini-3.8-flash-low" },
+      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium)", alias: "gemini-3.5-flash-low" },
       { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", alias: "gemini-3.1-pro-low" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", alias: "claude-sonnet-4-6" },
       { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },

@@ -104,6 +104,7 @@ export function saveGatewaySettings(
     server_host: string;
     server_port: number;
     restart_required?: boolean;
+    lan_ips?: string[];
   }>(secret, "/api/admin/settings/gateway", {
     method: "PATCH",
     body: JSON.stringify(payload),

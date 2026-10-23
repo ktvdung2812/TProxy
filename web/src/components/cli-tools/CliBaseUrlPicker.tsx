@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { Button, Select } from "../ui";
+import { cn, Select } from "../ui";
 import type { CliBaseUrlKind } from "../../lib/cliBaseUrl";
+import { CopyField } from "./CopyBits";
 
 type Props = {
   kind: CliBaseUrlKind;
@@ -11,12 +12,11 @@ type Props = {
   allowLan: boolean;
   lanIPs: string[];
   selectedLanIP: string;
-  copied?: boolean;
   onKindChange: (kind: CliBaseUrlKind) => void;
   onLanIPChange: (ip: string) => void;
-  onCopy: () => void;
 };
 
+/** Localhost / LAN / Tunnel / Tailscale switch plus the resulting base URL with a copy button. */
 export function CliBaseUrlPicker({
   kind,
   baseUrl,
@@ -26,85 +26,64 @@ export function CliBaseUrlPicker({
   allowLan,
   lanIPs,
   selectedLanIP,
-  copied,
   onKindChange,
   onLanIPChange,
-  onCopy,
 }: Props) {
   const { t } = useTranslation();
-  const tunnelAvailable = Boolean(tunnelUrl);
-  const tailscaleAvailable = Boolean(tailscaleUrl);
   const lanAvailable = allowLan && lanIPs.length > 0 && Boolean(lanUrl);
+  const options: Array<{ kind: CliBaseUrlKind; icon: string; label: string; available: boolean; title: string }> = [
+    { kind: "local", icon: "computer", label: t("cliTools.localhost"), available: true, title: t("cliTools.endpointHint.local") },
+    { kind: "lan", icon: "lan", label: t("cliTools.lan"), available: lanAvailable, title: lanAvailable ? lanUrl : t("cliTools.enableLanAccess") },
+    { kind: "tunnel", icon: "public", label: t("cliTools.tunnel"), available: Boolean(tunnelUrl), title: tunnelUrl || t("cliTools.configurePublicUrl") },
+    {
+      kind: "tailscale",
+      icon: "vpn_lock",
+      label: t("cliTools.tailscale"),
+      available: Boolean(tailscaleUrl),
+      title: tailscaleUrl || t("cliTools.enableTailscaleHint"),
+    },
+  ];
 
   return (
-    <div className="cli-base-url-picker">
-      <div className="usage-segmented cli-base-url-tabs">
-        <button type="button" className={kind === "local" ? "active" : ""} onClick={() => onKindChange("local")}>
-          {t("cliTools.localhost")}
-        </button>
-        <button
-          type="button"
-          className={kind === "lan" ? "active" : ""}
-          disabled={!lanAvailable}
-          title={lanAvailable ? lanUrl : t("cliTools.enableLanAccess")}
-          onClick={() => onKindChange("lan")}
-        >
-          {t("cliTools.lan")}
-        </button>
-        <button
-          type="button"
-          className={kind === "tunnel" ? "active" : ""}
-          disabled={!tunnelAvailable}
-          title={tunnelAvailable ? tunnelUrl : t("cliTools.configurePublicUrl")}
-          onClick={() => onKindChange("tunnel")}
-        >
-          {t("cliTools.tunnel")}
-        </button>
-        <button
-          type="button"
-          className={kind === "tailscale" ? "active" : ""}
-          disabled={!tailscaleAvailable}
-          title={tailscaleAvailable ? tailscaleUrl : t("cliTools.enableTailscaleHint")}
-          onClick={() => onKindChange("tailscale")}
-        >
-          {t("cliTools.tailscale")}
-        </button>
+    <div className="ct-base-url">
+      <div className="ct-seg" role="group" aria-label={t("cliTools.steps.baseUrl")}>
+        {options.map((option) => (
+          <button
+            key={option.kind}
+            type="button"
+            className={cn(kind === option.kind && "is-active")}
+            aria-pressed={kind === option.kind}
+            disabled={!option.available}
+            title={option.title}
+            onClick={() => onKindChange(option.kind)}
+          >
+            <span className="material-symbols-outlined" aria-hidden>{option.icon}</span>
+            <span>{option.label}</span>
+          </button>
+        ))}
       </div>
 
       {kind === "lan" && lanIPs.length > 1 ? (
-        <div className="cli-base-url-lan-select">
-          <Select value={selectedLanIP || lanIPs[0]} onChange={(event) => onLanIPChange(event.target.value)}>
-            {lanIPs.map((ip) => (
-              <option key={ip} value={ip}>
-                {ip}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <Select value={selectedLanIP || lanIPs[0]} onChange={(event) => onLanIPChange(event.target.value)} aria-label={t("cliTools.lanAddress")}>
+          {lanIPs.map((ip) => (
+            <option key={ip} value={ip}>
+              {ip}
+            </option>
+          ))}
+        </Select>
       ) : null}
 
-      <div className="cli-tool-kv">
-        <code>{baseUrl}</code>
-        <Button
-          variant="outline"
-          size="sm"
-          className="btn-icon-only"
-          icon={copied ? "check" : "content_copy"}
-          aria-label={copied ? t("common.copied") : t("common.copy")}
-          title={copied ? t("common.copied") : t("common.copy")}
-          onClick={onCopy}
-        />
-      </div>
+      <CopyField value={baseUrl} copyLabel={t("cliTools.copyBaseUrl")} />
 
-      {kind === "lan" && !lanAvailable ? (
-        <p className="cli-tool-hint">{t("cliTools.enableLanHint")}</p>
-      ) : null}
-      {kind === "tunnel" && !tunnelAvailable ? (
-        <p className="cli-tool-hint">{t("cliTools.setPublicUrlHint")}</p>
-      ) : null}
-      {kind === "tailscale" && !tailscaleAvailable ? (
-        <p className="cli-tool-hint">{t("cliTools.enableTailscaleHint")}</p>
-      ) : null}
+      <p className="ct-hint">
+        {kind === "lan" && !lanAvailable
+          ? t("cliTools.enableLanHint")
+          : kind === "tunnel" && !tunnelUrl
+            ? t("cliTools.setPublicUrlHint")
+            : kind === "tailscale" && !tailscaleUrl
+              ? t("cliTools.enableTailscaleHint")
+              : t(`cliTools.endpointHint.${kind}`)}
+      </p>
     </div>
   );
 }

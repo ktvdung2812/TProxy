@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "../ui";
 import { formatProxyUsageLabel, formatQuotaName, formatResetAbsolute, formatResetTime, getColorTone } from "./utils";
 
@@ -30,6 +31,7 @@ const AGGREGATE_KEY = "weekly";
  * could already be spent.
  */
 export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
+  const { t } = useTranslation();
   const aggregate = rows.find((row) => row.key === AGGREGATE_KEY);
   const segments = rows.filter((row) => row.key.startsWith(BREAKDOWN_PREFIX));
   const others = rows.filter((row) => row.key !== AGGREGATE_KEY && !row.key.startsWith(BREAKDOWN_PREFIX));
@@ -58,11 +60,11 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
 
       <div className="quota-stacked-head">
         <span className={cn("quota-stacked-headline", `quota-stacked-headline-${tone}`)}>
-          <span className="quota-stacked-remaining">còn {aggregate.remaining}%</span>
-          <span className="quota-stacked-used">{usedPct}% đã sử dụng</span>
+          <span className="quota-stacked-remaining">{t("quota.percentLeft", { value: aggregate.remaining })}</span>
+          <span className="quota-stacked-used">{t("quota.percentUsed", { value: usedPct })}</span>
         </span>
         <span className="quota-stacked-reset" title={aggregate.reset_at || undefined}>
-          {countdown !== "-" ? `in ${countdown}` : "N/A"}
+          {countdown !== "-" ? t("quota.resetsIn", { time: countdown }) : "—"}
           {absoluteReset ? <span className="quota-stacked-reset-absolute">{absoluteReset}</span> : null}
         </span>
       </div>
@@ -116,7 +118,7 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
               <div className="quota-tracker-progress-fill" style={{ width: `${Math.min(row.remaining, 100)}%` }} />
             </div>
             <span className={cn("quota-tracker-percent", `quota-tracker-percent-${rowTone}`)}>
-              Còn {row.remaining}%
+              {t("quota.percentLeft", { value: row.remaining })}
             </span>
           </div>
         );

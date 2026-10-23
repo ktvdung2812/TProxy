@@ -61,7 +61,8 @@ type Props = {
   resetCreditCount?: number;
   resettingQuota?: boolean;
   onResetQuota?: () => void;
-  refreshCountdown?: number;
+  /** Changes periodically so reset countdowns are recomputed. */
+  clock?: number;
 };
 
 function formatAuthType(value: string) {
@@ -105,7 +106,7 @@ export function QuotaAccountDetailModal({
   resetCreditCount = 0,
   resettingQuota = false,
   onResetQuota,
-  refreshCountdown,
+  clock,
 }: Props) {
   const { t } = useTranslation();
   const { masked } = useAccountMask();
@@ -272,7 +273,7 @@ export function QuotaAccountDetailModal({
         }))
         .filter((entry) => entry.countdown !== "-")
         .sort((a, b) => new Date(a.resetAt).getTime() - new Date(b.resetAt).getTime()),
-    [entries, refreshCountdown],
+    [entries, clock],
   );
   const usage = proxyUsage ?? { requests: 0, promptTokens: 0, completionTokens: 0 };
   const totalTokens = usage.promptTokens + usage.completionTokens;

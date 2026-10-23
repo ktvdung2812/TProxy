@@ -1,17 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { LanguageToggle } from "./components/LanguageToggle";
 import { useViewportWidth } from "./hooks/useViewportWidth";
 import { Header } from "./components/Header";
-import {
-  Badge,
-  Button,
-  Card,
-  Input,
-  cn,
-} from "./components/ui";
+import { cn } from "./components/ui";
 import { resolveChatApiKey } from "./devDefaults";
 import { AuthLoadingView } from "./components/auth/AuthLoadingView";
 import { LoginView } from "./components/auth/LoginView";
@@ -24,7 +18,6 @@ import {
 import { ChatView } from "./components/chat/ChatView";
 import { useChatModels } from "./components/chat/useChatModels";
 import { ProvidersView } from "./components/providers/ProvidersView";
-import { ProviderLogo } from "./components/providers/ProviderLogo";
 import { QuotaTrackerView } from "./components/quota/QuotaTrackerView";
 import { OperationsView } from "./components/operations/OperationsView";
 import { DiagnosticsView } from "./components/diagnostics/DiagnosticsView";
@@ -33,12 +26,12 @@ import { TokenSaverView } from "./components/token-saver/TokenSaverView";
 import { FreeTiersView } from "./components/free-tiers/FreeTiersView";
 import { ApisView } from "./components/apis/ApisView";
 import { buildExampleModelOptions } from "./components/apis/utils";
-import { OverviewApiKeysCard } from "./components/overview/OverviewApiKeysCard";
+import { OverviewView } from "./components/overview/OverviewView";
+import { HealthOverviewView } from "./components/upstreams/HealthOverviewView";
 import { ProxyPoolsView } from "./components/proxy-pools/ProxyPoolsView";
-import { CombosView } from "./components/combos/CombosView";
-import { useComboStepOptions } from "./components/combos/modelOptions";
+import { CombosPage } from "./components/combos/CombosPage";
 import { MappingView } from "./components/mapping/MappingView";
-import { ModelsView } from "./components/models/ModelsView";
+import { ModelsPage } from "./components/models/ModelsPage";
 import { CLIToolDetailView } from "./components/cli-tools/CLIToolDetailView";
 import { CLIToolsView } from "./components/cli-tools/CLIToolsView";
 import { SkillsView } from "./components/skills/SkillsView";
@@ -141,20 +134,13 @@ const emptySnapshot: Snapshot = {
   usage: { requests: 0, errors: 0, input_tokens: 0, output_tokens: 0, tokens_saved: 0, estimated_cost_usd: 0 },
 };
 
-function compactNumber(value: number) {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
-}
-
-function usd(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(value || 0);
-}
-
-function statusBadge(status?: string, enabled = true) {
-  const { t } = useTranslation();
-  if (!enabled) return <Badge variant="default">{t("common.disabled")}</Badge>;
-  if (status === "healthy") return <Badge variant="success" dot>{t("common.healthy")}</Badge>;
-  if (status && status !== "unknown") return <Badge variant="warning" dot>{status}</Badge>;
-  return <Badge variant="default">{t("common.unknown")}</Badge>;
+// Keep the route component stable when notices or snapshots update, so an
+// in-progress import retains its selected files and per-file results.
+function ProvidersPage(props: Omit<ComponentProps<typeof ProvidersView>, "selectedId" | "onSelect">) {
+  const { providerId } = useParams();
+  const navigate = useNavigate();
+  return <ProvidersView {...props} selectedId={providerId ?? null}
+    onSelect={(id) => navigate(id ? `/providers/${encodeURIComponent(id)}` : "/providers")} />;
 }
 
 function App() {
@@ -174,7 +160,6 @@ function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const viewportWidth = useViewportWidth();
-  const [providerSearch, setProviderSearch] = useState("");
   const [apiKey, setApiKey] = useState("");
 
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
@@ -317,8 +302,8 @@ function App() {
   const checkProvider = async (id: string) => {
     try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/health`, "POST"); setNotice(result.ok ? t("providers.healthOk", { id }) : t("providers.healthFailed", { id })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed")); }
   };
-  const checkAllProviders = async () => {
-    const ids = (snapshot.providers || []).map((provider) => provider.ID);
+  const checkAllProviders = async (only?: string[]) => {
+    const ids = only ?? (snapshot.providers || []).map((provider) => provider.ID);
     if (ids.length === 0) {
       setError(t("providers.noProvidersConfigured"));
       return;
@@ -347,15 +332,10 @@ function App() {
   const discoverProvider = async (id: string) => {
     try { const result = await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/models`, "GET"); setDiscovered((current) => ({ ...current, [id]: result.data || [] })); setNotice(t("providers.modelsDiscovered", { count: result.data?.length || 0, id })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("providers.modelDiscoveryFailed")); }
   };
+  // Callers confirm with a ConfirmDialog before calling this.
   const remove = async (path: string, label: string) => {
-    if (!window.confirm(t("common.deleteConfirm", { label }))) return;
     try { await adminRequest(path, "DELETE"); setNotice(t("common.deleted", { label })); await load(); } catch (cause) { setError(cause instanceof Error ? cause.message : t("common.deleteFailed")); }
   };
-
-  const activeCredentials = useMemo(
-    () => Object.values(snapshot.credentials || {}).flat().filter((item) => item.enabled).length,
-    [snapshot.credentials],
-  );
 
   const quotaCredentials = useMemo(() => {
     const providersById = Object.fromEntries((snapshot.providers || []).map((provider) => [provider.ID, provider]));
@@ -419,6 +399,19 @@ function App() {
     );
   }
 
+  const providersPage = (
+    <ProvidersPage
+      providers={snapshot.providers || []}
+      credentials={snapshot.credentials || {}}
+      aliases={snapshot.aliases || []}
+      secret={secret}
+      snapshotLoading={loading}
+      onMutated={() => void load()}
+      onNotice={setNotice}
+      onError={setError}
+    />
+  );
+
   return (
     <div className="app-shell">
       {isMobileSidebar && mobileNavOpen ? (
@@ -450,18 +443,6 @@ function App() {
           loading={loading}
           onLogout={logout}
           onOpenNav={isMobileSidebar ? () => setMobileNavOpen(true) : undefined}
-          extra={
-            activeRoute.id === "providers" ? (
-              <Input
-                icon="search"
-                placeholder={t("common.searchProviders")}
-                value={providerSearch}
-                onChange={(e) => setProviderSearch(e.target.value)}
-                style={{ width: 220 }}
-                aria-label={t("common.searchProviders")}
-              />
-            ) : undefined
-          }
         />
 
         <div className={cn("main-scroll custom-scrollbar", activeRoute.id === "chat" && "is-chat-page")}>
@@ -486,14 +467,66 @@ function App() {
             )}
 
             <Routes>
-              <Route path="/" element={<OverviewPage />} />
-              <Route path="/combos" element={<CombosPage />} />
-              <Route path="/mapping" element={<MappingPage />} />
-              <Route path="/models" element={<ModelsPage />} />
-              <Route path="/upstreams" element={<UpstreamsPage />} />
-              <Route path="/providers" element={<ProvidersPage />} />
-              <Route path="/providers/:providerId" element={<ProvidersPage />} />
-              <Route path="/proxy-pools" element={<ProxyPoolsPage />} />
+              <Route
+                path="/"
+                element={
+                  <OverviewView
+                    secret={secret}
+                    providers={snapshot.providers || []}
+                    credentials={snapshot.credentials || {}}
+                    proxyPools={snapshot.proxy_pools || []}
+                    models={snapshot.models || []}
+                    routes={snapshot.routes || {}}
+                    combos={snapshot.combos || []}
+                    apiKeys={snapshot.api_keys || []}
+                    usage={snapshot.usage}
+                    loading={loading}
+                    onError={setError}
+                    onMutated={refreshSnapshot}
+                  />
+                }
+              />
+              <Route
+                path="/combos"
+                element={<CombosPage secret={secret} snapshot={snapshot} loading={loading} onMutated={refreshSnapshot} onNotice={setNotice} onError={setError} />}
+              />
+              <Route path="/mapping" element={MappingPage()} />
+              <Route
+                path="/models"
+                element={<ModelsPage secret={secret} snapshot={snapshot} loading={loading} onMutated={refreshSnapshot} onNotice={setNotice} onError={setError} />}
+              />
+              <Route
+                path="/upstreams"
+                element={
+                  <HealthOverviewView
+                    providers={snapshot.providers || []}
+                    credentials={snapshot.credentials || {}}
+                    routes={snapshot.routes || {}}
+                    discovered={discovered}
+                    loading={loading}
+                    checkingAll={healthCheckAllBusy}
+                    onCheck={checkProvider}
+                    onCheckMany={checkAllProviders}
+                    onDiscover={discoverProvider}
+                    onDelete={(provider) => remove(`/api/admin/providers/${encodeURIComponent(provider.ID)}`, provider.Name || provider.ID)}
+                  />
+                }
+              />
+              <Route path="/providers" element={providersPage} />
+              <Route path="/providers/:providerId" element={providersPage} />
+              <Route
+                path="/proxy-pools"
+                element={
+                  <ProxyPoolsView
+                    secret={secret}
+                    providers={snapshot.providers || []}
+                    credentials={snapshot.credentials || {}}
+                    onError={setError}
+                    onNotice={setNotice}
+                    onMutated={refreshSnapshot}
+                  />
+                }
+              />
               <Route
                 path="/quota"
                 element={
@@ -509,16 +542,19 @@ function App() {
               />
               <Route path="/free-tiers" element={<FreeTiersPage />} />
               <Route path="/usage" element={<UsagePage />} />
-              <Route path="/operations" element={<OperationsView secret={secret}/>} />
+              <Route path="/operations" element={<OperationsView secret={secret} providers={snapshot.providers} credentials={snapshot.credentials || {}} />} />
               <Route path="/diagnostics" element={<DiagnosticsView secret={secret}/>} />
               <Route path="/token-saver" element={<TokenSaverPage />} />
-              <Route path="/apis" element={<ApisPage />} />
+              <Route path="/apis" element={ApisPage()} />
               <Route path="/chat" element={<ChatPage />} />
-              <Route path="/cli-tools" element={<CLIToolsPage />} />
-              <Route path="/cli-tools/:toolId" element={<CLIToolDetailPage />} />
+              {/* Called, not rendered as <Page />: a wrapper declared inside App is a new
+                  component type on every App render, which would remount the page and drop
+                  its filters, paused log stream and unsaved settings. */}
+              <Route path="/cli-tools" element={CLIToolsPage()} />
+              <Route path="/cli-tools/:toolId" element={CLIToolDetailPage()} />
               <Route path="/skills" element={<SkillsView />} />
-              <Route path="/logs" element={<LogsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/logs" element={LogsPage()} />
+              <Route path="/settings" element={SettingsPage()} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
@@ -537,6 +573,7 @@ function App() {
         secret={secret}
         providers={snapshot.providers}
         credentials={snapshot.credentials || {}}
+        apiKeys={snapshot.api_keys || []}
         onError={setError}
       />
     );
@@ -547,10 +584,8 @@ function App() {
   }
 
   function ApisPage() {
-    const modelOptions = useMemo(
-      () => buildExampleModelOptions(snapshot.models, snapshot.combos),
-      [snapshot.models, snapshot.combos],
-    );
+    // No hooks here: this wrapper is called from the route element, not rendered.
+    const modelOptions = buildExampleModelOptions(snapshot.models, snapshot.combos);
 
     return (
       <ApisView
@@ -600,6 +635,7 @@ function App() {
         providerLabels={providerLabels}
         providerError={providerError}
         apiKey={apiKey}
+        apiKeys={snapshot.api_keys || []}
         onApiKeyChange={handleApiKeyChange}
         onInvalidClientApiKey={handleInvalidClientApiKey}
         onError={setError}
@@ -613,107 +649,6 @@ function App() {
 
   function CLIToolDetailPage() {
     return <CLIToolDetailView snapshot={snapshot} secret={secret} />;
-  }
-
-  function ProvidersPage() {
-    const { providerId } = useParams();
-    return (
-      <ProvidersView
-        providers={snapshot.providers || []}
-        credentials={snapshot.credentials || {}}
-        aliases={snapshot.aliases || []}
-        secret={secret}
-        searchQuery={providerSearch}
-        selectedId={providerId ?? null}
-        snapshotLoading={loading}
-        onSelect={(id) => navigate(id ? `/providers/${encodeURIComponent(id)}` : "/providers")}
-        onMutated={() => void load()}
-        onNotice={setNotice}
-        onError={setError}
-      />
-    );
-  }
-
-  function OverviewPage() {
-    return (
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">{t("overview.subtitle")}</p>
-            <h2>{t("overview.title")}</h2>
-            <p>{t("overview.description")}</p>
-          </div>
-        </div>
-        <div className="metrics">
-          <Metric icon="bolt" label={t("overview.requests")} value={compactNumber(snapshot.usage?.requests)} hint={t("overview.requestsHint")} />
-          <Metric icon="error" label={t("overview.errorAttempts")} value={compactNumber(snapshot.usage?.errors)} hint={t("overview.errorAttemptsHint")} variant="warning" />
-          <Metric icon="savings" label={t("overview.tokensSaved")} value={compactNumber(snapshot.usage?.tokens_saved || 0)} hint={t("overview.tokensSavedHint")} variant="success" />
-          <Metric icon="payments" label={t("overview.estimatedCost")} value={usd(snapshot.usage?.estimated_cost_usd || 0)} hint={t("overview.estimatedCostHint")} />
-          <Metric icon="key" label={t("overview.activeCredentials")} value={String(activeCredentials)} hint={t("overview.activeCredentialsHint")} />
-        </div>
-        <OverviewApiKeysCard
-          secret={secret}
-          apiKeys={snapshot.api_keys || []}
-          onError={setError}
-          onMutated={() => void load()}
-        />
-      </section>
-    );
-  }
-
-  function CombosPage() {
-    const comboModels = useMemo(
-      () =>
-        (snapshot.models || []).map((model) => ({
-          id: model.ID,
-          label: model.DisplayName ? `${model.DisplayName} (${model.ID})` : model.ID,
-          enabled: model.Enabled,
-        })),
-      [snapshot.models],
-    );
-
-    const chatSnapshot = useMemo(
-      () => ({
-        providers: (snapshot.providers || []).map((provider) => ({
-          ID: provider.ID,
-          Name: provider.Name || provider.ID,
-          Enabled: provider.Enabled !== false,
-        })),
-        credentials: snapshot.credentials || {},
-        models: (snapshot.models || []).map((model) => ({
-          ID: model.ID,
-          DisplayName: model.DisplayName,
-          Enabled: model.Enabled,
-          Capabilities: model.Capabilities,
-        })),
-        combos: (snapshot.combos || []).map((combo) => ({
-          id: combo.id,
-          display_name: combo.display_name || combo.id,
-          enabled: combo.enabled !== false,
-          capabilities: combo.capabilities || [],
-        })),
-      }),
-      [snapshot.providers, snapshot.credentials, snapshot.models, snapshot.combos],
-    );
-    const { models: discoveredModels } = useChatModels(secret, chatSnapshot);
-    const comboStepOptions = useComboStepOptions(
-      snapshot.models || [],
-      snapshot.combos || [],
-      snapshot.routes || {},
-      discoveredModels,
-    );
-
-    return (
-      <CombosView
-        secret={secret}
-        combos={snapshot.combos || []}
-        models={comboModels}
-        modelOptions={comboStepOptions}
-        onMutated={() => void load()}
-        onNotice={setNotice}
-        onError={setError}
-      />
-    );
   }
 
   function MappingPage() {
@@ -732,136 +667,6 @@ function App() {
     );
   }
 
-  function ModelsPage() {
-    const modelProviders = useMemo(
-      () =>
-        (snapshot.providers || []).map((provider) => ({
-          id: provider.ID,
-          label: provider.Name ? `${provider.Name} (${provider.ID})` : provider.ID,
-          type: provider.Type,
-        })),
-      [snapshot.providers],
-    );
-
-    const credentialCounts = useMemo(() => {
-      const counts: Record<string, number> = {};
-      for (const [providerId, items] of Object.entries(snapshot.credentials || {})) {
-        counts[providerId] = (items || []).filter((item) => item.enabled).length;
-      }
-      return counts;
-    }, [snapshot.credentials]);
-
-    const knownProviderIDs = useMemo(
-      () => new Set((snapshot.providers || []).map((provider) => provider.ID)),
-      [snapshot.providers],
-    );
-
-    const modelRoutes = useMemo(() => {
-      const mapped: Record<string, { ID: string; ProviderID: string; UpstreamModel: string; Priority: number; Weight?: number; Enabled: boolean }[]> = {};
-      for (const [modelId, routes] of Object.entries(snapshot.routes || {})) {
-        mapped[modelId] = (routes || []).filter((route) => knownProviderIDs.has(route.ProviderID)).map((route) => ({
-          ID: route.ID,
-          ProviderID: route.ProviderID,
-          UpstreamModel: route.UpstreamModel,
-          Priority: route.Priority,
-          Weight: route.Weight,
-          Enabled: route.Enabled,
-        }));
-      }
-      return mapped;
-    }, [knownProviderIDs, snapshot.routes]);
-
-    return (
-      <ModelsView
-        secret={secret}
-        models={snapshot.models || []}
-        routesByModel={modelRoutes}
-        providers={modelProviders}
-        credentialCounts={credentialCounts}
-        onMutated={() => void load()}
-        onNotice={setNotice}
-        onError={setError}
-      />
-    );
-  }
-
-  function UpstreamsPage() {
-    return (
-      <section className="section">
-              <div className="section-head">
-                <div>
-                  <p className="eyebrow">Infrastructure</p>
-                  <h2>Health overview</h2>
-                  <p>Run health checks and model discovery without opening each provider detail page. For credential setup and OAuth, use <button type="button" className="inline-link" onClick={() => navigate("/providers")}>Providers</button>.</p>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span className="meta">{snapshot.providers?.length || 0} configured</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    icon="monitor_heart"
-                    loading={healthCheckAllBusy}
-                    disabled={healthCheckAllBusy || !(snapshot.providers?.length)}
-                    onClick={() => void checkAllProviders()}
-                  >
-                    {healthCheckAllBusy ? "Checking…" : "Check all health"}
-                  </Button>
-                  <Button variant="primary" size="sm" icon="dns" onClick={() => navigate("/providers")}>
-                    Manage providers
-                  </Button>
-                </div>
-              </div>
-              <Card pad="md">
-                <div className="row-table">
-                  {(snapshot.providers || []).map((provider) => (
-                    <div className="row" key={provider.ID}>
-                      <ProviderLogo
-                        className="provider-badge"
-                        providerId={provider.ID}
-                        providerType={provider.Type}
-                      />
-                      <div className="row-body">
-                        <div className="row-primary">
-                          <strong>{provider.Name || provider.ID}</strong>
-                          <small>{provider.BaseURL || "local transport"}</small>
-                        </div>
-                        <div className="row-meta">
-                          <code>{provider.Type}</code>
-                          <span>{snapshot.credentials?.[provider.ID]?.length || 0} accounts</span>
-                          {statusBadge(provider.Status, provider.Enabled)}
-                        </div>
-                        {discovered[provider.ID]?.length ? (
-                          <div className="discovery-list">
-                            {discovered[provider.ID].slice(0, 8).map((model) => <code key={model.id}>{model.id}</code>)}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="row-actions">
-                        <Button variant="outline" size="sm" icon="monitor_heart" onClick={() => void checkProvider(provider.ID)}>Health</Button>
-                        <Button variant="outline" size="sm" icon="search" onClick={() => void discoverProvider(provider.ID)}>Discover</Button>
-                        <Button variant="ghost" size="sm" icon="arrow_forward" onClick={() => navigate(`/providers/${encodeURIComponent(provider.ID)}`)}>Open</Button>
-                        <Button variant="danger" size="sm" icon="delete" onClick={() => remove(`/api/admin/providers/${encodeURIComponent(provider.ID)}`, `provider ${provider.ID}`)}>Delete</Button>
-                      </div>
-                    </div>
-                  ))}
-                  {(snapshot.providers || []).length === 0 && <EmptyState icon="dns" text="No providers configured yet." />}
-                </div>
-              </Card>
-      </section>
-    );
-  }
-
-  function ProxyPoolsPage() {
-    return (
-      <ProxyPoolsView
-        secret={secret}
-        onError={setError}
-        onNotice={setNotice}
-        onMutated={() => void load()}
-      />
-    );
-  }
-
   function LogsPage() {
     return (
       <LogsView
@@ -869,6 +674,8 @@ function App() {
         audit={audit}
         streaming={logsStreamEnabled}
         onRefreshAudit={refreshAudit}
+        credentials={snapshot.credentials || {}}
+        apiKeys={snapshot.api_keys || []}
       />
     );
   }
@@ -877,6 +684,7 @@ function App() {
     return (
       <SettingsView
         secret={secret}
+        providers={snapshot.providers || []}
         onError={setError}
         onNotice={setNotice}
         onMutated={() => void load()}
@@ -887,35 +695,6 @@ function App() {
       />
     );
   }
-}
-
-/* ============================================================
-   Small presentational helpers
-   ============================================================ */
-function Metric({ icon, label, value, hint, variant }: { icon: string; label: string; value: string; hint: string; variant?: "success" | "warning" }) {
-  const badgeVariant = variant ? `badge ${variant}` : "badge primary";
-  return (
-    <Card pad="md" className="metric-card" elev>
-      <span className="metric-icon" style={variant ? { background: "var(--color-surface-2)", color: "var(--color-text-muted)" } : undefined}>
-        <span className="material-symbols-outlined">{icon}</span>
-      </span>
-      <span className="metric-label">
-        {label}
-        {variant && <span className={badgeVariant} style={{ marginLeft: 8, verticalAlign: "middle" }}>{variant === "success" ? "saved" : "errors"}</span>}
-      </span>
-      <strong className="metric-value">{value}</strong>
-      <small className="metric-hint">{hint}</small>
-    </Card>
-  );
-}
-
-function EmptyState({ icon, text }: { icon: string; text: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "24px 8px", color: "var(--color-text-muted)" }}>
-      <span className="material-symbols-outlined" style={{ fontSize: 28, color: "var(--color-text-subtle)" }}>{icon}</span>
-      <span style={{ fontSize: 14 }}>{text}</span>
-    </div>
-  );
 }
 
 export default App;

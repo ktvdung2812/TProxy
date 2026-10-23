@@ -48,15 +48,26 @@ export function formToPayload(form: ComboFormData) {
   };
 }
 
-export function validateComboForm(form: ComboFormData, existingIds: string[], editing: boolean) {
+export type ComboFormError = "" | "idRequired" | "idInvalid" | "idInUse" | "nameRequired" | "noSteps" | "stepModel";
+
+/** Returns an error code (translated as combos.validation.<code>) or "" when the form is valid. */
+export function validateComboForm(form: ComboFormData, existingIds: string[], editing: boolean): ComboFormError {
   const id = form.id.trim();
-  if (!id) return "Combo ID is required";
-  if (!COMBO_ID_REGEX.test(id)) return "Combo ID may only contain letters, numbers, -, _, and .";
-  if (!editing && existingIds.includes(id)) return `Combo ID "${id}" already exists`;
-  if (!form.display_name.trim()) return "Display name is required";
-  if (form.items.length === 0) return "Add at least one model step";
-  if (form.items.some((item) => !item.public_model_id)) return "Each step needs a model";
+  if (!id) return "idRequired";
+  if (!COMBO_ID_REGEX.test(id)) return "idInvalid";
+  if (!editing && existingIds.includes(id)) return "idInUse";
+  if (!form.display_name.trim()) return "nameRequired";
+  if (form.items.length === 0) return "noSteps";
+  if (form.items.some((item) => !item.public_model_id)) return "stepModel";
   return "";
+}
+
+/** A free combo ID based on `base`: base, base-2, base-3… */
+export function uniqueComboId(base: string, existingIds: string[]) {
+  if (!existingIds.includes(base)) return base;
+  let suffix = 2;
+  while (existingIds.includes(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
 }
 
 function pickModels(modelIds: string[], available: ComboModelOption[]) {
@@ -117,12 +128,7 @@ export function buildComboPresets(models: ComboModelOption[]): ComboPreset[] {
 
 export function presetToForm(preset: ComboPreset, existingIds: string[]): ComboFormData | null {
   if (preset.modelIds.length === 0) return null;
-  let comboId = preset.comboId;
-  if (existingIds.includes(comboId)) {
-    let suffix = 2;
-    while (existingIds.includes(`${comboId}-${suffix}`)) suffix += 1;
-    comboId = `${comboId}-${suffix}`;
-  }
+  const comboId = uniqueComboId(preset.comboId, existingIds);
   return {
     id: comboId,
     display_name: preset.display_name,
@@ -131,15 +137,4 @@ export function presetToForm(preset: ComboPreset, existingIds: string[]): ComboF
     items: preset.modelIds.map((public_model_id) => ({ public_model_id, route_target_id: "" })),
     policy: preset.policy,
   };
-}
-
-export function clientLabel(client: ComboPreset["client"]) {
-  switch (client) {
-    case "claude-code":
-      return "Claude Code";
-    case "cowork":
-      return "Cowork";
-    default:
-      return "General";
-  }
 }

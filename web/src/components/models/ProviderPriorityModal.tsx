@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
+import { StatusPill } from "../page-kit";
 import { ProviderPriorityEditor } from "./ProviderPriorityEditor";
 import type { ModelRecord, ProviderOption, RouteFormData } from "./types";
 
@@ -26,29 +28,38 @@ export function ProviderPriorityModal({
   onClose,
   onSubmit,
 }: Props) {
-  const [saveActions, setSaveActions] = useState<{ canSave: boolean; save: () => void } | null>(null);
+  const { t } = useTranslation();
+  const [saveActions, setSaveActions] = useState<{ canSave: boolean; dirty: boolean; save: () => void } | null>(null);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Provider Priority Manager"
-      subtitle={model ? `${model.DisplayName || model.ID} · ${model.ID}` : "Configure provider fallback order"}
+      title={t("models.priority.title")}
+      subtitle={model ? `${model.DisplayName || model.ID} · ${model.ID}` : t("models.priority.subtitle")}
       icon="route"
       size="lg"
       className="priority-manager-modal"
       footer={
         saveActions ? (
-          <Button
-            variant="primary"
-            size="sm"
-            icon="save"
-            loading={saving}
-            disabled={!saveActions.canSave}
-            onClick={saveActions.save}
-          >
-            Save priority
-          </Button>
+          <>
+            {saveActions.dirty ? (
+              <StatusPill tone="warning" title={t("models.priority.unsavedHint")}>{t("models.priority.unsaved")}</StatusPill>
+            ) : null}
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon="save"
+              loading={saving}
+              disabled={!saveActions.canSave}
+              onClick={saveActions.save}
+            >
+              {t("models.priority.save")}
+            </Button>
+          </>
         ) : null
       }
     >

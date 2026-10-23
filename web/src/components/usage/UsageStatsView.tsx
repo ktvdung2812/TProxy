@@ -1,336 +1,102 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { fetchUsageStats } from "./api";
+import { PageNote } from "../page-kit";
+import { cn } from "../ui";
 import type { UsagePeriod, UsageStats } from "./api";
-import { OverviewCards } from "./OverviewCards";
-import { ProviderTopology } from "./ProviderTopology";
+import { ProviderUsagePanel, type ProviderItem } from "./ProviderUsageList";
 import { RecentRequests } from "./RecentRequests";
 import { UsageChart } from "./UsageChart";
-import { ProviderBadge, UsageTable } from "./UsageTable";
-import { useUsageStream } from "./useUsageStream";
-import {
-  enrichUsageRows,
-  fmt,
-  fmtTime,
-  groupUsageRows,
-  sortUsageRows,
-  sameUsageLiveSnapshot,
-  type UsageGroup,
-  type UsageRow,
-  type UsageTableView,
-  type UsageValueMode,
-} from "./utils";
-import { maskAccountText } from "../../lib/accountMask";
-import { useAccountMask } from "../../hooks/useAccountMask";
-
-type ProviderItem = {
-  id: string;
-  name: string;
-  type: string;
-  enabled: boolean;
-};
+import { UsageTable } from "./UsageTable";
+import type { RecentFilter } from "./UsageView";
+import type { UsageSortField, UsageTableView, UsageValueMode } from "./utils";
 
 type Props = {
   secret: string;
   period: UsagePeriod;
+  stats: UsageStats;
+  refetching: boolean;
+  reloadToken: number;
   providers: ProviderItem[];
+  valueMode: UsageValueMode;
+  tableView: UsageTableView;
+  sort: { field: UsageSortField; order: "asc" | "desc" };
+  onSort: (sort: { field: UsageSortField; order: "asc" | "desc" }) => void;
+  query: string;
+  providerFilter: string;
+  onProviderFilter: (value: string) => void;
+  recentFilter: RecentFilter;
+  onRecentFilter: (value: RecentFilter) => void;
+  streamPill: ReactNode;
+  hasFilters: boolean;
+  onClearFilters: () => void;
   onError: (message: string) => void;
 };
 
-type UsageTableConfig = {
-  columns: Array<{ field: string; label: string; align?: "right" }>;
-  groupedData: UsageGroup[];
-  storageKey: string;
-  emptyMessage: string;
-  renderSummaryCells: (group: UsageGroup) => ReactNode;
-  renderDetailCells: (item: UsageRow) => ReactNode;
-  renderGroupLabel?: (group: UsageGroup) => ReactNode;
-};
-
-function buildTableOptions(t: (key: string) => string): Array<{ value: UsageTableView; label: string }> {
-  return [
-    { value: "model", label: t("usage.byModel") },
-    { value: "account", label: t("usage.byCredential") },
-    { value: "apiKey", label: t("usage.byApiKey") },
-    { value: "endpoint", label: t("usage.byUpstreamModel") },
-  ];
-}
-
-export function UsageStatsView({ secret, period, providers, onError }: Props) {
+/** Overview tab: traffic over time, where it went, what is happening now, and who used what. */
+export function UsageStatsView({
+  secret,
+  period,
+  stats,
+  refetching,
+  reloadToken,
+  providers,
+  valueMode,
+  tableView,
+  sort,
+  onSort,
+  query,
+  providerFilter,
+  onProviderFilter,
+  recentFilter,
+  onRecentFilter,
+  streamPill,
+  hasFilters,
+  onClearFilters,
+  onError,
+}: Props) {
   const { t } = useTranslation();
-  const { masked } = useAccountMask();
-  const TABLE_OPTIONS = useMemo(() => buildTableOptions(t), [t]);
-  const [stats, setStats] = useState<UsageStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fetching, setFetching] = useState(false);
-  const [tableView, setTableView] = useState<UsageTableView>("model");
-  const [viewMode, setViewMode] = useState<UsageValueMode>("costs");
-  const [sortBy, setSortBy] = useState("rawModel");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!stats) setLoading(true);
-    else setFetching(true);
-    fetchUsageStats(secret, period)
-      .then((data) => {
-        if (!cancelled) setStats(data);
-      })
-      .catch((error) => {
-        if (!cancelled) onError(error instanceof Error ? error.message : t("usage.failedToLoad"));
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setFetching(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [secret, period, onError]);
-
-  const applyLiveUpdate = useCallback((update: Pick<UsageStats, "activeRequests" | "recentRequests" | "errorProvider">) => {
-    setStats((current) => {
-      if (!current) return current;
-      const next = {
-        activeRequests: update.activeRequests ?? [],
-        recentRequests: update.recentRequests ?? [],
-        errorProvider: update.errorProvider,
-      };
-      if (sameUsageLiveSnapshot(
-        {
-          activeRequests: current.activeRequests ?? [],
-          recentRequests: current.recentRequests ?? [],
-          errorProvider: current.errorProvider,
-        },
-        next,
-      )) {
-        return current;
-      }
-      return { ...current, ...next };
-    });
-  }, []);
-
-  useUsageStream(secret, Boolean(stats), applyLiveUpdate);
-
-  const toggleSort = useCallback((field: string) => {
-    setSortBy((current) => {
-      if (current === field) {
-        setSortOrder((order) => (order === "asc" ? "desc" : "asc"));
-        return current;
-      }
-      setSortOrder("asc");
-      return field;
-    });
-  }, []);
-
-  const tableConfig = useMemo<UsageTableConfig | null>(() => {
-    if (!stats) return null;
-    const source =
-      tableView === "model"
-        ? stats.byModel
-        : tableView === "account"
-          ? stats.byAccount
-          : tableView === "apiKey"
-            ? stats.byApiKey
-            : stats.byEndpoint;
-    const rows = sortUsageRows(enrichUsageRows(source), sortBy, sortOrder);
-    const groupedData = groupUsageRows(rows, tableView);
-    const emptyMessage =
-      tableView === "model"
-        ? "No usage recorded yet."
-        : tableView === "account"
-          ? "No credential-specific usage recorded yet."
-          : tableView === "apiKey"
-            ? "No API key usage recorded yet."
-            : "No upstream model usage recorded yet.";
-
-    if (tableView === "model") {
-      return {
-        columns: [
-          { field: "rawModel", label: t("usage.model") },
-          { field: "provider", label: t("usage.provider") },
-          { field: "requests", label: t("usage.requests"), align: "right" as const },
-          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
-        ],
-        groupedData,
-        storageKey: "tproxy-usage:expanded-models",
-        emptyMessage,
-        renderSummaryCells: (group: ReturnType<typeof groupUsageRows>[number]) => (
-          <>
-            <td>—</td>
-            <td className="right">{fmt(group.summary.requests)}</td>
-            <td className="right muted">{fmtTime(group.summary.lastUsed)}</td>
-          </>
-        ),
-        renderDetailCells: (item: ReturnType<typeof enrichUsageRows>[number]) => (
-          <>
-            <td>{item.provider?.toLowerCase() || "unknown"}</td>
-            <td className="muted">—</td>
-            <td className="right">{fmt(item.requests)}</td>
-            <td className="right muted">{fmtTime(item.lastUsed)}</td>
-          </>
-        ),
-      };
-    }
-
-    if (tableView === "account") {
-      return {
-        columns: [
-          { field: "rawModel", label: t("usage.model") },
-          { field: "provider", label: t("usage.provider") },
-          { field: "accountName", label: t("usage.credential") },
-          { field: "requests", label: t("usage.requests"), align: "right" as const },
-          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
-        ],
-        groupedData,
-        storageKey: "tproxy-usage:expanded-accounts",
-        emptyMessage,
-        renderGroupLabel: (group: ReturnType<typeof groupUsageRows>[number]) => maskAccountText(group.groupKey, masked),
-        renderSummaryCells: (group: ReturnType<typeof groupUsageRows>[number]) => (
-          <>
-            <td>—</td>
-            <td>—</td>
-            <td className="right">{fmt(group.summary.requests)}</td>
-            <td className="right muted">{fmtTime(group.summary.lastUsed)}</td>
-          </>
-        ),
-        renderDetailCells: (item: ReturnType<typeof enrichUsageRows>[number]) => (
-          <>
-            <td>{item.rawModel}</td>
-            <td><ProviderBadge provider={item.provider} /></td>
-            <td>{maskAccountText(item.accountName, masked)}</td>
-            <td className="right">{fmt(item.requests)}</td>
-            <td className="right muted">{fmtTime(item.lastUsed)}</td>
-          </>
-        ),
-      };
-    }
-
-    if (tableView === "apiKey") {
-      return {
-        columns: [
-          { field: "keyName", label: "API key" },
-          { field: "rawModel", label: t("usage.model") },
-          { field: "provider", label: t("usage.provider") },
-          { field: "requests", label: t("usage.requests"), align: "right" as const },
-          { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
-        ],
-        groupedData,
-        storageKey: "tproxy-usage:expanded-apikeys",
-        emptyMessage,
-        renderSummaryCells: (group: ReturnType<typeof groupUsageRows>[number]) => (
-          <>
-            <td>—</td>
-            <td>—</td>
-            <td className="right">{fmt(group.summary.requests)}</td>
-            <td className="right muted">{fmtTime(group.summary.lastUsed)}</td>
-          </>
-        ),
-        renderDetailCells: (item: ReturnType<typeof enrichUsageRows>[number]) => (
-          <>
-            <td>{item.keyName}</td>
-            <td>{item.rawModel}</td>
-            <td><ProviderBadge provider={item.provider} /></td>
-            <td className="right">{fmt(item.requests)}</td>
-            <td className="right muted">{fmtTime(item.lastUsed)}</td>
-          </>
-        ),
-      };
-    }
-
-    return {
-      columns: [
-        { field: "endpoint", label: t("usage.upstreamModel") },
-        { field: "rawModel", label: t("usage.virtualModel") },
-        { field: "provider", label: t("usage.provider") },
-        { field: "requests", label: t("usage.requests"), align: "right" as const },
-        { field: "lastUsed", label: t("usage.lastUsed"), align: "right" as const },
-      ],
-      groupedData,
-      storageKey: "tproxy-usage:expanded-endpoints",
-      emptyMessage,
-      renderSummaryCells: (group: ReturnType<typeof groupUsageRows>[number]) => (
-        <>
-          <td>—</td>
-          <td>—</td>
-          <td className="right">{fmt(group.summary.requests)}</td>
-          <td className="right muted">{fmtTime(group.summary.lastUsed)}</td>
-        </>
-      ),
-      renderDetailCells: (item: ReturnType<typeof enrichUsageRows>[number]) => (
-        <>
-          <td><code>{item.endpoint}</code></td>
-          <td>{item.rawModel}</td>
-          <td><ProviderBadge provider={item.provider} /></td>
-          <td className="right">{fmt(item.requests)}</td>
-          <td className="right muted">{fmtTime(item.lastUsed)}</td>
-        </>
-      ),
-    };
-  }, [stats, tableView, sortBy, sortOrder, masked]);
-
-  const recentAside = useMemo(
-    () => <RecentRequests requests={stats?.recentRequests ?? []} />,
-    [stats?.recentRequests],
-  );
-
-  if (!stats && !loading) {
-    return <div className="usage-empty">Failed to load usage statistics.</div>;
-  }
-
-  if (loading || !stats) {
-    return (
-      <div className="usage-loading">
-        <span className="material-symbols-outlined animate-spin">progress_activity</span>
-      </div>
-    );
-  }
+  const providerLabel = useMemo(() => {
+    if (!providerFilter) return "";
+    return stats.byProvider[providerFilter]?.provider || providers.find((item) => item.id === providerFilter)?.name || providerFilter;
+  }, [providerFilter, stats.byProvider, providers]);
 
   return (
-    <div className="usage-stats-stack">
-      {fetching ? (
-        <div className="usage-fetching">
-          <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          Refreshing...
-        </div>
-      ) : null}
-      <OverviewCards stats={stats} />
-      <ProviderTopology
-        providers={providers}
-        activeRequests={stats.activeRequests}
-        lastProvider={stats.recentRequests?.[0]?.provider || ""}
-        errorProvider={stats.errorProvider || ""}
-        aside={recentAside}
-      />
-      <UsageChart secret={secret} period={period} onError={onError} />
-      <div className="usage-table-toolbar">
-        <select value={tableView} onChange={(event) => setTableView(event.target.value as UsageTableView)} className="select">
-          {TABLE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-        <div className="usage-segmented">
-          <button type="button" className={viewMode === "costs" ? "active" : ""} onClick={() => setViewMode("costs")}>Costs</button>
-          <button type="button" className={viewMode === "tokens" ? "active" : ""} onClick={() => setViewMode("tokens")}>Tokens</button>
-        </div>
-      </div>
-      {tableConfig ? (
-        <UsageTable
-          columns={tableConfig.columns}
-          groupedData={tableConfig.groupedData}
-          sortBy={sortBy}
-          sortOrder={sortOrder}
-          onToggleSort={toggleSort}
-          viewMode={viewMode}
-          storageKey={tableConfig.storageKey}
-          renderSummaryCells={tableConfig.renderSummaryCells}
-          renderDetailCells={tableConfig.renderDetailCells}
-          renderGroupLabel={tableConfig.renderGroupLabel}
-          emptyMessage={tableConfig.emptyMessage}
+    // While a new period loads, the previous numbers stay in place, dimmed, so nothing jumps.
+    <div className={cn("us-overview", refetching && "is-refetching")} aria-busy={refetching}>
+      <UsageChart secret={secret} period={period} valueMode={valueMode} reloadToken={reloadToken} onError={onError} />
+
+      <div className="us-split">
+        <ProviderUsagePanel
+          stats={stats}
+          providers={providers}
+          valueMode={valueMode}
+          selected={providerFilter}
+          onSelect={(id) => onProviderFilter(id === providerFilter ? "" : id)}
         />
-      ) : null}
+        <RecentRequests
+          requests={stats.recentRequests ?? []}
+          activeRequests={stats.activeRequests ?? []}
+          providers={providers}
+          filter={recentFilter}
+          onFilter={onRecentFilter}
+          streamPill={streamPill}
+        />
+      </div>
+
+      <UsageTable
+        stats={stats}
+        tableView={tableView}
+        valueMode={valueMode}
+        sort={sort}
+        onSort={onSort}
+        query={query}
+        providerId={providerFilter}
+        providerLabel={providerLabel}
+        onClearProvider={() => onProviderFilter("")}
+        hasFilters={hasFilters}
+        onClearFilters={onClearFilters}
+      />
+      <PageNote>{t("usage.costNote")}</PageNote>
     </div>
   );
 }

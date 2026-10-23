@@ -1696,6 +1696,8 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.adminGatewaySettings(w, r)
 	case "/api/admin/version":
 		s.adminVersion(w, r)
+	case "/api/admin/import":
+		s.adminImportAuto(w, r)
 	case "/api/admin/import/9router":
 		s.adminImport9router(w, r)
 	case "/api/admin/ninerouter/presets":
@@ -3238,9 +3240,13 @@ func (s *Server) adminImportPayload(w http.ResponseWriter, r *http.Request, run 
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "POST required", useClientRequestID(r))
 		return
 	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	data, err := io.ReadAll(io.LimitReader(r.Body, (32<<20)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "import_failed", err.Error(), useClientRequestID(r))
+		return
+	}
+	if len(data) > 32<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "import file exceeds 32 MB", useClientRequestID(r))
 		return
 	}
 	dryRun := strings.EqualFold(r.URL.Query().Get("dry_run"), "true") || r.URL.Query().Get("dry_run") == "1"

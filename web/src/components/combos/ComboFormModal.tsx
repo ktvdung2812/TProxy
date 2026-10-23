@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Field, Input, Modal, Select, Toggle } from "../ui";
-import { modelOptionGroupLabel } from "../../lib/modelOptions";
+import { Button, Field, Input, Modal, Select, Toggle, cn } from "../ui";
+import { IconAction, PageNote, StatusPill, ToolButton } from "../page-kit";
 import type { ModelOption } from "../../lib/modelOptions";
 import type { ComboFormData } from "./types";
 import { COMBO_ID_REGEX, emptyComboForm, validateComboForm } from "./utils";
@@ -12,6 +12,8 @@ type Props = {
   initial: ComboFormData | null;
   modelOptions: ModelOption[];
   existingIds: string[];
+  /** Model and combo IDs that exist but are turned off (they are not offered as options). */
+  disabledTargets?: Set<string>;
   saving: boolean;
   onClose: () => void;
   onSubmit: (form: ComboFormData) => void;
@@ -25,23 +27,31 @@ function moveItem<T>(items: T[], from: number, to: number) {
   return next;
 }
 
+function sameForm(left: ComboFormData, right: ComboFormData) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function ComboFormModal({
   open,
   editing,
   initial,
   modelOptions,
   existingIds,
+  disabledTargets,
   saving,
   onClose,
   onSubmit,
 }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState<ComboFormData>(emptyComboForm());
+  const [baseline, setBaseline] = useState<ComboFormData>(emptyComboForm());
   const [idError, setIdError] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setForm(initial || emptyComboForm());
+    const seed = initial || emptyComboForm();
+    setForm(seed);
+    setBaseline(seed);
     setIdError("");
   }, [open, initial]);
 
@@ -52,8 +62,11 @@ export function ComboFormModal({
     }
     return groups;
   }, [modelOptions]);
+  const knownValues = useMemo(() => new Set(modelOptions.map((option) => option.value)), [modelOptions]);
 
   const validationError = validateComboForm(form, existingIds, editing);
+  const dirty = !sameForm(form, baseline);
+  const canSubmit = !saving && !validationError && !idError;
 
   const handleIdChange = (value: string) => {
     setForm((current) => ({ ...current, id: value }));
@@ -73,11 +86,10 @@ export function ComboFormModal({
   };
 
   const addItem = () => {
-    const firstModel = modelOptions[0]?.value || "";
-    setForm((current) => ({
-      ...current,
-      items: [...current.items, { public_model_id: firstModel }],
-    }));
+    // Suggest the first target not already in the chain, so repeated clicks build a useful order.
+    const used = new Set(form.items.map((item) => item.public_model_id));
+    const next = modelOptions.find((option) => !used.has(option.value))?.value || modelOptions[0]?.value || "";
+    setForm((current) => ({ ...current, items: [...current.items, { public_model_id: next }] }));
   };
 
   const updateItem = (index: number, patch: Partial<ComboFormData["items"][number]>) => {
@@ -88,147 +100,159 @@ export function ComboFormModal({
   };
 
   const removeItem = (index: number) => {
-    setForm((current) => ({
-      ...current,
-      items: current.items.filter((_, itemIndex) => itemIndex !== index),
-    }));
+    setForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }));
   };
+
+  const submit = () => {
+    if (canSubmit) onSubmit(form);
+  };
+
+  // Only explain a blocked Save once the user has touched something.
+  const showValidation = validationError && validationError !== "idRequired" && !idError && (dirty || editing);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? t("combos.editCombo") : t("combos.createCombo")}
+      title={editing ? t("combos.editCombo") : t("combos.createComboTitle")}
       subtitle={t("combos.comboSubtitle")}
       icon="layers"
       size="lg"
+      className="cb-form-modal"
       footer={
         <>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
+          {dirty && editing ? <StatusPill tone="warning">{t("combos.form.unsaved")}</StatusPill> : null}
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
+            {t("common.cancel")}
           </Button>
-          <Button
-            variant="primary"
-            icon="save"
-            disabled={saving || !!validationError || !!idError}
-            onClick={() => onSubmit(form)}
-          >
-            {saving ? t("combos.saving") : editing ? t("combos.saveChanges") : t("combos.createCombo")}
+          <Button variant="primary" size="sm" icon="save" loading={saving} disabled={!canSubmit} onClick={submit}>
+            {editing ? t("combos.saveChanges") : t("combos.createComboBtn")}
           </Button>
         </>
       }
     >
       <form
-        className="combo-form"
+        className="cb-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!validationError && !idError) onSubmit(form);
+          submit();
         }}
       >
-        <div className="combo-form-grid">
-          <Field label={t("combos.comboId")} hint={t("combos.comboIdHint")}>
+        <div className="cb-form-grid">
+          <Field label={t("combos.comboId")} hint={editing ? t("combos.form.idLocked") : t("combos.comboIdHint")} error={idError || undefined}>
             <Input
               value={form.id}
               onChange={(event) => handleIdChange(event.target.value)}
-              placeholder="claude-code-fallback"
+              placeholder={t("combos.comboIdPlaceholder")}
               disabled={editing}
+              autoFocus={!editing}
             />
-            {idError ? <p className="field-error">{idError}</p> : null}
           </Field>
           <Field label={t("combos.displayName")}>
             <Input
               value={form.display_name}
               onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
-              placeholder="Claude Code Fallback"
+              placeholder={t("combos.displayNamePlaceholder")}
             />
           </Field>
         </div>
 
-        <div className="combo-form-toggles">
-          <Toggle
-            label="Enabled"
-            checked={form.enabled}
-            onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
-          />
-          <Toggle
-            label="Rewrite response model"
-            checked={form.rewrite_response_model}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, rewrite_response_model: event.target.checked }))
-            }
-          />
+        <div className="cb-form-toggles">
+          <div className="cb-form-toggle">
+            <Toggle
+              label={t("combos.form.enabled")}
+              checked={form.enabled}
+              onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
+            />
+            <small>{t("combos.form.enabledHint")}</small>
+          </div>
+          <div className="cb-form-toggle">
+            <Toggle
+              label={t("combos.rewriteResponseModel")}
+              checked={form.rewrite_response_model}
+              onChange={(event) => setForm((current) => ({ ...current, rewrite_response_model: event.target.checked }))}
+            />
+            <small>{t("combos.form.rewriteHint")}</small>
+          </div>
         </div>
 
-        <div className="combo-form-items">
-          <div className="combo-form-items-head">
-            <p className="combo-form-section-title">Fallback order</p>
-            <Button type="button" variant="outline" size="sm" icon="add" onClick={addItem} disabled={!modelOptions.length}>
-              Add step
-            </Button>
-          </div>
+        <section className="cb-form-steps" aria-label={t("combos.fallbackOrder")}>
+          <header className="cb-form-steps-head">
+            <div>
+              <strong>{t("combos.fallbackOrder")}</strong>
+              <small>{t("combos.form.orderHint")}</small>
+            </div>
+            <ToolButton icon="add" onClick={addItem} disabled={!modelOptions.length}>
+              {t("combos.addStep")}
+            </ToolButton>
+          </header>
 
           {modelOptions.length === 0 ? (
-            <p className="combo-form-empty">Create a virtual model or configure mapping targets first.</p>
+            <PageNote icon="info">{t("combos.noModelsForStep")}</PageNote>
           ) : form.items.length === 0 ? (
-            <p className="combo-form-empty">No steps yet. Add models in priority order.</p>
+            <button type="button" className="cb-form-empty" onClick={addItem}>
+              <span className="material-symbols-outlined" aria-hidden>add</span>
+              {t("combos.noStepsYet")}
+            </button>
           ) : (
-            <div className="combo-form-item-list">
-              {form.items.map((item, index) => (
-                <div className="combo-form-item" key={`${item.public_model_id}-${index}`}>
-                    <span className="combo-form-item-index">{index + 1}</span>
-                    <div className="combo-form-item-fields">
-                      <Field label="Model">
-                        <Select
-                          value={item.public_model_id}
-                          onChange={(event) => updateItem(index, { public_model_id: event.target.value })}
-                        >
-                          {groupedOptions.map((group) => (
-                            <optgroup key={group} label={modelOptionGroupLabel(group)}>
-                              {modelOptions
-                                .filter((option) => option.group === group)
-                                .map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                            </optgroup>
-                          ))}
-                        </Select>
-                      </Field>
+            <ol className="cb-form-list">
+              {form.items.map((item, index) => {
+                const unknown = Boolean(item.public_model_id) && !knownValues.has(item.public_model_id);
+                const off = unknown && Boolean(disabledTargets?.has(item.public_model_id));
+                return (
+                  <li className={cn("cb-form-step", index === 0 && "is-primary")} key={`${index}-${item.public_model_id}`}>
+                    <span className="cb-form-rank">{index + 1}</span>
+                    <div className="cb-form-select">
+                      <Select
+                        value={item.public_model_id}
+                        onChange={(event) => updateItem(index, { public_model_id: event.target.value })}
+                        aria-label={t("combos.form.stepModel", { index: index + 1 })}
+                      >
+                        {unknown ? (
+                          <option value={item.public_model_id}>
+                            {t(off ? "combos.form.offTarget" : "combos.form.unknownTarget", { id: item.public_model_id })}
+                          </option>
+                        ) : null}
+                        {groupedOptions.map((group) => (
+                          <optgroup key={group} label={t(`combos.optionGroup.${group}`)}>
+                            {modelOptions
+                              .filter((option) => option.group === group)
+                              .map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ))}
+                      </Select>
+                      {index === 0 ? <small>{t("combos.form.firstStep")}</small> : null}
+                      {unknown ? (
+                        <small className={off ? "cb-form-muted" : "cb-form-warn"}>{t(off ? "combos.form.offHint" : "combos.form.unknownHint")}</small>
+                      ) : null}
                     </div>
-                    <div className="combo-form-item-actions">
-                      <button
-                        type="button"
-                        className="combo-form-icon-btn"
+                    <div className="cb-form-actions">
+                      <IconAction
+                        icon="arrow_upward"
+                        label={t("combos.moveUp")}
                         disabled={index === 0}
                         onClick={() => setForm((current) => ({ ...current, items: moveItem(current.items, index, index - 1) }))}
-                        aria-label="Move up"
-                      >
-                        <span className="material-symbols-outlined">arrow_upward</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="combo-form-icon-btn"
+                      />
+                      <IconAction
+                        icon="arrow_downward"
+                        label={t("combos.moveDown")}
                         disabled={index === form.items.length - 1}
                         onClick={() => setForm((current) => ({ ...current, items: moveItem(current.items, index, index + 1) }))}
-                        aria-label="Move down"
-                      >
-                        <span className="material-symbols-outlined">arrow_downward</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="combo-form-icon-btn combo-form-icon-btn-danger"
-                        onClick={() => removeItem(index)}
-                        aria-label="Remove step"
-                      >
-                        <span className="material-symbols-outlined">close</span>
-                      </button>
+                      />
+                      <IconAction icon="close" danger label={t("combos.removeStep")} onClick={() => removeItem(index)} />
                     </div>
-                  </div>
-              ))}
-            </div>
+                  </li>
+                );
+              })}
+            </ol>
           )}
-        </div>
+        </section>
+
+        {showValidation ? <PageNote icon="error">{t(`combos.validation.${validationError}`)}</PageNote> : null}
       </form>
     </Modal>
   );

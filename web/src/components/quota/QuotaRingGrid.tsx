@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "../ui";
 import { formatProxyUsageLabel, formatQuotaName, formatResetAbsolute, formatResetTime, getColorTone } from "./utils";
 
@@ -34,6 +35,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  * each model a fixed-size tile, so the row count stops driving the height.
  */
 export function QuotaRingGrid({ rows, proxyUsage, onHide }: Props) {
+  const { t } = useTranslation();
   if (rows.length === 0) return null;
 
   const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
@@ -108,7 +110,7 @@ export function QuotaRingGrid({ rows, proxyUsage, onHide }: Props) {
                 {name}
               </span>
               <span className="quota-ring-reset" title={row.reset_at || undefined}>
-                {countdown !== "-" ? `in ${countdown}` : "N/A"}
+                {countdown !== "-" ? t("quota.resetsIn", { time: countdown }) : "—"}
                 {absoluteReset ? <span className="quota-ring-reset-absolute">{absoluteReset}</span> : null}
               </span>
             </li>

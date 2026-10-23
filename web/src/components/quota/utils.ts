@@ -5,16 +5,59 @@ export const REFRESH_INTERVAL_MS = 60000;
 export const CLAUDE_REFRESH_INTERVAL_MS = 180000;
 export const QUOTA_REFRESH_CONCURRENCY = 4;
 export const DEPLETED_QUOTA_THRESHOLD = 5;
+export const LOW_QUOTA_THRESHOLD = 30;
 export const AUTO_REFRESH_STORAGE_KEY = "tproxy.quotaAutoRefresh";
 export const QUOTA_VISIBILITY_KEY = "tproxy.quotaVisibility";
+export const QUOTA_VIEW_MODE_KEY = "tproxy.quotaViewMode";
+export const QUOTA_GUIDE_DISMISSED_KEY = "tproxy.quotaGuideDismissed";
 
-export const ACCOUNT_FILTER_OPTIONS = [
-  { value: "all", label: "All accounts" },
-  { value: "active", label: "Active" },
-  { value: "inactive", label: "Turned off" },
-] as const;
+// "active" is no longer offered in the UI but still parsed so old links work.
+export const ACCOUNT_FILTERS = ["all", "available", "low", "attention", "inactive", "active"] as const;
 
-export type AccountFilter = (typeof ACCOUNT_FILTER_OPTIONS)[number]["value"];
+export type AccountFilter = (typeof ACCOUNT_FILTERS)[number];
+
+/**
+ * What an account looks like to the router right now, from the operator's
+ * point of view. "loading" only lasts until the first quota request settles.
+ */
+export type AccountHealth =
+  | "loading"
+  | "ready"
+  | "low"
+  | "exhausted"
+  | "cooldown"
+  | "paused"
+  | "error"
+  | "nodata"
+  | "off";
+
+export type AccountHealthBucket = "available" | "low" | "attention" | "off";
+
+export function accountHealthBucket(health: AccountHealth): AccountHealthBucket | null {
+  switch (health) {
+    case "ready":
+    case "nodata":
+      return "available";
+    case "low":
+      return "low";
+    case "exhausted":
+    case "cooldown":
+    case "paused":
+    case "error":
+      return "attention";
+    case "off":
+      return "off";
+    default:
+      return null;
+  }
+}
+
+export function matchesAccountFilter(filter: AccountFilter, health: AccountHealth, enabled: boolean) {
+  if (filter === "all") return true;
+  if (filter === "active") return enabled;
+  if (filter === "inactive") return !enabled;
+  return accountHealthBucket(health) === filter;
+}
 
 export function getConnectionLabel(credential: { label?: string; email?: string; id: string }) {
   return credential.label?.trim() || credential.email?.trim() || null;
@@ -124,6 +167,78 @@ export function isConnectionAtZero(quota?: CredentialQuota, providerType = quota
     if (entry.unlimited || entry.total <= 0) return false;
     return entry.remaining <= 0;
   });
+}
+
+// Keep in step with quotaKeyAutoDisablesAtZero in internal/providers/quota_state.go.
+function quotaKeyAutoDisablesAtZero(providerType: string, key: string) {
+  const normalizedKey = key.trim().toLowerCase();
+  if (normalizedKey === "session" || normalizedKey === "weekly") return true;
+  const normalizedType = providerType.trim().toLowerCase();
+  if (normalizedType === "opencode-go" && normalizedKey === "monthly") return true;
+  return normalizedType === "devin" && normalizedKey === "daily";
+}
+
+const CREDIT_RESCUE_KEYS: Record<string, string[]> = {
+  claude: ["extra_usage", "spend"],
+  xai: ["prepaid", "on_demand"],
+  "grok-cli": ["prepaid", "on_demand"],
+};
+
+/**
+ * Port of QuotaAtZero in internal/providers/quota_state.go: whether the router
+ * considers the whole account spent. A spent session or primary weekly window
+ * is enough (unless paid credit keeps it serving); otherwise every routing
+ * window has to be empty, so one exhausted Antigravity model does not count.
+ */
+export function isQuotaExhausted(quota?: CredentialQuota, providerType = quota?.provider_type || "") {
+  const entries = quotaEntries(quota);
+  if (entries.length === 0) return false;
+  const type = providerType.trim().toLowerCase();
+  const rescued = (CREDIT_RESCUE_KEYS[type] || []).some((key) => {
+    const entry = entries.find((item) => item.key === key);
+    return Boolean(entry && !entry.unlimited && entry.total > 0 && entry.remaining > 0);
+  });
+  let hasRoutingWindow = false;
+  let hasAvailableRoutingWindow = false;
+  for (const entry of entries) {
+    if (entry.unlimited || entry.total <= 0) continue;
+    if (quotaKeyAutoDisablesAtZero(type, entry.key) && entry.remaining <= 0 && !rescued) return true;
+    if (!quotaKeyAffectsRouting(type, entry.key)) continue;
+    hasRoutingWindow = true;
+    if (entry.remaining > 0) hasAvailableRoutingWindow = true;
+  }
+  return hasRoutingWindow && !hasAvailableRoutingWindow;
+}
+
+/** Lowest remaining percentage across limited windows, or null when none are limited. */
+export function lowestRemaining(entries: Array<{ remaining: number; unlimited?: boolean; total: number }>) {
+  let lowest: number | null = null;
+  for (const entry of entries) {
+    if (entry.unlimited || entry.total <= 0) continue;
+    if (lowest === null || entry.remaining < lowest) lowest = entry.remaining;
+  }
+  return lowest;
+}
+
+export function getAccountHealth(input: {
+  enabled: boolean;
+  quota?: CredentialQuota;
+  providerType: string;
+  error?: string;
+  settled: boolean;
+  onCooldown: boolean;
+}): AccountHealth {
+  if (!input.enabled) return "off";
+  if (input.quota?.quota_auto_disabled) return "paused";
+  if (input.onCooldown) return "cooldown";
+  if (input.error) return "error";
+  if (!input.quota) return input.settled ? "nodata" : "loading";
+  const entries = quotaEntries(input.quota);
+  if (entries.length === 0) return "nodata";
+  if (isQuotaExhausted(input.quota, input.providerType)) return "exhausted";
+  const lowest = lowestRemaining(entries);
+  if (lowest !== null && lowest < LOW_QUOTA_THRESHOLD) return "low";
+  return "ready";
 }
 
 export function formatResetTime(date?: string) {
@@ -276,12 +391,16 @@ export const QUOTA_URL_PARAMS = {
   sort: "sort",
 } as const;
 
-export type QuotaUrlSort = "default" | "expiring";
+export type QuotaUrlSort = "default" | "expiring" | "lowest";
 
 export function parseQuotaAccountFilter(raw: string | null): AccountFilter {
   const value = raw?.trim().toLowerCase();
-  if (value === "active" || value === "inactive") return value;
-  return "all";
+  return (ACCOUNT_FILTERS as readonly string[]).includes(value || "") ? (value as AccountFilter) : "all";
+}
+
+export function parseQuotaSort(raw: string | null): QuotaUrlSort {
+  const value = raw?.trim().toLowerCase();
+  return value === "expiring" || value === "lowest" ? value : "default";
 }
 
 export function resolveQuotaProviderFilter(raw: string | null, providerOptions: string[]): string {
@@ -289,10 +408,6 @@ export function resolveQuotaProviderFilter(raw: string | null, providerOptions: 
   if (!value || value === "all") return "all";
   if (providerOptions.length === 0) return value;
   return providerOptions.includes(value) ? value : "all";
-}
-
-export function isQuotaExpiringSort(raw: string | null): boolean {
-  return raw?.trim().toLowerCase() === "expiring";
 }
 
 export function patchQuotaSearchParams(
@@ -310,8 +425,8 @@ export function patchQuotaSearchParams(
     else next.set(QUOTA_URL_PARAMS.status, patch.status);
   }
   if (patch.sort !== undefined) {
-    if (patch.sort === "expiring") next.set(QUOTA_URL_PARAMS.sort, "expiring");
-    else next.delete(QUOTA_URL_PARAMS.sort);
+    if (patch.sort === "default") next.delete(QUOTA_URL_PARAMS.sort);
+    else next.set(QUOTA_URL_PARAMS.sort, patch.sort);
   }
   return next;
 }

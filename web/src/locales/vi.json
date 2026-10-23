@@ -1,4 +1,15 @@
 {
+  "kit": {
+    "clearSearch": "Xóa tìm kiếm",
+    "searchShortcut": "Nhấn / để tìm",
+    "autoRefresh": "Tự động làm mới",
+    "guideToggle": "Hướng dẫn trang này",
+    "guideKicker": "// HƯỚNG DẪN NHANH",
+    "guideDismiss": "Đã hiểu, ẩn hướng dẫn",
+    "bulkToolbar": "Thao tác hàng loạt",
+    "selected": "đã chọn",
+    "clearSelection": "Bỏ chọn"
+  },
   "auth": {
     "login": "Đăng nhập",
     "password": "Mật khẩu",
@@ -26,12 +37,12 @@
     "usage": "Sử dụng",
     "tokenSaver": "Token Saver",
     "quotaTracker": "Quota Tracker",
-    "freeTiers": "Free tiers",
+    "freeTiers": "Gói miễn phí",
     "apis": "APIs",
     "chat": "Chat",
     "cliTools": "CLI Tools",
     "skills": "Skills",
-    "logs": "Logs & audit",
+    "logs": "Nhật ký & audit",
     "settings": "Cài đặt",
     "controlCenter": "control center",
     "gatewayOnline": "Gateway online",
@@ -42,11 +53,11 @@
     "signOut": "Đăng xuất",
     "overview_page_title": "Tổng quan định tuyến",
     "overview_page_desc": "Model ID ổn định trên mọi upstream.",
-    "ppm_page_title": "Provider Priority Manager",
+    "ppm_page_title": "Thứ tự ưu tiên provider",
     "ppm_page_desc": "Định nghĩa public model ID và chuỗi ưu tiên provider quyết định upstream nào xử lý mỗi yêu cầu.",
     "combos_page_title": "Combos",
     "combos_page_desc": "Chính sách fallback có thứ tự trên các virtual model.",
-    "mapping_page_title": "Protocol mapping",
+    "mapping_page_title": "Ánh xạ giao thức",
     "mapping_page_desc": "Định tuyến Claude, Codex, Cursor trong suốt — viết lại tên model phía server mà không cần đổi trong IDE/CLI.",
     "providers_page_title": "Providers",
     "providers_page_desc": "Quản lý kết nối đến nhà cung cấp AI.",
@@ -68,9 +79,9 @@
     "chat_page_desc": "Kiểm tra model với playground hội thoại.",
     "cliTools_page_title": "CLI Tools",
     "cliTools_page_desc": "Kết nối CLI coding và IDE extension với tproxy.",
-    "skills_page_title": "Agent skills",
+    "skills_page_title": "Kỹ năng cho agent",
     "skills_page_desc": "Skill prompt để agent dùng tproxy cho chat, media, search và hơn thế nữa.",
-    "logs_page_title": "Logs & audit",
+    "logs_page_title": "Nhật ký & audit",
     "logs_page_desc": "Yêu cầu gần đây và thay đổi admin.",
     "settings_page_title": "Cài đặt",
     "settings_page_desc": "Hành vi gateway, rotation, retention và backup cấu hình."
@@ -129,7 +140,134 @@
     "estimatedCostHint": "giá models.dev",
     "activeCredentials": "Credential đang hoạt động",
     "activeCredentialsHint": "bản ghi account khả dụng",
-    "noApiKeys": "Chưa có API key"
+    "noApiKeys": "Chưa có API key",
+    "connectProvider": "Kết nối provider",
+    "quickStart": "Bắt đầu nhanh",
+    "quick": {
+      "cliTools": "Cài CLI tool",
+      "chat": "Thử trong chat",
+      "logs": "Nhật ký request"
+    },
+    "stats": {
+      "label": "Tổng quan gateway",
+      "open": "Mở {{page}}",
+      "tokensHint": "{{input}} vào · {{output}} ra token",
+      "noErrors": "Không có lần thử lỗi",
+      "errorRate": "{{rate}}% số request",
+      "savedShare": "{{rate}}% token đầu vào",
+      "savedNone": "Token Saver chưa tiết kiệm được",
+      "activeAccounts": "Tài khoản đang bật",
+      "accountsHint": "trên tổng {{total}} tài khoản",
+      "accountsAttention": "{{count}}/{{total}} cần xử lý"
+    },
+    "guide": {
+      "title": "Gateway hoạt động thế nào",
+      "connect": "Kết nối provider (Claude, Codex, Gemini…) và đăng nhập một hoặc nhiều tài khoản — tproxy sẽ luân phiên giữa chúng.",
+      "keys": "Tạo API key rồi trỏ ứng dụng hoặc CLI tool tới URL của gateway. Model giữ nguyên ID dù upstream nào phục vụ.",
+      "watch": "Xem mục \"Cần xử lý\" ở đây: mỗi mục dẫn tới đúng trang để khắc phục.",
+      "legendOk": "Hoạt động tốt",
+      "legendWarn": "Suy giảm, vẫn phục vụ",
+      "legendDanger": "Bị chặn, cần xử lý"
+    },
+    "attention": {
+      "title": "Cần xử lý",
+      "summary_one": "{{count}} mục đang cản trở lưu lượng",
+      "summary_other": "{{count}} mục đang cản trở lưu lượng",
+      "summaryNone": "Không có gì cản trở lưu lượng",
+      "toneDanger": "Bị chặn",
+      "toneWarning": "Suy giảm",
+      "toneInfo": "Thông tin",
+      "showAll": "Xem tất cả {{count}}",
+      "showFewer": "Thu gọn",
+      "noProviders": "Chưa kết nối provider nào",
+      "noProvidersHint": "Kết nối một provider và đăng nhập tài khoản để bắt đầu định tuyến request.",
+      "allClear": "Mọi thứ ổn",
+      "allClearHint": "Tất cả provider, tài khoản và proxy pool đều hoạt động.",
+      "kind": {
+        "provider": "Provider",
+        "account": "Tài khoản",
+        "pool": "Proxy pool",
+        "model": "Model"
+      },
+      "providerAuth": "{{name}} cần đăng nhập lại",
+      "accountsAffected_one": "ảnh hưởng {{count}} tài khoản",
+      "accountsAffected_other": "ảnh hưởng {{count}} tài khoản",
+      "signIn": "Đăng nhập",
+      "providerDegraded": "{{name}} đang suy giảm",
+      "providerDegradedHint": "Các lần kiểm tra gần đây thất bại",
+      "checkHealth": "Kiểm tra",
+      "providerUnchecked": "{{name}} chưa được kiểm tra",
+      "providerUncheckedHint": "Chạy kiểm tra để xác nhận hoạt động",
+      "providerDisabled": "{{name}} đang tắt",
+      "disabledRoutes_one": "{{count}} route model đang trỏ tới",
+      "disabledRoutes_other": "{{count}} route model đang trỏ tới",
+      "disabledHint": "Không dùng để định tuyến",
+      "openProvider": "Mở provider",
+      "accountAuth": "{{account}} cần đăng nhập lại",
+      "accountCooldown": "{{account}} đang cooldown",
+      "backIn": "hoạt động lại {{time}}",
+      "clearCooldown": "Xem cooldown",
+      "accountError": "{{account}} đang lỗi",
+      "poolFailing": "Proxy pool {{name}} đang lỗi",
+      "poolInUse_one": "{{count}} tài khoản đang dùng",
+      "poolInUse_other": "{{count}} tài khoản đang dùng",
+      "poolUnused": "chưa tài khoản nào dùng",
+      "testPool": "Kiểm tra pool",
+      "modelNoRoute": "{{name}} không có route hoạt động",
+      "modelNoRouteHint": "Request cho model này sẽ thất bại",
+      "addRoute": "Thêm route"
+    },
+    "summary": {
+      "title": "Gateway",
+      "subtitle": "Những gì đang định tuyến được",
+      "open": "Mở {{name}}",
+      "providers": "Provider",
+      "accounts": "Tài khoản",
+      "accountsOk": "Sẵn sàng",
+      "accountsWarn": "Cooldown hoặc lỗi",
+      "accountsAuth": "Cần đăng nhập",
+      "models": "Model",
+      "modelsDetail": "{{on}} bật · {{routes}} route",
+      "combos": "Combo",
+      "proxyPools": "Proxy pool",
+      "poolsDetail": "{{on}} bật · {{inUse}} đang dùng",
+      "apiKeys": "API key",
+      "onCount": "{{count}} đang bật"
+    },
+    "keys": {
+      "title": "API key",
+      "subtitle": "Khóa ứng dụng dùng để gọi gateway",
+      "summary_one": "{{count}} key · {{on}} đang bật",
+      "summary_other": "{{count}} key · {{on}} đang bật",
+      "today": "Hôm nay: {{requests}} req · {{cost}}",
+      "manage": "Quản lý",
+      "manageHint": "Mở trang APIs để tạo key và đặt giới hạn",
+      "create": "Tạo API key",
+      "emptyHint": "Tạo một key, rồi dùng nó làm bearer token cho URL của gateway.",
+      "columns": {
+        "key": "Key",
+        "models": "Model",
+        "limits": "Giới hạn",
+        "today": "Hôm nay",
+        "on": "Bật"
+      },
+      "secretMissing": "secret không lưu trên trình duyệt này",
+      "secretMissingHint": "Key đầy đủ chỉ hiện một lần lúc tạo. Hãy tạo key mới nếu bạn làm mất.",
+      "allModels": "Mọi model",
+      "modelsCount_one": "{{count}} model",
+      "modelsCount_other": "{{count}} model",
+      "usage": "{{requests}} req · {{cost}}",
+      "enable": "Bật key",
+      "disable": "Tắt key",
+      "pause": "Tắt",
+      "pauseTitle": "Tắt key này?",
+      "pauseMessage": "Ứng dụng dùng \"{{name}}\" sẽ nhận lỗi 401 cho tới khi bạn bật lại.",
+      "more": "Thao tác khác",
+      "edit": "Sửa giới hạn",
+      "editHint": "Mở trang APIs",
+      "revoke": "Thu hồi",
+      "revokeMessage": "Thu hồi \"{{name}}\"? Ứng dụng đang dùng sẽ ngừng hoạt động ngay. Không thể hoàn tác."
+    }
   },
   "providers": {
     "healthOk": "{{id}} khỏe mạnh",
@@ -535,7 +673,359 @@
     "freeTierProviders": "Provider miễn phí",
     "oauthCredentialHint": "Credential OAuth — secret được quản lý bởi luồng token refresh.",
     "leaveSecretBlank": "Để trống secret để giữ giá trị hiện tại.",
-    "leaveEmptyKeepSecret": "Để trống để giữ secret hiện có"
+    "leaveEmptyKeepSecret": "Để trống để giữ secret hiện có",
+    "stats": {
+      "label": "Tình trạng provider",
+      "connected": "Provider",
+      "connectedHint": "Tất cả provider đã cấu hình",
+      "connectedOf": "Lọc từ {{count}} provider",
+      "healthy": "Ổn định",
+      "healthyHint": "Đang phục vụ bình thường",
+      "attention": "Cần xử lý",
+      "attentionHint": "Suy giảm hoặc bị chặn",
+      "off": "Đã tắt",
+      "offHint": "Không được định tuyến",
+      "accounts": "Tài khoản",
+      "accountsHint": "{{on}} bật · {{off}} tắt",
+      "cooldown": "Đang cooldown",
+      "cooldownNext": "Gần nhất hết sau {{time}}",
+      "cooldownNone": "Không tài khoản nào bị giới hạn"
+    },
+    "kind": {
+      "all": "Tất cả",
+      "oauth": "OAuth",
+      "apikey": "API key",
+      "custom": "Tùy chỉnh",
+      "other": "Media & plugin"
+    },
+    "kindTitle": {
+      "oauth": "OAuth & gói đăng ký",
+      "apikey": "Provider dùng API key",
+      "custom": "Endpoint tùy chỉnh",
+      "other": "Media & plugin"
+    },
+    "health": {
+      "healthy": "Ổn định",
+      "degraded": "Suy giảm",
+      "attention": "Cần xử lý",
+      "idle": "Chưa có tài khoản",
+      "off": "Tắt",
+      "unknown": "Chưa kiểm tra"
+    },
+    "healthHint": {
+      "healthy": "Đang phục vụ bình thường",
+      "degraded": "Vẫn phục vụ nhưng một số tài khoản hoặc upstream đang báo lỗi",
+      "attention": "Không phục vụ được cho đến khi bạn xử lý: đăng nhập lại hoặc sửa tài khoản lỗi",
+      "idle": "Đã bật nhưng chưa kết nối tài khoản nào",
+      "off": "Provider đã tắt, không bao giờ được định tuyến",
+      "unknown": "Chưa chạy kiểm tra sức khỏe lần nào"
+    },
+    "accountState": {
+      "ready": "Sẵn sàng",
+      "cooldown": "Cooldown",
+      "degraded": "Suy giảm",
+      "attention": "Cần xử lý",
+      "off": "Tắt",
+      "unknown": "Chưa kiểm tra"
+    },
+    "accountStateHint": {
+      "ready": "Ổn định và được router chọn",
+      "cooldown": "Bị giới hạn tốc độ; tạm bỏ qua đến khi hết cooldown",
+      "degraded": "Vẫn chạy nhưng lần kiểm tra gần nhất có lỗi",
+      "attention": "Đang lỗi hoặc mất đăng nhập; không định tuyến cho đến khi sửa",
+      "off": "Đã tắt; không bao giờ được định tuyến",
+      "unknown": "Chưa kiểm tra; vẫn định tuyến bình thường"
+    },
+    "columns": {
+      "provider": "Provider",
+      "kind": "Loại",
+      "status": "Trạng thái",
+      "accounts": "Tài khoản",
+      "checked": "Kiểm tra",
+      "account": "Tài khoản",
+      "quota": "Quota",
+      "today": "Hôm nay",
+      "on": "Bật"
+    },
+    "list": {
+      "kindFilter": "Loại provider",
+      "import": "Nhập",
+      "addProvider": "Thêm provider",
+      "searchPlaceholder": "Tìm provider và danh mục…",
+      "sortBy": "Sắp xếp provider",
+      "sort": {
+        "attention": "Có vấn đề trước",
+        "accounts": "Nhiều tài khoản nhất",
+        "name": "Tên"
+      },
+      "viewMode": "Kiểu xem",
+      "viewGrid": "Thẻ",
+      "viewList": "Danh sách",
+      "quickActions": "Thao tác nhanh",
+      "checkAttention": "Kiểm tra provider cần xử lý",
+      "checkAttentionHint_one": "{{count}} provider",
+      "checkAttentionHint_other": "{{count}} provider",
+      "checkAll": "Kiểm tra sức khỏe mọi provider",
+      "checkAllHint_one": "{{count}} provider đang bật",
+      "checkAllHint_other": "{{count}} provider đang bật",
+      "exportHint": "Token OAuth của mọi provider trong một file JSON",
+      "importHint": "File xuất từ sub2api, CLIProxyAPI, 9router hoặc tproxy",
+      "emptyTitle": "Chưa kết nối provider nào",
+      "emptyHint": "Chọn một provider trong danh mục bên dưới rồi đăng nhập, hoặc nhập tài khoản đã xuất từ công cụ khác.",
+      "noMatch": "Không có provider nào khớp",
+      "noMatchSearch": "Không provider đã cấu hình nào khớp từ khóa. Danh mục bên dưới có thể vẫn có.",
+      "noMatchHint": "Thử loại hoặc trạng thái khác, hoặc xóa bộ lọc.",
+      "clearFilters": "Xóa bộ lọc",
+      "groupProviders_one": "{{count}} provider",
+      "groupProviders_other": "{{count}} provider",
+      "groupAccounts_one": "{{count}} tài khoản",
+      "groupAccounts_other": "{{count}} tài khoản",
+      "groupHealth": "Tình trạng trong nhóm",
+      "checkGroup": "Kiểm tra nhóm",
+      "checkGroupHint_one": "Kiểm tra {{count}} provider đang bật",
+      "checkGroupHint_other": "Kiểm tra {{count}} provider đang bật",
+      "noAuthNeeded": "Không cần thông tin đăng nhập",
+      "noAccountsYet": "Chưa kết nối tài khoản nào",
+      "accountsSummary_one": "{{count}} tài khoản · {{on}} bật",
+      "accountsSummary_other": "{{count}} tài khoản · {{on}} bật",
+      "cooldownClears": "Cooldown gần nhất hết sau {{time}}",
+      "cooldownFor": "{{count}} cooldown · {{time}}",
+      "cooldownCount": "{{count}} đang cooldown",
+      "attentionCount_one": "{{count}} cần xử lý",
+      "attentionCount_other": "{{count}} cần xử lý",
+      "openNamed": "Mở {{name}}",
+      "checkedAgo": "kiểm tra {{time}} trước",
+      "neverChecked": "chưa kiểm tra",
+      "proxyPools_one": "{{count}} proxy pool",
+      "proxyPools_other": "{{count}} proxy pool",
+      "accountsShort": "{{on}}/{{count}} bật",
+      "noAuthShort": "không cần xác thực",
+      "checkSummary": "{{healthy}}/{{checked}} tài khoản ổn định",
+      "copiedId": "Đã sao chép {{id}}",
+      "copyFailed": "Không sao chép được vào clipboard"
+    },
+    "menu": {
+      "open": "Mở chi tiết",
+      "openHint": "Tài khoản, model và xoay vòng",
+      "checkHint": "Kiểm tra mọi tài khoản đang bật",
+      "checkNamed": "Kiểm tra sức khỏe {{name}}",
+      "copyId": "Sao chép ID provider",
+      "more": "Thao tác khác",
+      "moreAccount": "Thao tác khác cho tài khoản"
+    },
+    "guide": {
+      "title": "Provider là các upstream mà tproxy định tuyến tới",
+      "connected": "Mỗi thẻ là một provider. Màu cho biết nó có phục vụ được không; thanh màu thể hiện tình trạng các tài khoản của nó.",
+      "health": "Bấm ô màu đỏ hoặc vàng để chỉ xem các provider đó, rồi kiểm tra sức khỏe ngay trên thẻ hoặc trong Thao tác nhanh.",
+      "add": "Muốn kết nối provider mới, chọn nó trong danh mục ở cuối trang rồi đăng nhập — provider sẽ được tạo tự động."
+    },
+    "detailGuide": {
+      "title": "Cách các tài khoản của provider này được dùng",
+      "order": "Router thử tài khoản từ trên xuống. Kéo ô # để đổi thứ tự; công tắc dùng để đưa tài khoản ra khỏi vòng xoay.",
+      "states": "Xanh là đang định tuyến, vàng là đang cooldown và tự hết, đỏ cần bạn xử lý: đăng nhập lại hoặc xem lỗi.",
+      "bulk": "Tích chọn nhiều tài khoản để bật/tắt, kiểm tra, xuất hoặc xóa cùng lúc. Esc để bỏ chọn."
+    },
+    "identity": {
+      "healthHint": "Kiểm tra mọi tài khoản đang bật của provider này",
+      "discoverHint": "Lấy danh sách model mới nhất từ upstream",
+      "deleteMessage": "Xóa provider và cấu hình định tuyến của nó. Các tài khoản vẫn được lưu nhưng không còn được dùng.",
+      "logoAlt": "Logo {{name}}"
+    },
+    "account": {
+      "cooldownFor": "Cooldown · {{time}}",
+      "editHint": "Nhãn, ưu tiên, secret, giới hạn và proxy pool",
+      "rankHint": "Vị trí định tuyến {{rank}}",
+      "rankDragHint": "Vị trí định tuyến {{rank}} — kéo để đổi thứ tự",
+      "dragNamed": "Kéo để đổi thứ tự {{label}}",
+      "turnOff": "Tắt (ngừng định tuyến)",
+      "turnOn": "Bật",
+      "checkingQuota": "Đang kiểm tra quota…",
+      "resetsIn": "Reset sau {{time}}",
+      "showLess": "Thu gọn",
+      "showMore": "Xem thêm {{count}}",
+      "editNamed": "Sửa {{label}}",
+      "plan": "Gói: {{plan}}",
+      "addedOn": "Thêm lúc {{date}}",
+      "usedAgo": "dùng {{time}} trước",
+      "stickyHint": "Số request liên tiếp tài khoản này đã phục vụ (xoay vòng sticky)",
+      "quotaFailed": "Không tải được quota",
+      "exported_one": "Đã xuất {{count}} tài khoản",
+      "exported_other": "Đã xuất {{count}} tài khoản",
+      "bulkEnabled_one": "Đã bật {{count}} tài khoản",
+      "bulkEnabled_other": "Đã bật {{count}} tài khoản",
+      "bulkDisabled_one": "Đã tắt {{count}} tài khoản",
+      "bulkDisabled_other": "Đã tắt {{count}} tài khoản",
+      "bulkDeleted_one": "Đã xóa {{count}} tài khoản",
+      "bulkDeleted_other": "Đã xóa {{count}} tài khoản",
+      "bulkPartial": "Đã cập nhật {{done}}/{{total}}. Lỗi: {{error}}",
+      "orderSaved": "Đã lưu thứ tự định tuyến",
+      "orderFailed": "Không lưu được thứ tự định tuyến",
+      "oauthConnected": "Đã kết nối tài khoản",
+      "connectTitle": "Kết nối tài khoản",
+      "connectHint": "Chọn cách đăng nhập. Lựa chọn được tô sáng là cách nên dùng.",
+      "statsLabel": "Tình trạng tài khoản",
+      "stats": {
+        "all": "Tài khoản",
+        "allHint": "{{on}} bật · {{off}} tắt",
+        "ready": "Sẵn sàng",
+        "readyHint": "Ổn định và được định tuyến",
+        "cooldown": "Cooldown",
+        "cooldownHint": "Tự hết sau một lúc",
+        "attention": "Cần xử lý",
+        "attentionHint": "Lỗi, suy giảm hoặc mất đăng nhập",
+        "off": "Đã tắt",
+        "offHint": "Không được định tuyến",
+        "usage": "Hôm nay",
+        "usageHint": "{{tokens}} qua tproxy hôm nay"
+      },
+      "errorFilter": "Lọc theo mã lỗi",
+      "selectVisible": "Chọn cả {{count}} đang hiển thị",
+      "selectAttention": "Chọn tài khoản cần xử lý",
+      "selectAttentionHint_one": "{{count}} tài khoản",
+      "selectAttentionHint_other": "{{count}} tài khoản",
+      "exportAll": "Xuất cả {{count}} (sub2api)",
+      "exportHint": "File JSON sub2api, có thể nhập lại sau",
+      "summary_one": "{{count}} tài khoản · {{on}} bật",
+      "summary_other": "{{count}} tài khoản · {{on}} bật",
+      "summaryFiltered": "Hiển thị {{shown}}/{{count}}",
+      "orderHint": "Kéo ô # của tài khoản để đổi tài khoản được router thử trước",
+      "orderShort": "Kéo # để đổi thứ tự",
+      "bulkEnable": "Bật",
+      "bulkDisable": "Tắt",
+      "bulkDeleteTitle_one": "Xóa {{count}} tài khoản?",
+      "bulkDeleteTitle_other": "Xóa {{count}} tài khoản?"
+    },
+    "catalog": {
+      "title": "Thêm provider",
+      "subtitle": "{{count}} tích hợp có sẵn",
+      "matches": "{{count}}/{{total}} khớp từ khóa",
+      "loading": "Đang tải danh mục…",
+      "tabsLabel": "Nhóm danh mục",
+      "tab": {
+        "oauth": "OAuth",
+        "freeTier": "Miễn phí",
+        "apikey": "API key",
+        "media": "Media",
+        "plugin": "Plugin",
+        "custom": "Tùy chỉnh"
+      },
+      "hint": {
+        "oauth": "Đăng nhập bằng tài khoản gói đăng ký — không cần API key. Provider đã kết nối có dấu tích.",
+        "freeTier": "Provider có quota miễn phí; đa số chỉ cần đăng nhập hoặc một key miễn phí.",
+        "apikey": "Dán key lấy từ trang quản trị của provider.",
+        "media": "Provider ảnh, video, giọng nói và tìm kiếm.",
+        "plugin": "Tiện ích mở rộng chạy qua plugin HTTP."
+      },
+      "auth": {
+        "oauth": "Đăng nhập OAuth",
+        "apikey": "API key",
+        "cookie": "Cookie trình duyệt",
+        "serviceAccount": "Service account",
+        "noAuth": "Không cần xác thực"
+      },
+      "customHint": "Trỏ tproxy tới bất kỳ endpoint tương thích OpenAI hoặc Anthropic nào, ví dụ gateway tự host.",
+      "customOpenAIHint": "Bất kỳ API /v1/chat/completions",
+      "customAnthropicHint": "Bất kỳ API /v1/messages",
+      "noMatch": "Không có gì trong danh mục khớp",
+      "noMatchHint": "Thử tên khác, hoặc thêm endpoint tùy chỉnh.",
+      "openConnected": "Mở {{name}} — đã kết nối",
+      "connectNamed": "Kết nối {{name}}",
+      "connectedAccounts_one": "Đã kết nối · {{count}} tài khoản",
+      "connectedAccounts_other": "Đã kết nối · {{count}} tài khoản"
+    },
+    "method": {
+      "moreWays": "Cách kết nối khác",
+      "recommended": "Nên dùng",
+      "signInWith": "Đăng nhập bằng {{name}}",
+      "addAccount": "Thêm tài khoản",
+      "grokCliDevice": "Đăng nhập thiết bị Grok CLI",
+      "githubOAuth": "GitHub OAuth",
+      "googleSignIn": "Đăng nhập Google",
+      "githubDevice": "Đăng nhập thiết bị GitHub",
+      "addOllamaHost": "Thêm Ollama host",
+      "addCookie": "Thêm cookie",
+      "addApiKey": "Thêm API key",
+      "addServiceAccount": "Thêm service account",
+      "addNoAuth": "Thêm kết nối không xác thực",
+      "connectCursor": "Kết nối Cursor IDE",
+      "connectKiro": "Kết nối Kiro",
+      "desc": {
+        "noAuth": "Dùng proxy pool và định tuyến mà không cần thông tin đăng nhập upstream.",
+        "cursor": "Tự lấy access token và machine ID từ database cục bộ của Cursor.",
+        "importData": "Chọn file JSON; định dạng được nhận diện và chuyển đổi tự động.",
+        "kiro": "AWS Builder ID, IAM Identity Center, API key, nhập token hoặc JSON CLIProxyAPI.",
+        "cookie": "Dán cookie phiên đăng nhập từ trình duyệt.",
+        "oauthDevice": "Xác thực thiết bị — hoàn tất đăng nhập trong tab trình duyệt vừa mở.",
+        "oauthBrowser": "OAuth qua trình duyệt — đăng nhập bằng tài khoản của provider.",
+        "byoKeyNoUrl": "Dán API key và base URL của provider.",
+        "byoKey": "Dán API key và dùng base URL của provider (ví dụ {{url}}).",
+        "ollamaHost": "Nhập URL Ollama host. API key là tùy chọn với bản chạy cục bộ.",
+        "apiKey": "Dán API key lấy từ trang quản trị của provider.",
+        "serviceAccount": "Dán JSON service account của Google Cloud."
+      },
+      "notice": {
+        "noAuth": "Provider này chạy không cần API credential. Thêm kết nối không xác thực hoặc bật provider để định tuyến.",
+        "cursor": "Mở Cursor IDE và đăng nhập, rồi nhập access token và machine ID từ state.vscdb.",
+        "kiro": "Chọn AWS Builder ID, IAM Identity Center, API key, hoặc nhập token từ Kiro IDE.",
+        "oauthUnavailable": "Provider này chưa hỗ trợ OAuth tương tác. Dùng Nhập dữ liệu nếu bạn đã có credential xuất sẵn."
+      }
+    },
+    "models": {
+      "summary_one": "{{count}} model từ {{accounts}} tài khoản đang bật",
+      "summary_other": "{{count}} model từ {{accounts}} tài khoản đang bật",
+      "testResults": "Kết quả kiểm tra",
+      "reachable": "Gọi được",
+      "unreachable": "Không gọi được",
+      "searchPlaceholder": "Lọc model…",
+      "colTest": "Lần thử gần nhất",
+      "accounts_one": "{{count}} tài khoản",
+      "accounts_other": "{{count}} tài khoản",
+      "ok": "OK",
+      "okLatency": "OK · {{ms}} ms",
+      "failed": "Lỗi",
+      "testFailedFor": "Thử {{id}} thất bại",
+      "onAccount_one": "{{count}} model khả dụng trên tài khoản này",
+      "onAccount_other": "{{count}} model khả dụng trên tài khoản này",
+      "loadingAccount": "Đang tải các model được hỗ trợ…",
+      "noneOnAccount": "Không tìm thấy model nào cho tài khoản này."
+    },
+    "rotation": {
+      "subtitle": "Quyết định tài khoản nào phục vụ request tiếp theo",
+      "effective": "Đang áp dụng",
+      "stickyLimit": "Giới hạn sticky",
+      "globalDefault": "Mặc định chung",
+      "useGlobal": "Mặc định chung ({{strategy}})",
+      "globalValue": "Mặc định ({{value}})",
+      "stickyDisabled": "Fill-first không dùng giá trị này",
+      "unsaved": "Chưa lưu",
+      "save": "Lưu xoay vòng",
+      "strategy": {
+        "fillFirst": "Fill first (theo ưu tiên)",
+        "roundRobin": "Sticky round-robin",
+        "weighted": "Weighted round-robin",
+        "expiringFirst": "Sắp hết hạn trước (gia hạn sớm nhất)"
+      }
+    },
+    "typeDetail": {
+      "notConfigured": "Chưa kết nối",
+      "advanced": "Thiết lập nâng cao",
+      "advancedHint": "Tạo provider với ID và base URL tùy chỉnh trước",
+      "connectHint": "Chọn cách kết nối. Lựa chọn được tô sáng là cách nên dùng.",
+      "autoCreate": "tproxy tự tạo provider này ngay khi tài khoản đầu tiên kết nối."
+    },
+    "editConnection": {
+      "expiryHint": "RFC3339, ví dụ 2026-12-31T23:59:59+07:00"
+    },
+    "oauth": {
+      "callbackHintDevin": "Sau khi đăng nhập, dán mã xác thực mà Devin hiển thị trên trình duyệt.",
+      "placeholderDevin": "Dán mã xác thực…"
+    },
+    "kiroAuth": {
+      "apiKeyPlaceholder": "API key Kiro"
+    },
+    "cursorImport": {
+      "dbHint": "Đăng nhập Cursor IDE trước. Token được đọc từ state.vscdb trong thư mục globalStorage của Cursor."
+    }
   },
   "proxyPools": {
     "title": "Proxy pools",
@@ -628,20 +1118,125 @@
     "deletedSummary": "Đã xóa {{ok}}",
     "deletedSummaryFull": "Đã xóa {{ok}}, {{blocked}} bị ràng buộc, {{failed}} thất bại",
     "deletedSummaryBlocked": "Đã xóa {{ok}}, {{blocked}} bị ràng buộc",
-    "deletedSummaryFailed": "Đã xóa {{ok}}, {{failed}} thất bại"
+    "deletedSummaryFailed": "Đã xóa {{ok}}, {{failed}} thất bại",
+    "statsLabel": "Tình trạng proxy pool",
+    "stats": {
+      "pools": "Pool",
+      "poolsHint": "{{count}} đang bật",
+      "inUse": "Đang dùng",
+      "inUseHint": "{{count}} liên kết · {{unused}} chưa dùng"
+    },
+    "health": {
+      "healthy": "Hoạt động",
+      "failing": "Lỗi",
+      "untested": "Chưa kiểm tra",
+      "off": "Đã tắt"
+    },
+    "tileHint": {
+      "healthy": "Lần kiểm tra cuối đạt",
+      "failing": "Lần kiểm tra cuối lỗi",
+      "untested": "Chưa có kết quả",
+      "off": "Bị bỏ qua khi chạy"
+    },
+    "healthHint": {
+      "healthy": "Lần kiểm tra kết nối gần nhất đạt.",
+      "failing": "Lần kiểm tra kết nối gần nhất thất bại. Request đi qua pool này sẽ lỗi.",
+      "untested": "Hãy kiểm tra để xác nhận proxy hoạt động.",
+      "off": "Đã tắt: provider và tài khoản liên kết sẽ kết nối trực tiếp."
+    },
+    "filterLabel": "Lọc theo tình trạng",
+    "filterAll": "Tất cả",
+    "searchPlaceholder": "Tìm theo tên, ID, host hoặc liên kết…",
+    "sortLabel": "Sắp xếp pool",
+    "sort": {
+      "status": "Có vấn đề trước",
+      "name": "Tên A–Z",
+      "usage": "Dùng nhiều trước",
+      "tested": "Lâu chưa kiểm tra trước"
+    },
+    "viewMode": "Chế độ xem",
+    "viewGrid": "Thẻ",
+    "viewList": "Danh sách",
+    "testAll": "Kiểm tra tất cả",
+    "testSelected_one": "Kiểm tra {{count}} đã chọn",
+    "testSelected_other": "Kiểm tra {{count}} đã chọn",
+    "testAllHint": "Kiểm tra kết nối, sau đó đề xuất tắt các pool bị lỗi",
+    "testing": "Đang kiểm tra…",
+    "guide": {
+      "title": "Proxy pool hoạt động thế nào",
+      "what": "Proxy pool là một proxy đi ra (HTTP, HTTPS hoặc SOCKS5). Request tới upstream sẽ đi qua nó thay vì IP của máy này.",
+      "test": "Kiểm tra pool trước khi dùng. \"Kiểm tra tất cả\" chạy song song mọi pool và đề xuất tắt những pool bị lỗi.",
+      "bind": "Gắn pool cho một provider hoặc từng tài khoản ở trang Provider. Cột \"Đang dùng bởi\" cho biết pool được gắn ở đâu."
+    },
+    "noMatch": "Không có proxy pool phù hợp",
+    "noMatchHint": "Thử từ khóa hoặc bộ lọc khác.",
+    "clearFilters": "Xóa bộ lọc",
+    "selectAllVisible": "Chọn tất cả {{count}} đang hiện",
+    "selectPool": "Chọn {{name}}",
+    "columns": {
+      "pool": "Pool",
+      "status": "Trạng thái",
+      "endpoint": "Endpoint",
+      "usedBy": "Đang dùng bởi",
+      "lastTest": "Kiểm tra lúc",
+      "on": "Bật"
+    },
+    "bulkTest": "Kiểm tra",
+    "turnOn": "Bật pool",
+    "turnOff": "Tắt pool",
+    "notBound": "Chưa gắn",
+    "boundCount_one": "{{count}} liên kết",
+    "boundCount_other": "{{count}} liên kết",
+    "usedByMore": "{{name}} +{{count}}",
+    "neverTested": "Chưa kiểm tra",
+    "testedAgo": "{{time}}",
+    "testedAgoLatency": "{{time}} · {{ms}} ms",
+    "editHint": "Đổi tên, thay URL hoặc tắt",
+    "editNamed": "Sửa {{name}}",
+    "copyId": "Sao chép ID pool",
+    "idCopied": "Đã sao chép ID pool {{id}}",
+    "moreActions": "Thao tác khác",
+    "deletePool": "Xóa pool",
+    "deleteBoundHint_one": "Hãy gỡ khỏi {{count}} provider hoặc tài khoản trước",
+    "deleteBoundHint_other": "Hãy gỡ khỏi {{count}} provider hoặc tài khoản trước",
+    "turnOffDead_one": "Tắt {{count}} pool",
+    "turnOffDead_other": "Tắt {{count}} pool",
+    "noticeTestPassedNamed": "{{name}} hoạt động · {{ms}} ms",
+    "noticeHealthDoneDead": "Kiểm tra xong: {{alive}} hoạt động, {{dead}} lỗi",
+    "noticeDisabled_one": "Đã tắt {{count}} pool lỗi",
+    "noticeDisabled_other": "Đã tắt {{count}} pool lỗi",
+    "confirmDisableDeadMessage_one": "{{alive}} hoạt động, {{dead}} lỗi. Tắt pool lỗi để lưu lượng không đi qua nó nữa?",
+    "confirmDisableDeadMessage_other": "{{alive}} hoạt động, {{dead}} lỗi. Tắt các pool lỗi để lưu lượng không đi qua chúng nữa?",
+    "confirmBulkDeleteMessage_one": "Xóa {{count}} proxy pool? Pool còn đang được gắn sẽ được bỏ qua.",
+    "confirmBulkDeleteMessage_other": "Xóa {{count}} proxy pool? Pool còn đang được gắn sẽ được bỏ qua.",
+    "confirmDeleteMessage_one": "Xóa \"{{name}}\"? Pool đang gắn với {{count}} provider hoặc tài khoản.",
+    "confirmDeleteMessage_other": "Xóa \"{{name}}\"? Pool đang gắn với {{count}} provider hoặc tài khoản.",
+    "form": {
+      "create": "Tạo pool",
+      "createSubtitle": "URL được lưu mã hóa và sẽ không hiện lại.",
+      "editSubtitle": "ID pool {{id}} · để trống URL nếu muốn giữ nguyên",
+      "importSubtitle": "Mỗi dòng một proxy; trùng lặp sẽ được bỏ qua.",
+      "importCount_one": "Nhập {{count}} proxy",
+      "importCount_other": "Nhập {{count}} proxy",
+      "previewValid_one": "{{count}} dòng hợp lệ, sẵn sàng nhập",
+      "previewValid_other": "{{count}} dòng hợp lệ, sẵn sàng nhập",
+      "previewInvalid": "{{valid}} hợp lệ, {{invalid}} không hợp lệ — hãy sửa các dòng lỗi trước khi nhập"
+    }
   },
   "apis": {
     "title": "APIs & Khóa",
     "subtitle": "Gateway endpoints",
     "description": "URL endpoint, client API key và truy cập LAN.",
-    "createKey": "Tạo API key mới",
+    "createKey": "Tạo API key",
     "local": "Local",
     "lan": {
       "label": "LAN",
       "openPort": "Mở cổng cho truy cập LAN",
       "copyCommand": "Sao chép lệnh",
       "howToOpen": "Cách mở cổng này",
-      "openPortFirst": "Mở cổng trước khi truy cập"
+      "openPortFirst": "Mở cổng trước khi truy cập",
+      "osLabel": "Hệ điều hành",
+      "footer": "Đảm bảo <code>server.host</code> là <code>0.0.0.0</code> trong <code>config.yaml</code>, rồi khởi động lại tproxy sau khi mở cổng."
     },
     "apiKeyName": "Tên API key",
     "models": "Models",
@@ -680,8 +1275,19 @@
     "capacityPerRequestHint": "Sức chứa được chia sẻ với các key khác. Trần đầu vào và đầu ra phụ thuộc model và route được sử dụng.",
     "quotaUnknown": "Chưa biết quota của {{count}} tài khoản; các giới hạn đã biết vẫn được áp dụng.",
     "quotaStale": "Một số quota đang chờ làm mới. Giá trị gần nhất vẫn được giữ lại.",
-    "limitStates": {"finite": "Có giới hạn", "unbounded": "Nguồn chưa đặt trần", "unknown": "Chưa xác định", "unavailable": "Không có nguồn khả dụng"},
-    "limitSources": {"global": "Gateway", "team": "Nhóm", "key": "API key", "provider": "Provider", "account": "Tài khoản"},
+    "limitStates": {
+      "finite": "Có giới hạn",
+      "unbounded": "Nguồn chưa đặt trần",
+      "unknown": "Chưa xác định",
+      "unavailable": "Không có nguồn khả dụng"
+    },
+    "limitSources": {
+      "global": "Gateway",
+      "team": "Nhóm",
+      "key": "API key",
+      "provider": "Provider",
+      "account": "Tài khoản"
+    },
     "rateLimits": "Giới hạn tốc độ",
     "requestsPerMin": "Yêu cầu / phút",
     "concurrentStreams": "Luồng đồng thời",
@@ -696,7 +1302,7 @@
     "exampleRequest": "Yêu cầu mẫu",
     "copyCurl": "Sao chép curl",
     "supportedRoutes": "Các route được hỗ trợ",
-    "apiKeys": "API Keys",
+    "apiKeys": "API key",
     "clientAuth": "Xác thực client",
     "clientAuthDesc": "Yêu cầu từ máy không phải local cần API key hợp lệ. Key chỉ hiển thị một lần khi tạo.",
     "noApiKeys": "Chưa có API key",
@@ -749,8 +1355,8 @@
     "noLanIp": "Không tìm thấy địa chỉ IPv4 riêng",
     "lanRestartWarning": "Đặt server.host thành 0.0.0.0 trong config.yaml và khởi động lại server để thiết bị LAN có thể kết nối.",
     "noKeysRemoteWarning": "Chưa có client API key. Client từ xa phải xác thực bằng key hợp lệ.",
-    "noKeysForExample": "Chưa có API key. Tạo một key bên dưới để tạo curl mẫu.",
-    "secretNotSavedForExample": "Secret của key này chưa được lưu trong trình duyệt này. Tạo key mới bên dưới và lưu secret khi nó được hiển thị.",
+    "noKeysForExample": "Chưa có API key. Tạo một key ở trên để sinh lệnh curl mẫu.",
+    "secretNotSavedForExample": "Secret của key này chưa được lưu trên trình duyệt. Mở key ở trên và dán secret, hoặc tạo key mới và lưu secret khi được hiển thị.",
     "noModels": "Chưa có model",
     "copyEndpoint": "Sao chép {{label}}",
     "firewallHelp": "Trợ giúp tường lửa {{label}}",
@@ -814,14 +1420,220 @@
       "dashboard": "Dashboard",
       "activeNoKeys": "Tunnel đang hoạt động nhưng chưa có API key. Tạo key để client từ xa có thể xác thực.",
       "tunnel": "Cloudflare",
-      "tailscale": "Tailscale"
+      "tailscale": "Tailscale",
+      "start": "Bật",
+      "stop": "Dừng",
+      "service": "Dịch vụ local",
+      "cloudflareTitle": "Cloudflare Tunnel",
+      "cloudflareCardDesc": "Dùng tên miền riêng qua tài khoản Cloudflare của bạn. URL giữ nguyên sau khi khởi động lại.",
+      "tailscaleTitle": "Tailscale Funnel",
+      "tailscaleCardDesc": "URL công khai *.ts.net từ node Tailscale của máy này. Không cần tên miền.",
+      "dashboardExposed": "Đang mở",
+      "dashboardOnHint": "Dashboard truy cập được qua URL công khai. Hãy dùng mật khẩu quản trị mạnh.",
+      "dashboardOffHint": "Chỉ công khai API; dashboard vẫn chỉ dùng nội bộ.",
+      "state": {
+        "checking": "Đang kiểm tra",
+        "off": "Tắt",
+        "busy": "Đang khởi động",
+        "online": "Trực tuyến",
+        "unreachable": "Không truy cập được",
+        "reconnecting": "Đang kết nối lại",
+        "error": "Lỗi"
+      }
     },
     "createKeyHint": "Tạo API key đầu tiên để xác thực client.",
     "failedRevokeKey": "Không thể thu hồi API key",
     "revokeKey": "Thu hồi API key",
     "revoke": "Thu hồi",
     "modelMappingTitle": "Áp dụng điều hướng model",
-    "modelMappingHint": "Khi bật, ánh xạ model toàn cục sẽ được áp dụng cho các model mà key này yêu cầu."
+    "modelMappingHint": "Khi bật, ánh xạ model toàn cục sẽ được áp dụng cho các model mà key này yêu cầu.",
+    "statsLabel": "Tổng quan API key",
+    "stats": {
+      "keys": "API key",
+      "keysHint_one": "{{count}} secret đã lưu trên trình duyệt này",
+      "keysHint_other": "{{count}} secret đã lưu trên trình duyệt này",
+      "activeHint": "Đang nhận request từ client",
+      "nearBudgetHint_one": "{{count}} key sắp hết ngân sách ngày",
+      "nearBudgetHint_other": "{{count}} key sắp hết ngân sách ngày",
+      "attentionHint": "Không có model, hết ngân sách hoặc không còn tài khoản",
+      "pausedHint": "Client bị từ chối",
+      "today": "Request hôm nay",
+      "todayHint": "Đã chi {{spend}} hôm nay",
+      "remote": "Truy cập từ xa",
+      "remoteOn": "Đang bật",
+      "remoteOff": "Tắt",
+      "remoteOffHint": "Chỉ truy cập được từ máy này và mạng LAN"
+    },
+    "filterLabel": "Lọc API key theo trạng thái",
+    "filter": {
+      "all": "Tất cả",
+      "active": "Hoạt động",
+      "attention": "Cần xử lý",
+      "paused": "Tạm dừng"
+    },
+    "health": {
+      "active": "Hoạt động",
+      "nearBudget": "Sắp hết ngân sách",
+      "paused": "Tạm dừng",
+      "noModels": "Chưa có model",
+      "overBudget": "Hết ngân sách",
+      "noAccounts": "Không có tài khoản"
+    },
+    "healthHint": {
+      "active": "Đang bật và phục vụ được request.",
+      "nearBudget": "Đã dùng từ 80% ngân sách hôm nay.",
+      "paused": "Đang tắt: request dùng key này bị từ chối.",
+      "noModels": "Chưa cho phép model nào nên mọi request đều bị từ chối. Mở key để cấp model.",
+      "overBudget": "Đã hết ngân sách hôm nay; request bị từ chối đến khi reset theo ngày.",
+      "noAccounts": "Không có tài khoản đang bật nào phục vụ được các model key này cho phép."
+    },
+    "refreshUsage": "Làm mới",
+    "refreshUsageHint": "Tải lại mức dùng và giới hạn hôm nay (tự làm mới mỗi 30 giây)",
+    "searchPlaceholder": "Tìm theo tên, ID, team hoặc model…",
+    "sortLabel": "Sắp xếp API key",
+    "sort": {
+      "status": "Trạng thái",
+      "name": "Tên",
+      "requests": "Request hôm nay",
+      "spend": "Chi phí hôm nay"
+    },
+    "guide": {
+      "title": "Kết nối client trong ba bước",
+      "endpoint": "Trỏ client tới một base URL bên dưới. Local dùng trên máy này; URL LAN và từ xa dùng được từ thiết bị khác.",
+      "keys": "Tạo API key và lưu secret ngay — secret chỉ hiện một lần. Request từ máy khác phải gửi nó dưới dạng Bearer token.",
+      "remote": "Cần truy cập từ mọi nơi? Bật Cloudflare Tunnel hoặc Tailscale Funnel ở mục Truy cập từ xa rồi dùng URL công khai của nó."
+    },
+    "keysCount_one": "{{count}} key",
+    "keysCount_other": "{{count}} key",
+    "keysShown": "Hiển thị {{shown}}/{{total}}",
+    "emptyHint": "Tạo một key rồi dùng làm Bearer token trong ứng dụng, script và CLI tool của bạn.",
+    "noMatch": "Không có API key phù hợp",
+    "noMatchHint": "Thử từ khóa hoặc bộ lọc trạng thái khác.",
+    "clearFilters": "Xóa bộ lọc",
+    "selectAllCount": "Chọn cả {{count}}",
+    "idCopied": "Đã sao chép ID {{id}}",
+    "capacityTitle": "Công suất · {{name}}",
+    "capacitySubtitle": "Những gì key này dùng được lúc này: giới hạn riêng và nhóm tài khoản dùng chung.",
+    "sharedCapacity_one": "Công suất dùng chung · {{count}} tài khoản",
+    "sharedCapacity_other": "Công suất dùng chung · {{count}} tài khoản",
+    "selectedModelsShort_one": "{{count}} model",
+    "selectedModelsShort_other": "{{count}} model",
+    "bulk": {
+      "resume": "Bật lại",
+      "pause": "Tạm dừng",
+      "resumed_one": "Đã bật lại {{count}} API key",
+      "resumed_other": "Đã bật lại {{count}} API key",
+      "paused_one": "Đã tạm dừng {{count}} API key",
+      "paused_other": "Đã tạm dừng {{count}} API key",
+      "revoked_one": "Đã thu hồi {{count}} API key",
+      "revoked_other": "Đã thu hồi {{count}} API key",
+      "pauseTitle_one": "Tạm dừng {{count}} API key",
+      "pauseTitle_other": "Tạm dừng {{count}} API key",
+      "pauseConfirm_one": "Client đang dùng key này sẽ ngừng hoạt động ngay.",
+      "pauseConfirm_other": "Client đang dùng {{count}} key này sẽ ngừng hoạt động ngay.",
+      "revokeTitle_one": "Thu hồi {{count}} API key",
+      "revokeTitle_other": "Thu hồi {{count}} API key",
+      "revokeConfirm_one": "Xóa {{names}}? Client đang dùng sẽ mất quyền truy cập ngay. Không thể hoàn tác.",
+      "revokeConfirm_other": "Xóa {{count}} key ({{names}})? Client đang dùng sẽ mất quyền truy cập ngay. Không thể hoàn tác.",
+      "partialFailure": "{{failed}} key lỗi: {{error}}"
+    },
+    "columns": {
+      "key": "Key",
+      "status": "Trạng thái",
+      "secret": "Secret",
+      "access": "Quyền & giới hạn",
+      "today": "Hôm nay",
+      "on": "Bật"
+    },
+    "limitShort": {
+      "rpm": "{{value}} req/phút",
+      "streams": "{{value}} luồng",
+      "inputBytes": "{{value}} byte vào",
+      "outputTokens": "{{value}} token ra",
+      "mediaJobs": "{{value}} tác vụ media",
+      "budget": "${{value}}/ngày"
+    },
+    "menu": {
+      "more": "Thao tác khác cho {{name}}",
+      "edit": "Sửa key",
+      "editHint": "Tên, model, tài khoản và giới hạn",
+      "capacity": "Xem công suất",
+      "example": "Dùng trong ví dụ",
+      "exampleHint": "Điền key này vào lệnh curl mẫu",
+      "copyId": "Sao chép ID key"
+    },
+    "accountsShort_one": "{{count}} tài khoản",
+    "accountsShort_other": "{{count}} tài khoản",
+    "endpointsShort_one": "{{count}} endpoint",
+    "endpointsShort_other": "{{count}} endpoint",
+    "openKey": "Sửa {{name}}",
+    "selectKey": "Chọn {{name}}",
+    "selectAllVisible": "Chọn mọi key đang hiển thị",
+    "teamShort": "team {{team}}",
+    "ownLimitsTag": "Giới hạn riêng",
+    "ownLimitsHint": "Key này có giới hạn riêng, áp dụng thêm trên công suất tài khoản dùng chung.",
+    "secretSavedHint": "Secret đã lưu trên trình duyệt này",
+    "secretNotSavedShort": "Chưa lưu ở đây",
+    "secretNotSavedHint": "Secret chưa được lưu trên trình duyệt này. Mở key và dán secret để sao chép và dùng trong ví dụ.",
+    "requestsShort": "req",
+    "budgetUsed": "Đã dùng {{spent}} / {{budget}} hôm nay",
+    "ofBudget": "trên {{budget}}",
+    "pauseKey": "Tạm dừng key",
+    "resumeKey": "Bật lại key",
+    "createKeySubtitle": "Client gửi key dưới dạng Bearer token. Secret chỉ hiện một lần.",
+    "keyNameHint": "Tên dễ nhận ra, ví dụ ứng dụng hoặc người dùng key.",
+    "advancedOptionsHint": "ID, model, team, endpoint và giới hạn",
+    "keyIdHint": "không bắt buộc · tự tạo nếu để trống",
+    "allowedEndpointsHint": "không bắt buộc · cách nhau bằng dấu phẩy",
+    "secretKeptInBrowser": "Một bản sao được lưu trên trình duyệt này để danh sách và ví dụ dùng được.",
+    "endpoints": {
+      "title": "Endpoint",
+      "subtitle": "Base URL cho client tương thích OpenAI, Anthropic và Gemini · bấm để sao chép",
+      "localHint": "Chỉ trên máy này",
+      "lanHint": "Thiết bị khác trong mạng · cần mở cổng TCP {{port}}",
+      "ready": "Sẵn sàng",
+      "network": "Mạng nội bộ",
+      "restartNeeded": "Cần khởi động lại",
+      "remoteOff": "Chưa chạy · thiết lập truy cập từ xa"
+    },
+    "remote": {
+      "title": "Truy cập từ xa",
+      "subtitle": "Công khai gateway qua HTTPS mà không cần mở cổng router"
+    },
+    "quickStart": {
+      "title": "Bắt đầu nhanh",
+      "subtitle": "Request chạy được ngay với một key và model của bạn",
+      "jump": "Ví dụ",
+      "routesCount_one": "{{count}} route",
+      "routesCount_other": "{{count}} route",
+      "route": "Route",
+      "methods": "Phương thức",
+      "description": "Mô tả",
+      "copyRoute": "Sao chép URL đầy đủ"
+    },
+    "routeDesc": {
+      "models": "Liệt kê các model ảo client dùng được.",
+      "modelsInfo": "Metadata chi tiết của model và gợi ý định tuyến.",
+      "chatCompletions": "Chat completions tương thích OpenAI.",
+      "responses": "OpenAI Responses API (Codex CLI wire_api=responses).",
+      "responsesCompact": "Thu gọn ngữ cảnh Responses API (Codex).",
+      "responsesWs": "Kết nối WebSocket cho Responses API.",
+      "responsesAlias": "Alias của Responses API (tương thích Codex).",
+      "codexAlias": "Alias Codex CLI tới Responses API.",
+      "messages": "Messages API tương thích Anthropic.",
+      "countTokens": "Đếm token cho Anthropic messages.",
+      "embeddings": "Embedding văn bản.",
+      "imageGenerations": "Tạo ảnh.",
+      "imageEdits": "Chỉnh sửa ảnh.",
+      "speech": "Chuyển văn bản thành giọng nói.",
+      "transcriptions": "Chuyển giọng nói thành văn bản.",
+      "voices": "Danh mục và quản lý giọng đọc.",
+      "videos": "Tạo video (tác vụ bất đồng bộ).",
+      "videoGenerations": "Alias tạo video.",
+      "videoStatus": "Kiểm tra trạng thái tác vụ video.",
+      "search": "Proxy tìm kiếm web.",
+      "webFetch": "Tải và trích xuất nội dung trang web."
+    }
   },
   "models": {
     "title": "Models",
@@ -840,7 +1652,271 @@
     "deleteModel": "Xóa model",
     "searchModels": "Tìm kiếm model đã cấu hình hoặc provider…",
     "discoveringProviders": "Đang khám phá provider tương thích…",
-    "noProviderRoutes": "Chưa có route provider"
+    "noProviderRoutes": "Chưa có route provider",
+    "loading": "Đang tải public model…",
+    "failedUpdate": "Không thể cập nhật model",
+    "filterByProvider": "Lọc theo provider",
+    "allProviders": "Tất cả provider",
+    "providerTabHint": "Trạng thái provider: {{status}}",
+    "sortBy": "Sắp xếp model",
+    "sort": {
+      "default": "Thứ tự đã cấu hình",
+      "attention": "Cần xử lý trước",
+      "name": "Tên A–Z",
+      "routes": "Nhiều provider hoạt động nhất"
+    },
+    "viewMode": "Chế độ xem",
+    "viewGrid": "Thẻ",
+    "viewList": "Danh sách gọn",
+    "quickActions": "Thao tác nhanh",
+    "quick": {
+      "resetPaused": "Mở lại provider đang tạm dừng",
+      "resetPausedHint_one": "{{count}} provider bị failover tạm dừng",
+      "resetPausedHint_other": "{{count}} provider bị failover tạm dừng",
+      "selectVisible": "Chọn cả {{count}} model đang hiển thị"
+    },
+    "selectAllVisible": "Chọn mọi model đang hiển thị",
+    "selectModel": "Chọn {{name}}",
+    "openPriorityFor": "Mở chuỗi fallback của {{name}}",
+    "clearFilters": "Xóa bộ lọc",
+    "stats": {
+      "label": "Tình trạng model",
+      "models": "Public model",
+      "modelsHint": "{{enabled}} đang bật · {{aliases}} bí danh",
+      "modelsTitle": "Các model ID mà client có thể gọi",
+      "serving": "Đang phục vụ",
+      "servingHint": "Provider đầu tiên sẵn sàng",
+      "degraded": "Suy giảm",
+      "degradedHint": "Một provider trong chuỗi đang tạm dừng",
+      "attention": "Không có route",
+      "attentionHint": "Request tới các ID này sẽ lỗi",
+      "disabled": "Đã tắt",
+      "disabledHint_one": "{{count}} route đang tắt",
+      "disabledHint_other": "{{count}} route đang tắt",
+      "discovered": "Từ tài khoản",
+      "discoveredHint": "Chưa public — thêm bằng một cú nhấp"
+    },
+    "health": {
+      "serving": "Đang phục vụ",
+      "degraded": "Suy giảm",
+      "attention": "Không có route",
+      "disabled": "Tắt"
+    },
+    "healthHint": {
+      "serving": "Request được provider đầu tiên trong chuỗi xử lý.",
+      "degraded": "Một provider đang tạm dừng hoặc gặp lỗi; provider kế tiếp trong chuỗi nhận traffic.",
+      "attention": "Không provider nào đang bật và có tài khoản để phục vụ model này, nên request sẽ lỗi.",
+      "disabled": "Model ID này đang tắt; client sẽ nhận lỗi không tìm thấy model."
+    },
+    "step": {
+      "ok": "sẵn sàng",
+      "suggested": "mới",
+      "off": "tắt",
+      "paused": "tạm dừng",
+      "pausedFor": "tạm dừng · {{time}}",
+      "probing": "đang thử lại",
+      "failing": "lỗi {{failures}}/{{threshold}}",
+      "provider-off": "provider tắt"
+    },
+    "stepHint": {
+      "ok": "{{provider}} nhận traffic theo thứ tự này",
+      "suggested": "{{provider}} có thể phục vụ model này nhưng chưa nằm trong chuỗi đã lưu",
+      "off": "Route đã tắt — bỏ qua {{provider}}",
+      "paused": "Tạm dừng sau nhiều lần lỗi liên tiếp; traffic chuyển sang provider kế tiếp",
+      "probing": "Request tiếp theo sẽ kiểm tra {{provider}} đã hồi phục chưa",
+      "failing": "Vừa có lỗi — thêm vài lần nữa {{provider}} sẽ bị tạm dừng",
+      "provider-off": "{{provider}} đang bị tắt ở trang Providers",
+      "unhealthy": "{{provider}} báo lỗi ở lần kiểm tra sức khỏe gần nhất"
+    },
+    "providerStatus": {
+      "healthy": "ổn định",
+      "degraded": "suy giảm",
+      "auth_required": "cần đăng nhập lại",
+      "unknown": "chưa kiểm tra",
+      "error": "lỗi",
+      "unhealthy": "không ổn định",
+      "failed": "thất bại",
+      "expired": "hết hạn"
+    },
+    "accountCount_one": "{{count}} tài khoản",
+    "accountCount_other": "{{count}} tài khoản",
+    "chainTitle": "Chuỗi fallback",
+    "chainServing_one": "{{count}} hoạt động",
+    "chainServing_other": "{{count}} hoạt động",
+    "moreSteps": "+{{count}} nữa",
+    "suggestedRoutes_one": "+{{count}} provider có thể thêm",
+    "suggestedRoutes_other": "+{{count}} provider có thể thêm",
+    "suggestedHint": "Provider đã phát hiện cũng phục vụ model này. Mở chuỗi và lưu để thêm chúng.",
+    "hiddenRoutes_one": "{{count}} route bị ẩn (không có tài khoản)",
+    "hiddenRoutes_other": "{{count}} route bị ẩn (không có tài khoản)",
+    "hiddenRoutesHint": "Route đã lưu nhưng provider không có tài khoản nào đang bật. Chúng tự quay lại khi có tài khoản.",
+    "noAliases": "Không có bí danh",
+    "noAliasesHint": "Client phải gọi đúng model ID này",
+    "aliasesHint": "Cũng nhận tên: {{aliases}}",
+    "menu": {
+      "more": "Thêm thao tác",
+      "editPriority": "Sửa chuỗi fallback",
+      "editPriorityHint": "Đổi thứ tự provider, bật/tắt route",
+      "editDetails": "Sửa tên & bí danh",
+      "editDetailsHint": "Tên hiển thị, bí danh, khả năng",
+      "enable": "Bật model",
+      "enableHint": "Client có thể gọi lại",
+      "disable": "Tắt model",
+      "disableHint": "Giữ chuỗi, từ chối request",
+      "copyId": "Sao chép model ID"
+    },
+    "deleteModels_one": "Xóa {{count}} model",
+    "deleteModels_other": "Xóa {{count}} model",
+    "deleteConfirm": "Xóa \"{{name}}\"? Client đang dùng model ID này sẽ ngừng hoạt động ngay lập tức.",
+    "deleteConfirmMany": "Xóa {{count}} model? Client đang dùng các model ID này sẽ ngừng hoạt động ngay lập tức.",
+    "configured": {
+      "title": "Public model",
+      "summary_one": "{{count}} model · {{enabled}} đang bật",
+      "summary_other": "{{count}} model · {{enabled}} đang bật",
+      "summaryFiltered": "Hiển thị {{shown}}/{{count}}"
+    },
+    "columns": {
+      "model": "Model",
+      "status": "Trạng thái",
+      "chain": "Chuỗi fallback",
+      "aliases": "Bí danh",
+      "enabled": "Bật"
+    },
+    "empty": {
+      "title": "Chưa có public model",
+      "description": "Tạo từ một model của provider, hoặc thêm model mà tài khoản của bạn đã cung cấp ở danh sách bên dưới.",
+      "noMatch": "Không có model phù hợp",
+      "noMatchHint": "Thử provider, trạng thái hoặc từ khóa khác."
+    },
+    "bulk": {
+      "enable": "Bật",
+      "disable": "Tắt",
+      "delete": "Xóa"
+    },
+    "notice": {
+      "created": "Đã tạo model \"{{name}}\" — hãy kiểm tra chuỗi fallback",
+      "prioritySaved": "Đã lưu chuỗi fallback cho \"{{name}}\"",
+      "updated": "Đã cập nhật model \"{{name}}\"",
+      "enabled": "Đã bật \"{{name}}\"",
+      "disabled": "Đã tắt \"{{name}}\"",
+      "deleted": "Đã xóa model \"{{name}}\"",
+      "bulkEnabled_one": "Đã bật {{count}} model",
+      "bulkEnabled_other": "Đã bật {{count}} model",
+      "bulkDisabled_one": "Đã tắt {{count}} model",
+      "bulkDisabled_other": "Đã tắt {{count}} model",
+      "bulkDeleted_one": "Đã xóa {{count}} model",
+      "bulkDeleted_other": "Đã xóa {{count}} model",
+      "bulkFailed_one": "{{count}} thay đổi thất bại",
+      "bulkFailed_other": "{{count}} thay đổi thất bại",
+      "pausedReset_one": "Đã mở lại {{count}} provider tạm dừng",
+      "pausedReset_other": "Đã mở lại {{count}} provider tạm dừng",
+      "copied": "Đã sao chép {{id}}"
+    },
+    "guide": {
+      "title": "Provider Priority Manager hoạt động thế nào",
+      "models": "Public model là tên cố định mà client gửi lên, ví dụ claude-sonnet-4-6. Bí danh là tên phụ của cùng model. Tắt model để từ chối request mà không mất cấu hình.",
+      "chain": "Mỗi model có một chuỗi fallback: provider 1 phục vụ trước; nếu lỗi hoặc chạm giới hạn, provider kế tiếp sẽ thay thế. Provider lỗi liên tục được tự động tạm dừng và thử lại sau.",
+      "fast": "Cách nhanh nhất: ở mục \"Từ tài khoản provider\" bấm Thêm cho model mà tài khoản đã có, rồi kiểm tra chuỗi. Bấm vào thẻ bất kỳ để đổi thứ tự provider. Nhấn / để tìm.",
+      "legendServing": "Đang phục vụ",
+      "legendDegraded": "Đang dùng fallback",
+      "legendAttention": "Không có route hoạt động",
+      "legendSuggested": "Có thể thêm"
+    },
+    "discovered": {
+      "title": "Từ tài khoản provider",
+      "scanning": "Đang lấy danh sách model từ các provider…",
+      "summary_one": "{{count}} model tài khoản đang cung cấp nhưng chưa public model nào dùng",
+      "summary_other": "{{count}} model tài khoản đang cung cấp nhưng chưa public model nào dùng",
+      "summaryFiltered": "Hiển thị {{shown}}/{{count}}",
+      "rescan": "Quét lại provider",
+      "rescanHint": "Lấy lại danh sách model hiện tại từ mọi provider",
+      "providerError": "không lấy được danh sách model: {{message}}",
+      "noMatch": "Không có model phát hiện nào phù hợp",
+      "allConfigured": "Mọi model tài khoản cung cấp đều đã public",
+      "allConfiguredHint": "Model mới sẽ xuất hiện ở đây khi provider bắt đầu cung cấp.",
+      "add": "Thêm",
+      "addHint": "Tạo public model cho {{name}} và mở chuỗi của nó"
+    },
+    "form": {
+      "createTitle": "Tạo public model",
+      "editTitle": "Sửa thông tin model",
+      "subtitle": "Một model ID cố định cho client. Chuỗi fallback được sửa riêng.",
+      "saveChanges": "Lưu thay đổi",
+      "idHint": "ID cố định client sẽ gọi, ví dụ td-coder-pro",
+      "idLocked": "Không thể đổi ID sau khi tạo — client đang dựa vào nó",
+      "idRequired": "Cần nhập model ID",
+      "idAllowed": "Chỉ cho phép chữ, số, -, _ và .",
+      "idInUse": "ID này đã được dùng",
+      "aliasesHint": "Các tên phụ, cách nhau bởi dấu phẩy, ví dụ coder, gpt-latest",
+      "enabled": "Model đang bật",
+      "capabilitiesHint": "Hiển thị cho client khi liệt kê model; không ảnh hưởng định tuyến"
+    },
+    "select": {
+      "title": "Tạo public model",
+      "subtitle": "Chọn một model mà provider của bạn cung cấp. ID, tên và route đầu tiên được điền sẵn.",
+      "add": "Tạo model",
+      "noProviders": "Chưa cấu hình provider nào",
+      "setUpProviders": "Thiết lập provider trước",
+      "search": "Tìm model của provider…",
+      "loading": "Đang tải model của provider…",
+      "available_one": "{{count}} khả dụng",
+      "available_other": "{{count}} khả dụng",
+      "discovering": "Đang lấy danh sách model từ mọi provider…",
+      "noMatch": "Không có model provider nào khớp với từ khóa.",
+      "groupCount_one": "{{count}} model",
+      "groupCount_other": "{{count}} model",
+      "groupEmpty": "Không có model mới",
+      "preview": "Sẽ được tạo thành",
+      "provider": "Provider",
+      "upstream": "Upstream model",
+      "openProviders": "Mở Providers",
+      "noneAvailable": "Không có model provider mới nào. Kiểm tra tài khoản provider hoặc chạy khám phá ở trang Providers."
+    },
+    "priority": {
+      "title": "Chuỗi fallback",
+      "subtitle": "Cấu hình thứ tự fallback giữa các provider",
+      "save": "Lưu chuỗi",
+      "unsaved": "Chưa lưu",
+      "unsavedHint": "Bao gồm provider mới phát hiện được thêm vào cuối",
+      "selectModel": "Chọn một model để quản lý chuỗi fallback.",
+      "publicId": "Public ID",
+      "upstream": "Upstream model",
+      "compatible": "Tương thích",
+      "checking": "Đang kiểm tra…",
+      "compatibleCount_one": "{{count}} provider",
+      "compatibleCount_other": "{{count}} provider",
+      "primary": "Phục vụ đầu tiên",
+      "noPrimary": "Không có provider nào bật",
+      "help": "P1 phục vụ trước; khi lỗi hoặc chạm giới hạn, provider kế tiếp sẽ thay thế. Kéo hàng hoặc dùng mũi tên để đổi thứ tự, tắt route để bỏ qua. Provider lỗi sẽ tự tạm dừng và được thử lại sau một khoảng ngắn.",
+      "noProviders": "Chưa cấu hình provider nào. Hãy thiết lập provider trước rồi quay lại sắp xếp chuỗi.",
+      "openProviders": "Mở Providers",
+      "noCompatible": "Hiện không provider nào cung cấp upstream model \"{{model}}\".",
+      "noRoutesYet": "Model này chưa có route provider. Hãy cấu hình provider rồi gán chúng ở đây.",
+      "discovering": "Đang tìm provider cung cấp \"{{model}}\"…",
+      "allHidden": "Mọi provider trong chuỗi đều có 0 tài khoản nên không thể phục vụ request. Thêm tài khoản và provider sẽ quay lại đúng vị trí đã lưu.",
+      "tableLabel": "Thứ tự fallback provider",
+      "colOrder": "Thứ tự",
+      "colProvider": "Provider · upstream model",
+      "colHealth": "Tài khoản & sức khỏe",
+      "colEnabled": "Bật",
+      "dragHint": "Kéo để đổi thứ tự",
+      "upstreamHint": "Tên model gửi tới provider này",
+      "lastStatus": "trạng thái gần nhất {{status}}",
+      "pausedHint_one": "Tạm dừng sau {{count}} lần thử thất bại",
+      "pausedHint_other": "Tạm dừng sau {{count}} lần thử thất bại",
+      "probingHint": "Request tiếp theo là request thăm dò; nếu thành công provider sẽ quay lại luân phiên.",
+      "failingHint_one": "Thêm {{count}} lần lỗi nữa sẽ tạm dừng provider này",
+      "failingHint_other": "Thêm {{count}} lần lỗi nữa sẽ tạm dừng provider này",
+      "reenable": "Mở lại ngay",
+      "reenabling": "Đang mở lại…",
+      "enableRoute": "Dùng {{provider}} trong chuỗi này",
+      "moveUp": "Lên",
+      "moveDown": "Xuống",
+      "removeRoute": "Gỡ khỏi chuỗi",
+      "hiddenNote_one": "{{count}} provider bị ẩn vì không có tài khoản. Vị trí đã lưu được giữ nguyên.",
+      "hiddenNote_other": "{{count}} provider bị ẩn vì không có tài khoản. Vị trí đã lưu được giữ nguyên.",
+      "manageProviders": "Quản lý provider"
+    }
   },
   "combos": {
     "title": "Combos",
@@ -863,52 +1939,362 @@
     "claudeCodeDesc": "Use a combo ID as <code>ANTHROPIC_DEFAULT_SONNET_MODEL</code> with your tproxy base URL.",
     "coworkLabel": "Cowork",
     "coworkDesc": "Add the combo ID to Cowork allowed models for third-party inference.",
-    "claudeCodeSetup": "Claude Code setup",
-    "coworkSetup": "Cowork setup",
-    "quickPresets": "Quick presets",
-    "quickPresetsDesc": "Start from a routing profile tuned for Claude Code, Cowork, or general clients.",
-    "usePreset": "Use preset",
-    "noVirtualModels": "No virtual models available",
-    "noCombosConfigured": "No combos configured yet.",
-    "noCombosHint": "Create a combo or apply a quick preset for Claude Code or Cowork.",
+    "claudeCodeSetup": "Cài đặt Claude Code",
+    "coworkSetup": "Cài đặt Cowork",
+    "quickPresets": "Mẫu dựng sẵn",
+    "quickPresetsDesc": "Bắt đầu từ một cấu hình định tuyến tối ưu cho Claude Code, Cowork hoặc client chung.",
+    "usePreset": "Dùng mẫu",
+    "noVirtualModels": "Chưa có public model nào khả dụng",
+    "noCombosConfigured": "Chưa có combo nào.",
+    "noCombosHint": "Tạo combo mới hoặc dùng một mẫu dựng sẵn cho Claude Code hay Cowork.",
     "policiesCount": "{{count}} policies",
     "enabledLabel": "Enabled",
     "pausedLabel": "Paused",
     "stepsCount": "{{count}} steps",
     "editLabel": "Edit",
     "deleteLabel": "Delete",
-    "createComboTitle": "Create combo",
+    "createComboTitle": "Tạo combo",
     "createComboSubtitle": "Ordered fallback across virtual models. Earlier steps are tried first.",
     "comboId": "Combo ID",
-    "comboIdHint": "Used as the model name in Claude Code, Cowork, and API clients",
+    "comboIdHint": "Dùng làm tên model trong Claude Code, Cowork và các API client",
     "comboIdPlaceholder": "claude-code-fallback",
-    "displayName": "Display name",
+    "displayName": "Tên hiển thị",
     "displayNamePlaceholder": "Claude Code Fallback",
-    "rewriteResponseModel": "Rewrite response model",
-    "fallbackOrder": "Fallback order",
-    "addStep": "Add step",
-    "noStepsYet": "No steps yet. Add models in priority order.",
-    "noModelsForStep": "Create a virtual model or configure mapping targets first.",
+    "rewriteResponseModel": "Viết lại model trong phản hồi",
+    "fallbackOrder": "Thứ tự fallback",
+    "addStep": "Thêm bước",
+    "noStepsYet": "Chưa có bước nào. Thêm model theo thứ tự ưu tiên.",
+    "noModelsForStep": "Hãy tạo public model hoặc cấu hình đích mapping trước.",
     "model": "Model",
     "cancelLabel": "Cancel",
-    "createComboBtn": "Create combo",
-    "deleteCombo": "Delete combo",
-    "deleteComboMessage": "Delete \"{{name}}\"? Clients using this combo ID will stop working immediately.",
-    "comboDeleted": "Combo \"{{name}}\" deleted",
-    "comboCreated": "Combo \"{{name}}\" created",
-    "comboUpdated": "Combo \"{{name}}\" updated",
-    "failedSaveCombo": "Failed to save combo",
-    "failedDeleteCombo": "Failed to delete combo",
+    "createComboBtn": "Tạo combo",
+    "deleteCombo": "Xóa combo",
+    "deleteComboMessage": "Xóa \"{{name}}\"? Client đang dùng combo ID này sẽ ngừng hoạt động ngay lập tức.",
+    "comboDeleted": "Đã xóa combo \"{{name}}\"",
+    "comboCreated": "Đã tạo combo \"{{name}}\"",
+    "comboUpdated": "Đã cập nhật combo \"{{name}}\"",
+    "failedSaveCombo": "Không thể lưu combo",
+    "failedDeleteCombo": "Không thể xóa combo",
     "comboIdRequired": "Combo ID is required",
     "comboIdInvalid": "Only letters, numbers, -, _, and . allowed",
     "comboIdInUse": "This ID is already in use",
-    "noPresetError": "Create at least one enabled virtual model before using this preset.",
-    "moveUp": "Move up",
-    "moveDown": "Move down",
-    "removeStep": "Remove step",
-    "copyComboId": "Copy combo ID"
+    "noPresetError": "Hãy tạo ít nhất một public model đang bật trước khi dùng mẫu này.",
+    "moveUp": "Lên",
+    "moveDown": "Xuống",
+    "removeStep": "Gỡ bước",
+    "copyComboId": "Sao chép combo ID",
+    "loading": "Đang tải combo…",
+    "copied": "Đã sao chép",
+    "copyName": "{{name}} (bản sao)",
+    "openCombo": "Sửa combo {{name}}",
+    "selectCombo": "Chọn {{name}}",
+    "selectAllVisible": "Chọn mọi combo đang hiển thị",
+    "clearFilters": "Xóa bộ lọc",
+    "search": "Tìm combo hoặc model trong combo…",
+    "sortBy": "Sắp xếp combo",
+    "sort": {
+      "default": "Thứ tự đã cấu hình",
+      "attention": "Cần xử lý trước",
+      "name": "Tên A–Z",
+      "steps": "Nhiều bước nhất"
+    },
+    "viewMode": "Chế độ xem",
+    "viewGrid": "Thẻ",
+    "viewList": "Danh sách gọn",
+    "quickActions": "Thao tác nhanh",
+    "quick": {
+      "fromPreset": "Tạo từ mẫu: {{name}}",
+      "selectVisible": "Chọn cả {{count}} combo đang hiển thị"
+    },
+    "filterByClient": "Lọc theo client",
+    "allClients": "Tất cả client",
+    "client": {
+      "claude-code": "Claude Code",
+      "cowork": "Cowork",
+      "general": "Mọi client"
+    },
+    "clientHint": {
+      "claude-code": "Tối ưu cho Claude Code qua Anthropic /v1/messages",
+      "cowork": "Tối ưu cho Cowork trên Claude Desktop (inference bên thứ ba)",
+      "general": "Dùng được với mọi client tương thích OpenAI hoặc Anthropic"
+    },
+    "stats": {
+      "label": "Tình trạng combo",
+      "combos": "Combo",
+      "combosHint": "{{enabled}} đang bật",
+      "ready": "Sẵn sàng",
+      "readyHint": "Mọi bước đều phục vụ được",
+      "partial": "Dùng được một phần",
+      "partialHint": "Một số bước bị bỏ qua",
+      "broken": "Hỏng",
+      "brokenHint": "Không bước nào phục vụ được — request sẽ lỗi",
+      "paused": "Đã tắt",
+      "pausedHint": "Client nhận lỗi không tìm thấy model",
+      "models": "Model đang dùng",
+      "modelsHint": "Số đích khác nhau trong mọi combo"
+    },
+    "health": {
+      "ready": "Sẵn sàng",
+      "partial": "Một phần",
+      "broken": "Hỏng",
+      "paused": "Tắt"
+    },
+    "healthHint": {
+      "ready": "Mọi bước đều trỏ tới model đang bật, toàn bộ thứ tự fallback đều dùng được.",
+      "partial": "Một số bước trỏ tới model đang tắt hoặc không tồn tại; các bước này bị bỏ qua.",
+      "broken": "Không bước nào phục vụ được request, nên mọi lệnh gọi tới combo ID này đều lỗi.",
+      "paused": "Combo này đang tắt; client sẽ nhận lỗi không tìm thấy model."
+    },
+    "chainTitle": "Thứ tự fallback",
+    "chainUsable": "{{usable}}/{{count}} dùng được",
+    "noSteps": "Chưa có bước nào",
+    "moreSteps": "+{{count}} nữa",
+    "stepKind": {
+      "model": "model",
+      "combo": "combo",
+      "provider": "provider",
+      "unknown": "không rõ"
+    },
+    "stepState": {
+      "ok": "sẵn sàng",
+      "direct": "trực tiếp",
+      "off": "tắt",
+      "missing": "không tồn tại"
+    },
+    "stepHint": {
+      "ok": "Đích đang bật — được thử theo thứ tự này",
+      "direct": "Gửi thẳng tới model của provider; được kiểm tra khi request chạy",
+      "off": "Đích đang tắt nên bước này bị bỏ qua",
+      "missing": "Không còn model hay combo nào có ID này; hãy sửa combo để thay thế"
+    },
+    "routingOrdered": "Fallback theo thứ tự",
+    "routingHint": "Các bước được thử từ trên xuống cho tới khi có bước thành công",
+    "rewriteOn": "Trả về combo ID",
+    "rewriteOff": "Trả về model thật",
+    "rewriteOnHint": "Phản hồi ghi combo ID thay vì model thực sự đã trả lời",
+    "rewriteOffHint": "Phản hồi giữ tên model thực sự đã trả lời",
+    "menu": {
+      "more": "Thêm thao tác",
+      "edit": "Sửa combo",
+      "editHint": "Tên, các bước và thứ tự",
+      "duplicate": "Nhân bản",
+      "duplicateHint": "Tạo combo mới dựa trên combo này",
+      "enable": "Bật combo",
+      "enableHint": "Client có thể gọi lại",
+      "disable": "Tắt combo",
+      "disableHint": "Giữ các bước, từ chối request"
+    },
+    "deleteCombos_one": "Xóa {{count}} combo",
+    "deleteCombos_other": "Xóa {{count}} combo",
+    "deleteCombosMessage": "Xóa {{count}} combo? Client đang dùng các combo ID này sẽ ngừng hoạt động ngay lập tức.",
+    "listTitle": "Combo",
+    "summary_one": "{{count}} combo · {{enabled}} đang bật",
+    "summary_other": "{{count}} combo · {{enabled}} đang bật",
+    "summaryFiltered": "Hiển thị {{shown}}/{{count}}",
+    "columns": {
+      "combo": "Combo",
+      "status": "Trạng thái",
+      "client": "Client",
+      "chain": "Thứ tự fallback",
+      "enabled": "Bật"
+    },
+    "empty": {
+      "noMatch": "Không có combo phù hợp",
+      "noMatchHint": "Thử client, trạng thái hoặc từ khóa khác."
+    },
+    "bulk": {
+      "enable": "Bật",
+      "disable": "Tắt",
+      "delete": "Xóa"
+    },
+    "notice": {
+      "enabled": "Đã bật \"{{name}}\"",
+      "disabled": "Đã tắt \"{{name}}\"",
+      "copied": "Đã sao chép {{id}}",
+      "bulkEnabled_one": "Đã bật {{count}} combo",
+      "bulkEnabled_other": "Đã bật {{count}} combo",
+      "bulkDisabled_one": "Đã tắt {{count}} combo",
+      "bulkDisabled_other": "Đã tắt {{count}} combo",
+      "bulkDeleted_one": "Đã xóa {{count}} combo",
+      "bulkDeleted_other": "Đã xóa {{count}} combo",
+      "bulkFailed_one": "{{count}} thay đổi thất bại",
+      "bulkFailed_other": "{{count}} thay đổi thất bại"
+    },
+    "guide": {
+      "title": "Combo hoạt động thế nào",
+      "what": "Combo là một model ID thử lần lượt nhiều model: nếu bước 1 lỗi hoặc chạm giới hạn, bước 2 sẽ trả lời, cứ thế tiếp tục. Mỗi bước có thể là public model, combo khác hoặc model của provider.",
+      "clients": "Dùng combo ID ở bất kỳ chỗ nào client yêu cầu model — ví dụ ANTHROPIC_DEFAULT_SONNET_MODEL cho Claude Code, hoặc danh sách model được phép trong Cowork. Hướng dẫn cài đặt nằm trong Thao tác nhanh.",
+      "fast": "Cách nhanh nhất: chọn một mẫu bên dưới, kiểm tra thứ tự rồi lưu. Bấm vào thẻ để sửa, dùng nút sao chép để lấy ID. Nhấn / để tìm.",
+      "legendPartial": "Bỏ qua vài bước",
+      "legendBroken": "Không có bước dùng được"
+    },
+    "setupGuide": "Hướng dẫn cài đặt",
+    "anyClient": "Mọi client tương thích OpenAI",
+    "presets": {
+      "claude-code-fallback": {
+        "title": "Fallback cho Claude Code",
+        "description": "Fallback theo thứ tự cho Claude Code qua Anthropic /v1/messages. Dùng combo ID làm ANTHROPIC_DEFAULT_SONNET_MODEL."
+      },
+      "cowork-fallback": {
+        "title": "Fallback cho Cowork",
+        "description": "Fallback theo thứ tự cho Cowork trên Claude Desktop. Thêm combo ID vào danh sách model được phép."
+      },
+      "general-fallback": {
+        "title": "Fallback chung",
+        "description": "Fallback mặc định qua các public model cho mọi client tương thích OpenAI."
+      }
+    },
+    "form": {
+      "unsaved": "Chưa lưu",
+      "idLocked": "Không thể đổi ID sau khi tạo — client đang dựa vào nó",
+      "enabled": "Combo đang bật",
+      "enabledHint": "Tắt sẽ giữ các bước nhưng từ chối request",
+      "rewriteHint": "Phản hồi ghi combo ID thay vì model thực sự đã trả lời",
+      "orderHint": "Bước 1 được thử trước; các bước sau chỉ trả lời khi bước trước lỗi.",
+      "stepModel": "Model cho bước {{index}}",
+      "firstStep": "Được thử đầu tiên",
+      "unknownTarget": "{{id}} (không tìm thấy)",
+      "offTarget": "{{id}} (đang tắt)",
+      "offHint": "Đích này đang tắt nên bước này bị bỏ qua cho tới khi bật lại.",
+      "unknownHint": "Đích này không còn tồn tại; hãy chọn model khác."
+    },
+    "optionGroup": {
+      "models": "Public model",
+      "combos": "Combo",
+      "suggested": "Đề xuất",
+      "providers": "Model của provider"
+    },
+    "validation": {
+      "idRequired": "Cần nhập combo ID",
+      "idInvalid": "ID chỉ cho phép chữ, số, -, _ và .",
+      "idInUse": "Combo ID này đã được dùng",
+      "nameRequired": "Nhập tên hiển thị để lưu",
+      "noSteps": "Thêm ít nhất một bước để lưu",
+      "stepModel": "Mỗi bước cần chọn một model"
+    }
   },
   "logs": {
+    "request": "Yêu cầu",
+    "route": "Model → provider",
+    "attemptN_one": "lần thử {{count}}",
+    "attemptN_other": "lần thử {{count}}",
+    "openRequest": "Mở yêu cầu {{id}}",
+    "noRoute": "Không định tuyến tới model",
+    "copyRequestId": "Sao chép request ID",
+    "moreActions": "Thao tác khác",
+    "pauseHint": "Tạm dừng stream để danh sách đứng yên khi bạn đọc",
+    "resumeHint": "Tiếp tục stream trực tiếp",
+    "resume": "Tiếp tục stream",
+    "pausedNote": "Đã tạm dừng stream — danh sách giữ nguyên cho tới khi tiếp tục.",
+    "pausedNotePending_one": "Đã tạm dừng stream — có {{count}} yêu cầu mới đang chờ.",
+    "pausedNotePending_other": "Đã tạm dừng stream — có {{count}} yêu cầu mới đang chờ.",
+    "protocolOther": "Admin & khác",
+    "viewLabel": "Chọn loại log",
+    "filterByProtocol": "Lọc theo protocol",
+    "allProtocols": "Mọi protocol",
+    "searchRequests": "Tìm request ID, model, provider, tài khoản hoặc key…",
+    "searchAudit": "Tìm action, resource hoặc người thực hiện…",
+    "sortLabel": "Sắp xếp",
+    "summary_one": "{{count}} yêu cầu trong bộ đệm trực tiếp",
+    "summary_other": "{{count}} yêu cầu trong bộ đệm trực tiếp",
+    "summaryFiltered": "Đang hiện {{shown}} / {{count}}",
+    "connectClient": "Kết nối client",
+    "noMatch": "Không có mục nào khớp bộ lọc",
+    "noMatchHint": "Thử protocol khác hoặc rút gọn từ khóa.",
+    "clearFilters": "Xóa bộ lọc",
+    "ago": {
+      "now": "vừa xong",
+      "seconds_one": "{{count}} giây trước",
+      "seconds_other": "{{count}} giây trước",
+      "minutes_one": "{{count}} phút trước",
+      "minutes_other": "{{count}} phút trước",
+      "hours_one": "{{count}} giờ trước",
+      "hours_other": "{{count}} giờ trước",
+      "days_one": "{{count}} ngày trước",
+      "days_other": "{{count}} ngày trước"
+    },
+    "sort": {
+      "newest": "Mới nhất trước",
+      "oldest": "Cũ nhất trước",
+      "slowest": "Chậm nhất trước",
+      "status": "Lỗi trước",
+      "action": "Action A–Z"
+    },
+    "stats": {
+      "label": "Thống kê log",
+      "requests": "Yêu cầu",
+      "requestsHint": "Hiện mọi yêu cầu trong phạm vi",
+      "requestsLive_one": "Trực tiếp · {{count}} mới nhất",
+      "requestsLive_other": "Trực tiếp · {{count}} mới nhất",
+      "requestsPaused_one": "Tạm dừng · {{count}} mới",
+      "requestsPaused_other": "Tạm dừng · {{count}} mới",
+      "errorRate": "Tỷ lệ lỗi",
+      "errorCount_one": "{{count}} yêu cầu lỗi",
+      "errorCount_other": "{{count}} yêu cầu lỗi",
+      "errorHint": "Chỉ hiện phản hồi 4xx và 5xx",
+      "rateLimited": "Bị giới hạn",
+      "rateLimitedHint": "HTTP 429 từ upstream hoặc giới hạn của key",
+      "p95": "Độ trễ p95",
+      "latencyHint": "TB {{avg}} · p50 {{p50}}",
+      "noData": "Chưa có dữ liệu",
+      "filters": "Bộ lọc đang bật",
+      "filtersClear": "Bấm để xóa",
+      "filtersNone": "Đang hiện tất cả",
+      "events": "Sự kiện",
+      "eventsHint": "Thay đổi admin gần đây",
+      "failed": "Thất bại",
+      "failedHint": "Thay đổi trả về lỗi",
+      "actors": "Người thực hiện",
+      "actorsHint": "Ai đã thay đổi",
+      "latest": "Thay đổi gần nhất"
+    },
+    "menu": {
+      "details": "Xem chi tiết",
+      "filterModel": "Chỉ hiện model này",
+      "filterProvider": "Chỉ hiện provider này",
+      "filterKey": "Chỉ hiện API key này",
+      "openProvider": "Mở provider"
+    },
+    "detail": {
+      "metadata": "Metadata",
+      "openProvider": "Mở provider",
+      "copyJson": "Sao chép JSON",
+      "requestId": "Request ID",
+      "protocol": "Protocol",
+      "model": "Model",
+      "provider": "Provider",
+      "account": "Tài khoản",
+      "attempt": "Lần thử",
+      "apiKey": "API key",
+      "latency": "Độ trễ",
+      "filterModel": "Lọc theo model",
+      "filterKey": "Lọc theo API key"
+    },
+    "auditView": {
+      "title": "Audit",
+      "summary_one": "{{count}} thay đổi admin gần đây",
+      "summary_other": "{{count}} thay đổi admin gần đây",
+      "action": "Action",
+      "resource": "Resource",
+      "resourceType": "Loại resource",
+      "resourceId": "Resource ID",
+      "open": "Mở {{action}}",
+      "filterByType": "Lọc theo loại resource",
+      "allTypes": "Mọi resource",
+      "filterResource": "Chỉ hiện resource này",
+      "filterActor": "Chỉ hiện người này",
+      "refresh": "Làm mới",
+      "autoRefreshHint": "Tải lại sự kiện audit mỗi 30 giây"
+    },
+    "guide": {
+      "title": "Theo dõi traffic và thay đổi admin",
+      "stream": "Mọi yêu cầu qua gateway hiện ở đây theo thời gian thực — 50 yêu cầu mới nhất từ bộ đệm trong bộ nhớ, bị xóa khi tproxy khởi động lại. Vạch màu bên trái đánh dấu yêu cầu lỗi.",
+      "filter": "Bấm Tỷ lệ lỗi hoặc Bị giới hạn để lọc, chọn tab protocol, hoặc tìm theo request ID, model, provider, tài khoản, key. Nhấn / để tới ô tìm kiếm.",
+      "inspect": "Tạm dừng stream để đọc khi danh sách không chạy, bấm vào một dòng để xem chi tiết. Chuyển sang Audit để xem ai đã thay đổi gì trên dashboard.",
+      "legendOk": "2xx/3xx ổn",
+      "legendClient": "4xx client hoặc bị giới hạn",
+      "legendServer": "5xx lỗi server"
+    },
     "title": "Logs & audit",
     "subtitle": "Giám sát",
     "description": "Yêu cầu gần đây và thay đổi admin.",
@@ -1007,7 +2393,121 @@
       "oauthSessions": "Phiên OAuth",
       "cleanupInterval": "Chu kỳ dọn dẹp"
     },
-    "allowLanAccess": "Cho phép truy cập dashboard qua LAN"
+    "allowLanAccess": "Cho phép truy cập dashboard qua LAN",
+    "strategy": {
+      "fill-first": {
+        "label": "Lấp đầy trước",
+        "hint": "Luôn dùng tài khoản khỏe đầu tiên theo thứ tự ưu tiên. Tài khoản kế tiếp chỉ thay khi tài khoản này hết quota hoặc lỗi."
+      },
+      "round-robin": {
+        "label": "Sticky round-robin",
+        "hint": "Giữ một tài khoản cho vài request rồi chuyển sang tài khoản kế tiếp. Chia tải đều và giữ prompt cache."
+      },
+      "weighted-round-robin": {
+        "label": "Round-robin theo trọng số",
+        "hint": "Luân phiên giữa các tài khoản theo tỉ lệ trọng số của từng tài khoản."
+      },
+      "expiring-first": {
+        "label": "Sắp gia hạn trước",
+        "hint": "Ưu tiên tài khoản có quota gia hạn sớm nhất để không lãng phí phần sắp hết hạn."
+      }
+    },
+    "page": {
+      "guideTitle": "Cài đặt chung của gateway ở một chỗ",
+      "guideStep1": "Rotation quyết định tài khoản nào phục vụ request tiếp theo khi một provider có nhiều tài khoản. Sticky round-robin là mặc định an toàn.",
+      "guideStep2": "Các thay đổi được gom lại cho tới khi bạn bấm Lưu thay đổi (hoặc Ctrl+S). Mục chưa lưu được đánh dấu trong mục lục.",
+      "guideStep3": "Xuất bản backup trước khi thay đổi lớn. Nhập và Reload thay thế cấu hình đang chạy nên sẽ hỏi xác nhận trước.",
+      "sectionIndex": "Trên trang này",
+      "nav": {
+        "rotation": "Luân chuyển tài khoản",
+        "access": "Truy cập mạng",
+        "password": "Mật khẩu dashboard",
+        "backup": "Backup & reload",
+        "features": "Tính năng gateway",
+        "retention": "Lưu giữ dữ liệu"
+      },
+      "unsaved": "Chưa lưu",
+      "readOnly": "Chỉ xem",
+      "readOnlyHint": "Chỉ xem ở đây: đổi trong config.yaml hoặc ở trang được liên kết",
+      "legendReadOnly": "Chỉ xem, sửa trong config.yaml",
+      "default": "Mặc định",
+      "saveBar": "Thay đổi chưa lưu",
+      "unsavedCount_other": "{{count}} thay đổi chưa lưu",
+      "discard": "Hủy thay đổi",
+      "keepEditing": "Tiếp tục sửa",
+      "saveChanges": "Lưu thay đổi",
+      "saving": "Đang lưu…",
+      "saveFailed": "Không lưu được cài đặt",
+      "discardConfirmTitle": "Hủy các thay đổi chưa lưu?",
+      "discardConfirmMessage_other": "{{count}} thay đổi sẽ quay về giá trị đã lưu.",
+      "unsavedLost": "Các chỉnh sửa chưa lưu trên trang này sẽ bị thay bằng giá trị mới tải.",
+      "rotationSubtitle": "Cách tproxy chọn tài khoản khi một provider có nhiều tài khoản",
+      "strategyHint": "Áp dụng cho mọi provider không có cấu hình riêng.",
+      "stickyHint": "Số request gửi vào cùng một tài khoản trước khi chuyển sang tài khoản kế tiếp.",
+      "stickyHintInactive": "Chỉ dùng cho sticky round-robin. Giữ lại để dùng khi bạn chuyển về.",
+      "requestsPerAccount": "request mỗi tài khoản",
+      "overridesLabel": "Ghi đè theo provider",
+      "overridesHint": "Provider có chiến lược riêng sẽ bỏ qua mặc định ở trên. Đổi trong trang provider.",
+      "noOverrides": "Không có — mọi provider dùng mặc định.",
+      "inheritsStrategy": "Chiến lược mặc định",
+      "stickyShort_other": "sticky {{count}} request",
+      "resetConfirmTitle": "Đặt lại trạng thái runtime của rotation?",
+      "resetConfirmMessage": "tproxy quên tài khoản mà mỗi provider đang dùng và xóa các đánh dấu capacity tạm thời của model, nên định tuyến bắt đầu lại từ tài khoản đầu tiên. Cài đặt đã lưu không thay đổi.",
+      "accessTitle": "Truy cập mạng",
+      "accessSubtitle": "Ai mở được dashboard này và client tìm gateway bằng cách nào",
+      "lanHint": "Cho thiết bị trong mạng LAN mở dashboard tại http://<ip-máy-này>:{{port}}/dashboard/ bằng mật khẩu dashboard.",
+      "lanOn": "Cho phép LAN",
+      "lanOff": "Chỉ máy này",
+      "lanLoopbackNote": "Server đang lắng nghe trên <code>{{host}}</code>. Đặt <code>server.host: 0.0.0.0</code> trong config.yaml và restart để thiết bị LAN kết nối được.",
+      "lanUrls": "Địa chỉ dashboard trong LAN",
+      "lanRestartNotice": "Đã bật truy cập LAN. Đặt server.host thành 0.0.0.0 trong config.yaml và restart server.",
+      "lanEnabledNotice": "Đã cho phép truy cập dashboard qua LAN",
+      "lanDisabledNotice": "Đã tắt truy cập dashboard qua LAN",
+      "publicBaseUrl": "Public base URL",
+      "publicBaseUrlHint": "Dùng cho CLI tool như Cursor. Endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel hoặc reverse proxy), ví dụ https://api.example.com.",
+      "publicUrlInvalid": "Giá trị này không giống URL http(s). Nó vẫn sẽ được lưu như đã nhập.",
+      "remoteHint": "Truy cập management API từ máy khác. Cấu hình trong config.yaml.",
+      "passwordTitle": "Mật khẩu dashboard",
+      "passwordSubtitle": "Lưu riêng — không nằm trong Lưu thay đổi",
+      "passwordIntro": "Dùng để đăng nhập dashboard này. Mặc định là <code>123123</code>; hãy đổi sau lần đăng nhập đầu tiên.",
+      "currentPassword": "Mật khẩu hiện tại",
+      "newPassword": "Mật khẩu mới",
+      "confirmPassword": "Xác nhận mật khẩu mới",
+      "passwordRule_other": "Ít nhất {{count}} ký tự.",
+      "passwordTooShort_other": "Mật khẩu mới phải có ít nhất {{count}} ký tự",
+      "passwordMismatch": "Mật khẩu mới không khớp",
+      "passwordChanged": "Đã đổi mật khẩu dashboard",
+      "passwordFailed": "Không đổi được mật khẩu",
+      "showPasswords": "Hiện mật khẩu",
+      "hidePasswords": "Ẩn mật khẩu",
+      "clearFields": "Xóa",
+      "changePassword": "Đổi mật khẩu",
+      "backupTitle": "Backup & reload",
+      "backupSubtitle": "Cấu hình định tuyến, kèm token OAuth",
+      "exportLabel": "Xuất",
+      "exportHint": "Tải về provider, tài khoản, model và route. API key vẫn là placeholder biến môi trường.",
+      "importLabel": "Nhập",
+      "importHint": "Nạp file export JSON hoặc YAML vào database. Mục trùng sẽ bị ghi đè.",
+      "reloadLabel": "Reload config.yaml",
+      "reloadHint": "Đọc lại file config trên đĩa và áp dụng mà không cần khởi động lại tiến trình.",
+      "importConfirmTitle": "Nhập cấu hình?",
+      "importConfirmMessage": "\"{{file}}\" sẽ được nạp vào gateway đang chạy. Provider, tài khoản và route trùng id sẽ bị ghi đè.",
+      "importConfirm": "Nhập",
+      "reloadConfirmTitle": "Reload cấu hình?",
+      "reloadConfirmMessage": "Gateway sẽ đọc lại config.yaml và áp dụng ngay.",
+      "exported": "Đã xuất {{file}}",
+      "imported": "Đã nhập {{file}}",
+      "reloadedFrom": "Đã reload {{path}}",
+      "featuresTitle": "Tính năng gateway",
+      "featuresSubtitle": "Trạng thái các công tắc runtime",
+      "bindAddress": "Địa chỉ lắng nghe",
+      "bindAddressHint": "server.host và server.port của tiến trình đang chạy.",
+      "payloadCaptureHint": "Khi bật, nội dung request và response được giữ trong log. Hãy tắt khi không debug.",
+      "tokenSaverHint": "Nén output lớn của tool trước khi gửi tới model.",
+      "retentionSubtitle": "tproxy giữ lịch sử bao lâu trước khi dọn dẹp",
+      "days_other": "{{count}} ngày",
+      "daysHours_other": "{{count}} ngày {{hours}} giờ"
+    }
   },
   "mapping": {
     "loading": "Đang tải ánh xạ…",
@@ -1095,9 +2595,195 @@
     "claudeHaiku": "Claude Haiku",
     "modelsDescription": "Điều hướng tên model của client toàn cục — ví dụ <code>gpt-5.6-sol</code> → <code>deepseek-v4-pro</code>. Áp dụng cho mọi endpoint trước các placeholder tier. Từng API key có thể tắt riêng.",
     "modelsPanelDescription": "Ánh xạ theo đúng tên model, áp dụng cho <strong>mọi</strong> request trước khi route theo tier Claude/Codex. Đích có thể là model ảo hoặc <code>provider:upstream-model</code>; việc phân luồng provider do Provider Priority Manager quyết định.",
-    "modelIdentityRejected": "Ánh xạ \"{source}\" vào chính nó là vô tác dụng nên bị từ chối.",
-    "savedModelMappings": "Đã lưu {count} ánh xạ model",
-    "clearedAllModelMappings": "Đã xóa toàn bộ ánh xạ model"
+    "modelIdentityRejected": "Ánh xạ \"{{source}}\" sang chính nó không có tác dụng nên đã bị từ chối.",
+    "savedModelMappings": "Đã lưu {{count}} ánh xạ model",
+    "clearedAllModelMappings": "Đã xóa toàn bộ ánh xạ model",
+    "savedModelMappings_other": "Đã lưu {{count}} ánh xạ model",
+    "selectBothForAddModel": "Nhập client model và chọn model đích trước khi thêm",
+    "selectBothForSaveModel": "Điền đủ dòng mới (client model và model đích) hoặc xoá trắng trước khi lưu",
+    "rowNeedsTarget": "Chọn model đích cho {{source}} hoặc xoá dòng này trước khi lưu",
+    "statsLabel": "Tổng quan ánh xạ",
+    "tabsLabel": "Client",
+    "tabs": {
+      "claude": "Claude Code",
+      "codex": "Codex CLI",
+      "cursor": "Cursor",
+      "models": "Model toàn cục"
+    },
+    "tabHint": {
+      "claude": "Placeholder theo bậc của Claude (default, fable, opus, sonnet, haiku)",
+      "codex": "GPT codename của Codex (gpt-sol, gpt-terra, gpt-luna)",
+      "cursor": "Cursor model ID được ánh xạ sang model của tproxy",
+      "models": "Viết lại đúng tên model, áp dụng cho mọi request"
+    },
+    "stats": {
+      "tiersHint": "Bậc đã ghi đè · còn lại dùng mặc định",
+      "codexHint": "Codename dùng chung đích với bậc Claude",
+      "cursorHint_other": "Đã lưu · trên {{count}} Cursor model",
+      "cursorHintStatic_other": "Đã lưu · {{count}} model, catalog tĩnh",
+      "modelsHint": "Đã lưu · áp dụng trước định tuyến theo bậc",
+      "unsaved": "Chưa lưu",
+      "allSaved": "Mọi thay đổi đã được lưu"
+    },
+    "section": {
+      "tiers": "Bậc Claude & Codex",
+      "cursor": "Cursor",
+      "models": "Model toàn cục"
+    },
+    "reload": "Tải lại",
+    "reloadHint": "Tải lại toàn bộ ánh xạ từ server",
+    "searchPlaceholder": {
+      "tiers": "Tìm bậc, alias hoặc model đích…",
+      "cursor": "Tìm Cursor model hoặc model đích…",
+      "models": "Tìm client model hoặc model đích…"
+    },
+    "guide": {
+      "title": "Ánh xạ model hoạt động thế nào",
+      "what": "Ánh xạ viết lại tên model mà client gửi lên — Claude Code gọi “sonnet”, Codex gọi “gpt-sol” — thành model tproxy thực sự phục vụ. Không cần sửa cấu hình client.",
+      "fast": "Cách nhanh nhất: chọn tab client, chọn model đích ngay trên dòng (virtual model hoặc provider:model) rồi bấm Lưu (Ctrl+S). Với Cursor và Model toàn cục, dùng dòng Thêm ở đầu danh sách.",
+      "client": "Sau đó chép cấu hình được tạo bên dưới vào client một lần. Cấu hình giữ nguyên tên placeholder, nên sau này bạn đổi đích tại đây mà không phải động vào client nữa."
+    },
+    "status": {
+      "changed": "Đã sửa",
+      "override": "Ghi đè",
+      "env": "Env",
+      "default": "Mặc định",
+      "saved": "Đã lưu",
+      "new": "Mới",
+      "incomplete": "Thiếu đích"
+    },
+    "statusHint": {
+      "changed": "Đã sửa ở đây nhưng chưa lưu",
+      "override": "Bậc này đang được định tuyến bằng ghi đè đã lưu",
+      "env": "Được định tuyến bởi biến môi trường trên tiến trình tproxy",
+      "default": "Không ghi đè — dùng model đích mặc định có sẵn",
+      "saved": "Đã lưu trên server",
+      "new": "Đã thêm ở đây nhưng chưa lưu",
+      "incomplete": "Chọn model đích hoặc xoá dòng này trước khi lưu"
+    },
+    "tierPanel": {
+      "claudeTitle": "Các bậc Claude Code",
+      "claudeSubtitle": "Trỏ mỗi placeholder bậc tới một virtual model hoặc provider:model",
+      "codexTitle": "GPT codename của Codex",
+      "codexSubtitle": "Mỗi codename dùng chung đích với một bậc Claude"
+    },
+    "route": {
+      "virtualModel": "Virtual model",
+      "claudeNative": "Claude gốc",
+      "codexBridge": "Cầu nối Codex"
+    },
+    "action": {
+      "revert": "Hoàn tác thay đổi",
+      "revertHint": "Trở về giá trị đã lưu",
+      "discardRow": "Bỏ dòng mới",
+      "resetTier": "Đặt lại mặc định",
+      "resetTierHint": "Xoá ghi đè · mặc định {{target}}",
+      "copyRouted": "Sao chép đích đang định tuyến",
+      "copyCodename": "Sao chép codename",
+      "copyEnvVar": "Sao chép tên biến môi trường",
+      "copySource": "Sao chép model ID nguồn",
+      "copySourceShort": "Sao chép model ID",
+      "copyTarget": "Sao chép model đích",
+      "test": "Thử phân giải",
+      "testHint": "Xem trước chuỗi viết lại đã lưu",
+      "remove": "Xoá ánh xạ",
+      "removeHint": "Áp dụng khi bạn lưu"
+    },
+    "aliasesHint": "Các tên model phía client dùng bậc này",
+    "sharedWith": "Giống {{tier}}",
+    "sharedWithHint": "Codename Codex và bậc Claude dùng chung một đích — sửa bên này sẽ đổi cả bên kia",
+    "effortTag": "Effort: {{effort}}",
+    "envTag": "Env: {{target}}",
+    "targetFor": "Model đích cho {{name}}",
+    "effortFor": "Mức reasoning effort cho {{name}}",
+    "effortLabel": "Mức reasoning effort",
+    "effort": {
+      "default": "Mặc định",
+      "none": "Không",
+      "low": "Thấp",
+      "medium": "Vừa",
+      "high": "Cao",
+      "xhigh": "Rất cao",
+      "max": "Tối đa"
+    },
+    "routesNow": "Đang định tuyến tới",
+    "moreActions": "Thao tác khác",
+    "livePlaceholderClaude": "Đang chạy trên server · placeholder Claude đã lưu",
+    "livePlaceholderCodex": "Đang chạy trên server · codename Codex đã lưu",
+    "noPlaceholdersHint": "Lưu một model đích để xem cách viết lại thực tế ở đây.",
+    "noMatch": "Không có kết quả phù hợp",
+    "noMatchHint": "Thử tên model khác hoặc xoá ô tìm kiếm.",
+    "clearSearch": "Xoá tìm kiếm",
+    "selectAll": "Chọn tất cả ánh xạ đang hiển thị",
+    "selectAllVisible_other": "Chọn cả {{count}} dòng đang hiển thị",
+    "selectRow": "Chọn {{name}}",
+    "columns": {
+      "cursorModel": "Cursor model",
+      "clientModel": "Client model",
+      "target": "Model đích"
+    },
+    "cursorPanelSubtitle": "Cursor gửi các ID này · tproxy chuyển chúng tới model của bạn",
+    "emptyCursorTitle": "Chưa có ánh xạ Cursor",
+    "emptyCursorHint": "Chọn một Cursor model và model đích ở dòng phía trên, bấm Thêm rồi Lưu.",
+    "globalModelMap": "Bản đồ model toàn cục",
+    "modelsPanelSubtitle": "Viết lại đúng tên model cho mọi request, chạy trước định tuyến theo bậc",
+    "modelTargetPlaceholder": "deepseek-v4-pro hoặc provider:model",
+    "emptyModelsTitle": "Chưa có quy tắc viết lại toàn cục",
+    "emptyModelsHint": "Nhập tên model mà client gửi, chọn model muốn đổi thành, bấm Thêm rồi Lưu.",
+    "catalog": {
+      "title": "Catalog Cursor",
+      "subtitle": "Các nguồn có thể ánh xạ",
+      "models": "Model",
+      "unmapped": "Chưa ánh xạ",
+      "source": "Nguồn",
+      "provider": "Provider",
+      "publicUrlNote": "Cursor chỉ gọi được URL public — hãy dùng tunnel, rồi thêm từng ID đã ánh xạ trong Cursor → Settings → Models."
+    },
+    "resolve": {
+      "title": "Thử phân giải",
+      "subtitle": "Xem trước chuỗi viết lại đã lưu",
+      "placeholder": "vd. gpt-5.6-sol",
+      "run": "Phân giải",
+      "chain": "Chuỗi viết lại",
+      "requested": "Gọi",
+      "final": "Phục vụ",
+      "hint": "Nhập tên model rồi nhấn Enter để xem nó được viết lại thành gì. Dùng bản đồ đã lưu."
+    },
+    "contentProtocolDescShort_other": "{{count}} lớp chuyển đổi · chỉ để tham khảo",
+    "noProtocolMapping": "Server không báo lớp chuyển đổi nào",
+    "codexAuthFormatHint": "Dán vào ~/.codex/auth.json (cùng thư mục với config.toml). Codex gửi OPENAI_API_KEY tới tproxy làm API key.",
+    "noCursorTargets": "Chưa có ánh xạ Cursor — hãy thêm ở phía trên.",
+    "formatLabel": "Định dạng cấu hình",
+    "shellExports": "Lệnh export shell",
+    "shellLabel": "Shell",
+    "copiedValue": "Đã sao chép {{value}}",
+    "save": {
+      "region": "Thay đổi chưa lưu",
+      "unsaved_other": "{{count}} thay đổi chưa lưu",
+      "alsoUnsaved": "cũng chưa lưu: {{list}}",
+      "discard": "Huỷ thay đổi",
+      "save": "Lưu thay đổi",
+      "shortcut": "Lưu (Ctrl+S / ⌘S)"
+    },
+    "bulk": {
+      "setTarget": "Đặt model đích…",
+      "remove": "Xoá",
+      "setTargetTitle_other": "Đặt model đích cho {{count}} ánh xạ",
+      "setTargetHint": "Mọi nguồn đã chọn sẽ được định tuyến tới model này sau khi bạn lưu.",
+      "apply_other": "Áp dụng cho {{count}}"
+    },
+    "cancel": "Huỷ",
+    "confirm": {
+      "ok": "Xác nhận",
+      "removeTitle_other": "Xoá {{count}} ánh xạ?",
+      "removeMessage_other": "Khi lưu sẽ xoá: {{list}}. Client gọi các model này sẽ không còn được viết lại.",
+      "removeConfirm_other": "Lưu và xoá {{count}}",
+      "discardTitle": "Huỷ các thay đổi chưa lưu?",
+      "discardMessage_other": "{{count}} thay đổi ở {{section}} sẽ bị mất.",
+      "reloadTitle": "Tải lại và bỏ phần đã sửa?",
+      "reloadMessage_other": "Bạn có {{count}} thay đổi chưa lưu. Tải lại sẽ thay bằng dữ liệu trên server.",
+      "reloadConfirm": "Bỏ thay đổi và tải lại"
+    }
   },
   "chat": {
     "newChat": "Chat mới",
@@ -1108,17 +2794,17 @@
     "selectModel": "Chọn model",
     "noModelsConfigured": "Chưa cấu hình model",
     "searchModels": "Tìm kiếm model…",
-    "noModelsAvailable": "Không có model khả dụng. Kết nối provider hoặc cấu hình model.",
+    "noModelsAvailable": "Kết nối tài khoản provider hoặc thêm virtual model rồi quay lại đây.",
     "noModelsMatchSearch": "Không có model nào khớp với tìm kiếm.",
     "settings": "Cài đặt",
     "clientApiKey": "Client API key",
     "tproxyApiKeyPlaceholder": "tproxy API key",
     "settingsHint": "Sử dụng <code>/v1/chat/completions</code> với client API key từ APIs — không phải mật khẩu quản trị dashboard.",
-    "startConversation": "Bắt đầu hội thoại",
-    "chatDescription": "Chat với virtual model, combo, hoặc bất kỳ model nào được khám phá từ các tài khoản provider đã cấu hình.",
+    "startConversation": "Thử một model",
+    "chatDescription": "Gửi prompt qua gateway để kiểm tra định tuyến, streaming và câu trả lời của model.",
     "you": "Bạn",
     "assistant": "Trợ lý",
-    "messageAI": "Nhắn AI…",
+    "messageAI": "Nhắn cho model…",
     "responsesStream": "Phản hồi được stream qua tproxy gateway của bạn.",
     "noConversations": "Chưa có hội thoại nào.",
     "emptyChat": "Chat trống",
@@ -1133,13 +2819,96 @@
     "copied": "Đã sao chép",
     "copyMessage": "Sao chép tin nhắn",
     "noModel": "Không có model",
-    "apiKeyRequired": "Cần API key. Đặt tproxy client API key trong cài đặt chat.",
+    "apiKeyRequired": "Thêm client API key trong cài đặt chat để gửi tin nhắn.",
     "failedToSend": "Không thể gửi tin nhắn",
     "invalidApiKey": "Client API key không hợp lệ. Key đã lưu đã bị xóa; hãy dùng key hiện tại từ APIs.",
     "invalidApiKeyError": "Client API key không hợp lệ. Key đã lưu đã bị xóa; hãy dùng key hiện tại từ APIs.",
     "discoveringModels": "Đang khám phá model được hỗ trợ…",
     "nAvailable": "{{count}} model khả dụng",
-    "discoveringMore": " · đang khám phá thêm…"
+    "discoveringMore": " · đang khám phá thêm…",
+    "code": "code",
+    "copyCode": "Sao chép code",
+    "groupVirtual": "Virtual model",
+    "groupCombos": "Combo",
+    "noModelsTitle": "Chưa có model để chat",
+    "openProviders": "Mở Providers",
+    "openModels": "Mở PPM",
+    "vision": "vision",
+    "discoveryFailed": "Không khám phá được model từ tài khoản provider. Virtual model và combo vẫn dùng được.",
+    "settingsTitle": "Cài đặt chat",
+    "apiKeyHint": "Request gửi tới <code>/v1/chat/completions</code> bằng client API key từ <link>APIs</link> — không phải mật khẩu dashboard.",
+    "keysWithoutSecret_other": "Còn {{count}} key đang bật chưa lưu secret trong trình duyệt này. Hiện secret ở trang APIs để dùng tại đây.",
+    "customKey": "Dán key",
+    "customKeyInUse": "Key đang dùng",
+    "customKeyShort": "Key tự nhập",
+    "showKey": "Hiện key",
+    "hideKey": "Ẩn key",
+    "forgetKey": "Quên key này",
+    "noKey": "Chưa có API key",
+    "parameters": "Tham số",
+    "resetParameters": "Đặt lại",
+    "parametersHint": "Để trống để dùng mặc định của model. Áp dụng cho tin nhắn tiếp theo.",
+    "systemPrompt": "System prompt",
+    "systemPromptPlaceholder": "VD: Bạn là trợ lý trả lời ngắn gọn.",
+    "temperature": "Temperature",
+    "maxTokens": "Max tokens",
+    "modelDefault": "Mặc định",
+    "shortcuts": "Phím tắt",
+    "shortcutSend": "Gửi",
+    "shortcutNewline": "Xuống dòng",
+    "shortcutStop": "Dừng câu trả lời",
+    "shortcutModel": "Đổi model",
+    "history": "Lịch sử chat",
+    "historyActions": "Thao tác lịch sử",
+    "deleteAll": "Xóa tất cả chat",
+    "deleteAllHint_other": "{{count}} hội thoại trong trình duyệt này",
+    "searchHistory": "Tìm chat",
+    "noHistoryMatch": "Không có chat nào khớp.",
+    "now": "vừa xong",
+    "deleteConfirmTitle": "Xóa chat này?",
+    "deleteConfirmMessage": "\"{{title}}\" và các tin nhắn sẽ bị xóa khỏi trình duyệt này.",
+    "deleteAllConfirmTitle": "Xóa tất cả chat?",
+    "deleteAllConfirmMessage_other": "{{count}} hội thoại sẽ bị xóa khỏi trình duyệt này. Không thể hoàn tác.",
+    "preset": {
+      "explain": {
+        "label": "Giải thích đơn giản",
+        "prompt": "Giải thích API gateway làm gì trong ba câu ngắn."
+      },
+      "code": {
+        "label": "Viết code",
+        "prompt": "Viết một hàm TypeScript gọi lại fetch với exponential backoff."
+      },
+      "summarize": {
+        "label": "Tóm tắt",
+        "prompt": "Tóm tắt ưu và nhược điểm của việc stream phản hồi trong ứng dụng chat thành vài gạch đầu dòng."
+      },
+      "ping": {
+        "label": "Kiểm tra định tuyến",
+        "prompt": "Trả lời \"pong\" kèm tên model của bạn."
+      }
+    },
+    "readiness": "Sẵn sàng gửi",
+    "readyModel": "Model",
+    "keyReady": "Sẵn sàng",
+    "keyMissingAction": "Thêm key",
+    "firstToken": "token đầu {{time}}",
+    "totalTime": "tổng {{time}}",
+    "streaming": "Đang stream",
+    "failed": "Lỗi",
+    "stopped": "Đã dừng",
+    "retry": "Thử lại",
+    "regenerate": "Tạo lại",
+    "changeModel": "Đổi model",
+    "composerHint": "Enter để gửi · Shift+Enter để xuống dòng",
+    "imageMessage": "Hình ảnh",
+    "systemShort": "system",
+    "maxShort": "max {{count}}",
+    "blockedNoModel": "Chọn model để bắt đầu",
+    "blockedNoKey": "Thêm client API key để gửi",
+    "guideTitle": "Thử model qua gateway của bạn",
+    "guideStep1": "Chọn virtual model, combo hoặc model khám phá từ tài khoản provider (Ctrl+K). Đổi model sẽ mở chat mới.",
+    "guideStep2": "Chat được gửi bằng client API key như mọi ứng dụng khác. Chọn key đã lưu hoặc dán key trong cài đặt chat (biểu tượng tune).",
+    "guideStep3": "Enter để gửi, Shift+Enter xuống dòng, Esc dừng câu trả lời. Mỗi câu trả lời hiện thời gian tới token đầu và tổng thời gian."
   },
   "quota": {
     "servicePlan": "Gói: {{plan}}",
@@ -1188,8 +2957,8 @@
     "tryChangingFilter": "Thử đổi bộ lọc provider hoặc trạng thái tài khoản.",
     "expiringFirst": "Sắp hết hạn trước",
     "expiringFirstBanner": "Sắp xếp Sắp hết hạn trước sắp xếp lại tài khoản trên trang này theo thời gian reset quota sớm nhất.",
-    "turnOffEmpty": "Tắt hết hạn mức",
-    "turnOnAvailable": "Bật còn khả dụng",
+    "turnOffEmpty": "Tắt tài khoản đã cạn quota",
+    "turnOnAvailable": "Bật tài khoản còn quota",
     "autoRefresh": "Tự động làm mới",
     "refreshAll": "Làm mới tất cả",
     "resetCodexLimit": "Reset giới hạn Codex?",
@@ -1246,7 +3015,134 @@
     "hideQuotaRow": "Ẩn dòng quota này",
     "hideQuota": "Ẩn quota",
     "failedToLoadHistory": "Không thể tải lịch sử yêu cầu",
-    "clearCooldown": "Xóa cooldown"
+    "clearCooldown": "Xóa cooldown",
+    "percentLeft": "Còn {{value}}%",
+    "percentUsed": "Đã dùng {{value}}%",
+    "resetsIn": "Reset sau {{time}}",
+    "resetsAt": "Reset lúc {{time}}",
+    "hideQuotaNamed": "Ẩn quota {{name}}",
+    "showLess": "Thu gọn",
+    "showMoreQuotas": "Xem thêm {{count}}",
+    "hiddenCount": "Đã ẩn {{count}}",
+    "showQuotaRow": "Hiện lại quota này",
+    "checkingQuota": "Đang kiểm tra quota…",
+    "retry": "Thử lại",
+    "renewsOn": "Gói gia hạn vào {{date}}",
+    "rankHint": "Thứ tự định tuyến #{{rank}}",
+    "rankDragHint": "Thứ tự định tuyến #{{rank}} — được thử trước các tài khoản phía sau. Kéo để sắp xếp lại.",
+    "dragToReorder": "Kéo {{label}} để đổi thứ tự định tuyến",
+    "toggleLocked": "Dùng được sau khi kiểm tra quota xong",
+    "toggleLockedShort": "công tắc bật/tắt sẽ mở khi hoàn tất",
+    "orderSaved": "Đã lưu thứ tự tài khoản",
+    "orderSaveFailed": "Không lưu được thứ tự tài khoản",
+    "connectProvidersAction": "Kết nối provider",
+    "filterByProvider": "Lọc theo provider",
+    "refreshAllHint": "Kiểm tra lại quota cho tất cả tài khoản ngay",
+    "autoRefreshHint": "Tự kiểm tra lại quota mỗi 60 giây (Claude mỗi 3 phút để tránh bị giới hạn)",
+    "searchPlaceholder": "Tìm email, nhãn hoặc gói…",
+    "clearSearch": "Xóa tìm kiếm",
+    "searchShortcut": "Nhấn / để tìm",
+    "sortBy": "Sắp xếp tài khoản",
+    "sortNote": "Chỉ đổi thứ tự hiển thị — định tuyến vẫn theo thứ tự #.",
+    "sortBackToRouting": "Về thứ tự định tuyến",
+    "viewMode": "Kiểu hiển thị",
+    "viewGrid": "Dạng thẻ",
+    "viewList": "Danh sách gọn",
+    "quickActions": "Thao tác nhanh",
+    "turnOffEmptyHint": "{{count}} tài khoản đang bật có hạn mức ≤5%",
+    "turnOnAvailableHint": "{{count}} tài khoản đang tắt nhưng còn quota",
+    "selectVisibleHint": "Chọn mọi tài khoản đang hiển thị để thao tác hàng loạt",
+    "clearFilters": "Xóa bộ lọc",
+    "deleteConfirmMessage": "Xóa {{label}}? Thông tin đăng nhập sẽ bị gỡ khỏi tproxy và tài khoản ngừng nhận traffic. Không thể hoàn tác.",
+    "sort": {
+      "default": "Thứ tự định tuyến",
+      "expiring": "Sắp reset trước",
+      "lowest": "Quota thấp nhất trước"
+    },
+    "health": {
+      "ready": "Sẵn sàng",
+      "nodata": "Chưa có dữ liệu",
+      "low": "Sắp hết",
+      "exhausted": "Đã hết quota",
+      "cooldown": "Cooldown",
+      "cooldownFor": "Cooldown · {{time}}",
+      "paused": "Tự tạm dừng",
+      "error": "Lỗi kiểm tra",
+      "off": "Đã tắt",
+      "loading": "Đang kiểm tra…"
+    },
+    "healthHint": {
+      "ready": "Đang bật và còn quota — router có thể dùng.",
+      "nodata": "Đang bật nhưng provider không trả về hạn mức quota.",
+      "low": "Đang bật nhưng có ít nhất một hạn mức dưới 30%.",
+      "exhausted": "Đã dùng hết quota. Router bỏ qua tài khoản này đến khi được reset.",
+      "cooldown": "Tạm bị bỏ qua sau lỗi từ upstream. Bấm làm mới để xóa cooldown.",
+      "paused": "Tự động tạm dừng vì quota về 0%.",
+      "error": "Lần kiểm tra quota gần nhất bị lỗi. Thử lại hoặc mở tài khoản để xem chi tiết.",
+      "off": "Đã tắt. Router không dùng tài khoản này.",
+      "loading": "Đang kiểm tra quota với provider…"
+    },
+    "overview": {
+      "all": "Tài khoản",
+      "allHint": "Mọi tài khoản đang xem",
+      "available": "Sẵn sàng",
+      "availableHint": "Đang bật, phục vụ được",
+      "low": "Sắp hết",
+      "lowHint": "Có hạn mức dưới 30%",
+      "attention": "Cần xử lý",
+      "attentionHint": "Hết quota, cooldown hoặc lỗi",
+      "inactive": "Đã tắt",
+      "inactiveHint": "Không dùng để định tuyến",
+      "checking": "Đang kiểm tra {{count}}…",
+      "nextReset": "Reset gần nhất",
+      "nextResetNone": "Chưa có lịch reset"
+    },
+    "menu": {
+      "more": "Thao tác khác",
+      "details": "Xem chi tiết",
+      "detailsHint": "Biểu đồ sử dụng, lịch sử request, chat thử",
+      "useResetCredit": "Dùng một lượt reset Codex",
+      "creditsAvailable": "Còn {{count}} lượt",
+      "editProvider": "Sửa trong Providers",
+      "editProviderHint": "Nhãn, độ ưu tiên, proxy pool"
+    },
+    "bulk": {
+      "toolbar": "Thao tác hàng loạt",
+      "selected": "đã chọn",
+      "selectAllVisible": "Chọn cả {{count}}",
+      "refresh": "Làm mới",
+      "enable": "Bật",
+      "disable": "Tắt",
+      "allSucceeded": "{{title}}: thành công cả {{count}}",
+      "resultSummary": "{{ok}} thành công · {{failed}} thất bại"
+    },
+    "group": {
+      "select": "Chọn tất cả tài khoản {{name}}",
+      "summary": "{{count}} tài khoản · {{on}} đang bật",
+      "summaryFiltered": "Hiển thị {{shown}}/{{count}} · {{on}} đang bật",
+      "health": "Phân bố tình trạng",
+      "refresh": "Làm mới",
+      "refreshHint": "Kiểm tra lại quota các tài khoản {{name}} này"
+    },
+    "columns": {
+      "account": "Tài khoản",
+      "status": "Trạng thái",
+      "quota": "Quota còn lại",
+      "usage": "Đã dùng qua proxy",
+      "routing": "Bật"
+    },
+    "guide": {
+      "toggle": "Hướng dẫn trang này",
+      "kicker": "// HƯỚNG DẪN NHANH",
+      "title": "Quota Tracker hoạt động thế nào",
+      "cards": "Mỗi thẻ là một tài khoản upstream. Thanh màu cho biết quota còn lại của từng hạn mức và thời điểm reset; nhãn trạng thái cho biết ngay tài khoản có phục vụ được hay không.",
+      "routing": "Trong mỗi provider, tproxy thử tài khoản từ #1 trở xuống và bỏ qua tài khoản đang tắt, đang cooldown hoặc hết quota. Kéo nút # để đổi thứ tự.",
+      "actions": "Bấm vào thẻ để xem lịch sử sử dụng và chat thử. Tick ô chọn để làm mới, xóa cooldown hoặc bật/tắt nhiều tài khoản cùng lúc. Nhấn / để tìm kiếm.",
+      "legendHigh": "Còn ≥ 70%",
+      "legendMid": "30–70%",
+      "legendLow": "< 30%",
+      "dismiss": "Đã hiểu, ẩn hướng dẫn"
+    }
   },
   "updates": {
     "newVersionTitle": "Có phiên bản mới: v{{version}}",
@@ -1326,7 +3222,194 @@
     "providerActivity": "Hoạt động provider",
     "providerActivityDesc": "Định tuyến trực tiếp qua các upstream provider đã cấu hình.",
     "noProvidersWithConnections": "Không có provider nào có kết nối",
-    "errorStatus": "lỗi"
+    "errorStatus": "lỗi",
+    "retry": "Thử lại",
+    "costNote": "Chi phí là ước tính theo bảng giá model, không phải hóa đơn của provider. Đầu vào đã gồm token cache.",
+    "period": {
+      "today": "Hôm nay",
+      "24h": "24 giờ",
+      "7d": "7 ngày",
+      "30d": "30 ngày",
+      "60d": "60 ngày"
+    },
+    "time": {
+      "never": "Chưa dùng",
+      "justNow": "Vừa xong",
+      "minutesAgo_one": "{{count}} phút trước",
+      "minutesAgo_other": "{{count}} phút trước",
+      "hoursAgo_one": "{{count}} giờ trước",
+      "hoursAgo_other": "{{count}} giờ trước"
+    },
+    "stream": {
+      "hint": "Request gần đây và request đang chạy được cập nhật trực tiếp từ gateway",
+      "off": "Ngoại tuyến",
+      "connecting": "Đang kết nối",
+      "live": "Trực tiếp",
+      "retrying": "Đang kết nối lại"
+    },
+    "stats": {
+      "label": "Tóm tắt sử dụng",
+      "requests": "Request",
+      "inFlight_one": "{{count}} đang chạy",
+      "inFlight_other": "{{count}} đang chạy",
+      "idle": "Không có request đang chạy",
+      "tokens": "Token",
+      "tokensHint": "Vào {{input}} · ra {{output}}",
+      "cache": "Tỷ lệ cache",
+      "cacheHint": "{{read}} đọc · {{write}} ghi",
+      "cacheTitle": "Tỷ lệ token đầu vào được lấy từ prompt cache của provider",
+      "cost": "Chi phí ước tính",
+      "errors": "Lỗi gần đây",
+      "errorsHint_one": "Trong {{count}} request gần nhất",
+      "errorsHint_other": "Trong {{count}} request gần nhất",
+      "errorsHintLast_one": "Trên {{count}} gần nhất · mới nhất {{model}}",
+      "errorsHintLast_other": "Trên {{count}} gần nhất · mới nhất {{model}}",
+      "errorsNone": "Chưa có request",
+      "errorsTitle": "Chỉ hiện request lỗi; bấm lần nữa để xem tất cả"
+    },
+    "toolbar": {
+      "view": "Chế độ xem",
+      "requestLog": "Nhật ký request",
+      "period": "Khoảng thời gian",
+      "search": "Lọc model, tài khoản, API key…",
+      "groupBy": "Nhóm bảng chi tiết theo",
+      "sort": "Sắp xếp bảng chi tiết",
+      "measure": "Đơn vị đo"
+    },
+    "groupBy": {
+      "model": "Theo model",
+      "account": "Theo tài khoản",
+      "apiKey": "Theo API key",
+      "endpoint": "Theo upstream model"
+    },
+    "sort": {
+      "cost_desc": "Chi phí cao nhất",
+      "cost_asc": "Chi phí thấp nhất",
+      "tokens_desc": "Nhiều token nhất",
+      "tokens_asc": "Ít token nhất",
+      "requests_desc": "Nhiều request nhất",
+      "requests_asc": "Ít request nhất",
+      "lastUsed_desc": "Dùng gần đây",
+      "lastUsed_asc": "Lâu chưa dùng",
+      "name_asc": "Tên A–Z",
+      "name_desc": "Tên Z–A"
+    },
+    "guide": {
+      "title": "Xem lưu lượng, chi phí, lỗi — và chúng đến từ đâu",
+      "range": "Chọn khoảng thời gian: các ô số liệu, biểu đồ, provider và bảng chi tiết đều theo khoảng này. Chi phí là ước tính theo giá model, không phải hóa đơn của provider.",
+      "providers": "Mục Provider cho biết traffic trong khoảng này đi đâu; bấm vào một provider để lọc bảng chi tiết. Hoạt động trực tiếp hiện request đang chạy và vừa xong.",
+      "breakdown": "Nhóm bảng chi tiết theo model, tài khoản, API key hoặc upstream model để biết ai dùng gì. Mở Nhật ký request để xem từng request với độ trễ, trạng thái và lý do định tuyến.",
+      "legendVolume": "Lưu lượng",
+      "legendOk": "Thành công",
+      "legendError": "Lỗi"
+    },
+    "chart": {
+      "title_tokens": "Token theo thời gian",
+      "title_cost": "Chi phí theo thời gian",
+      "metric_tokens": "token",
+      "metric_cost": "chi phí ước tính",
+      "subtitle": "{{bucket}} · tổng {{total}} · cao nhất {{peak}} lúc {{at}}",
+      "hourly": "Theo giờ",
+      "daily": "Theo ngày",
+      "hour": "Giờ",
+      "day": "Ngày",
+      "view": "Biểu đồ hoặc bảng",
+      "asChart": "Biểu đồ",
+      "asTable": "Bảng",
+      "failed": "Không tải được biểu đồ",
+      "emptyHint": "Request trong khoảng này sẽ hiện ở đây."
+    },
+    "providers": {
+      "title": "Provider",
+      "subtitle_one": "{{count}} có traffic · bấm để lọc",
+      "subtitle_other": "{{count}} có traffic · bấm để lọc",
+      "view": "Danh sách hoặc sơ đồ",
+      "asList": "Danh sách",
+      "asMap": "Sơ đồ định tuyến",
+      "emptyHint": "Kết nối một provider và gửi request để thấy traffic ở đây.",
+      "shareCost": "Tỷ trọng chi phí",
+      "shareTokens": "Tỷ trọng token",
+      "clearFilter": "Bỏ lọc provider",
+      "filterHint": "Chỉ hiện {{name}} trong bảng chi tiết",
+      "inFlight_one": "{{count}} đang chạy",
+      "inFlight_other": "{{count}} đang chạy",
+      "lastFailed": "Request gần nhất lỗi",
+      "idle": "Không có traffic trong khoảng này"
+    },
+    "live": {
+      "title": "Hoạt động trực tiếp",
+      "subtitle_one": "{{count}} request gần nhất · không theo khoảng thời gian",
+      "subtitle_other": "{{count}} request gần nhất · không theo khoảng thời gian",
+      "filter": "Hiển thị",
+      "all": "Tất cả",
+      "errors_one": "Lỗi {{count}}",
+      "errors_other": "Lỗi {{count}}",
+      "inFlight": "Đang chạy",
+      "nothingInFlight": "Hiện không có",
+      "noErrors": "Không có request lỗi",
+      "emptyHint": "Request sẽ hiện ở đây ngay khi xử lý xong.",
+      "showAll": "Xem tất cả request"
+    },
+    "table": {
+      "sortBy": "Sắp xếp theo {{column}}",
+      "unknown": "Không rõ",
+      "providersCount_one": "{{count}} provider",
+      "providersCount_other": "{{count}} provider",
+      "modelsCount_one": "{{count}} model",
+      "modelsCount_other": "{{count}} model",
+      "subtitle": "{{groups}} nhóm · {{rows}} dòng · {{requests}} request",
+      "providerChip": "Provider: {{name}}",
+      "collapseAll": "Thu gọn tất cả",
+      "expandAll": "Mở rộng tất cả",
+      "noMatch": "Không có mục nào khớp bộ lọc",
+      "emptyHint": "Số liệu sẽ có sau request đầu tiên trong khoảng này.",
+      "empty_model": "Chưa có dữ liệu sử dụng",
+      "empty_account": "Chưa có dữ liệu theo tài khoản",
+      "empty_apiKey": "Chưa có dữ liệu theo API key",
+      "empty_endpoint": "Chưa có dữ liệu theo upstream model",
+      "name_model": "Model / provider",
+      "name_account": "Tài khoản / model",
+      "name_apiKey": "API key / model",
+      "name_endpoint": "Upstream / virtual model",
+      "inputTokens": "Đầu vào",
+      "cachedTokens": "Cache",
+      "outputTokens": "Đầu ra",
+      "inputCost": "Chi phí vào",
+      "cachedCost": "Chi phí cache",
+      "outputCost": "Chi phí ra",
+      "total": "Tổng"
+    },
+    "log": {
+      "failed": "Không tải được nhật ký sử dụng",
+      "localKey": "Nội bộ (không key)",
+      "subtitle_one": "{{count}} request · mới nhất trước · {{errors}} lỗi ở trang này",
+      "subtitle_other": "{{count}} request · mới nhất trước · {{errors}} lỗi ở trang này",
+      "noMatchPage": "Không có mục nào trên trang này khớp",
+      "noMatchPageHint": "Trạng thái và tìm kiếm chỉ lọc trang đang tải; thử trang tiếp theo hoặc xóa bộ lọc.",
+      "emptyHint": "Mỗi lượt gọi upstream được ghi ở đây kèm token, độ trễ và chi phí.",
+      "modelRoute": "Model / tuyến",
+      "inOut": "Vào / ra",
+      "openRow": "Mở chi tiết {{model}} lúc {{time}}",
+      "ttft": "TTFT {{value}}",
+      "attemptN_one": "lần thử {{count}}",
+      "attemptN_other": "lần thử {{count}}",
+      "pageFilterNote": "Trạng thái và tìm kiếm chỉ lọc 20 request trên trang này; bộ lọc provider tìm trên toàn bộ request.",
+      "search": "Lọc trang này theo model, request ID, key…",
+      "allProviders": "Tất cả provider",
+      "status": {
+        "all": "Mọi trạng thái",
+        "errors": "Chỉ lỗi",
+        "ok": "Chỉ thành công"
+      }
+    },
+    "request": {
+      "copyId": "Sao chép request ID",
+      "ok": "Thành công · {{status}}",
+      "failed": "Lỗi · {{status}}",
+      "routing": "Định tuyến",
+      "timing": "Thời gian",
+      "tokens": "Token và chi phí"
+    }
   },
   "cliTools": {
     "eyebrow": "Client bên ngoài",
@@ -1417,11 +3500,527 @@
     "tierOverridesDesc": "Bỏ trống để dùng placeholder rewrite đã cấu hình ở Mapping.",
     "coworkPlugins": "MCP server được quản lý",
     "coworkPluginsDesc": "Ghi vào config Cowork của Claude Desktop và tự động duyệt.",
-    "coworkRestart": "Đã áp dụng. Thoát và mở lại Claude Desktop để có hiệu lực."
+    "coworkRestart": "Đã áp dụng. Thoát và mở lại Claude Desktop để có hiệu lực.",
+    "statsLabel": "Tổng quan CLI tools",
+    "stats": {
+      "tools": "Công cụ",
+      "toolsHint_one": "{{count}} áp dụng một cú bấm",
+      "toolsHint_other": "{{count}} áp dụng một cú bấm",
+      "endpoint": "Endpoint",
+      "endpointHint": "Thiết lập mới sẽ trỏ về {{url}}. Đổi ở trang thiết lập của bất kỳ công cụ nào."
+    },
+    "endpointKind": {
+      "local": "Localhost",
+      "lan": "LAN",
+      "tunnel": "Tunnel",
+      "tailscale": "Tailscale"
+    },
+    "endpointHint": {
+      "local": "Dùng khi công cụ chạy cùng máy với tproxy.",
+      "lan": "Các thiết bị khác trong mạng LAN truy cập được.",
+      "tunnel": "URL public — dùng được ở mọi nơi, kể cả công cụ đi qua cloud như Cursor.",
+      "tailscale": "Các thiết bị trong tailnet của bạn truy cập được."
+    },
+    "bucket": {
+      "connected": "Đã kết nối",
+      "setup": "Cần thiết lập",
+      "missing": "Chưa phát hiện",
+      "manual": "Thiết lập thủ công"
+    },
+    "bucketHint": {
+      "connected": "Đã trỏ về tproxy",
+      "setup": "Đã cài, chưa dùng tproxy",
+      "missing": "Chưa cài trên máy này",
+      "manual": "Dán giá trị vào công cụ"
+    },
+    "state": {
+      "connected": "Đã kết nối",
+      "other": "Endpoint khác",
+      "not_configured": "Chưa cấu hình",
+      "not_installed": "Chưa phát hiện",
+      "manual": "Thiết lập thủ công",
+      "unknown": "Chưa rõ trạng thái",
+      "checking": "Đang kiểm tra…",
+      "unsupported": "Không hỗ trợ"
+    },
+    "stateHint": {
+      "connected": "Config local đã trỏ về tproxy.",
+      "other": "Đã cài nhưng đang trỏ tới endpoint không do dashboard này cấp.",
+      "not_configured": "Đã cài trên máy này, chưa trỏ về tproxy.",
+      "not_installed": "Không tìm thấy trên máy này — hãy cài, hoặc sao chép config sang máy khác.",
+      "manual": "tproxy không tự ghi config cho công cụ này — hãy tự dán base URL, key và model.",
+      "unknown": "Gateway không báo trạng thái local của công cụ này.",
+      "checking": "Đang kiểm tra cài đặt local…",
+      "unsupported": "tproxy không chặn bắt sản phẩm này — hãy kết nối nó trong Providers."
+    },
+    "next": {
+      "connected": "Xem lại",
+      "other": "Trỏ về tproxy",
+      "not_configured": "Thiết lập",
+      "not_installed": "Cài & thiết lập",
+      "manual": "Lấy cấu hình",
+      "unknown": "Mở thiết lập",
+      "checking": "Mở thiết lập",
+      "unsupported": "Chi tiết"
+    },
+    "kind": {
+      "auto": "Một cú bấm",
+      "autoHint": "tproxy có thể tự ghi file config của công cụ này.",
+      "manual": "Sao chép & dán",
+      "manualHint": "Cấu hình bên trong công cụ; tproxy cung cấp các giá trị cần dán."
+    },
+    "configInApp": "Cấu hình trong ứng dụng",
+    "menu": {
+      "more": "Thao tác khác cho {{name}}",
+      "openSetup": "Mở thiết lập",
+      "viewDetails": "Xem chi tiết",
+      "copyBaseUrl": "Sao chép base URL",
+      "copyBaseUrlHint": "Endpoint mà thiết lập mới sử dụng",
+      "copyConfigPath": "Sao chép đường dẫn config",
+      "docs": "Mở tài liệu",
+      "reset": "Gỡ cấu hình tproxy",
+      "resetHint": "Xoá các mục tproxy khỏi file config local",
+      "resetNothing": "Không có gì để gỡ — chưa trỏ về tproxy"
+    },
+    "notice": {
+      "baseUrlCopied": "Đã sao chép {{url}}",
+      "pathCopied": "Đã sao chép {{path}}",
+      "reset": "Đã gỡ cài đặt tproxy khỏi config local của {{name}}."
+    },
+    "resetConfirmTitle": "Gỡ tproxy khỏi {{name}}?",
+    "resetConfirmMessage": "Thao tác này xoá các mục tproxy đã ghi vào {{path}}. {{name}} sẽ ngừng gửi request qua gateway này cho tới khi bạn áp dụng lại.",
+    "columns": {
+      "tool": "Công cụ",
+      "status": "Trạng thái",
+      "pointsAt": "Đang trỏ tới",
+      "config": "File config",
+      "setup": "Cách thiết lập"
+    },
+    "filterLabel": "Lọc công cụ theo trạng thái",
+    "filterAll": "Tất cả",
+    "refreshStatus": "Làm mới trạng thái",
+    "refreshHint": "Kiểm tra lại công cụ nào đã cài và đang trỏ về đâu",
+    "searchPlaceholder": "Tìm công cụ, đường dẫn config hoặc endpoint…",
+    "sortLabel": "Sắp xếp công cụ",
+    "sort": {
+      "catalog": "Phổ biến trước",
+      "status": "Cần xử lý trước",
+      "name": "Tên"
+    },
+    "viewMode": "Kiểu hiển thị",
+    "viewGrid": "Thẻ",
+    "viewList": "Danh sách",
+    "guide": {
+      "title": "Trỏ một công cụ code về tproxy trong ba bước",
+      "key": "Tạo một client API key ở trang APIs trước — mọi công cụ gửi key này kèm mỗi request, nên usage và giới hạn được theo dõi theo key.",
+      "pick": "Chọn một công cụ. Màu xanh là đã dùng tproxy; màu vàng là đã cài nhưng chưa trỏ về đây — hãy bắt đầu với chúng.",
+      "apply": "Công cụ \"một cú bấm\" được ghi config tự động khi bấm Áp dụng. Với các công cụ khác, sao chép giá trị hoặc script một lệnh rồi dán trên máy chạy công cụ đó."
+    },
+    "statusLoadFailed": "Không đọc được trạng thái công cụ local: {{message}}",
+    "noMatch": "Không có công cụ phù hợp",
+    "noMatchHint": "Thử từ khoá hoặc bộ lọc trạng thái khác.",
+    "clearFilters": "Xoá bộ lọc",
+    "sections": {
+      "tools": "Công cụ lập trình",
+      "toolsSub_one": "{{count}} công cụ · {{auto}} một cú bấm",
+      "toolsSub_other": "{{count}} công cụ · {{auto}} một cú bấm",
+      "mitmSub_one": "{{count}} sản phẩm · chỉ để tham khảo",
+      "mitmSub_other": "{{count}} sản phẩm · chỉ để tham khảo",
+      "mitmNote": "tproxy không chặn bắt traffic (MITM kiểu 9Router nằm ngoài phạm vi). Hãy kết nối Antigravity, Kiro và các sản phẩm tương tự trong Providers bằng OAuth hoặc API key."
+    },
+    "toolNotFoundHint": "Liên kết có thể đã cũ. Hãy chọn một công cụ từ danh sách.",
+    "hero": {
+      "pointsAt": "Đang trỏ tới",
+      "model": "Model",
+      "docs": "Tài liệu"
+    },
+    "detailGuide": {
+      "title": "Thiết lập {{name}} trong bốn bước",
+      "values": "Chọn API key và base URL mà {{name}} sẽ dùng. Localhost phù hợp khi nó chạy trên máy này; dùng LAN, Tunnel hoặc Tailscale khi chạy ở nơi khác.",
+      "model": "Chọn một virtual model hoặc combo. Combo cho phép fallback theo thứ tự khi provider lỗi hoặc hết quota.",
+      "apply": "Bấm Áp dụng để ghi config trên máy này. Cần cho máy khác? Sao chép script một lệnh bên phải và chạy ở đó.",
+      "copy": "Sao chép giá trị, file config hoặc script một lệnh rồi dán ở nơi công cụ đang chạy.",
+      "mitmTitle": "Sản phẩm này không được hỗ trợ qua MITM",
+      "mitmWhat": "9Router bắt traffic của sản phẩm này bằng MITM proxy. tproxy chủ đích không làm vậy.",
+      "mitmProviders": "Thêm tài khoản trong Providers bằng OAuth hoặc API key — sau đó tproxy định tuyến nó như mọi upstream khác.",
+      "mitmSlots": "Các slot model bên dưới chỉ được giữ lại để tham khảo khi chuyển đổi."
+    },
+    "steps": {
+      "title": "Thiết lập",
+      "progress": "Xong {{done}}/{{total}}",
+      "done": "Đã xong",
+      "key": "Chọn API key",
+      "keyDesc": "{{name}} gửi client key này kèm mỗi request.",
+      "manageKeys": "Quản lý key",
+      "baseUrl": "Chọn base URL",
+      "baseUrlDesc": "Địa chỉ mà {{name}} dùng để gọi tproxy.",
+      "model": "Chọn model",
+      "modelDesc": "Virtual model hoặc combo ID. Combo tự fallback theo thứ tự khi provider lỗi.",
+      "noModels": "Chưa có model.",
+      "addModel": "Thêm model",
+      "addCombo": "Thêm combo",
+      "apply": "Áp dụng cho {{name}}",
+      "applyDesc": "Ghi file config trên máy này. Chạy lại bất cứ khi nào bạn đổi các bước ở trên.",
+      "copy": "Sao chép config cho {{name}}",
+      "copyDesc": "Dashboard này không chạy trên máy của công cụ, nên hãy sao chép config hoặc script một lệnh sang đó.",
+      "paste": "Dán vào {{name}}",
+      "pasteDesc": "Sao chép các giá trị này vào phần cài đặt của {{name}}, theo các bước bên phải.",
+      "noKeyYet": "Chọn key đã lưu secret",
+      "noModelYet": "Chọn model"
+    },
+    "apply": {
+      "notDetected": "Không tìm thấy {{name}} trên máy này.",
+      "useManual": "Dùng cấu hình thủ công",
+      "installDocs": "Tài liệu cài đặt",
+      "writesTo": "Ghi vào",
+      "reapply": "Áp dụng lại",
+      "remoteSteps": "Mở Cấu hình thủ công để sao chép nội dung file, rồi dán trên máy chạy {{name}}. Client key được tạo ở",
+      "needKey": "Hãy chọn API key đã lưu secret trước.",
+      "needModel": "Hãy chọn model trước."
+    },
+    "publicUrl": {
+      "desc": "{{name}} gọi tproxy từ server của họ nên cần một URL public. Nhập tạm ở đây, hoặc đặt cố định trong",
+      "settingsLink": "Settings → Gateway"
+    },
+    "options": {
+      "title": "Tuỳ chọn khác",
+      "hint": "Không bắt buộc — mặc định phù hợp đa số trường hợp"
+    },
+    "removeModelNamed": "Bỏ {{model}}",
+    "tierDefault": "Mặc định",
+    "tierPlaceholder": "{{tier}} (placeholder)",
+    "lanAddress": "Địa chỉ LAN",
+    "copyBaseUrl": "Sao chép base URL",
+    "output": {
+      "title": "Lệnh & cấu hình",
+      "inTool": "Trong {{name}}",
+      "inToolHint": "Thực hiện các bước này ngay trong công cụ.",
+      "preview": "Xem trước cấu hình",
+      "previewHint": "Cập nhật ngay khi bạn đổi các bước thiết lập.",
+      "run": "Sau đó chạy",
+      "runHint": "Khởi động {{name}} từ terminal."
+    },
+    "script": {
+      "shell": "Shell",
+      "needsKey": "Chọn API key và model để bật sao chép."
+    },
+    "manualModal": {
+      "hint_one": "Dán file này trên máy chạy công cụ. Các cài đặt sẵn có trong file sẽ bị ghi đè.",
+      "hint_other": "Dán {{count}} file này trên máy chạy công cụ. Các cài đặt sẵn có trong file sẽ bị ghi đè.",
+      "copyFile": "Sao chép {{file}}"
+    },
+    "mitm": {
+      "openProviders": "Mở Providers",
+      "domain": "Domain bị chặn bắt",
+      "domainHint": "Chỉ liệt kê để tham khảo khi chuyển từ 9Router."
+    },
+    "keySelect": {
+      "customKey": "Key tuỳ chỉnh",
+      "customKeyHint": "Không lưu trong trình duyệt — chỉ dùng cho lần áp dụng này.",
+      "noKeys": "Chưa có API key. Hãy tạo một key trong <0>APIs</0> trước khi cấu hình CLI tool này.",
+      "usingKey": "Đang dùng key <0>{{name}}</0>. Quản lý key trong <1>APIs</1>.",
+      "secretMissing": "Secret của key này chưa được lưu trong trình duyệt. Tạo key mới trong <0>APIs</0> và lưu secret khi nó hiện ra."
+    },
+    "catalog": {
+      "claude": {
+        "description": "CLI Claude Code của Anthropic",
+        "notes": {
+          "0": "Đặt ANTHROPIC_BASE_URL về endpoint tproxy và dùng một client API key tạo ở trang APIs.",
+          "1": "Dùng ID của một combo (ví dụ claude-code-fallback) làm model mặc định để có fallback theo thứ tự qua nhiều virtual model."
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Claude Code",
+            "desc": "npm install -g @anthropic-ai/claude-code"
+          }
+        },
+        "install": {
+          "0": "Cài Claude Code CLI, rồi chạy `claude` một lần để kiểm tra."
+        }
+      },
+      "openclaw": {
+        "description": "Trợ lý AI Open Claw",
+        "notes": {
+          "0": "Open Claw lưu cấu hình provider trong models.providers. Thêm một provider tproxy với base URL và API key của bạn."
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Open Claw",
+            "desc": "Làm theo hướng dẫn cài đặt Open Claw cho hệ điều hành của bạn."
+          },
+          "5": {
+            "title": "Tên provider",
+            "desc": "Dùng provider id \"tproxy\" trong cấu hình Open Claw."
+          }
+        },
+        "install": {
+          "0": "Cài Open Claw, rồi chạy `openclaw` một lần để tạo ~/.openclaw/openclaw.json."
+        }
+      },
+      "codex": {
+        "description": "OpenAI Codex CLI",
+        "notes": {
+          "0": "Codex đọc ~/.codex/config.toml. Trỏ base_url về endpoint /v1 tương thích OpenAI của tproxy."
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Codex",
+            "desc": "Làm theo hướng dẫn cài Codex CLI của OpenAI."
+          }
+        },
+        "install": {
+          "0": "Cài Codex CLI, rồi chạy `codex` một lần để kiểm tra."
+        }
+      },
+      "opencode": {
+        "description": "Trợ lý AI trên terminal OpenCode",
+        "notes": {
+          "0": "Cấu hình OpenCode dùng tproxy như một provider tương thích OpenAI."
+        },
+        "install": {
+          "0": "Cài OpenCode, rồi chạy `opencode` một lần để tạo file cấu hình."
+        }
+      },
+      "cowork": {
+        "description": "Claude Desktop Cowork (inference bên thứ ba)",
+        "notes": {
+          "0": "Cowork cho Claude Desktop đi qua một endpoint inference tuỳ chỉnh. Trỏ nó về tproxy với API key và danh sách model được phép.",
+          "1": "Thêm ID combo như cowork-fallback vào danh sách model được phép để có fallback theo thứ tự qua nhiều virtual model."
+        },
+        "steps": {
+          "1": {
+            "title": "Mở cài đặt Cowork",
+            "desc": "Cấu hình inference bên thứ ba trong Claude Desktop Cowork."
+          },
+          "5": {
+            "title": "Model được phép",
+            "desc": "Thêm một hoặc nhiều virtual model ID của tproxy vào danh sách model được phép."
+          }
+        },
+        "install": {
+          "0": "Cài Claude Desktop và mở ứng dụng một lần.",
+          "1": "Khi áp dụng, ứng dụng chuyển sang chế độ Cowork (3p); sau đó thoát và mở lại."
+        }
+      },
+      "hermes": {
+        "description": "AI agent tự cải thiện của Nous Research",
+        "notes": {
+          "0": "Hermes Agent dùng cấu hình model gồm các trường base_url, api_key và model."
+        },
+        "install": {
+          "0": "Cài Hermes agent, rồi chạy `hermes` một lần để tạo ~/.hermes/config.yaml."
+        }
+      },
+      "droid": {
+        "description": "Trợ lý AI Factory Droid",
+        "notes": {
+          "0": "Droid hỗ trợ provider model tuỳ chỉnh. Thêm một mục tproxy trong customModels."
+        },
+        "install": {
+          "0": "Cài Factory Droid bằng script cài đặt chính thức."
+        }
+      },
+      "cursor": {
+        "description": "Trình soạn code AI Cursor",
+        "notes": {
+          "0": "Cần tài khoản Cursor Pro để dùng tính năng này.",
+          "1": "Cursor gửi request qua server của họ nên không dùng được endpoint chỉ chạy local. Hãy dùng một URL tproxy truy cập được từ Internet."
+        },
+        "steps": {
+          "1": {
+            "title": "Mở Settings",
+            "desc": "Vào Settings → Models"
+          },
+          "2": {
+            "title": "Bật OpenAI API",
+            "desc": "Bật tuỳ chọn \"OpenAI API key\""
+          },
+          "5": {
+            "title": "Thêm custom model",
+            "desc": "Bấm \"View All Models\" → \"Add Custom Model\""
+          },
+          "7": {
+            "title": "Dùng model ID",
+            "desc": "Nhập virtual model ID của tproxy làm tên custom model trong Cursor."
+          }
+        }
+      },
+      "cline": {
+        "description": "Trợ lý code AI Cline — dùng tproxy dạng OpenAI Compatible, hoặc thêm Cline/ClinePass OAuth trong Providers cho model cline.bot.",
+        "notes": {
+          "0": "Với model theo tài khoản Cline/ClinePass (anthropic/*, cline-pass/*), thêm provider Cline hoặc ClinePass bằng OAuth trong Dashboard → Providers. Để đi qua virtual model của tproxy, dùng OpenAI Compatible bên dưới."
+        },
+        "steps": {
+          "1": {
+            "title": "Mở cài đặt Cline",
+            "desc": "Chọn API Provider → OpenAI Compatible (cho tproxy) hoặc Cline (dùng trực tiếp cline.bot)"
+          }
+        },
+        "install": {
+          "0": "Cài extension Cline trong VS Code, rồi mở nó một lần để tạo thư mục ~/.cline."
+        }
+      },
+      "kilo": {
+        "description": "Trợ lý AI Kilo Code",
+        "notes": {
+          "0": "Extension Kilo Code cho VS Code hỗ trợ endpoint tương thích OpenAI."
+        },
+        "steps": {
+          "1": {
+            "title": "Mở cài đặt Kilo",
+            "desc": "Chọn API Provider → OpenAI Compatible"
+          }
+        },
+        "install": {
+          "0": "Cài extension Kilo Code, rồi đăng nhập một lần để tạo file xác thực."
+        }
+      },
+      "roo": {
+        "description": "Trợ lý AI Roo",
+        "steps": {
+          "1": {
+            "title": "Mở Settings",
+            "desc": "Mở bảng Roo Settings"
+          },
+          "2": {
+            "title": "Chọn provider",
+            "desc": "Chọn API Provider → Ollama"
+          }
+        }
+      },
+      "continue": {
+        "description": "Trợ lý AI Continue",
+        "steps": {
+          "1": {
+            "title": "Mở file cấu hình",
+            "desc": "Mở file cấu hình của Continue"
+          },
+          "4": {
+            "title": "Thêm cấu hình model",
+            "desc": "Thêm cấu hình sau vào mảng models:"
+          }
+        }
+      },
+      "amp": {
+        "description": "CLI trợ lý code Amp của Sourcegraph",
+        "notes": {
+          "0": "Dùng virtual model ID của tproxy để các shorthand của Amp không đổi khi provider cập nhật.",
+          "1": "Ví dụ shorthand: g25p → gemini-2.5-pro, g25f → gemini-2.5-flash, cs45 → claude-sonnet-4-5."
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Amp",
+            "desc": "Cài Amp CLI bằng trình quản lý gói mà môi trường của bạn hỗ trợ."
+          },
+          "5": {
+            "title": "Thêm shorthand",
+            "desc": "Ánh xạ các shorthand của Amp như g25p hay cs45 sang model ID của tproxy trong cấu hình local."
+          }
+        }
+      },
+      "qwen": {
+        "description": "Qwen Code CLI của Alibaba — hỗ trợ provider OpenAI, Anthropic và Gemini qua tproxy",
+        "notes": {
+          "0": "Qwen Code hỗ trợ nhiều loại provider (openai, anthropic, gemini) qua modelProviders trong settings.json. tproxy hoạt động như một endpoint tương thích OpenAI.",
+          "1": "Dùng được mọi model có trong tproxy — không chỉ model Qwen.",
+          "2": "Đường dẫn config: Linux/macOS ~/.qwen/settings.json • Windows %USERPROFILE%\\.qwen\\settings.json",
+          "3": "Gói miễn phí Qwen OAuth đã ngừng. Hãy dùng tproxy với các upstream provider bạn đã cấu hình."
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Qwen Code",
+            "desc": "npm install -g @qwen-code/qwen-code"
+          },
+          "5": {
+            "title": "Lưu cấu hình",
+            "desc": "Sao chép JSON bên dưới vào file ~/.qwen/settings.json."
+          }
+        }
+      },
+      "deepseek-tui": {
+        "description": "Agent code trên terminal của DeepSeek (Rust TUI)",
+        "notes": {
+          "0": "DeepSeek TUI dùng ~/.deepseek/config.toml. Đặt provider ở chế độ openai với base_url, api_key và model của bạn.",
+          "1": "Đường dẫn config: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml"
+        },
+        "steps": {
+          "1": {
+            "title": "Cài DeepSeek TUI",
+            "desc": "Làm theo hướng dẫn cài đặt DeepSeek TUI."
+          }
+        },
+        "install": {
+          "0": "Cài DeepSeek TUI, rồi chạy `deepseek` một lần để tạo ~/.deepseek/config.toml."
+        }
+      },
+      "jcode": {
+        "description": "Bộ khung agent code hiệu năng cao viết bằng Rust",
+        "notes": {
+          "0": "jcode là agent code viết bằng Rust, có bộ nhớ ngữ nghĩa, chạy nhiều agent song song và rất nhanh.",
+          "1": "Cấu hình tproxy làm provider tương thích OpenAI để mọi request của jcode đi qua tproxy.",
+          "2": "Cài bằng: curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash"
+        },
+        "steps": {
+          "1": {
+            "title": "Cài jcode",
+            "desc": "Chạy script cài đặt trong repository jcode."
+          }
+        },
+        "install": {
+          "0": "Cài jcode bằng script cài đặt chính thức."
+        }
+      },
+      "grok-build": {
+        "description": "Agent code dạng TUI Grok Build của xAI",
+        "notes": {
+          "0": "Grok Build dùng ~/.grok/config.toml. TProxy ghi một custom model [model.tproxy] và đặt nó làm mặc định.",
+          "1": "Sau khi áp dụng, chạy grok (hoặc /model tproxy) để dùng model được định tuyến. Quay lại bất cứ lúc nào bằng /model grok-build.",
+          "2": "Đường dẫn config: Linux/macOS ~/.grok/config.toml • Windows %USERPROFILE%\\.grok\\config.toml"
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Grok Build",
+            "desc": "Làm theo hướng dẫn cài Grok CLI của xAI."
+          }
+        },
+        "install": {
+          "0": "Cài Grok Build, rồi chạy `grok` một lần để tạo ~/.grok/config.toml."
+        }
+      },
+      "copilot": {
+        "description": "GitHub Copilot Chat với provider model tuỳ chỉnh",
+        "notes": {
+          "0": "Thêm tproxy làm provider BYOK trong VS Code. Khởi động lại VS Code, rồi chọn model trong bộ chọn model của Copilot Chat.",
+          "1": "Đường dẫn config: Linux ~/.config/Code/User/chatLanguageModels.json • Windows %APPDATA%\\Code\\User\\chatLanguageModels.json"
+        },
+        "steps": {
+          "1": {
+            "title": "Cài Copilot Chat",
+            "desc": "Cài extension GitHub Copilot Chat trong VS Code."
+          }
+        },
+        "install": {
+          "0": "Cài VS Code và extension GitHub Copilot Chat.",
+          "1": "tproxy ghi một provider BYOK vào chatLanguageModels.json; chọn nó trong bộ chọn model."
+        }
+      },
+      "antigravity": {
+        "description": "IDE Google Antigravity dùng MITM",
+        "notes": {
+          "0": "tproxy chưa có MITM proxy. Bảng ánh xạ bên dưới cho biết các slot mà Antigravity cần khi MITM được hỗ trợ."
+        }
+      },
+      "kiro": {
+        "description": "IDE Kiro dùng MITM",
+        "notes": {
+          "0": "tproxy chưa có MITM proxy. Kiro gửi model ID cụ thể — mỗi slot bên dưới nên ánh xạ tới một virtual model của tproxy."
+        }
+      }
+    }
   },
   "import": {
     "title": "Nhập dữ liệu",
-    "subtitle": "Di chuyển credential và định tuyến từ 9router, CLIProxyAPI hoặc sub2api",
+    "subtitle": "Chọn file JSON. Ứng dụng tự nhận diện định dạng và chuẩn bị dữ liệu để nhập.",
     "cancel": "Hủy",
     "previewing": "Đang xem trước…",
     "preview": "Xem trước",
@@ -1432,7 +4031,7 @@
     "source9routerDesc": "Di chuyển provider credential, client API key, combo và virtual model từ file export 9router đầy đủ.",
     "sourceCliproxyTitle": "CLIProxyAPI auth",
     "sourceCliproxyDesc": "Nhập OAuth credential được export từ thư mục auth của CLIProxyAPI.",
-    "autoDetect": "Tự động phát hiện định dạng khi có thể",
+    "autoDetect": "Chọn một hoặc nhiều file, có thể khác định dạng. Xem trước không lưu dữ liệu.",
     "chooseFile": "Chọn file JSON",
     "lastResult": "Kết quả cuối:",
     "previewReady": "Xem trước sẵn sàng: {{summary}}",
@@ -1440,7 +4039,7 @@
     "importFailed": "Nhập thất bại",
     "failedToImport": "Không thể nhập file",
     "cardTitle": "Nhập dữ liệu",
-    "cardDesc": "Di chuyển từ 9router-backup-*.json, file auth CLIProxyAPI như codex-*.json, hoặc file export accounts của sub2api.",
+    "cardDesc": "Nhập 9router, CLIProxyAPI, sub2api, file OAuth ChatGPT hoặc OAuth bundle của tproxy tại một nơi.",
     "cardButton": "Nhập…",
     "failed": "Nhập thất bại",
     "failedFile": "Không thể nhập file",
@@ -1458,7 +4057,30 @@
     "sub2apiNoAccounts": "{{name}} không có tài khoản hợp lệ",
     "sub2apiBatchPreview": "Đã xem trước {{files}} file: {{summary}}",
     "sub2apiBatchDone": "Đã nhập {{files}} file: {{summary}}",
-    "back": "Quay lại"
+    "back": "Quay lại",
+    "supportedFormats": "Hỗ trợ 9router, CLIProxyAPI, sub2api, token OAuth ChatGPT và OAuth bundle của tproxy.",
+    "chooseFiles": "Chọn file JSON",
+    "close": "Đóng",
+    "fileTooLarge": "File vượt quá giới hạn 32 MB.",
+    "invalidJSON": "File không phải JSON hợp lệ.",
+    "noRecords": "Không tìm thấy dữ liệu được hỗ trợ.",
+    "batchDone": "Đã nhập {{count}} file.",
+    "checkFileErrors": "Một số file không xử lý được. Kiểm tra lỗi trong hộp thoại nhập dữ liệu.",
+    "skipDuplicates": "Bỏ qua tài khoản đã tồn tại trong file sub2api và token ChatGPT",
+    "removeFile": "Bỏ file {{name}}",
+    "accountCount": "Số tài khoản nhập từ đầu danh sách (tìm thấy {{total}})",
+    "fileImported": "Đã nhập",
+    "fileReady": "Sẵn sàng nhập · chưa lưu dữ liệu",
+    "previewRequired": "Tùy chọn đã thay đổi. Xem trước lại trước khi nhập.",
+    "counts": {
+      "providers": "{{count}} nhà cung cấp",
+      "credentials": "{{count}} tài khoản",
+      "api_keys": "{{count}} API key",
+      "models": "{{count}} model",
+      "combos": "{{count}} combo",
+      "proxy_pools": "{{count}} nhóm proxy",
+      "skipped": "bỏ qua {{count}}"
+    }
   },
   "topology": {
     "requestFlow": "Topology luồng yêu cầu",
@@ -1494,9 +4116,183 @@
     "off": "TẮT",
     "failedLoad": "Không thể tải cài đặt token saver",
     "failedUpdate": "Không thể cập nhật chế độ nén",
-    "copyFailed": "Không thể sao chép lệnh"
+    "copyFailed": "Không thể sao chép lệnh",
+    "modeSaved": "Đã chuyển chế độ nén sang {{mode}}",
+    "pipelineSubtitle": "Chọn một chế độ · lưu ngay · áp dụng cho mọi request không ghi đè",
+    "saving": "Đang lưu…",
+    "active": "Đang dùng",
+    "recommended": "Khuyên dùng",
+    "noEngines": "Không nén",
+    "installStep": "Cài binary RTK",
+    "hookStep": "Bật hook tự viết lại lệnh",
+    "cliHookSubtitle": "Nén output shell ngay trên máy bạn, trước khi vào prompt",
+    "upstreamProject": "Dự án RTK trên GitHub",
+    "stats": {
+      "label": "Tóm tắt tiết kiệm token",
+      "mode": "Chế độ",
+      "modeOffHint": "Prompt được gửi nguyên vẹn",
+      "saved": "Token tiết kiệm",
+      "sampleHint_one": "Trong {{count}} request gần nhất",
+      "sampleHint_other": "Trong {{count}} request gần nhất",
+      "rate": "Tỷ lệ tiết kiệm",
+      "rateHint": "So với đầu vào trước khi nén",
+      "rateTitle": "Token tiết kiệm ÷ (đầu vào đã gửi + token tiết kiệm), chỉ tính request thành công",
+      "compressed": "Đã nén",
+      "compressedHint": "Request thành công được thu gọn",
+      "override": "Ghi đè theo request",
+      "overrideOn": "Cho phép",
+      "overrideOff": "Tắt",
+      "overrideHint": "Client chọn chế độ hoặc bỏ nén bằng header"
+    },
+    "guide": {
+      "title": "Gửi ít token hơn lên upstream mà không đổi client",
+      "what": "Gateway thu gọn prompt trước khi gửi tới provider: RTK cắt output công cụ (log, git, build), Caveman rút gọn đoạn văn dài, Headroom nén mảng JSON.",
+      "pick": "Bấm vào một chế độ để chuyển; thay đổi được lưu ngay. Stacked là mặc định tốt nhất cho coding agent; Full và Ultra nén mạnh hơn nhưng dễ mất chi tiết.",
+      "override": "Client có thể ghi đè từng request bằng header, và hook RTK CLI (tùy chọn) nén output shell ngay trên máy trước khi nó thành prompt.",
+      "legendActive": "Chế độ đang dùng",
+      "legendOff": "Đã tắt nén"
+    },
+    "modes": {
+      "stacked": {
+        "name": "Stacked",
+        "hint": "Tiết kiệm tốt nhất cho phiên agent (~30–70%): RTK cho output công cụ, rồi Caveman cho đoạn văn dài."
+      },
+      "full": {
+        "name": "Full",
+        "hint": "Mọi engine cấu trúc, không gồm LLMLingua."
+      },
+      "ultra": {
+        "name": "Ultra",
+        "hint": "Tiết kiệm tối đa; thêm cắt tỉa LLMLingua-2 theo heuristic, có thể mất chi tiết."
+      },
+      "rtk": {
+        "name": "Chỉ RTK",
+        "hint": "Lọc output công cụ cho log shell, git và build."
+      },
+      "caveman": {
+        "name": "Caveman",
+        "hint": "Nén ngắn gọn các đoạn trả lời dài."
+      },
+      "lite": {
+        "name": "Lite",
+        "hint": "Nén mảng JSON đồng nhất của công cụ (Headroom)."
+      },
+      "off": {
+        "name": "Tắt",
+        "hint": "Tắt nén ở gateway; prompt được chuyển nguyên như gửi lên."
+      }
+    },
+    "override": {
+      "title": "Điều khiển theo request",
+      "subtitle": "Gửi kèm một trong các header này",
+      "forceMode": "Dùng một chế độ cụ thể cho request này",
+      "optOut": "Bỏ qua nén cho request này",
+      "disabled": "Gateway này đang tắt tùy chọn bỏ nén theo request."
+    },
+    "chart": {
+      "title": "Token tiết kiệm mỗi giờ",
+      "subtitle_one": "{{count}} request gần nhất · tiết kiệm {{total}}",
+      "subtitle_other": "{{count}} request gần nhất · tiết kiệm {{total}}",
+      "saved": "token tiết kiệm",
+      "requests": "request",
+      "empty": "Chưa ghi nhận tiết kiệm",
+      "emptyHint": "Số liệu sẽ hiện khi có request đã nén đi qua gateway."
+    }
   },
   "operations": {
+    "statsLabel": "Tóm tắt vận hành",
+    "stats": {
+      "critical": "Nghiêm trọng",
+      "criticalHint": "Request đang lỗi ngay lúc này",
+      "criticalNone": "Không có lỗi nghiêm trọng",
+      "warning": "Cảnh báo",
+      "warningHint": "Suy giảm, traffic đang failover",
+      "warningNone": "Không có cảnh báo",
+      "filterHint": "Chỉ hiện các cảnh báo này; bấm lần nữa để xem tất cả",
+      "attempts": "Lượt xử lý · 5 phút",
+      "attemptsHint": "{{errors}} lỗi · {{fallbacks}} lượt dự phòng",
+      "errorRate": "Tỷ lệ lỗi upstream",
+      "errorRateHint": "Cảnh báo khi ≥20% trên 20+ lượt",
+      "p95": "p95 chậm nhất",
+      "p95None": "Chưa có lượt xử lý",
+      "load": "Đang xử lý",
+      "loadHint_one": "{{waiting}} đang chờ · {{count}} tài khoản",
+      "loadHint_other": "{{waiting}} đang chờ · {{count}} tài khoản"
+    },
+    "filterByProvider": "Lọc theo provider",
+    "allProviders": "Tất cả provider",
+    "attemptsTab_one": "{{count}} lượt xử lý trong 5 phút qua",
+    "attemptsTab_other": "{{count}} lượt xử lý trong 5 phút qua",
+    "updatedAt": "Cập nhật {{time}}",
+    "autoRefreshHint": "Tải lại mỗi 15 giây",
+    "sortBy": "Sắp xếp danh sách",
+    "sort": {
+      "attention": "Cần xử lý trước",
+      "busiest": "Bận nhất trước",
+      "slowest": "Chậm nhất trước",
+      "name": "Tên"
+    },
+    "guide": {
+      "title": "Phát hiện sự cố sớm và đi thẳng tới chỗ sửa",
+      "alerts": "Cảnh báo xuất hiện khi tài khoản không đăng nhập được, hết quota hoặc hết hạn, model không còn tuyến dùng được, hoặc upstream lỗi từ 20% trên 20+ lượt.",
+      "fix": "Mỗi cảnh báo có nút mở đúng trang để sửa. Nghiêm trọng nghĩa là request đang lỗi; cảnh báo nghĩa là traffic đang chuyển sang tài khoản khác.",
+      "metrics": "Số liệu yêu cầu tính trong 5 phút gần nhất theo model và tài khoản; tải tài khoản cho thấy request đang chạy và đang chờ. Tất cả tự tải lại mỗi 15 giây.",
+      "legendCritical": "Nghiêm trọng / đang lỗi",
+      "legendWarning": "Cảnh báo / quá tải",
+      "legendHealthy": "Ổn định"
+    },
+    "alertsTitle": "Cảnh báo đang mở",
+    "alertsSubtitle": "Đánh giá lúc {{time}} · kiểm tra lại mỗi 30–60 giây",
+    "severity": {
+      "critical": "Nghiêm trọng",
+      "warning": "Cảnh báo"
+    },
+    "alertHelp": {
+      "high_error_rate": "Từ 20% lượt xử lý bị upstream trả lỗi trong 5 phút qua.",
+      "quota_exhausted": "Tự tạm dừng cho tới khi quota được làm mới.",
+      "authentication_failed": "Phiên đăng nhập hết hạn hoặc bị thu hồi; request sẽ bỏ qua tài khoản này.",
+      "account_expired": "Đã quá ngày hết hạn đã cấu hình nên không còn được dùng.",
+      "route_unavailable": "Không có tuyến bật nào tới provider đang hoạt động nên request bị lỗi."
+    },
+    "fix": {
+      "quota": "Mở quota",
+      "routes": "Sửa tuyến",
+      "reauth": "Xác thực lại",
+      "account": "Cập nhật tài khoản",
+      "provider": "Mở provider"
+    },
+    "firstSeen": "Phát hiện lần đầu {{time}}",
+    "showMetrics": "Xem số liệu liên quan",
+    "copyId": "Sao chép ID tài nguyên",
+    "moreActions": "Thao tác khác",
+    "modelResource": "Public model",
+    "noAlertsHint": "Tài khoản, tuyến và tỷ lệ lỗi upstream đều ổn.",
+    "noAlertsMatch": "Không có cảnh báo khớp bộ lọc",
+    "clearFilters": "Xóa bộ lọc",
+    "noMatch": "Không có mục nào khớp bộ lọc",
+    "metricsSubtitle_one": "5 phút gần nhất · {{count}} cặp model/tài khoản",
+    "metricsSubtitle_other": "5 phút gần nhất · {{count}} cặp model/tài khoản",
+    "highErrors": "Tỷ lệ lỗi cao",
+    "someErrors": "Có lỗi",
+    "errorsCount_one": "{{count}} lỗi",
+    "errorsCount_other": "{{count}} lỗi",
+    "inputOutput": "Input / output",
+    "cacheReadWrite": "Cache đọc / ghi",
+    "openProvider": "Mở provider",
+    "noRequestsHint": "Các dòng sẽ hiện khi có request đi qua gateway.",
+    "accountsSubtitle_one": "Trực tiếp từ bộ nhớ · {{count}} tài khoản",
+    "accountsSubtitle_other": "Trực tiếp từ bộ nhớ · {{count}} tài khoản",
+    "accountsFailing": "Đang lỗi hoặc hết quota",
+    "accountsStrained": "Đang xếp hàng hoặc sắp hết quota",
+    "accountColumn": "Tài khoản",
+    "noAccounts": "Chưa có hoạt động tài khoản",
+    "noAccountsHint": "Tài khoản sẽ hiện ở đây khi đã xử lý request.",
+    "quotaUnknown": "Chưa báo cáo",
+    "staleHint": "Quota được ghi nhận lần cuối {{age}} trước",
+    "loading": "Đang tải dữ liệu vận hành…",
+    "loadFailed": "Không thể tải dữ liệu vận hành",
+    "loadFailedStale": "Tải lại thất bại — đang hiện dữ liệu đánh giá lúc {{time}}.",
+    "retry": "Thử lại",
     "title": "Vận hành",
     "hint": "5 phút gần nhất · tự tải lại mỗi 15 giây. Cảnh báo lỗi khi có ít nhất 20 lượt và tỷ lệ lỗi upstream từ 20%; đánh giá mỗi 30–60 giây.",
     "updated": "Đánh giá cảnh báo lúc",
@@ -1554,6 +4350,317 @@
     "outbound": "Body gửi upstream",
     "copy": "Sao chép",
     "title_page_title": "Chẩn đoán chuyển đổi",
-    "title_page_desc": "Kiểm tra chuyển đổi giao thức mà không gọi upstream."
+    "title_page_desc": "Kiểm tra chuyển đổi giao thức mà không gọi upstream.",
+    "from": "Từ",
+    "to": "Sang",
+    "sourceTitle": "Dữ liệu client gửi tới {{endpoint}}",
+    "targetTitle": {
+      "openai": "Body gửi tới upstream tương thích OpenAI",
+      "codex": "Body gửi tới Codex (ChatGPT Responses)",
+      "claude": "Body gửi tới upstream Anthropic Messages",
+      "gemini": "Body gửi tới Gemini generateContent"
+    },
+    "modelHint": "Tên model upstream được ghi vào body sau chuyển đổi",
+    "modelPlaceholder": "vd. gpt-5.5",
+    "guide": {
+      "title": "Xem chính xác tproxy gửi gì lên upstream",
+      "input": "Chọn giao thức client đang dùng ở mục Từ, rồi dán JSON request — hoặc bắt đầu từ ví dụ.",
+      "output": "Chọn định dạng upstream ở mục Sang và bấm Xem chuyển đổi. Đổi định dạng sẽ tự chạy lại, so sánh chỉ mất một cú bấm.",
+      "offline": "Không có gì rời khỏi server: không gọi upstream, không tốn quota, không lưu lại. Các trường bí mật được che."
+    },
+    "inputTitle": "Request của client",
+    "jsonValid": "JSON hợp lệ",
+    "jsonInvalid": "JSON không hợp lệ",
+    "format": "Định dạng JSON",
+    "loadExample": "Nạp ví dụ {{label}}",
+    "notObject": "Body phải là một object JSON.",
+    "inputStats_one": "{{count}} dòng · {{size}}",
+    "inputStats_other": "{{count}} dòng · {{size}}",
+    "shortcut": "để xem trước",
+    "outputTitle": "Request sau chuyển đổi",
+    "viewLabel": "Chế độ xem kết quả",
+    "copyView": "Sao chép {{view}}",
+    "rerun": "Chạy lại",
+    "staleNote": "Đầu vào đã thay đổi so với lần xem này.",
+    "running": "Đang chuyển đổi…",
+    "failed": "Chuyển đổi thất bại",
+    "facts": {
+      "model": "Model upstream",
+      "messages": "Tin nhắn",
+      "system": "System prompt",
+      "tools": "Tool",
+      "stream": "Stream",
+      "maxTokens": "Token tối đa",
+      "size": "Kích thước body"
+    },
+    "yes": "Có",
+    "no": "Không",
+    "offline": "Xem trước ngoại tuyến",
+    "emptyTitle": "Chưa có kết quả",
+    "emptyDesc": "Bấm Xem chuyển đổi hoặc {{shortcut}} để xem body tproxy sẽ gửi lên upstream."
+  },
+  "upstreams": {
+    "loading": "Đang tải provider…",
+    "emptyTitle": "Chưa kết nối provider nào",
+    "emptyHint": "Kết quả kiểm tra sẽ hiện ở đây sau khi bạn kết nối provider.",
+    "connectProvider": "Kết nối provider",
+    "statsLabel": "Tình trạng provider",
+    "stats": {
+      "providers": "Provider",
+      "providersHint": "{{count}} đang bật",
+      "unchecked_one": "{{count}} chưa từng kiểm tra",
+      "unchecked_other": "{{count}} chưa từng kiểm tra",
+      "lastCheck": "Kiểm tra gần nhất",
+      "oldestCheck": "cũ nhất {{time}}",
+      "noChecks": "Chưa chạy kiểm tra nào"
+    },
+    "health": {
+      "healthy": "Ổn định",
+      "degraded": "Suy giảm",
+      "auth_required": "Cần đăng nhập",
+      "disabled": "Đã tắt",
+      "unchecked": "Chưa kiểm tra"
+    },
+    "tileHint": {
+      "healthy": "Lần kiểm tra cuối đạt",
+      "degraded": "Có lỗi hoặc bị giới hạn",
+      "auth_required": "Token hết hạn hoặc bị thu hồi",
+      "disabled": "Không dùng để định tuyến",
+      "unchecked": "Chưa có kết quả"
+    },
+    "healthHint": {
+      "healthy": "Lần kiểm tra gần nhất đạt.",
+      "degraded": "Các lần kiểm tra gần đây trả về lỗi hoặc bị giới hạn. Request có thể chuyển sang provider khác.",
+      "auth_required": "Upstream từ chối thông tin đăng nhập. Hãy đăng nhập lại ở trang provider.",
+      "disabled": "Đã tắt: request không bao giờ được định tuyến tới đây.",
+      "unchecked": "Chưa chạy kiểm tra. Hãy chạy để xác nhận provider hoạt động."
+    },
+    "filterLabel": "Lọc theo tình trạng",
+    "filterAll": "Tất cả",
+    "checkAll": "Kiểm tra tất cả",
+    "checkAllHint": "Chạy kiểm tra cho mọi provider",
+    "checkingAll": "Đang kiểm tra…",
+    "searchPlaceholder": "Tìm theo tên, loại, URL hoặc lỗi…",
+    "sortLabel": "Sắp xếp provider",
+    "sort": {
+      "attention": "Có vấn đề trước",
+      "name": "Tên A–Z",
+      "checked": "Lâu chưa kiểm tra trước"
+    },
+    "viewMode": "Chế độ xem",
+    "viewList": "Danh sách",
+    "viewGrid": "Thẻ",
+    "manageProviders": "Provider",
+    "manageProvidersHint": "Thêm provider và quản lý tài khoản",
+    "guide": {
+      "title": "Đọc tình trạng provider",
+      "status": "Mỗi provider hiện kết quả lần kiểm tra gần nhất. Bấm một ô ở trên để chỉ xem provider ở trạng thái đó.",
+      "actions": "Bấm biểu tượng nhịp tim để kiểm tra lại một provider, hoặc chọn nhiều cái để kiểm tra hay tìm model hàng loạt.",
+      "fix": "Bấm vào một dòng để mở provider: đăng nhập lại, thêm tài khoản hoặc đổi cài đặt ở đó."
+    },
+    "noMatch": "Không có provider phù hợp",
+    "noMatchHint": "Thử từ khóa hoặc bộ lọc khác.",
+    "clearFilters": "Xóa bộ lọc",
+    "selectVisible": "Chọn tất cả đang hiện",
+    "selectAllVisible": "Chọn tất cả {{count}} đang hiện",
+    "selectProvider": "Chọn {{name}}",
+    "columns": {
+      "provider": "Provider",
+      "status": "Trạng thái",
+      "accounts": "Tài khoản",
+      "routes": "Route",
+      "lastCheck": "Kiểm tra lúc"
+    },
+    "bulkCheck": "Kiểm tra",
+    "bulkDiscover": "Tìm model",
+    "deleteTitle": "Xóa provider?",
+    "deleteMessage_one": "Xóa \"{{name}}\" cùng {{count}} tài khoản? Các route model dùng provider này sẽ ngừng hoạt động. Không thể hoàn tác.",
+    "deleteMessage_other": "Xóa \"{{name}}\" cùng {{count}} tài khoản? Các route model dùng provider này sẽ ngừng hoạt động. Không thể hoàn tác.",
+    "deleteProvider": "Xóa provider",
+    "checking": "Đang kiểm tra…",
+    "checkHealth": "Kiểm tra",
+    "discover": "Tìm model",
+    "discoverHint": "Liệt kê các model upstream này cung cấp",
+    "discovering": "Đang tìm model…",
+    "openProvider": "Mở provider",
+    "openProviderHint": "Tài khoản, đăng nhập và cài đặt",
+    "openNamed": "Mở {{name}}",
+    "moreActions": "Thao tác khác",
+    "modelsFound_one": "Tìm thấy {{count}} model",
+    "modelsFound_other": "Tìm thấy {{count}} model",
+    "noAccounts": "Chưa có tài khoản",
+    "accountsOn_one": "{{on}}/{{count}} tài khoản bật",
+    "accountsOn_other": "{{on}}/{{count}} tài khoản bật",
+    "accountIssues_one": "{{count}} có vấn đề",
+    "accountIssues_other": "{{count}} có vấn đề",
+    "routesCount_one": "{{count}} route",
+    "routesCount_other": "{{count}} route",
+    "noRoutes": "Chưa có route",
+    "localTransport": "Kết nối cục bộ",
+    "typeHint": "Loại provider: {{type}}",
+    "checkedAgo": "kiểm tra {{time}}",
+    "neverChecked": "chưa từng kiểm tra",
+    "never": "chưa",
+    "proxyCount_one": "{{count}} proxy pool",
+    "proxyCount_other": "{{count}} proxy pool"
+  },
+  "skills": {
+    "tabsLabel": "Nhóm skill",
+    "category": {
+      "all": "Tất cả",
+      "setup": "Thiết lập",
+      "text": "Văn bản",
+      "media": "Đa phương tiện",
+      "web": "Web"
+    },
+    "searchPlaceholder": "Tìm skill, endpoint hoặc đường dẫn…",
+    "copySetupPrompt": "Sao chép prompt khởi đầu",
+    "copySetupPromptHint": "Prompt cho skill khởi đầu tproxy — skill này liệt kê mọi skill khác",
+    "guide": {
+      "title": "Agent skill hoạt động thế nào",
+      "what": "Skill là một file hướng dẫn ngắn (SKILL.md) dạy AI agent — Claude, Cursor, ChatGPT — cách gọi tproxy. Nó không phải plugin và không chạy gì trên server.",
+      "fast": "Cách nhanh nhất: bấm “Sao chép prompt khởi đầu” rồi dán vào agent. Skill khởi đầu liệt kê mọi skill khác nên agent tự chọn đúng skill.",
+      "env": "Cung cấp TPROXY_URL và TPROXY_KEY cho agent một lần (khối bên dưới). Tạo key ở trang APIs."
+    },
+    "setup": {
+      "title": "Cấu hình một lần",
+      "subtitle": "Agent đọc hai biến này",
+      "copy": "Sao chép",
+      "copied": "Đã sao chép",
+      "keyLink": "Tạo client key ở APIs",
+      "note": "Nên dùng OAuth, API key hoặc web cookie trong Providers — tproxy không hỗ trợ bắt gói MITM."
+    },
+    "card": {
+      "copyPrompt": "Sao chép prompt cho agent",
+      "copied": "Đã sao chép prompt",
+      "copyPath": "Sao chép đường dẫn file",
+      "copyLink": "Sao chép link GitHub raw",
+      "copyLinkHint": "Cho agent có thể tải URL",
+      "openGithub": "Mở trên GitHub",
+      "more": "Thao tác khác",
+      "entry": "Bắt đầu ở đây"
+    },
+    "copiedNotice": "Đã sao chép {{value}}",
+    "noMatch": "Không có skill phù hợp",
+    "noMatchHint": "Thử khả năng hoặc endpoint khác, vd. “image” hoặc “/v1/audio”.",
+    "clearFilters": "Xoá bộ lọc",
+    "items": {
+      "tproxy": {
+        "name": "tproxy (khởi đầu)",
+        "description": "Thiết lập TPROXY_URL / TPROXY_KEY và mục lục mọi skill theo khả năng."
+      },
+      "tproxy-chat": {
+        "name": "Chat / sinh code",
+        "description": "OpenAI chat completions, Anthropic messages, Responses API."
+      },
+      "tproxy-image": {
+        "name": "Tạo ảnh",
+        "description": "/v1/images/generations và chỉnh sửa ảnh."
+      },
+      "tproxy-video": {
+        "name": "Tạo video",
+        "description": "Các endpoint /v1/videos và theo dõi job."
+      },
+      "tproxy-tts": {
+        "name": "Chuyển văn bản thành giọng nói",
+        "description": "/v1/audio/speech cho các provider TTS."
+      },
+      "tproxy-stt": {
+        "name": "Chuyển giọng nói thành văn bản",
+        "description": "/v1/audio/transcriptions, STT dạng multipart."
+      },
+      "tproxy-embeddings": {
+        "name": "Embeddings",
+        "description": "/v1/embeddings cho các model vector."
+      },
+      "tproxy-web-search": {
+        "name": "Tìm kiếm web",
+        "description": "/v1/search (Tavily và tương thích)."
+      },
+      "tproxy-web-fetch": {
+        "name": "Tải nội dung web",
+        "description": "Mẫu URL → nội dung qua các công cụ an toàn của gateway."
+      }
+    }
+  },
+  "freeTiers": {
+    "failedLoad": "Không tải được danh mục free tier",
+    "filterByAccess": "Lọc theo cách truy cập",
+    "allAccess": "Tất cả",
+    "openProviders": "Mở Providers",
+    "search": "Tìm provider, model, giới hạn…",
+    "sortBy": "Sắp xếp danh mục",
+    "sort": {
+      "status": "Đã kết nối trước",
+      "name": "Tên A–Z",
+      "limit": "Có giới hạn rõ trước"
+    },
+    "viewMode": "Chế độ xem",
+    "viewGrid": "Thẻ",
+    "viewList": "Danh sách",
+    "noMatch": "Không có free tier nào khớp bộ lọc",
+    "empty": "Danh mục trống",
+    "emptyHint": "Bản gateway này không kèm preset miễn phí nào.",
+    "openCombos": "Mở combo",
+    "strategiesNote": "Mẹo: gom nhiều free tier vào một combo để chia đều giới hạn hằng ngày. Chiến lược: {{strategies}}.",
+    "getKey": "Lấy API key (mở trang quản trị của provider)",
+    "open": "Mở",
+    "setUp": "Thiết lập",
+    "openHint": "Mở {{name}} trong Providers",
+    "moreModels_one": "+{{count}} nữa",
+    "moreModels_other": "+{{count}} nữa",
+    "dailyLimit": "Giới hạn ngày",
+    "resets": "Làm mới",
+    "notPublished": "Không công bố",
+    "provider": "Provider",
+    "access": "Truy cập",
+    "models": "Model",
+    "statusLabel": "Trạng thái",
+    "stats": {
+      "label": "Tóm tắt free tier",
+      "all": "Provider miễn phí",
+      "allHint_one": "{{count}} có công bố giới hạn ngày",
+      "allHint_other": "{{count}} có công bố giới hạn ngày",
+      "allTitle": "Hiện toàn bộ danh mục",
+      "configured": "Đã kết nối",
+      "configuredHint": "Sẵn sàng định tuyến",
+      "available": "Chưa thiết lập",
+      "availableHint": "Thêm key hoặc đăng nhập để dùng",
+      "noKey": "Không cần key",
+      "noKeyHint": "Adapter cục bộ hoặc không key",
+      "filterHint": "Chỉ hiện nhóm này; bấm lần nữa để xem tất cả"
+    },
+    "group": {
+      "configured": "Đã kết nối",
+      "configuredSubtitle_one": "{{count}} provider đang dùng",
+      "configuredSubtitle_other": "{{count}} provider đang dùng",
+      "available": "Có thể thêm",
+      "availableSubtitle_one": "{{count}} provider · thiết lập để bắt đầu định tuyến",
+      "availableSubtitle_other": "{{count}} provider · thiết lập để bắt đầu định tuyến"
+    },
+    "status": {
+      "configured": "Đã kết nối",
+      "available": "Chưa thiết lập"
+    },
+    "auth": {
+      "api_key": "API key",
+      "oauth": "Đăng nhập OAuth",
+      "none": "Không key",
+      "service_account": "Service account"
+    },
+    "category": {
+      "free": "Miễn phí hẳn",
+      "freeTier": "Free tier"
+    },
+    "reset": {
+      "provider_defined": "Theo provider",
+      "utc_midnight": "0 giờ UTC"
+    },
+    "guide": {
+      "title": "Tìm provider miễn phí và kết nối trong một phút",
+      "what": "Provider Miễn phí hẳn không tốn tiền; Free tier là API trả phí có hạn mức miễn phí hằng ngày, làm mới theo lịch của provider.",
+      "connect": "Bấm vào thẻ hoặc Thiết lập để mở provider rồi dán key hoặc đăng nhập. Biểu tượng chìa khóa mở trang quản trị của provider để tạo key.",
+      "combine": "Gom nhiều free tier vào một combo để traffic chuyển sang provider khác khi một bên hết hạn mức ngày. Ô Đã kết nối cho biết cái nào dùng được ngay."
+    }
   }
 }

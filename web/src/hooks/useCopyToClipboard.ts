@@ -5,11 +5,7 @@ export function useCopyToClipboard(resetDelay = 2000) {
   const timeoutRef = useRef<number | null>(null);
 
   const copy = useCallback((text: string, id = "default") => {
-    const write = async () => {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
+    const fallback = () => {
       const textarea = document.createElement("textarea");
       textarea.value = text;
       textarea.style.position = "fixed";
@@ -18,6 +14,17 @@ export function useCopyToClipboard(resetDelay = 2000) {
       textarea.select();
       document.execCommand("copy");
       document.body.removeChild(textarea);
+    };
+    const write = async () => {
+      if (navigator?.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return;
+        } catch {
+          // Permission denied or insecure context (plain-http LAN access): use the legacy path.
+        }
+      }
+      fallback();
     };
     void write();
     setCopied(id);

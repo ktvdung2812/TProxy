@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Controls,
   Handle,
@@ -25,7 +26,6 @@ type Props = {
   activeRequests?: UsageActiveRequest[];
   lastProvider?: string;
   errorProvider?: string;
-  aside?: ReactNode;
 };
 
 const FE_ACTIVE_TIMEOUT_MS = 60_000;
@@ -139,11 +139,12 @@ function buildProviderLayout(providers: ProviderItem[]): ProviderLayout[] {
   });
 }
 
+// Edge colours are state, so they use the theme's status tokens (both themes).
 function edgeStyle(active: boolean, last: boolean, error: boolean) {
-  if (error) return { stroke: "#ef4444", strokeWidth: 2.5, opacity: 0.9 };
-  if (active) return { stroke: "#57b37c", strokeWidth: 2.5, opacity: 0.9 };
-  if (last) return { stroke: "#c9a45c", strokeWidth: 2, opacity: 0.7 };
-  return { stroke: "var(--color-border)", strokeWidth: 1, opacity: 0.3 };
+  if (error) return { stroke: "var(--color-danger)", strokeWidth: 2.5, opacity: 0.9 };
+  if (active) return { stroke: "var(--color-success)", strokeWidth: 2.5, opacity: 0.9 };
+  if (last) return { stroke: "var(--color-warning)", strokeWidth: 2, opacity: 0.7 };
+  return { stroke: "var(--color-border)", strokeWidth: 1, opacity: 0.5 };
 }
 
 function buildFlowGraph(
@@ -233,8 +234,8 @@ export function ProviderTopology({
   activeRequests = [],
   lastProvider = "",
   errorProvider = "",
-  aside,
 }: Props) {
+  const { t } = useTranslation();
   const sortedProviders = useMemo(
     () => [...providers].sort((left, right) => left.id.localeCompare(right.id)),
     [providers],
@@ -321,44 +322,32 @@ export function ProviderTopology({
   }, [sortedProviders.length, scheduleFitView]);
 
   return (
-    <div className="usage-topology-shell">
-      <div className="usage-topology-head">
-        <span className="material-symbols-outlined">hub</span>
-        <div>
-          <strong>Provider activity</strong>
-          <p>Live routing through configured upstream providers.</p>
-        </div>
-      </div>
-      <div className={aside ? "usage-topology-body" : undefined}>
-        <div ref={containerRef} className="usage-flow-canvas">
-          {sortedProviders.length === 0 ? (
-            <div className="usage-flow-empty">No providers with connections</div>
-          ) : (
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={FIT_VIEW_OPTS}
-              minZoom={0.1}
-              maxZoom={2}
-              onInit={onInit}
-              proOptions={{ hideAttribution: true }}
-              panOnDrag
-              zoomOnScroll
-              zoomOnPinch
-              zoomOnDoubleClick
-              preventScrolling={false}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-            >
-              <Controls showInteractive={false} className="react-flow-controls-custom" />
-            </ReactFlow>
-          )}
-        </div>
-        {aside ? <div className="usage-topology-aside">{aside}</div> : null}
-      </div>
+    <div ref={containerRef} className="usage-flow-canvas us-flow-canvas">
+      {sortedProviders.length === 0 ? (
+        <div className="usage-flow-empty">{t("usage.noProvidersWithConnections")}</div>
+      ) : (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={FIT_VIEW_OPTS}
+          minZoom={0.1}
+          maxZoom={2}
+          onInit={onInit}
+          proOptions={{ hideAttribution: true }}
+          panOnDrag
+          zoomOnScroll
+          zoomOnPinch
+          zoomOnDoubleClick
+          preventScrolling={false}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+        >
+          <Controls showInteractive={false} className="react-flow-controls-custom" />
+        </ReactFlow>
+      )}
     </div>
   );
 }

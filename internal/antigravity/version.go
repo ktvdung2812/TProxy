@@ -3,7 +3,7 @@
 //
 // Cloud Code sees this build number in the User-Agent, in X-Client-Version and
 // in the onboarding metadata. Measured against a live account, none of those is
-// currently gated: 2.1.1, 2.2.1 and 2.8.1 were all accepted, under both the
+// currently gated: 2.1.1, 2.2.1, 2.8.1 and 2.25.0 were all accepted, under both the
 // "ide" and "hub" component names. That can change without notice, which is the
 // argument for tracking the real build rather than pinning one and forgetting
 // it — the version was previously hard-coded in five places across three
@@ -11,7 +11,7 @@
 //
 // The build is published by Antigravity's own auto-updater manifest, which
 // reports the same number as the public changelog at antigravity.google/changelog
-// (verified: manifest 2.8.1 == changelog "Version 2.8.1, August 13, 2026").
+// (verified: manifest 2.25.0 == auto-updater manifest "2.25.0").
 // TPROXY_ANTIGRAVITY_IDE_VERSION pins a specific build and disables tracking.
 package antigravity
 
@@ -33,7 +33,7 @@ import (
 const (
 	// FallbackVersion is used until the manifest has been read and whenever it
 	// cannot be reached. Keep it at a build Cloud Code is known to accept.
-	FallbackVersion = "2.8.1"
+	FallbackVersion = "2.25.0"
 	idePlatform     = "darwin/arm64"
 
 	// nodeAPIClient is appended for control-plane (onboardUser) calls only. The

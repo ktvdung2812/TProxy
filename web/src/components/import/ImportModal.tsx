@@ -2,430 +2,189 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "../ui";
 import { storeApiKeySecretsFrom9routerBackup } from "../../lib/apiKeySecrets";
-import { import9routerBackup, importCliproxyAuth, importSub2apiExport, type ImportSub2apiResult } from "./api";
-import { countSub2apiAccounts, detectImportSource, type ImportSource } from "./utils";
+import { importData, type ImportResult } from "./api";
 
 type Props = {
   open: boolean;
   secret: string;
-  initialSource?: ImportSource;
   onClose: () => void;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
   onMutated?: () => void;
 };
 
-type Sub2apiFilePlan = {
+type FilePlan = {
   file: File;
-  payload: unknown;
-  total: number;
-  importCount: number;
+  payload?: unknown;
+  preview?: ImportResult;
+  importCount?: number;
+  reviewed?: boolean;
+  imported?: boolean;
+  error?: string;
 };
 
-const SOURCES: Array<{
-  id: ImportSource;
-  label: string;
-  title: string;
-  description: string;
-  patterns: string[];
-}> = [
-  {
-    id: "9router",
-    label: "9router",
-    title: "9router backup",
-    description:
-      "Migrate provider credentials, client API keys, combos, and virtual models from a full 9router export.",
-    patterns: ["9router-backup-*.json"],
-  },
-  {
-    id: "cliproxy",
-    label: "CLIProxyAPI",
-    title: "CLIProxyAPI auth",
-    description:
-      "Import OAuth credentials exported from the CLIProxyAPI auth directory.",
-    patterns: ["codex-*.json", "claude-*.json", "xai-*.json"],
-  },
-  {
-    id: "sub2api",
-    label: "sub2api",
-    title: "import.sourceSub2apiTitle",
-    description: "import.sourceSub2apiDesc",
-    patterns: ["*_sub2api_*.json", "*_sub2api_accounts.json", "accounts-export.json"],
-  },
-];
+const SOURCE_LABELS: Record<ImportResult["source"], string> = {
+  "9router": "9router",
+  cliproxy: "CLIProxyAPI",
+  sub2api: "sub2api",
+  chatgpt: "ChatGPT OAuth → Codex",
+  "auth-bundle": "tproxy OAuth bundle",
+};
 
-export function ImportModal({ open, secret, initialSource = "9router", onClose, onNotice, onError, onMutated }: Props) {
+function supportsAccountOptions(plan: FilePlan) {
+  return plan.preview?.source === "sub2api" || plan.preview?.source === "chatgpt";
+}
+
+export function ImportModal({ open, secret, onClose, onNotice, onError, onMutated }: Props) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [source, setSource] = useState<ImportSource>("9router");
-  const [importing, setImporting] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [lastSummary, setLastSummary] = useState<string | null>(null);
-  const [pendingDryRun, setPendingDryRun] = useState(false);
-  const [sub2apiPlans, setSub2apiPlans] = useState<Sub2apiFilePlan[] | null>(null);
+  const [plans, setPlans] = useState<FilePlan[]>([]);
+  const [busy, setBusy] = useState<"preview" | "import" | null>(null);
   const [skipDuplicates, setSkipDuplicates] = useState(true);
-
-  const busy = importing || previewing;
-  const active = SOURCES.find((item) => item.id === source) ?? SOURCES[0];
-  const sub2apiBatch = source === "sub2api" && sub2apiPlans !== null && sub2apiPlans.length > 0;
+  const pending = plans.filter((plan) => !plan.imported);
+  const canImport = pending.length > 0 && pending.every((plan) => plan.reviewed && !plan.error);
 
   useEffect(() => {
     if (!open) return;
-    setSource(initialSource);
-    setSelectedFile(null);
-    setLastSummary(null);
-    setImporting(false);
-    setPreviewing(false);
-    setPendingDryRun(false);
-    setSub2apiPlans(null);
+    setPlans([]);
+    setBusy(null);
     setSkipDuplicates(true);
-    if (inputRef.current) {
-      inputRef.current.value = "";
-    }
-  }, [open, initialSource]);
+  }, [open]);
 
-  const formatSummary = (nextSource: ImportSource, counts: Record<string, number>) => {
-    if (nextSource === "9router") {
-      return [
-        `${counts.providers ?? 0} providers`,
-        `${counts.credentials ?? 0} credentials`,
-        `${counts.api_keys ?? 0} API keys`,
-        `${counts.models ?? 0} virtual models`,
-        `${counts.combos ?? 0} combos`,
-      ].join(" · ");
-    }
-    if (nextSource === "sub2api") {
-      const parts = [
-        `${counts.providers ?? 0} providers`,
-        `${counts.credentials ?? 0} credentials`,
-        `${counts.proxy_pools ?? 0} proxy pools`,
-      ];
-      if ((counts.skipped ?? 0) > 0) {
-        parts.push(`${counts.skipped} skipped`);
-      }
-      return parts.join(" · ");
-    }
-    return [`${counts.providers ?? 0} providers`, `${counts.credentials ?? 0} credentials`].join(" · ");
-  };
+  const summary = (result: ImportResult) => Object.entries(result.result.counts)
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => t(`import.counts.${key}`, { count }))
+    .join(" · ");
 
-  const runSingleImport = async (file: File, dryRun: boolean, forcedSource?: ImportSource) => {
-    const setBusy = dryRun ? setPreviewing : setImporting;
-    setBusy(true);
-    setLastSummary(null);
+  const run = async (rows: FilePlan[], dryRun: boolean) => {
+    setBusy(dryRun ? "preview" : "import");
+    const next = [...rows];
+    let attemptedImport = false;
+    let importedFiles = 0;
     try {
-      const text = await file.text();
-      const payload = JSON.parse(text) as unknown;
-      const detected = detectImportSource(payload);
-      const nextSource = forcedSource ?? detected ?? source;
-      if (detected && detected !== source && !forcedSource) {
-        setSource(detected);
-      }
-      const result =
-        nextSource === "9router"
-          ? await import9routerBackup(secret, payload, dryRun)
-          : nextSource === "sub2api"
-            ? await importSub2apiExport(secret, payload, { dryRun, skipDuplicates })
-            : await importCliproxyAuth(secret, payload, dryRun);
-      const summary = formatSummary(nextSource, result.counts as Record<string, number>);
-      setLastSummary(summary);
-      setSelectedFile(file);
-      const duplicateNotes =
-        nextSource === "sub2api"
-          ? ((result as ImportSub2apiResult).accounts ?? [])
-              .filter((row) => row.action === "skip_duplicate")
-              .map((row) => t("import.sub2apiDuplicateLine", { email: row.email || row.label }))
-          : [];
-      const warnings = [...(result.warnings ?? []), ...duplicateNotes];
-      if (warnings.length) {
-        onError?.(warnings.join("\n"));
-      }
-      if (!result.ok) {
-        onError?.(result.errors?.join("\n") || t("import.failed"));
-        return;
-      }
-      const sourceLabel =
-        nextSource === "9router" ? "9router backup" : nextSource === "sub2api" ? "sub2api export" : "CLIProxyAPI auth";
-      onNotice?.(dryRun ? t("import.previewReady", { summary }) : t("import.imported", { source: sourceLabel, summary }));
-      if (!dryRun) {
-        if (nextSource === "9router") {
-          storeApiKeySecretsFrom9routerBackup(payload);
-        }
-        onMutated?.();
-        onClose();
-      }
-    } catch (error) {
-      onError?.(error instanceof Error ? error.message : t("import.failedFile"));
-    } finally {
-      setBusy(false);
-      setPendingDryRun(false);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
-    }
-  };
-
-  const runSub2apiBatch = async (plans: Sub2apiFilePlan[], dryRun: boolean) => {
-    const setBusy = dryRun ? setPreviewing : setImporting;
-    setBusy(true);
-    setLastSummary(null);
-    try {
-      let totalProviders = 0;
-      let totalCredentials = 0;
-      let totalPools = 0;
-      let totalSkipped = 0;
-      const messages: string[] = [];
-      for (const plan of plans) {
-        if (plan.importCount <= 0) continue;
-        const result = await importSub2apiExport(secret, plan.payload, {
-          dryRun,
-          maxAccounts: plan.importCount,
-          skipDuplicates,
-        });
-        totalProviders += result.counts.providers ?? 0;
-        totalCredentials += result.counts.credentials ?? 0;
-        totalPools += result.counts.proxy_pools ?? 0;
-        totalSkipped += result.counts.skipped ?? 0;
-        if (result.warnings?.length) {
-          messages.push(...result.warnings.map((line) => `${plan.file.name}: ${line}`));
-        }
-        for (const row of result.accounts ?? []) {
-          if (row.action === "skip_duplicate") {
-            messages.push(
-              `${plan.file.name}: ${t("import.sub2apiDuplicateLine", { email: row.email || row.label })}`,
-            );
+      for (let index = 0; index < next.length; index++) {
+        const row = next[index]!;
+        if (row.imported) continue;
+        try {
+          if (row.file.size > 32 * 1024 * 1024) throw new Error(t("import.fileTooLarge"));
+          let payload = row.payload;
+          if (payload === undefined) {
+            try {
+              payload = JSON.parse(await row.file.text());
+            } catch {
+              throw new Error(t("import.invalidJSON"));
+            }
           }
+          attemptedImport ||= !dryRun;
+          const preview = await importData(secret, payload, {
+            dryRun, maxAccounts: row.importCount, skipDuplicates,
+          });
+          const hasRecords = Object.values(preview.result.counts).some((count) => count > 0);
+          const error = !preview.result.ok
+            ? preview.result.errors?.join("\n") || t("import.failed")
+            : !hasRecords ? t("import.noRecords") : undefined;
+          next[index] = {
+            ...row, payload, preview, error,
+            importCount: row.importCount ?? preview.total_accounts,
+            reviewed: !error,
+            imported: !dryRun && !error,
+          };
+          if (!dryRun && !error) {
+            importedFiles++;
+            if (preview.source === "9router") storeApiKeySecretsFrom9routerBackup(payload);
+          }
+        } catch (error) {
+          next[index] = { ...row, reviewed: false, error: error instanceof Error ? error.message : t("import.failedFile") };
         }
-        if (!result.ok) {
-          onError?.(result.errors?.join("\n") || t("import.failed"));
-          return;
-        }
+        setPlans([...next]);
       }
-      const summary = formatSummary("sub2api", {
-        providers: totalProviders,
-        credentials: totalCredentials,
-        proxy_pools: totalPools,
-        skipped: totalSkipped,
-      });
-      setLastSummary(summary);
-      if (messages.length) {
-        onError?.(messages.join("\n"));
-      }
-      onNotice?.(
-        dryRun
-          ? t("import.sub2apiBatchPreview", { files: plans.length, summary })
-          : t("import.sub2apiBatchDone", { files: plans.length, summary }),
-      );
-      if (!dryRun) {
-        onMutated?.();
-        onClose();
-      }
-    } catch (error) {
-      onError?.(error instanceof Error ? error.message : t("import.failedFile"));
+      if (!dryRun && importedFiles) onNotice?.(t("import.batchDone", { count: importedFiles }));
+      if (next.some((row) => row.error)) onError?.(t("import.checkFileErrors"));
     } finally {
-      setBusy(false);
-      setPendingDryRun(false);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
+      if (attemptedImport) onMutated?.();
+      setBusy(null);
     }
   };
 
-  const handleFiles = async (files: FileList | null, dryRun: boolean) => {
-    if (!files?.length) return;
-    if (source !== "sub2api") {
-      await runSingleImport(files[0]!, dryRun);
-      return;
-    }
-    const plans: Sub2apiFilePlan[] = [];
-    for (const file of Array.from(files)) {
-      const text = await file.text();
-      const payload = JSON.parse(text) as unknown;
-      const detected = detectImportSource(payload);
-      if (detected && detected !== "sub2api") {
-        onError?.(t("import.sub2apiWrongFormat", { name: file.name }));
-        return;
-      }
-      const total = countSub2apiAccounts(payload);
-      if (total === 0) {
-        onError?.(t("import.sub2apiNoAccounts", { name: file.name }));
-        return;
-      }
-      plans.push({ file, payload, total, importCount: Math.min(total, 1) });
-    }
-    if (plans.length === 1 && plans[0]!.total === 1) {
-      await runSingleImport(plans[0]!.file, dryRun, "sub2api");
-      return;
-    }
-    setSub2apiPlans(plans);
-    setPendingDryRun(dryRun);
-  };
-
-  const openFilePicker = (dryRun: boolean) => {
-    setPendingDryRun(dryRun);
-    inputRef.current?.click();
+  const selectFiles = (files: FileList | null) => {
+    if (!files?.length || busy) return;
+    const next = Array.from(files, (file): FilePlan => ({ file }));
+    setPlans(next);
+    void run(next, true);
   };
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose(); }}
       title={t("import.title")}
       subtitle={t("import.subtitle")}
       icon="upload"
-      size="md"
+      size="lg"
       className="import-modal"
       footer={
-        sub2apiBatch ? (
-          <>
-            <Button variant="ghost" size="sm" onClick={() => setSub2apiPlans(null)} disabled={busy}>
-              {t("import.back")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              icon="preview"
-              disabled={busy}
-              onClick={() => void runSub2apiBatch(sub2apiPlans, true)}
-            >
-              {previewing ? t("import.previewing") : t("import.preview")}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              icon="upload"
-              disabled={busy}
-              onClick={() => {
-                setPendingDryRun(false);
-                void runSub2apiBatch(sub2apiPlans, false);
-              }}
-            >
-              {importing ? t("import.importing") : t("import.import")}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>
-              {t("import.cancel")}
-            </Button>
-            <Button variant="outline" size="sm" icon="preview" disabled={busy} onClick={() => openFilePicker(true)}>
-              {previewing ? t("import.previewing") : t("import.preview")}
-            </Button>
-            <Button variant="primary" size="sm" icon="upload" disabled={busy} onClick={() => openFilePicker(false)}>
-              {importing ? t("import.importing") : t("import.import")}
-            </Button>
-          </>
-        )
+        <>
+          <Button variant="ghost" size="sm" onClick={onClose} disabled={!!busy}>{t("import.close")}</Button>
+          <Button variant="outline" size="sm" icon="preview" aria-label={t("import.preview")} disabled={!!busy || !pending.length} onClick={() => void run(plans, true)}>
+            {busy === "preview" ? t("import.previewing") : t("import.preview")}
+          </Button>
+          <Button variant="primary" size="sm" icon="upload" aria-label={t("import.import")} disabled={!!busy || !canImport} onClick={() => void run(plans, false)}>
+            {busy === "import" ? t("import.importing") : t("import.import")}
+          </Button>
+        </>
       }
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/json,.json"
-        multiple={source === "sub2api"}
-        hidden
-        onChange={(event) => {
-          void handleFiles(event.target.files, pendingDryRun);
-        }}
-      />
-
-      <div className="import-modal-tabs" role="tablist" aria-label={t("import.importSource")}>
-        {SOURCES.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={source === item.id}
-            className={`import-modal-tab${source === item.id ? " active" : ""}`}
-            onClick={() => {
-              setSource(item.id);
-              setSub2apiPlans(null);
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
+      <input ref={inputRef} type="file" accept="application/json,.json" multiple hidden onChange={(event) => {
+        selectFiles(event.target.files);
+        event.target.value = "";
+      }} />
       <div className="import-modal-panel">
-        <h4>{t(active.title)}</h4>
-        <p>{t(active.description)}</p>
-        {source === "sub2api" ? <p className="import-modal-hint">{t("import.sub2apiMultiFileHint")}</p> : null}
-        <div className="import-modal-patterns">
-          {active.patterns.map((pattern) => (
-            <code key={pattern}>{pattern}</code>
-          ))}
-        </div>
-
-        {sub2apiBatch ? (
-          <div className="import-modal-batch">
-            <p>{t("import.sub2apiBatchIntro")}</p>
-            <label className="import-modal-checkbox">
-              <input
-                type="checkbox"
-                checked={skipDuplicates}
-                onChange={(event) => setSkipDuplicates(event.target.checked)}
-              />
-              {t("import.sub2apiSkipDuplicates")}
-            </label>
-            <table className="import-modal-batch-table">
-              <thead>
-                <tr>
-                  <th>{t("import.sub2apiBatchFile")}</th>
-                  <th>{t("import.sub2apiBatchFound")}</th>
-                  <th>{t("import.sub2apiBatchImportCount")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sub2apiPlans!.map((plan, index) => (
-                  <tr key={plan.file.name}>
-                    <td>{plan.file.name}</td>
-                    <td>{plan.total}</td>
-                    <td>
-                      <input
-                        type="number"
-                        min={1}
-                        max={plan.total}
-                        value={plan.importCount}
-                        onChange={(event) => {
-                          const next = Math.min(plan.total, Math.max(1, Number(event.target.value) || 1));
-                          setSub2apiPlans((current) =>
-                            current?.map((row, rowIndex) =>
-                              rowIndex === index ? { ...row, importCount: next } : row,
-                            ) ?? null,
-                          );
-                        }}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <p>{t("import.supportedFormats")}</p>
+        <button type="button" className="import-modal-dropzone" disabled={!!busy} onClick={() => inputRef.current?.click()}>
+          <span className="material-symbols-outlined" aria-hidden>upload_file</span>
+          <strong>{t("import.chooseFiles")}</strong>
+          <span>{t("import.autoDetect")}</span>
+        </button>
+        {plans.some(supportsAccountOptions) ? (
+          <label className="import-modal-checkbox">
+            <input type="checkbox" checked={skipDuplicates} disabled={!!busy} onChange={(event) => {
+              setSkipDuplicates(event.target.checked);
+              setPlans((rows) => rows.map((row) => supportsAccountOptions(row) && !row.imported ? { ...row, reviewed: false } : row));
+            }} />
+            {t("import.skipDuplicates")}
+          </label>
+        ) : null}
+        {plans.length ? (
+          <div className="import-modal-files" aria-live="polite" aria-busy={!!busy}>
+            {plans.map((plan, index) => (
+              <article className="import-modal-file" key={`${index}-${plan.file.name}`}>
+                <div className="import-modal-file-heading">
+                  <strong>{plan.file.name}</strong>
+                  <Button variant="ghost" size="sm" icon="close" disabled={!!busy} aria-label={t("import.removeFile", { name: plan.file.name })}
+                    onClick={() => setPlans((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} />
+                </div>
+                {plan.preview ? (
+                  <>
+                    <p>{SOURCE_LABELS[plan.preview.source]} · {summary(plan.preview) || t("import.noRecords")}</p>
+                    {supportsAccountOptions(plan) && plan.preview.total_accounts > 1 ? (
+                      <label className="import-modal-count">
+                        {t("import.accountCount", { total: plan.preview.total_accounts })}
+                        <input type="number" min={1} max={plan.preview.total_accounts} value={plan.importCount} disabled={!!busy || plan.imported}
+                          onChange={(event) => {
+                            const count = Math.min(plan.preview!.total_accounts, Math.max(1, Number(event.target.value) || 1));
+                            setPlans((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, importCount: count, reviewed: false } : row));
+                          }} />
+                      </label>
+                    ) : null}
+                    {plan.preview.result.warnings?.map((warning, warningIndex) => <p className="import-modal-warning" key={warningIndex}>{warning}</p>)}
+                  </>
+                ) : null}
+                {plan.error ? <p className="import-modal-error" role="alert">{plan.error}</p> : (
+                  <p className="import-modal-status">{plan.imported ? t("import.fileImported") : plan.reviewed ? t("import.fileReady") : busy ? t("import.previewing") : t("import.previewRequired")}</p>
+                )}
+              </article>
+            ))}
           </div>
-        ) : (
-          <button
-            type="button"
-            className="import-modal-dropzone"
-            disabled={busy}
-            onClick={() => openFilePicker(false)}
-          >
-            <span className="material-symbols-outlined" aria-hidden>
-              upload_file
-            </span>
-            <strong>
-              {selectedFile
-                ? selectedFile.name
-                : source === "sub2api"
-                  ? t("import.sub2apiChooseFiles")
-                  : t("import.chooseFile")}
-            </strong>
-            <span>{t("import.autoDetect")}</span>
-          </button>
-        )}
-        {lastSummary ? (
-          <p className="import-modal-summary">
-            {t("import.lastResult")} {lastSummary}
-          </p>
         ) : null}
       </div>
     </Modal>

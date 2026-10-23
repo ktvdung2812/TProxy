@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Button, Field, Input, Modal, Select, Toggle } from "../ui";
 import { getProviderTypeInfo } from "./catalog";
 import type { ConnectionMethod } from "./connectionMethods";
+import { methodDescription, methodText } from "./connectionText";
+import { PageNote } from "../page-kit";
 import { saveCredential } from "./api";
 
 type CredentialAuthType = "api_key" | "service_account" | "none";
@@ -94,7 +96,7 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
         provider_id: providerId,
         credential: {
           id: id || `${providerId}-cred-${Date.now().toString(36)}`,
-          label: label || (isCookie ? t("addCredentialWebCookie") : undefined),
+          label: label || (isCookie ? t("providers.addCredentialWebCookie") : undefined),
           email: email || undefined,
           auth_type: authType,
           secret: resolvedSecret,
@@ -113,20 +115,21 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
   };
 
   const needsSecret = authType === "api_key" || authType === "service_account";
-  const title = method?.label || `Add credential to ${info.name}`;
+  const title = method ? methodText(method, t) : t("providers.addCredentialTitle", { name: info.name });
+  const description = method ? methodDescription(method, t) : undefined;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={title}
-      subtitle={method?.description || t("providers.addCredentialSubtitle")}
+      subtitle={description || t("providers.addCredentialSubtitle")}
       icon={isCookie ? "cookie" : "key"}
       size="md"
     >
-      <form onSubmit={handleSave} style={{ display: "grid", gap: 12 }}>
+      <form onSubmit={handleSave} className="pv-form">
         {method?.authHint || isCookie ? (
-          <p className="provider-connection-notice">{method?.authHint || method?.description}</p>
+          <PageNote icon="info">{method?.authHint || description}</PageNote>
         ) : null}
         <div className="inline-fields">
           <Field label={t("providers.credentialId")} hint={t("providers.credentialIdHint")}>
@@ -201,8 +204,9 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
           </Field>
         )}
         {method?.apiKeyUrl ? (
-          <a className="detail-link" href={method.apiKeyUrl} target="_blank" rel="noreferrer">
-            {t("providers.getApiKey")} <span className="material-symbols-outlined" style={{ fontSize: 14 }}>open_in_new</span>
+          <a className="pv-modal-link" href={method.apiKeyUrl} target="_blank" rel="noreferrer">
+            {t("providers.getApiKey")}
+            <span className="material-symbols-outlined" aria-hidden>open_in_new</span>
           </a>
         ) : null}
         <div className="inline-fields">
@@ -215,12 +219,12 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
         </div>
         <Toggle label={t("providers.enabled")} checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         {error && (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--color-danger)", display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>error</span>
+          <p className="pv-form-error" role="alert">
+            <span className="material-symbols-outlined" aria-hidden>error</span>
             {error}
           </p>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+        <div className="pv-form-actions">
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             {t("common.cancel")}
           </Button>

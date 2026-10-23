@@ -37,6 +37,22 @@ var antigravityInternalModels = map[string]struct{}{
 // displayName. The upstream response remains authoritative for availability;
 // this map never adds models that the signed-in account cannot use.
 var antigravityKnownModels = map[string]string{
+	"gemini-4-argon":             "Gemini 4 Argon",
+	"gemini-4-argon-high":        "Gemini 4 Argon (High)",
+	"gemini-4-argon-low":         "Gemini 4 Argon (Low)",
+	"gemini-3.8-flash-high":      "Gemini 3.8 Flash (High)",
+	"gemini-3.8-flash-medium":    "Gemini 3.8 Flash (Medium)",
+	"gemini-3.8-flash-low":       "Gemini 3.8 Flash (Low)",
+	"gemini-3.8-flash":           "Gemini 3.8 Flash",
+	"gemini-3.8-flash-tiered":    "Gemini 3.8 Flash (Tiered)",
+	"gemini-3.7-flash-high":      "Gemini 3.7 Flash (High)",
+	"gemini-3.7-flash-medium":    "Gemini 3.7 Flash (Medium)",
+	"gemini-3.7-flash-low":       "Gemini 3.7 Flash (Low)",
+	"gemini-3.7-flash":           "Gemini 3.7 Flash",
+	"gemini-3.6-flash-high":      "Gemini 3.6 Flash (High)",
+	"gemini-3.6-flash-medium":    "Gemini 3.6 Flash (Medium)",
+	"gemini-3.6-flash-low":       "Gemini 3.6 Flash (Low)",
+	"gemini-3.6-flash":           "Gemini 3.6 Flash",
 	"gemini-3-flash-agent":       "Gemini 3.5 Flash (High)",
 	"gemini-3.5-flash-low":       "Gemini 3.5 Flash (Medium)",
 	"gemini-3.5-flash-extra-low": "Gemini 3.5 Flash (Low)",

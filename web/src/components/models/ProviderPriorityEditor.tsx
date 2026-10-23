@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useNavigate } from "react-router-dom";
-import { Badge, Button, Select, Toggle } from "../ui";
+import { ProviderLogo } from "../providers/ProviderLogo";
+import { Button, Select, Toggle, cn } from "../ui";
+import { IconAction, LinkButton, PageNote, StatusPill, ToolButton, type Tone } from "../page-kit";
 import type { FailoverState } from "./failoverApi";
+import { formatRetryIn } from "./modelHealth";
 import type { ModelRecord, ProviderOption, RouteFormData } from "./types";
 import { useProviderFailover } from "./useProviderFailover";
 import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 import {
-  accountHealthLabel,
-  accountHealthVariant,
   hasUsableAccounts,
+  providerDisplayLabel,
   providersForUpstreamModel,
   reorderRoutePriorities,
   resolveCanonicalUpstreamModel,
@@ -19,35 +23,28 @@ import {
   validatePriorityRoutes,
 } from "./utils";
 
-function formatRetryIn(seconds: number) {
-  if (seconds <= 0) return "any moment";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.round(minutes / 60)}h`;
-}
-
-function failoverBadge(state: FailoverState | undefined) {
+function failoverPill(state: FailoverState | undefined, t: TFunction): { tone: Tone; label: string; title: string } | null {
   if (!state) return null;
+  const detail = [
+    state.last_status ? t("models.priority.lastStatus", { status: state.last_status }) : "",
+    state.last_error || "",
+  ].filter(Boolean).join(" · ");
   if (state.state === "open") {
+    const retry = formatRetryIn(state.retry_in_seconds);
     return {
-      variant: "error" as const,
-      label: `auto-disabled · retry in ${formatRetryIn(state.retry_in_seconds)}`,
-      title: `Disabled after ${state.failures} failed attempt${state.failures === 1 ? "" : "s"}${
-        state.last_status ? ` (last status ${state.last_status})` : ""
-      }${state.last_error ? `: ${state.last_error}` : ""}`,
+      tone: "danger",
+      label: retry ? t("models.step.pausedFor", { time: retry }) : t("models.step.paused"),
+      title: [t("models.priority.pausedHint", { count: state.failures }), detail].filter(Boolean).join(" — "),
     };
   }
   if (state.state === "half_open") {
-    return { variant: "warning" as const, label: "probing", title: "Next request is a probe; success puts this provider back in rotation." };
+    return { tone: "warning", label: t("models.step.probing"), title: t("models.priority.probingHint") };
   }
   if (state.failures > 0) {
     return {
-      variant: "warning" as const,
-      label: `${state.failures}/${state.threshold} failures`,
-      title: `${state.threshold - state.failures} more consecutive failure${
-        state.threshold - state.failures === 1 ? "" : "s"
-      } will take this provider out of the chain.`,
+      tone: "warning",
+      label: t("models.step.failing", { failures: state.failures, threshold: state.threshold }),
+      title: [t("models.priority.failingHint", { count: state.threshold - state.failures }), detail].filter(Boolean).join(" — "),
     };
   }
   return null;
@@ -62,7 +59,7 @@ type Props = {
   credentialCounts: Record<string, number>;
   onSave?: (routes: RouteFormData[]) => void;
   onNavigateAway?: () => void;
-  onRegisterSave?: (actions: { canSave: boolean; save: () => void } | null) => void;
+  onRegisterSave?: (actions: { canSave: boolean; dirty: boolean; save: () => void } | null) => void;
 };
 
 export function ProviderPriorityEditor({
@@ -76,9 +73,12 @@ export function ProviderPriorityEditor({
   onNavigateAway,
   onRegisterSave,
 }: Props) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [items, setItems] = useState<RouteFormData[]>([]);
   const [resettingProvider, setResettingProvider] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const { modelsByProvider, loading: loadingModels, error: modelsError } = useProviderModelDiscovery(
     secret,
     providers,
@@ -126,6 +126,11 @@ export function ProviderPriorityEditor({
   const hiddenCount = items.length - visibleItems.length;
   const enabledItems = visibleItems.filter((item) => item.enabled);
   const primaryProvider = enabledItems[0]?.provider || "";
+  const savedProviders = useMemo(() => new Set(routes.map((route) => route.provider)), [routes]);
+  const dirty = useMemo(
+    () => !routeFormsEqual(reorderRoutePriorities(items), reorderRoutePriorities(sortRouteForms(routes))),
+    [items, routes],
+  );
 
   useEffect(() => {
     if (!onRegisterSave) return;
@@ -135,10 +140,11 @@ export function ProviderPriorityEditor({
     }
     onRegisterSave({
       canSave: !validationError,
+      dirty,
       save: () => onSave(reorderRoutePriorities(items)),
     });
     return () => onRegisterSave(null);
-  }, [onRegisterSave, model, onSave, validationError, items]);
+  }, [onRegisterSave, model, onSave, validationError, items, dirty]);
 
   const goToProviders = () => {
     onNavigateAway?.();
@@ -181,15 +187,18 @@ export function ProviderPriorityEditor({
 
   // Moves are expressed against the visible rows, then applied to the real list
   // so hidden account-less routes keep their saved position.
-  const moveRoute = (visiblePosition: number, direction: -1 | 1) => {
-    const target = visiblePosition + direction;
-    if (target < 0 || target >= visibleItems.length) return;
-    const from = items.indexOf(visibleItems[visiblePosition]);
-    const to = items.indexOf(visibleItems[target]);
-    if (from < 0 || to < 0) return;
+  const moveVisible = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= visibleItems.length) return;
     setItems((current) => {
+      const visible = current.filter((item) => hasUsableAccounts(item, credentialCounts));
+      const slots = visible.map((item) => current.indexOf(item));
+      const reordered = [...visible];
+      const [moved] = reordered.splice(from, 1);
+      reordered.splice(to, 0, moved);
       const next = [...current];
-      [next[from], next[to]] = [next[to], next[from]];
+      slots.forEach((slot, position) => {
+        next[slot] = reordered[position];
+      });
       return reorderRoutePriorities(next);
     });
   };
@@ -203,88 +212,91 @@ export function ProviderPriorityEditor({
     }
   };
 
+  const dragHandlers = (position: number) => ({
+    onDragOver: (event: DragEvent<HTMLDivElement>) => {
+      if (dragIndex === null || dragIndex === position) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropIndex(position);
+    },
+    onDrop: (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      if (dragIndex !== null) moveVisible(dragIndex, position);
+      setDragIndex(null);
+      setDropIndex(null);
+    },
+  });
+
   if (!model) {
-    return <p className="priority-manager-empty">Select a model to manage provider priority.</p>;
+    return <p className="priority-manager-empty">{t("models.priority.selectModel")}</p>;
   }
 
+  const providerFor = (id: string) => providers.find((provider) => provider.id === id);
+
   return (
-    <div className="priority-manager">
-      <div className="priority-manager-help">
-        <p>
-          This is where tproxy decides which provider serves <code>{model.ID}</code>. Requests hit{" "}
-          <strong>P1</strong> first, then fall back down the chain. Disable providers you do not want, or keep only one
-          enabled route to pin a single provider.
-        </p>
-        <p>
-          A provider that keeps failing is taken out of this chain automatically and traffic moves to the next one. It is
-          probed again after a short backoff, or immediately if you re-enable it here. Providers with no accounts are
-          hidden because they cannot serve a request.
-        </p>
-        {hiddenCount > 0 ? (
-          <p className="priority-manager-primary">
-            {hiddenCount} provider{hiddenCount === 1 ? "" : "s"} hidden — no accounts configured. Their saved priority is
-            kept and they return to the chain once an account is added.
-          </p>
-        ) : null}
-        {canonicalUpstream ? (
-          <p className="priority-manager-primary">
-            Upstream model: <code>{canonicalUpstream}</code>
-            {!loadingModels ? (
-              <>
-                {" "}
-                · {compatibleProviders.length} compatible provider{compatibleProviders.length === 1 ? "" : "s"}
-              </>
-            ) : null}
-          </p>
-        ) : null}
-        {primaryProvider ? (
-          <p className="priority-manager-primary">
-            Primary provider: <code>{primaryProvider}</code>
-          </p>
-        ) : (
-          <p className="priority-manager-primary is-warning">No enabled provider selected.</p>
-        )}
-      </div>
+    <div className="md-pe">
+      <dl className="cp-facts md-pe-facts">
+        <div>
+          <dt>{t("models.priority.publicId")}</dt>
+          <dd><code>{model.ID}</code></dd>
+        </div>
+        <div>
+          <dt>{t("models.priority.upstream")}</dt>
+          <dd title={canonicalUpstream}><code>{canonicalUpstream || "—"}</code></dd>
+        </div>
+        <div>
+          <dt>{t("models.priority.compatible")}</dt>
+          <dd>{loadingModels ? t("models.priority.checking") : t("models.priority.compatibleCount", { count: compatibleProviders.length })}</dd>
+        </div>
+        <div>
+          <dt>{t("models.priority.primary")}</dt>
+          <dd className={cn(!primaryProvider && "md-warn-text cp-tone-danger")}>
+            {primaryProvider ? providerDisplayLabel(providers, primaryProvider) : t("models.priority.noPrimary")}
+          </dd>
+        </div>
+      </dl>
+
+      <PageNote icon="low_priority">{t("models.priority.help")}</PageNote>
 
       {providers.length === 0 ? (
         <div className="priority-manager-empty">
-          <p>No providers configured yet. Set up providers first, then return here to arrange priority.</p>
+          <p>{t("models.priority.noProviders")}</p>
           <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
-            Open Providers
+            {t("models.priority.openProviders")}
           </Button>
         </div>
       ) : !loadingModels && compatibleProviders.length === 0 && items.length === 0 ? (
         <div className="priority-manager-empty">
           <p>
             {canonicalUpstream
-              ? `No providers currently expose upstream model "${canonicalUpstream}".`
-              : "No provider routes for this model yet. Configure providers, then map them here."}
+              ? t("models.priority.noCompatible", { model: canonicalUpstream })
+              : t("models.priority.noRoutesYet")}
           </p>
           <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
-            Open Providers
+            {t("models.priority.openProviders")}
           </Button>
         </div>
       ) : items.length === 0 ? (
         <div className="priority-manager-empty">
-          <p>Discovering providers that support upstream model "{canonicalUpstream}"…</p>
+          <p>
+            <span className="material-symbols-outlined animate-spin" aria-hidden>progress_activity</span>{" "}
+            {t("models.priority.discovering", { model: canonicalUpstream })}
+          </p>
         </div>
       ) : visibleItems.length === 0 ? (
         <div className="priority-manager-empty">
-          <p>
-            Every provider mapped to this model has 0 accounts, so none of them can serve a request. Add an account to a
-            provider and it rejoins the chain at its saved priority.
-          </p>
+          <p>{t("models.priority.allHidden")}</p>
           <Button variant="primary" size="sm" icon="dns" onClick={goToProviders}>
-            Open Providers
+            {t("models.priority.openProviders")}
           </Button>
         </div>
       ) : (
-        <div className="priority-manager-table" role="table" aria-label="Provider priority routes">
-          <div className="priority-manager-head" role="row">
-            <span>Order</span>
-            <span>Provider</span>
-            <span>Accounts &amp; health</span>
-            <span>Enabled</span>
+        <div className="md-pe-table" role="table" aria-label={t("models.priority.tableLabel")}>
+          <div className="md-pe-head" role="row">
+            <span role="columnheader">{t("models.priority.colOrder")}</span>
+            <span role="columnheader">{t("models.priority.colProvider")}</span>
+            <span role="columnheader">{t("models.priority.colHealth")}</span>
+            <span role="columnheader">{t("models.priority.colEnabled")}</span>
             <span aria-hidden />
           </div>
           {visibleItems.map((route, visiblePosition) => {
@@ -292,89 +304,109 @@ export function ProviderPriorityEditor({
             const enabledPosition = route.enabled ? enabledItems.findIndex((item) => item === route) + 1 : 0;
             const accountCount = credentialCounts[route.provider] ?? 0;
             const failover = failoverByProvider[route.provider];
-            const badge = failoverBadge(failover);
+            const pill = failoverPill(failover, t);
             const trippedOut = failover?.state === "open";
+            const provider = providerFor(route.provider);
+            const isNew = !savedProviders.has(route.provider);
+            const status = provider?.status;
             return (
               <div
-                className={`priority-manager-row${route.enabled ? "" : " is-disabled"}${
-                  trippedOut ? " is-failed-over" : ""
-                }`}
+                className={cn(
+                  "md-pe-row",
+                  !route.enabled && "is-disabled",
+                  trippedOut && "is-failed-over",
+                  dragIndex === visiblePosition && "is-dragging",
+                  dropIndex === visiblePosition && "is-drop-target",
+                )}
                 key={`${route.id || route.provider}-${index}`}
                 role="row"
+                {...dragHandlers(visiblePosition)}
               >
-                <div className="priority-manager-order" role="cell">
-                  {route.enabled && enabledPosition > 0 ? (
-                    <span className="priority-badge">P{enabledPosition}</span>
-                  ) : (
-                    <span className="priority-badge is-muted">off</span>
-                  )}
-                </div>
-                <div className="priority-manager-provider" role="cell">
-                  <Select
-                    value={route.provider}
-                    onChange={(event) => updateRoute(index, { provider: event.target.value })}
+                <div className="md-pe-order" role="cell">
+                  <button
+                    type="button"
+                    className="md-pe-handle"
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", String(visiblePosition));
+                      setDragIndex(visiblePosition);
+                    }}
+                    onDragEnd={() => {
+                      setDragIndex(null);
+                      setDropIndex(null);
+                    }}
+                    aria-label={t("models.priority.dragHint")}
+                    title={t("models.priority.dragHint")}
                   >
-                    {providerOptionsForRoute(route.provider).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
+                    <span className="material-symbols-outlined" aria-hidden>drag_indicator</span>
+                  </button>
+                  <span className={cn("md-pe-rank", enabledPosition === 1 && "is-primary", !enabledPosition && "is-off")}>
+                    {route.enabled && enabledPosition > 0 ? `P${enabledPosition}` : t("models.step.off")}
+                  </span>
                 </div>
-                <div className="priority-manager-health" role="cell">
-                  <Badge variant={accountHealthVariant(accountCount)} size="sm" dot>
-                    {accountHealthLabel(accountCount)}
-                  </Badge>
-                  {badge ? (
-                    <Badge variant={badge.variant} size="sm" dot title={badge.title}>
-                      {badge.label}
-                    </Badge>
+                <div className="md-pe-provider" role="cell">
+                  <ProviderLogo className="cp-section-logo md-pe-logo" providerId={route.provider} providerType={provider?.type || route.provider} />
+                  <div className="md-pe-provider-main">
+                    <Select
+                      value={route.provider}
+                      onChange={(event) => updateRoute(index, { provider: event.target.value })}
+                      aria-label={t("models.priority.colProvider")}
+                    >
+                      {providerOptionsForRoute(route.provider).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                    <code title={t("models.priority.upstreamHint")}>{route.upstream_model || "—"}</code>
+                  </div>
+                </div>
+                <div className="md-pe-health" role="cell">
+                  <StatusPill tone={accountCount <= 0 ? "danger" : accountCount === 1 ? "warning" : "success"}>
+                    {t("models.accountCount", { count: accountCount })}
+                  </StatusPill>
+                  {status && status !== "healthy" && status !== "unknown" ? (
+                    <StatusPill tone={status === "auth_required" ? "danger" : "warning"} title={provider?.lastError}>
+                      {t(`models.providerStatus.${status}`, { defaultValue: status })}
+                    </StatusPill>
                   ) : null}
+                  {pill ? (
+                    <StatusPill tone={pill.tone} title={pill.title}>
+                      {pill.label}
+                    </StatusPill>
+                  ) : null}
+                  {isNew ? <StatusPill tone="info" title={t("models.stepHint.suggested", { provider: providerDisplayLabel(providers, route.provider) })}>{t("models.step.suggested")}</StatusPill> : null}
                   {trippedOut ? (
-                    <button
-                      type="button"
-                      className="priority-manager-reset-btn"
+                    <LinkButton
                       disabled={resettingProvider === route.provider}
                       onClick={() => void onResetFailover(route.provider)}
                     >
-                      {resettingProvider === route.provider ? "Re-enabling…" : "Re-enable now"}
-                    </button>
+                      {resettingProvider === route.provider ? t("models.priority.reenabling") : t("models.priority.reenable")}
+                    </LinkButton>
                   ) : null}
                 </div>
-                <div className="priority-manager-enabled" role="cell">
+                <div className="md-pe-enabled" role="cell">
                   <Toggle
                     checked={route.enabled}
                     onChange={(event) => updateRoute(index, { enabled: event.target.checked })}
-                    aria-label={`Enable ${route.provider}`}
+                    aria-label={t("models.priority.enableRoute", { provider: route.provider })}
                   />
                 </div>
-                <div className="priority-manager-actions" role="cell">
-                  <button
-                    type="button"
-                    className="priority-manager-icon-btn"
+                <div className="md-pe-actions" role="cell">
+                  <IconAction
+                    icon="arrow_upward"
+                    label={t("models.priority.moveUp")}
                     disabled={visiblePosition === 0}
-                    onClick={() => moveRoute(visiblePosition, -1)}
-                    aria-label="Move provider up"
-                  >
-                    <span className="material-symbols-outlined">arrow_upward</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="priority-manager-icon-btn"
+                    onClick={() => moveVisible(visiblePosition, visiblePosition - 1)}
+                  />
+                  <IconAction
+                    icon="arrow_downward"
+                    label={t("models.priority.moveDown")}
                     disabled={visiblePosition === visibleItems.length - 1}
-                    onClick={() => moveRoute(visiblePosition, 1)}
-                    aria-label="Move provider down"
-                  >
-                    <span className="material-symbols-outlined">arrow_downward</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="priority-manager-icon-btn priority-manager-icon-btn-danger"
-                    onClick={() => removeRoute(index)}
-                    aria-label="Remove provider route"
-                  >
-                    <span className="material-symbols-outlined">delete</span>
-                  </button>
+                    onClick={() => moveVisible(visiblePosition, visiblePosition + 1)}
+                  />
+                  <IconAction icon="delete" danger label={t("models.priority.removeRoute")} onClick={() => removeRoute(index)} />
                 </div>
               </div>
             );
@@ -382,10 +414,12 @@ export function ProviderPriorityEditor({
         </div>
       )}
 
-      <div className="priority-manager-footer">
-        <Button variant="outline" size="sm" icon="dns" onClick={goToProviders}>
-          Manage providers
-        </Button>
+      {hiddenCount > 0 ? <PageNote icon="visibility_off">{t("models.priority.hiddenNote", { count: hiddenCount })}</PageNote> : null}
+
+      <div className="md-pe-footer">
+        <ToolButton icon="dns" onClick={goToProviders}>
+          {t("models.priority.manageProviders")}
+        </ToolButton>
       </div>
 
       {modelsError ? <p className="field-error">{modelsError}</p> : null}

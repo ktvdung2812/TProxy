@@ -117,7 +117,7 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
     <Modal
       open={open}
       onClose={onClose}
-      title={step === "pick" ? t("providers.addProvider") : `Add ${selected?.name ?? "provider"}`}
+      title={step === "pick" ? t("providers.addProvider") : selected ? t("providers.addProviderTitleWithName", { name: selected.name }) : t("providers.addProvider")}
       subtitle={step === "pick" ? t("providers.chooseUpstreamType") : t("providers.setProviderIdentity")}
       icon={step === "pick" ? "add" : selected?.icon}
       size="md"
@@ -141,7 +141,7 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
             })}
           </div>
           {presets.length > 0 ? (
-            <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
+            <div className="pv-preset-picker">
               <Field label={t("providers.9routerPresets")} hint={t("providers.9routerPresetsHint")}>
                 <Input
                   placeholder={t("providers.filterPresets")}
@@ -149,7 +149,7 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
                   onChange={(e) => setPresetFilter(e.target.value)}
                 />
               </Field>
-              <div className="provider-gallery" style={{ maxHeight: 220, overflow: "auto" }}>
+              <div className="provider-gallery pv-preset-gallery">
                 {filteredPresets.map((preset) => (
                   <button key={preset.id} type="button" className="gallery-item" onClick={() => handlePickPreset(preset)}>
                     <ProviderLogo className="provider-logo" providerType={preset.type} />
@@ -162,35 +162,35 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
           ) : null}
         </>
       ) : (
-        <form onSubmit={handleSave} style={{ display: "grid", gap: 12 }}>
-          <Field label="Type">
+        <form onSubmit={handleSave} className="pv-form">
+          <Field label={t("providers.addProviderType")}>
             <Input value={selected?.name ?? ""} disabled />
           </Field>
-          <Field label="Provider ID" hint="Stable identifier used in routes." required>
-            <Input placeholder="e.g. openai-main" value={id} onChange={(e) => setId(e.target.value)} required />
+          <Field label={t("providers.addProviderId")} hint={t("providers.addProviderIdHint")} required>
+            <Input placeholder={t("providers.addProviderIdPlaceholder")} value={id} onChange={(e) => setId(e.target.value)} required />
           </Field>
-          <Field label="Display name">
-            <Input placeholder="e.g. OpenAI primary" value={name} onChange={(e) => setName(e.target.value)} />
+          <Field label={t("providers.addProviderDisplayName")}>
+            <Input placeholder={t("providers.addProviderDisplayNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Base URL" hint={selected?.defaultBaseUrl ? `Default: ${selected.defaultBaseUrl}` : "Optional"}>
-            <Input placeholder="https://api.example.com" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          <Field label={t("providers.addProviderBaseUrl")} hint={selected?.defaultBaseUrl ? t("providers.addProviderBaseUrlHint", { url: selected.defaultBaseUrl }) : t("providers.addProviderBaseUrlOptional")}>
+            <Input placeholder={t("providers.addProviderBaseUrlPlaceholder")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </Field>
           {error && (
-            <p style={{ margin: 0, fontSize: 13, color: "var(--color-danger)", display: "flex", alignItems: "center", gap: 6 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>error</span>
+            <p className="pv-form-error" role="alert">
+              <span className="material-symbols-outlined" aria-hidden>error</span>
               {error}
             </p>
           )}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
-            <Button type="button" variant="ghost" onClick={() => setStep("pick")} disabled={saving}>
-              ← Back
+          <div className="pv-form-actions is-split">
+            <Button type="button" variant="ghost" icon="arrow_back" onClick={() => setStep("pick")} disabled={saving}>
+              {t("common.back")}
             </Button>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="pv-form-actions">
               <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" variant="primary" icon="save" loading={saving}>
-                Create provider
+                {t("providers.addProviderCreateProvider")}
               </Button>
             </div>
           </div>

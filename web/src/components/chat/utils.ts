@@ -6,6 +6,9 @@ export const STORAGE_KEYS = {
   activeModelId: "tproxy-chat.activeModelId",
   draft: "tproxy-chat.draft",
   apiKey: "tproxy-api-key",
+  params: "tproxy-chat.params",
+  sidebar: "tproxy-chat.sidebar",
+  panel: "tproxy-chat.panel",
 } as const;
 
 export function createId(): string {
@@ -39,16 +42,17 @@ export function textValue(value: unknown): string {
   return String(value);
 }
 
-export function makeSessionTitle(text = ""): string {
+export function makeSessionTitle(text = "", fallback = "New chat"): string {
   const normalized = textValue(text).replace(/\s+/g, " ").trim();
-  if (!normalized) return "New chat";
+  if (!normalized) return fallback;
   return normalized.length > 52 ? `${normalized.slice(0, 52).trimEnd()}…` : normalized;
 }
 
-export function formatRelativeTime(value?: string): string {
-  if (!value) return "Now";
+export function formatRelativeTime(value?: string, nowLabel = "now"): string {
+  if (!value) return nowLabel;
   const time = new Date(value).getTime();
-  if (Number.isNaN(time)) return "Now";
+  if (Number.isNaN(time)) return nowLabel;
+  if (Date.now() - time < 60000) return nowLabel;
   const diffMinutes = Math.max(1, Math.round((Date.now() - time) / 60000));
   if (diffMinutes < 60) return `${diffMinutes}m`;
   const diffHours = Math.round(diffMinutes / 60);
@@ -103,4 +107,14 @@ export function cloneSession<T extends { messages: ChatMessage[] }>(session: T):
     ...session,
     messages: session.messages.map((message) => ({ ...message })),
   };
+}
+
+export function formatDuration(ms?: number): string {
+  if (ms === undefined || !Number.isFinite(ms)) return "";
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+/** "⌘" on Apple keyboards, "Ctrl" elsewhere — for shortcut hints. */
+export function modKeyLabel(): string {
+  return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 }

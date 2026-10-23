@@ -1,140 +1,71 @@
 import { Link } from "react-router-dom";
-import { Badge } from "../ui";
+import { useTranslation } from "react-i18next";
+import { cn } from "../ui";
 import type { ProviderTypeInfo } from "./catalog";
 import { ProviderLogo } from "./ProviderLogo";
-import { getProviderStats, type Credential, type Provider, type ProviderStats } from "./types";
+import { providerLogoId } from "./ProviderListItem";
+import { countAccounts } from "./providerHealth";
+import type { Credential, Provider } from "./types";
+
+export type CatalogAuthKind = "oauth" | "apikey" | "cookie" | "serviceAccount" | "noAuth";
 
 type Props = {
   catalog: ProviderTypeInfo;
   instances: Provider[];
   credentials: Record<string, Credential[]>;
   to: string;
+  auth: CatalogAuthKind;
 };
 
-/** Compact provider tile — matches 9router ProviderCard layout. */
-export function ProviderCatalogCard({ catalog, instances, credentials, to }: Props) {
-  const allCreds = instances.flatMap((p) => credentials[p.ID] || []);
-  const stats = getProviderStats(allCreds);
-  const allDisabled = instances.length > 0 && instances.every((p) => !p.Enabled);
-  const dimmed = allDisabled || (instances.length === 1 && !instances[0]?.Enabled);
-
+/**
+ * Compact catalog tile. Providers that are already set up show a check and
+ * their account count, so the catalog doubles as a shortcut to them.
+ */
+export function ProviderCatalogCard({ catalog, instances, credentials, to, auth }: Props) {
+  const { t } = useTranslation();
+  const counts = countAccounts(instances.flatMap((provider) => credentials[provider.ID] || []));
+  const connected = instances.length > 0;
+  const disabled = connected && instances.every((provider) => !provider.Enabled);
   return (
     <Link
       to={to}
-      className={`provider-catalog-card ${dimmed ? "disabled" : ""}`}
+      className={cn("pv-tile", connected && "is-connected", disabled && "is-off")}
+      title={connected ? t("providers.catalog.openConnected", { name: catalog.name }) : t("providers.catalog.connectNamed", { name: catalog.name })}
     >
-      <div className="provider-catalog-card-inner">
-        <ProviderLogo
-          className="provider-catalog-icon"
-          providerId={catalog.presetId}
-          providerType={catalog.type}
-          style={{ color: catalog.color }}
-        />
-        <div className="provider-catalog-copy">
-          <h3 className="provider-catalog-name">{catalog.name}</h3>
-          <div className="provider-catalog-status">
-            <ProviderAccountStatus
-              catalog={catalog}
-              stats={stats}
-              allDisabled={allDisabled}
-              instances={instances}
-            />
-          </div>
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function ProviderAccountStatus({
-  catalog,
-  stats,
-  allDisabled,
-  instances,
-}: {
-  catalog: ProviderTypeInfo;
-  stats: ProviderStats;
-  allDisabled: boolean;
-  instances: Provider[];
-}) {
-  if (allDisabled) {
-    return (
-      <Badge variant="default" size="sm">
-        <span className="badge-with-icon">
-          <span className="material-symbols-outlined">pause_circle</span>
-          Disabled
+      <ProviderLogo
+        className="pv-tile-logo"
+        providerId={catalog.presetId}
+        providerType={catalog.type}
+        logoId={providerLogoId(catalog.presetId, catalog.type, Boolean(catalog.presetId))}
+        style={{ color: catalog.color }}
+      />
+      <span className="pv-tile-copy">
+        <strong>{catalog.name}</strong>
+        <small>{t(`providers.catalog.auth.${auth}`)}</small>
+      </span>
+      {connected ? (
+        <span className="pv-tile-state" aria-label={t("providers.catalog.connectedAccounts", { count: counts.total })}>
+          <span className="material-symbols-outlined" aria-hidden>{disabled ? "pause_circle" : "check_circle"}</span>
+          {counts.total > 0 ? counts.total : null}
         </span>
-      </Badge>
-    );
-  }
-  if (catalog.noAuth && instances.some((p) => p.Enabled)) {
-    return (
-      <Badge variant="success" size="sm" dot>
-        Ready
-      </Badge>
-    );
-  }
-  if (stats.total > 0) {
-    return <AccountCountBadges stats={stats} />;
-  }
-  return <span className="provider-no-connections">No connections</span>;
-}
-
-function AccountCountBadges({ stats }: { stats: ProviderStats }) {
-  return (
-    <span className="provider-account-counts">
-      <Badge variant={stats.active > 0 ? "success" : "default"} size="sm" dot={stats.active > 0}>
-        {stats.active} active
-      </Badge>
-      {stats.disabled > 0 ? (
-        <Badge variant="neutral" size="sm">
-          {stats.disabled} disabled
-        </Badge>
-      ) : null}
-      {stats.active === 0 && stats.error > 0 ? (
-        <Badge variant="error" size="sm" dot>
-          {stats.error} error
-        </Badge>
-      ) : null}
-    </span>
+      ) : (
+        <span className="material-symbols-outlined pv-tile-go" aria-hidden>add</span>
+      )}
+    </Link>
   );
 }
 
-type CustomCardProps = {
-  provider: Provider;
-  credentials: Credential[];
-  to: string;
-};
-
-/** Card for a configured OpenAI/Anthropic compatible upstream instance. */
-export function CustomProviderCard({ provider, credentials, to }: CustomCardProps) {
-  const stats = getProviderStats(credentials);
-  const dimmed = !provider.Enabled;
-
+/** Tile that starts the "add a custom OpenAI/Anthropic-compatible endpoint" form. */
+export function CustomEndpointCard({ type, onAdd }: { type: "openai-compatible" | "anthropic-compatible"; onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
-    <Link to={to} className={`provider-catalog-card ${dimmed ? "disabled" : ""}`}>
-      <div className="provider-catalog-card-inner">
-        <ProviderLogo
-          className="provider-catalog-icon provider-catalog-icon-custom"
-          providerId={provider.ID}
-          providerType={provider.Type}
-          fallbackIcon="extension"
-        />
-        <div className="provider-catalog-copy">
-          <h3 className="provider-catalog-name">{provider.Name || provider.ID}</h3>
-          <div className="provider-catalog-status">
-            {!provider.Enabled ? (
-              <Badge variant="default" size="sm">
-                Disabled
-              </Badge>
-            ) : stats.total > 0 ? (
-              <AccountCountBadges stats={stats} />
-            ) : (
-              <span className="provider-no-connections">No connections</span>
-            )}
-          </div>
-        </div>
-      </div>
-    </Link>
+    <button type="button" className="pv-tile pv-tile-custom" onClick={onAdd}>
+      <ProviderLogo className="pv-tile-logo" providerType={type} />
+      <span className="pv-tile-copy">
+        <strong>{t(type === "openai-compatible" ? "providers.providerListOpenAICompatible" : "providers.providerListAnthropicCompatible")}</strong>
+        <small>{t(type === "openai-compatible" ? "providers.catalog.customOpenAIHint" : "providers.catalog.customAnthropicHint")}</small>
+      </span>
+      <span className="material-symbols-outlined pv-tile-go" aria-hidden>add</span>
+    </button>
   );
 }

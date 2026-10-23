@@ -16,6 +16,7 @@ type Props = {
   onChange: (next: TierOverrides) => void;
 };
 
+// Claude model family names; "default" is translated at render time.
 const TIER_LABELS: Record<MappingTier, string> = {
   default: "Default",
   fable: "Fable",
@@ -71,19 +72,21 @@ export function ClaudeCodeOptions({ secret, modelOptions, overrides, onChange }:
   };
 
   return (
-    <div className="cli-tool-claude-options">
-      <div className="cli-tool-field-stack">
-        <p className="cli-tool-step-title">{t("cliTools.tierOverrides")}</p>
-        <p className="cli-tool-step-desc">
-          {t("cliTools.tierOverridesDesc")} <Link to="/mapping">Mapping</Link>
+    <div className="ct-option-group">
+      <div className="ct-option-head">
+        <strong>{t("cliTools.tierOverrides")}</strong>
+        <p>
+          {t("cliTools.tierOverridesDesc")} <Link to="/mapping">{t("nav.mapping")}</Link>
         </p>
+      </div>
+      <div className="ct-tier-grid">
         {MAPPING_TIERS.map((tier) => (
-          <Field key={tier} label={TIER_LABELS[tier]}>
+          <Field key={tier} label={tier === "default" ? t("cliTools.tierDefault") : TIER_LABELS[tier]}>
             <Select
               value={overrides[TIER_ENV_VARS[tier]] ?? ""}
               onChange={(event) => setTier(tier, event.target.value)}
             >
-              <option value="">{tier} (placeholder)</option>
+              <option value="">{t("cliTools.tierPlaceholder", { tier })}</option>
               {modelOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -94,13 +97,15 @@ export function ClaudeCodeOptions({ secret, modelOptions, overrides, onChange }:
         ))}
       </div>
 
-      <Toggle
-        label={t("cliTools.filterNaming")}
-        checked={filterNaming}
-        disabled={savingFilter}
-        onChange={(event) => void handleFilterToggle(event.target.checked)}
-      />
-      <p className="cli-tool-hint">{t("cliTools.filterNamingDesc")}</p>
+      <div className="ct-option-toggle">
+        <Toggle
+          label={t("cliTools.filterNaming")}
+          checked={filterNaming}
+          disabled={savingFilter}
+          onChange={(event) => void handleFilterToggle(event.target.checked)}
+        />
+        <p className="ct-hint">{t("cliTools.filterNamingDesc")}</p>
+      </div>
     </div>
   );
 }

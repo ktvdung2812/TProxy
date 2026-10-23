@@ -1,4 +1,4 @@
-import type { ApiKeyFormData, ApiKeyRecord, ApiModelOption, ProxyEndpoint } from "./types";
+import type { ApiKeyFormData, ApiKeyRecord, ApiKeyUsage, ApiModelOption, ProxyEndpoint } from "./types";
 import type { TFunction } from "i18next";
 import { getStoredApiKeySecret } from "../../lib/apiKeySecrets";
 
@@ -161,27 +161,27 @@ export function buildExampleModelOptions(
 }
 
 export const PROXY_ENDPOINTS: ProxyEndpoint[] = [
-  { path: "/v1/models", methods: ["GET"], description: "List virtual models available to the client." },
-  { path: "/v1/models/info", methods: ["GET"], description: "Detailed model metadata and routing hints." },
-  { path: "/v1/chat/completions", methods: ["POST"], description: "OpenAI-compatible chat completions.", capability: "text" },
-  { path: "/v1/responses", methods: ["POST"], description: "OpenAI Responses API (Codex CLI wire_api=responses).", capability: "text" },
-  { path: "/v1/responses/compact", methods: ["POST"], description: "Compact Responses API context (Codex).", capability: "text" },
-  { path: "/v1/responses/ws", methods: ["GET"], description: "WebSocket transport for Responses API.", capability: "text" },
-  { path: "/responses", methods: ["POST"], description: "Responses API alias (Codex-compatible).", capability: "text" },
-  { path: "/codex/*", methods: ["POST"], description: "Codex CLI alias to Responses API.", capability: "text" },
-  { path: "/v1/messages", methods: ["POST"], description: "Anthropic-compatible messages API.", capability: "text" },
-  { path: "/v1/messages/count_tokens", methods: ["POST"], description: "Token counting for Anthropic messages.", capability: "text" },
-  { path: "/v1/embeddings", methods: ["POST"], description: "Text embeddings.", capability: "embeddings" },
-  { path: "/v1/images/generations", methods: ["POST"], description: "Image generation.", capability: "image" },
-  { path: "/v1/images/edits", methods: ["POST"], description: "Image edits.", capability: "image" },
-  { path: "/v1/audio/speech", methods: ["POST"], description: "Text-to-speech.", capability: "audio" },
-  { path: "/v1/audio/transcriptions", methods: ["POST"], description: "Speech-to-text.", capability: "audio" },
-  { path: "/v1/audio/voices", methods: ["GET", "POST"], description: "Voice catalog and management.", capability: "audio" },
-  { path: "/v1/videos", methods: ["POST"], description: "Video generation (async job).", capability: "video" },
-  { path: "/v1/videos/generations", methods: ["POST"], description: "Video generation alias.", capability: "video" },
-  { path: "/v1/videos/{id}", methods: ["GET"], description: "Poll async video job status.", capability: "video" },
-  { path: "/v1/search", methods: ["POST"], description: "Web search proxy.", capability: "search" },
-  { path: "/v1/web/fetch", methods: ["POST"], description: "Fetch and extract web page content.", capability: "web" },
+  { id: "models", path: "/v1/models", methods: ["GET"], description: "List virtual models available to the client." },
+  { id: "modelsInfo", path: "/v1/models/info", methods: ["GET"], description: "Detailed model metadata and routing hints." },
+  { id: "chatCompletions", path: "/v1/chat/completions", methods: ["POST"], description: "OpenAI-compatible chat completions.", capability: "text" },
+  { id: "responses", path: "/v1/responses", methods: ["POST"], description: "OpenAI Responses API (Codex CLI wire_api=responses).", capability: "text" },
+  { id: "responsesCompact", path: "/v1/responses/compact", methods: ["POST"], description: "Compact Responses API context (Codex).", capability: "text" },
+  { id: "responsesWs", path: "/v1/responses/ws", methods: ["GET"], description: "WebSocket transport for Responses API.", capability: "text" },
+  { id: "responsesAlias", path: "/responses", methods: ["POST"], description: "Responses API alias (Codex-compatible).", capability: "text" },
+  { id: "codexAlias", path: "/codex/*", methods: ["POST"], description: "Codex CLI alias to Responses API.", capability: "text" },
+  { id: "messages", path: "/v1/messages", methods: ["POST"], description: "Anthropic-compatible messages API.", capability: "text" },
+  { id: "countTokens", path: "/v1/messages/count_tokens", methods: ["POST"], description: "Token counting for Anthropic messages.", capability: "text" },
+  { id: "embeddings", path: "/v1/embeddings", methods: ["POST"], description: "Text embeddings.", capability: "embeddings" },
+  { id: "imageGenerations", path: "/v1/images/generations", methods: ["POST"], description: "Image generation.", capability: "image" },
+  { id: "imageEdits", path: "/v1/images/edits", methods: ["POST"], description: "Image edits.", capability: "image" },
+  { id: "speech", path: "/v1/audio/speech", methods: ["POST"], description: "Text-to-speech.", capability: "audio" },
+  { id: "transcriptions", path: "/v1/audio/transcriptions", methods: ["POST"], description: "Speech-to-text.", capability: "audio" },
+  { id: "voices", path: "/v1/audio/voices", methods: ["GET", "POST"], description: "Voice catalog and management.", capability: "audio" },
+  { id: "videos", path: "/v1/videos", methods: ["POST"], description: "Video generation (async job).", capability: "video" },
+  { id: "videoGenerations", path: "/v1/videos/generations", methods: ["POST"], description: "Video generation alias.", capability: "video" },
+  { id: "videoStatus", path: "/v1/videos/{id}", methods: ["GET"], description: "Poll async video job status.", capability: "video" },
+  { id: "search", path: "/v1/search", methods: ["POST"], description: "Web search proxy.", capability: "search" },
+  { id: "webFetch", path: "/v1/web/fetch", methods: ["POST"], description: "Fetch and extract web page content.", capability: "web" },
 ];
 
 export function resolveExampleApiKeySecret(keyId: string, explicitSecret = ""): string {
@@ -203,4 +203,37 @@ export function buildCurlExample(baseUrl: string, apiKey: string, model: string)
     `  -H "Content-Type: application/json" \\`,
     `  -d '{"model":"${modelId}","messages":[{"role":"user","content":"Hello"}]}'`,
   ].join("\n");
+}
+
+/** Joins a gateway base URL ("…/v1") and a route path without doubling the /v1 prefix. */
+export function routeUrl(baseUrl: string, path: string): string {
+  const origin = baseUrl.replace(/\/v1\/?$/, "");
+  return `${origin}${path}`;
+}
+
+export function hasOwnLimits(key: ApiKeyRecord): boolean {
+  const limits = key.policy?.limits;
+  return Boolean(limits && Object.values(limits).some((value) => Number(value) > 0));
+}
+
+export type ApiKeyHealth = "active" | "paused" | "noModels" | "overBudget" | "nearBudget" | "noAccounts";
+
+/**
+ * One state per key, worst first: a paused key is simply paused; an enabled
+ * key that cannot serve anything (no models, budget spent, no accounts) needs
+ * attention before "near budget" is worth mentioning.
+ */
+export function apiKeyHealth(key: ApiKeyRecord, usage?: ApiKeyUsage): ApiKeyHealth {
+  if (!key.enabled) return "paused";
+  if (!key.models?.length) return "noModels";
+  const budget = usage?.budget_usd_per_day || key.policy?.limits?.budget_usd_per_day || 0;
+  const spent = usage?.cost_usd_today || 0;
+  if (budget > 0 && spent >= budget) return "overBudget";
+  if (usage && usage.eligible_account_count === 0) return "noAccounts";
+  if (budget > 0 && spent >= budget * 0.8) return "nearBudget";
+  return "active";
+}
+
+export function isAttentionHealth(health: ApiKeyHealth): boolean {
+  return health === "noModels" || health === "overBudget" || health === "noAccounts";
 }

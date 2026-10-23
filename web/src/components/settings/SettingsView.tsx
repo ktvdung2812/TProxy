@@ -1,73 +1,60 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Badge, Button, Card, Input, Select, Toggle } from "../ui";
+import { GuideToggle, LegendItem, PageGuide, isDialogOpen, usePageGuide } from "../page-kit";
 import {
-  GLOBAL_ROTATION_STRATEGIES,
   fetchAccountRotation,
   resetAccountRotationState,
-  rotationStrategyLabel,
   saveAccountRotation,
   type AccountRotationSettings,
 } from "../providers/api";
-import {
-  exportConfig,
-  fetchAdminSettings,
-  importConfig,
-  reloadConfig,
-  changeDashboardPassword,
-  saveGatewaySettings,
-  type AdminSettings,
-} from "./api";
+import { Button, ConfirmDialog, cn } from "../ui";
+import { AccessPanel } from "./AccessPanel";
+import { fetchAdminSettings, saveGatewaySettings, type AdminSettings } from "./api";
+import { BackupPanel } from "./BackupPanel";
+import { PasswordPanel } from "./PasswordPanel";
+import { FeaturesPanel, RetentionPanel } from "./ReadOnlyPanels";
+import { RotationPanel } from "./RotationPanel";
+import { modKeyLabel } from "../chat/utils";
+import { SETTINGS_SECTIONS, type SettingsSectionId } from "./utils";
 
 type Props = {
   secret: string;
+  providers?: Array<{ ID: string; Name?: string }>;
   onError: (message: string) => void;
   onNotice?: (message: string) => void;
   onMutated?: () => void;
   onPasswordChanged?: (newPassword: string) => void;
 };
 
-function buildRetentionRows(t: (key: string) => string): Array<{ key: keyof AdminSettings["retention"]; label: string }> {
-  return [
-    { key: "usage_events", label: t("settings.retention.usageEvents") },
-    { key: "audit_events", label: t("settings.retention.auditEvents") },
-    { key: "media_jobs", label: t("settings.retention.mediaJobs") },
-    { key: "oauth_sessions", label: t("settings.retention.oauthSessions") },
-    { key: "cleanup_interval", label: t("settings.retention.cleanupInterval") },
-  ];
-}
+const DEFAULT_STRATEGY = "round-robin";
+const DEFAULT_STICKY = 3;
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordChanged }: Props) {
+export function SettingsView({ secret, providers = [], onError, onNotice, onMutated, onPasswordChanged }: Props) {
   const { t } = useTranslation();
-  const RETENTION_ROWS = useMemo(() => buildRetentionRows(t), [t]);
-  const importRef = useRef<HTMLInputElement>(null);
+  const guide = usePageGuide("settings");
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [rotation, setRotation] = useState<AccountRotationSettings | null>(null);
-  const [strategy, setStrategy] = useState("round-robin");
-  const [stickyLimit, setStickyLimit] = useState("3");
-  const [savingRotation, setSavingRotation] = useState(false);
-  const [reloading, setReloading] = useState(false);
-  const [exporting, setExporting] = useState<"json" | "yaml" | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [savingPassword, setSavingPassword] = useState(false);
-  const [allowLanManagement, setAllowLanManagement] = useState(false);
+
+  // Drafts for the page-wide save bar; the saved values live in settings/rotation.
+  const [strategy, setStrategy] = useState(DEFAULT_STRATEGY);
+  const [stickyLimit, setStickyLimit] = useState(String(DEFAULT_STICKY));
+  const [allowLan, setAllowLan] = useState(false);
   const [publicBaseUrl, setPublicBaseUrl] = useState("");
-  const [savingLanAccess, setSavingLanAccess] = useState(false);
-  const [savingPublicUrl, setSavingPublicUrl] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>("rotation");
+
+  const applyLoaded = useCallback((adminSettings: AdminSettings, rotationSettings: AccountRotationSettings) => {
+    setSettings(adminSettings);
+    setRotation(rotationSettings);
+    setStrategy(rotationSettings.strategy || DEFAULT_STRATEGY);
+    setStickyLimit(String(rotationSettings.sticky_round_robin_limit || DEFAULT_STICKY));
+    setAllowLan(Boolean(adminSettings.allow_lan_management));
+    setPublicBaseUrl(adminSettings.public_base_url || "");
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,393 +63,293 @@ export function SettingsView({ secret, onError, onNotice, onMutated, onPasswordC
         fetchAdminSettings(secret),
         fetchAccountRotation(secret),
       ]);
-      setSettings(adminSettings);
-      setRotation(rotationSettings);
-      setStrategy(rotationSettings.strategy || "round-robin");
-      setStickyLimit(String(rotationSettings.sticky_round_robin_limit || 3));
-      setAllowLanManagement(Boolean(adminSettings.allow_lan_management));
-      setPublicBaseUrl(adminSettings.public_base_url || "");
+      applyLoaded(adminSettings, rotationSettings);
     } catch (error) {
       onError(error instanceof Error ? error.message : t("settings.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [onError, secret]);
+  }, [onError, secret, applyLoaded]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const saveRotation = async () => {
-    if (!rotation) return;
-    const sticky = Number(stickyLimit);
-    if (!Number.isFinite(sticky) || sticky < 1) {
-      onError(t("settings.stickyLimitMin"));
-      return;
-    }
-    setSavingRotation(true);
-    try {
-      const saved = await saveAccountRotation(secret, {
-        strategy,
-        sticky_round_robin_limit: sticky,
-        provider_strategies: rotation.provider_strategies,
-      });
-      setRotation(saved);
-      onNotice?.(t("settings.rotationSaved"));
-    } catch (error) {
-      onError(error instanceof Error ? error.message : t("settings.rotationSaveFailed"));
-    } finally {
-      setSavingRotation(false);
-    }
+  const savedStrategy = rotation?.strategy || DEFAULT_STRATEGY;
+  const savedSticky = rotation?.sticky_round_robin_limit || DEFAULT_STICKY;
+  const stickyNumber = Number(stickyLimit);
+  const stickyError =
+    !Number.isFinite(stickyNumber) || stickyNumber < 1 || !Number.isInteger(stickyNumber)
+      ? t("settings.stickyLimitMin")
+      : undefined;
+
+  const dirty = useMemo(() => {
+    const rotationDirty = Boolean(rotation) && (strategy !== savedStrategy || stickyLimit.trim() !== String(savedSticky));
+    const lanDirty = Boolean(settings) && allowLan !== Boolean(settings?.allow_lan_management);
+    const urlDirty = Boolean(settings) && publicBaseUrl.trim() !== (settings?.public_base_url || "").trim();
+    return { rotation: rotationDirty, lan: lanDirty, url: urlDirty };
+  }, [rotation, settings, strategy, savedStrategy, stickyLimit, savedSticky, allowLan, publicBaseUrl]);
+  const changeCount = Number(dirty.rotation) + Number(dirty.lan) + Number(dirty.url);
+  const dirtySections: SettingsSectionId[] = [
+    ...(dirty.rotation ? (["rotation"] as const) : []),
+    ...(dirty.lan || dirty.url ? (["access"] as const) : []),
+  ];
+  const canSave = changeCount > 0 && !saving && !(dirty.rotation && stickyError);
+
+  const discard = () => {
+    setStrategy(savedStrategy);
+    setStickyLimit(String(savedSticky));
+    setAllowLan(Boolean(settings?.allow_lan_management));
+    setPublicBaseUrl(settings?.public_base_url || "");
   };
 
+  const save = useCallback(async () => {
+    if (!canSave) return;
+    setSaving(true);
+    const notices: string[] = [];
+    try {
+      if (dirty.rotation && rotation) {
+        const saved = await saveAccountRotation(secret, {
+          strategy,
+          sticky_round_robin_limit: stickyNumber,
+          provider_strategies: rotation.provider_strategies,
+        });
+        setRotation(saved);
+        setStrategy(saved.strategy || DEFAULT_STRATEGY);
+        setStickyLimit(String(saved.sticky_round_robin_limit || DEFAULT_STICKY));
+        notices.push(t("settings.rotationSaved"));
+      }
+      // LAN access and the public URL keep their separate PATCH calls, as before.
+      if (dirty.lan) {
+        const result = await saveGatewaySettings(secret, { allow_lan_management: allowLan });
+        setAllowLan(result.allow_lan_management);
+        setSettings((current) =>
+          current
+            ? { ...current, allow_lan_management: result.allow_lan_management, lan_ips: result.lan_ips ?? current.lan_ips }
+            : current,
+        );
+        if (result.restart_required) notices.push(t("settings.page.lanRestartNotice"));
+        else notices.push(result.allow_lan_management ? t("settings.page.lanEnabledNotice") : t("settings.page.lanDisabledNotice"));
+      }
+      if (dirty.url) {
+        const result = await saveGatewaySettings(secret, { public_base_url: publicBaseUrl.trim() });
+        setPublicBaseUrl(result.public_base_url || "");
+        setSettings((current) => (current ? { ...current, public_base_url: result.public_base_url || "" } : current));
+        notices.push(t("settings.publicBaseUrlSaved"));
+      }
+      if (notices.length) onNotice?.(notices.join(" · "));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : t("settings.page.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  }, [canSave, dirty, rotation, secret, strategy, stickyNumber, allowLan, publicBaseUrl, onNotice, onError, t]);
+
   const resetRotation = async () => {
-    setSavingRotation(true);
+    setResetting(true);
     try {
       await resetAccountRotationState(secret);
       onNotice?.(t("settings.rotationReset"));
     } catch (error) {
       onError(error instanceof Error ? error.message : t("settings.rotationResetFailed"));
     } finally {
-      setSavingRotation(false);
+      setResetting(false);
     }
   };
 
-  const handleReload = async () => {
-    setReloading(true);
-    try {
-      const result = await reloadConfig(secret);
-      onNotice?.(result.config_path ? `Reloaded ${result.config_path}` : t("settings.configReloaded"));
-      onMutated?.();
-      await load();
-    } catch (error) {
-      onError(error instanceof Error ? error.message : t("settings.reloadFailed"));
-    } finally {
-      setReloading(false);
-    }
-  };
+  // Ctrl/Cmd+S saves; leaving the tab with unsaved edits asks first.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s" || isDialogOpen()) return;
+      event.preventDefault();
+      void saveRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (changeCount === 0) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [changeCount]);
 
-  const handleExport = async (format: "json" | "yaml") => {
-    setExporting(format);
-    try {
-      const { blob, filename } = await exportConfig(secret, format);
-      downloadBlob(blob, filename);
-      onNotice?.(`Exported ${filename}`);
-    } catch (error) {
-      onError(error instanceof Error ? error.message : t("settings.exportFailed"));
-    } finally {
-      setExporting(null);
-    }
-  };
-
-  const handleImportFile = async (file: File | undefined) => {
-    if (!file) return;
-    setImporting(true);
-    try {
-      await importConfig(secret, file);
-      onNotice?.(`Imported ${file.name}`);
-      onMutated?.();
-      await load();
-    } catch (error) {
-      onError(error instanceof Error ? error.message : t("settings.importFailed"));
-    } finally {
-      setImporting(false);
-      if (importRef.current) importRef.current.value = "";
-    }
-  };
-
-  const savePassword = async () => {
-    if (newPassword !== confirmPassword) {
-      onError("Mật khẩu mới không khớp");
-      return;
-    }
-    if (newPassword.length < 6) {
-      onError("Mật khẩu mới phải có ít nhất 6 ký tự");
-      return;
-    }
-    setSavingPassword(true);
-    try {
-      await changeDashboardPassword(secret, currentPassword, newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      onPasswordChanged?.(newPassword);
-      onNotice?.("Đã đổi mật khẩu dashboard");
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Không đổi được mật khẩu");
-    } finally {
-      setSavingPassword(false);
-    }
-  };
-
-  const toggleLanAccess = async (enabled: boolean) => {
-    setSavingLanAccess(true);
-    try {
-      const result = await saveGatewaySettings(secret, { allow_lan_management: enabled });
-      setAllowLanManagement(result.allow_lan_management);
-      setSettings((current) => (current ? { ...current, allow_lan_management: result.allow_lan_management } : current));
-      if (result.restart_required) {
-        onNotice?.("Đã bật truy cập LAN. Đặt server.host thành 0.0.0.0 trong config.yaml và restart server.");
-      } else {
-        onNotice?.(enabled ? "Đã cho phép truy cập dashboard qua LAN" : "Đã tắt truy cập dashboard qua LAN");
+  // Highlight the section currently at the top of the scroll area.
+  useEffect(() => {
+    const scroller = document.querySelector(".main-scroll");
+    if (!scroller) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const top = scroller.getBoundingClientRect().top + 140;
+      let current: SettingsSectionId = SETTINGS_SECTIONS[0].id;
+      for (const section of SETTINGS_SECTIONS) {
+        const element = document.getElementById(`settings-${section.id}`);
+        if (element && element.getBoundingClientRect().top <= top) current = section.id;
       }
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Không cập nhật được cài đặt LAN");
-    } finally {
-      setSavingLanAccess(false);
-    }
+      // At the very bottom the last short panels can never reach the top.
+      if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+        current = SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1].id;
+      }
+      setActiveSection(current);
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    update();
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [loading]);
+
+  const jumpTo = (id: SettingsSectionId) => {
+    setActiveSection(id);
+    document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const savePublicBaseUrl = async () => {
-    setSavingPublicUrl(true);
-    try {
-      const result = await saveGatewaySettings(secret, { public_base_url: publicBaseUrl.trim() });
-      setPublicBaseUrl(result.public_base_url || "");
-      setSettings((current) => (current ? { ...current, public_base_url: result.public_base_url || "" } : current));
-      onNotice?.(t("settings.publicBaseUrlSaved"));
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Không lưu được public base URL");
-    } finally {
-      setSavingPublicUrl(false);
-    }
-  };
-
-  const overrideCount = Object.keys(rotation?.provider_strategies || {}).length;
+  const providerNames = useMemo(
+    () => Object.fromEntries(providers.map((provider) => [provider.ID, provider.Name || provider.ID])),
+    [providers],
+  );
 
   return (
-    <section className="section settings-page">
-      <Card pad="md" className="settings-card">
-        <div className="settings-title-row">
-          <span className="material-symbols-outlined">lock</span>
-          <h2>Mật khẩu dashboard</h2>
-        </div>
-        <p className="settings-desc">
-          Mật khẩu mặc định là <code>123123</code>. Đổi mật khẩu tại đây sau khi đăng nhập.
-        </p>
-        <div className="settings-form-grid">
-          <label className="settings-field">
-            <span>Mật khẩu hiện tại</span>
-            <Input
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              disabled={savingPassword}
-              onChange={(event) => setCurrentPassword(event.target.value)}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Mật khẩu mới</span>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              disabled={savingPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Xác nhận mật khẩu mới</span>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              disabled={savingPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-            />
-          </label>
-        </div>
-        <div className="settings-actions">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={savingPassword || !currentPassword || !newPassword || !confirmPassword}
-            onClick={() => void savePassword()}
-          >
-            {savingPassword ? "Đang lưu…" : "Đổi mật khẩu"}
-          </Button>
-        </div>
-      </Card>
+    <section className="cp-page st-page">
+      <PageGuide
+        open={guide.open}
+        onDismiss={guide.dismiss}
+        title={t("settings.page.guideTitle")}
+        steps={[
+          { icon: "sync_alt", text: t("settings.page.guideStep1") },
+          { icon: "save", text: t("settings.page.guideStep2") },
+          { icon: "backup", text: t("settings.page.guideStep3") },
+        ]}
+        legend={
+          <>
+            <LegendItem tone="warning">{t("settings.page.unsaved")}</LegendItem>
+            <LegendItem tone="muted">{t("settings.page.legendReadOnly")}</LegendItem>
+          </>
+        }
+      />
 
-      <Card pad="md" className="settings-card">
-        <div className="settings-card-head">
-          <div className="settings-title-row">
-            <span className="material-symbols-outlined">sync_alt</span>
-            <h2>{t("settings.accountRotation")}</h2>
-            {overrideCount > 0 && (
-              <Badge variant="neutral" size="sm">{overrideCount} {t("settings.providerOverride", { count: overrideCount })}</Badge>
-            )}
+      <div className="st-layout">
+        <nav className="st-nav" aria-label={t("settings.page.sectionIndex")}>
+          <span className="st-nav-kicker">{t("settings.page.sectionIndex")}</span>
+          <ul>
+            {SETTINGS_SECTIONS.map((section) => (
+              <li key={section.id}>
+                <button
+                  type="button"
+                  className={cn("st-nav-item", activeSection === section.id && "is-active")}
+                  aria-current={activeSection === section.id ? "true" : undefined}
+                  onClick={() => jumpTo(section.id)}
+                >
+                  <span className="material-symbols-outlined" aria-hidden>{section.icon}</span>
+                  <span className="st-nav-label">{t(`settings.page.nav.${section.id}`)}</span>
+                  {dirtySections.includes(section.id) ? (
+                    <span className="st-nav-dot" title={t("settings.page.unsaved")} aria-label={t("settings.page.unsaved")} />
+                  ) : section.readOnly ? (
+                    <span className="material-symbols-outlined st-nav-lock" title={t("settings.page.readOnly")} aria-hidden>visibility</span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="st-nav-foot">
+            <GuideToggle open={guide.open} onToggle={guide.toggle} />
           </div>
-          <p className="settings-desc">
-            {t("settings.accountRotationDesc")}
-          </p>
-        </div>
-        <div className="settings-form-grid">
-          <label className="settings-field">
-            <span>{t("settings.defaultStrategy")}</span>
-            <Select value={strategy} disabled={loading || savingRotation} onChange={(event) => setStrategy(event.target.value)}>
-              {GLOBAL_ROTATION_STRATEGIES.map((item) => (
-                <option key={item.id} value={item.id}>{item.label}</option>
-              ))}
-            </Select>
-          </label>
-          <label className="settings-field">
-            <span>{t("settings.stickyLimit")}</span>
-            <Input
-              type="number"
-              min={1}
-              value={stickyLimit}
-              disabled={loading || savingRotation}
-              onChange={(event) => setStickyLimit(event.target.value)}
-            />
-          </label>
-        </div>
-        <p className="settings-hint">
-          Active: {rotationStrategyLabel(strategy)} · sticky {stickyLimit} {t("settings.request", { count: parseInt(stickyLimit) })}
-        </p>
-        <div className="settings-actions">
-          <Button variant="primary" size="sm" disabled={loading || savingRotation} onClick={() => void saveRotation()}>
-            {t("settings.saveRotation")}
-          </Button>
-          <Button variant="outline" size="sm" disabled={loading || savingRotation} onClick={() => void resetRotation()}>
-            {t("settings.resetRuntimeState")}
-          </Button>
-        </div>
-      </Card>
+        </nav>
 
-      <Card pad="md" className="settings-card">
-        <div className="settings-title-row">
-          <span className="material-symbols-outlined">schedule</span>
-          <h2>{t("settings.dataRetention")}</h2>
-          <Badge variant="neutral" size="sm">{t("settings.configYaml")}</Badge>
-        </div>
-        <p className="settings-desc">{t("settings.dataRetentionDesc")}</p>
-        <div className="settings-kv-table">
-          {RETENTION_ROWS.map((row) => (
-            <div key={row.key} className="settings-kv-row">
-              <span>{row.label}</span>
-              <code>{settings?.retention?.[row.key] || "—"}</code>
-            </div>
-          ))}
-        </div>
-      </Card>
+        <div className="st-content">
+          <RotationPanel
+            loading={loading}
+            dirty={dirty.rotation}
+            strategy={strategy}
+            onStrategyChange={setStrategy}
+            stickyLimit={stickyLimit}
+            onStickyLimitChange={setStickyLimit}
+            stickyError={dirty.rotation ? stickyError : undefined}
+            overrides={rotation?.provider_strategies || {}}
+            providerNames={providerNames}
+            resetting={resetting}
+            onReset={() => setConfirmReset(true)}
+          />
+          <AccessPanel
+            loading={loading}
+            dirty={dirty.lan || dirty.url}
+            settings={settings}
+            allowLan={allowLan}
+            onAllowLanChange={setAllowLan}
+            publicBaseUrl={publicBaseUrl}
+            onPublicBaseUrlChange={setPublicBaseUrl}
+          />
+          <PasswordPanel secret={secret} onError={onError} onNotice={onNotice} onPasswordChanged={onPasswordChanged} />
+          <BackupPanel
+            secret={secret}
+            hasUnsavedChanges={changeCount > 0}
+            onError={onError}
+            onNotice={onNotice}
+            onMutated={onMutated}
+            onReloadSettings={load}
+          />
+          <FeaturesPanel loading={loading} settings={settings} />
+          <RetentionPanel loading={loading} settings={settings} />
 
-      <Card pad="md" className="settings-card">
-        <div className="settings-title-row">
-          <span className="material-symbols-outlined">shield</span>
-          <h2>{t("settings.gateway")}</h2>
-        </div>
-        <div className="settings-kv-table">
-          <div className="settings-kv-row">
-            <span>Truy cập qua LAN</span>
-            <div className="settings-inline">
-              <Toggle
-                checked={allowLanManagement}
-                disabled={loading || savingLanAccess}
-                onChange={(event) => void toggleLanAccess(event.target.checked)}
-                aria-label={t("settings.allowLanAccess")}
-              />
-              <Badge variant={allowLanManagement ? "success" : "neutral"} size="sm">
-                {allowLanManagement ? "Đã bật" : "Tắt"}
-              </Badge>
+          {changeCount > 0 || saving ? (
+            <div className="st-savebar" role="region" aria-label={t("settings.page.saveBar")}>
+              <span className="material-symbols-outlined st-savebar-icon" aria-hidden>edit_note</span>
+              <div className="st-savebar-copy">
+                <strong>{t("settings.page.unsavedCount", { count: changeCount })}</strong>
+                <span>
+                  {dirtySections.map((id) => t(`settings.page.nav.${id}`)).join(" · ")}
+                  <kbd className="cp-kbd">{modKeyLabel()} S</kbd>
+                </span>
+              </div>
+              <div className="st-savebar-actions">
+                <Button variant="ghost" size="sm" disabled={saving} onClick={() => setConfirmDiscard(true)}>
+                  {t("settings.page.discard")}
+                </Button>
+                <Button variant="primary" size="sm" icon="save" loading={saving} disabled={!canSave} onClick={() => void save()}>
+                  {saving ? t("settings.page.saving") : t("settings.page.saveChanges")}
+                </Button>
+              </div>
             </div>
-          </div>
-          {allowLanManagement ? (
-            <p className="settings-hint">
-              Thiết bị trong mạng LAN có thể mở dashboard bằng <code>http://&lt;ip-máy&gt;:{settings?.server_port || 28120}/dashboard/</code> và mật khẩu đăng nhập.
-              {settings?.server_host === "127.0.0.1" || settings?.server_host === "localhost" || settings?.server_host === "::1" ? (
-                <> Đặt <code>server.host: 0.0.0.0</code> trong config.yaml và restart server để LAN kết nối được.</>
-              ) : null}
-            </p>
           ) : null}
-          <div className="settings-kv-row settings-kv-row-stack">
-            <span>Public base URL</span>
-            <div className="settings-inline settings-inline-stack">
-              <Input
-                value={publicBaseUrl}
-                disabled={loading || savingPublicUrl}
-                placeholder="https://your-tunnel.example.com"
-                onChange={(event) => setPublicBaseUrl(event.target.value)}
-              />
-              <Button variant="outline" size="sm" loading={savingPublicUrl} onClick={() => void savePublicBaseUrl()}>
-                Save
-              </Button>
-            </div>
-          </div>
-          <p className="settings-hint">
-            Dùng cho CLI Tools như Cursor — endpoint phải truy cập được từ internet (tunnel, Tailscale Funnel, reverse proxy). Ví dụ: <code>https://api.example.com</code>
-          </p>
-          <div className="settings-kv-row">
-            <span>{t("settings.remoteManagement")}</span>
-            <Badge variant={settings?.allow_remote_management ? "success" : "neutral"} size="sm">
-              {settings?.allow_remote_management ? t("settings.allowed") : t("settings.localOnly")}
-            </Badge>
-          </div>
-          <div className="settings-kv-row">
-            <span>{t("settings.payloadCapture")}</span>
-            <Badge variant={settings?.payload_capture ? "warning" : "neutral"} size="sm">
-              {settings?.payload_capture ? t("common.enabled") : t("common.disabled")}
-            </Badge>
-          </div>
-          <div className="settings-kv-row">
-            <span>{t("settings.tokenSaverRTK")}</span>
-            <div className="settings-inline">
-              <Badge variant={settings?.token_saver?.rtk_enabled !== false ? "success" : "neutral"} size="sm">
-                {settings?.token_saver?.rtk_enabled !== false ? t("common.enabled") : t("common.disabled")}
-              </Badge>
-              <Link className="settings-link" to="/token-saver">{t("settings.configure")}</Link>
-            </div>
-          </div>
         </div>
-      </Card>
+      </div>
 
-      <Card pad="md" className="settings-card">
-        <div className="settings-title-row">
-          <span className="material-symbols-outlined">backup</span>
-          <h2>{t("settings.configuration")}</h2>
-        </div>
-        <p className="settings-desc">
-          {t("settings.configurationDesc")}
-        </p>
-        <div className="settings-actions">
-          <Button
-            variant="outline"
-            size="sm"
-            icon="download"
-            disabled={exporting !== null || importing}
-            onClick={() => void handleExport("json")}
-          >
-            {exporting === "json" ? t("settings.exporting") : t("settings.exportJSON")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            icon="download"
-            disabled={exporting !== null || importing}
-            onClick={() => void handleExport("yaml")}
-          >
-            {exporting === "yaml" ? t("settings.exporting") : t("settings.exportYAML")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            icon="upload"
-            disabled={importing || exporting !== null}
-            onClick={() => importRef.current?.click()}
-          >
-            {importing ? t("settings.importing") : t("settings.importFile")}
-          </Button>
-          <Button variant="primary" size="sm" icon="restart_alt" disabled={reloading} onClick={() => void handleReload()}>
-            {reloading ? t("settings.reloading") : t("settings.reloadConfig")}
-          </Button>
-        </div>
-        <input
-          ref={importRef}
-          type="file"
-          accept=".json,.yaml,.yml,application/json,application/yaml"
-          hidden
-          onChange={(event) => void handleImportFile(event.target.files?.[0])}
-        />
-      </Card>
+      <ConfirmDialog
+        open={confirmReset}
+        title={t("settings.page.resetConfirmTitle")}
+        message={t("settings.page.resetConfirmMessage")}
+        confirmText={t("settings.resetRuntimeState")}
+        cancelText={t("common.cancel")}
+        variant="danger"
+        onClose={() => setConfirmReset(false)}
+        onConfirm={() => {
+          setConfirmReset(false);
+          void resetRotation();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmDiscard}
+        title={t("settings.page.discardConfirmTitle")}
+        message={t("settings.page.discardConfirmMessage", { count: changeCount })}
+        confirmText={t("settings.page.discard")}
+        cancelText={t("settings.page.keepEditing")}
+        variant="danger"
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          discard();
+        }}
+      />
     </section>
   );
 }

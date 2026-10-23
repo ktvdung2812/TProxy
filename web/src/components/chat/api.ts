@@ -10,11 +10,18 @@ type StreamCallbacks = {
   signal?: AbortSignal;
 };
 
+/** Sampling options; only the ones that are set are sent. */
+export type ChatRequestOptions = {
+  temperature?: number;
+  max_tokens?: number;
+};
+
 export async function streamChatCompletion(
   apiKey: string,
   model: string,
   messages: ChatCompletionMessage[],
   callbacks: StreamCallbacks,
+  options: ChatRequestOptions = {},
 ): Promise<string> {
   const response = await fetch("/v1/chat/completions", {
     method: "POST",
@@ -23,7 +30,13 @@ export async function streamChatCompletion(
       Accept: "text/event-stream",
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
-    body: JSON.stringify({ model, messages, stream: true }),
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.max_tokens !== undefined ? { max_tokens: options.max_tokens } : {}),
+    }),
     signal: callbacks.signal,
   });
 
@@ -42,39 +55,50 @@ export async function streamChatCompletion(
   let buffer = "";
   let assistantText = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  // Cancel the body explicitly on abort: not every Response body (e.g. a
+  // service-worker or polyfilled stream) errors its reader when the fetch is aborted.
+  const signal = callbacks.signal;
+  const onAbort = () => void reader.cancel().catch(() => undefined);
+  signal?.addEventListener("abort", onAbort, { once: true });
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (signal?.aborted) throw new DOMException("The stream was stopped", "AbortError");
+      if (done) break;
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
 
-      const payload = trimmed.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
 
-      let chunk: { error?: { message?: string } | string };
-      try {
-        chunk = JSON.parse(payload) as { error?: { message?: string } | string };
-      } catch {
-        continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]") continue;
+
+        let chunk: { error?: { message?: string } | string };
+        try {
+          chunk = JSON.parse(payload) as { error?: { message?: string } | string };
+        } catch {
+          continue;
+        }
+        if (chunk.error) {
+          const message =
+            typeof chunk.error === "string"
+              ? chunk.error
+              : chunk.error.message || `Request failed (${response.status})`;
+          throw new Error(message);
+        }
+        const text = readAssistantText(chunk);
+        if (!text) continue;
+        assistantText += text;
+        callbacks.onDelta(assistantText);
       }
-      if (chunk.error) {
-        const message =
-          typeof chunk.error === "string"
-            ? chunk.error
-            : chunk.error.message || `Request failed (${response.status})`;
-        throw new Error(message);
-      }
-      const text = readAssistantText(chunk);
-      if (!text) continue;
-      assistantText += text;
-      callbacks.onDelta(assistantText);
     }
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
 
   return assistantText;

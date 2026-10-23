@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "../ui";
 import { formatProxyUsageLabel, formatQuotaName, formatResetAbsolute, formatResetTime, getColorEmoji, getColorTone } from "./utils";
 
@@ -25,6 +26,7 @@ function isSessionQuotaRow(row: QuotaRow) {
 }
 
 export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide }: Props) {
+  const { t } = useTranslation();
   if (rows.length === 0) return null;
 
   const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
@@ -47,7 +49,7 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
             const tone = getColorTone(row.remaining);
             const countdown = formatResetTime(row.reset_at);
             const absoluteReset = formatResetAbsolute(row.reset_at);
-            const countdownLabel = countdown !== "-" ? `in ${countdown}` : "N/A";
+            const countdownLabel = countdown !== "-" ? t("quota.resetsIn", { time: countdown }) : "—";
 
             const isLive = credentialActive && isSessionQuotaRow(row);
 
@@ -70,7 +72,7 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                       className={cn("quota-tracker-percent", `quota-tracker-percent-${tone}`)}
                       title={`${Math.round(row.used).toLocaleString()} / ${row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString()}`}
                     >
-                      Còn {row.remaining}%
+                      {t("quota.percentLeft", { value: row.remaining })}
                     </span>
                   </div>
                 </td>

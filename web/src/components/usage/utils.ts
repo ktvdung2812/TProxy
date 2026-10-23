@@ -1,14 +1,10 @@
 import type { UsageBucketEntry, UsageActiveRequest, UsageRecentRequest } from "./api";
 
-export const USAGE_PERIODS = [
-  { value: "today", label: "Today" },
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7D" },
-  { value: "30d", label: "30D" },
-  { value: "60d", label: "60D" },
-] as const;
+/** Time ranges the stats and chart endpoints accept; labels live under usage.period.*. */
+export const USAGE_PERIODS = ["today", "24h", "7d", "30d", "60d"] as const;
 
 export type UsageTableView = "model" | "account" | "apiKey" | "endpoint";
+export const USAGE_TABLE_VIEWS: UsageTableView[] = ["model", "account", "apiKey", "endpoint"];
 export type UsageValueMode = "tokens" | "costs";
 
 export const fmt = (value: number) => new Intl.NumberFormat().format(value || 0);
@@ -37,13 +33,34 @@ export function fmtCompact(value: number) {
 }
 export const fmtCost = (value: number) => `$${(value || 0).toFixed(2)}`;
 
-export function fmtTime(iso?: string) {
-  if (!iso) return "Never";
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/** Relative "5m ago" style time; falls back to the date after a day. */
+export function fmtTime(iso: string | undefined, t: Translate) {
+  if (!iso) return t("usage.time.never");
   const diffMins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+  if (diffMins < 1) return t("usage.time.justNow");
+  if (diffMins < 60) return t("usage.time.minutesAgo", { count: diffMins });
+  if (diffMins < 1440) return t("usage.time.hoursAgo", { count: Math.floor(diffMins / 60) });
   return new Date(iso).toLocaleDateString();
+}
+
+/** Cost with sub-cent precision for single requests, cents for totals. */
+export function fmtCostPrecise(value: number) {
+  const amount = value || 0;
+  if (amount > 0 && amount < 0.01) return `$${amount.toFixed(4)}`;
+  return fmtCost(amount);
+}
+
+export function fmtMs(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  if (value >= 10_000) return `${(value / 1000).toFixed(1)} s`;
+  return `${fmt(Math.round(value))} ms`;
+}
+
+/** Recent-request status strings the backend uses for success. */
+export function isOkStatus(status?: string) {
+  return !status || status === "ok" || status === "success" || status === "200";
 }
 
 export type UsageRow = UsageBucketEntry & {
@@ -89,11 +106,12 @@ export type UsageGroup = {
 function groupKeyFor(item: UsageRow, field: UsageTableView) {
   switch (field) {
     case "account":
-      return item.accountName || `Account ${item.connectionId?.slice(0, 8) || "unknown"}`;
+      // Unnamed buckets group under "" and render as "Unknown" in the table.
+      return item.accountName || item.connectionId?.slice(0, 8) || "";
     case "apiKey":
-      return item.keyName || "Unknown Key";
+      return item.keyName || "";
     case "endpoint":
-      return item.endpoint || "Unknown Endpoint";
+      return item.endpoint || "";
     case "model":
     default:
       return item.rawModel || item.key;
@@ -138,6 +156,47 @@ export function groupUsageRows(rows: UsageRow[], field: UsageTableView): UsageGr
     groups.set(groupKey, existing);
   }
   return Array.from(groups.values());
+}
+
+export type UsageSortField = "name" | "requests" | "tokens" | "cost" | "lastUsed";
+
+function sortValue(row: UsageRow, field: UsageSortField, label: string): string | number {
+  switch (field) {
+    case "requests":
+      return row.requests || 0;
+    case "tokens":
+      return row.totalTokens || 0;
+    case "cost":
+      return row.totalCost || row.cost || 0;
+    case "lastUsed":
+      return row.lastUsed ? Date.parse(row.lastUsed) : 0;
+    default:
+      return label.toLowerCase();
+  }
+}
+
+function compare(left: string | number, right: string | number, order: "asc" | "desc") {
+  if (left < right) return order === "asc" ? -1 : 1;
+  if (left > right) return order === "asc" ? 1 : -1;
+  return 0;
+}
+
+/**
+ * Orders groups by their summary (not by their first item, which is what
+ * grouping pre-sorted rows gives) and the items inside each group the same way.
+ */
+export function sortUsageGroups(
+  groups: UsageGroup[],
+  field: UsageSortField,
+  order: "asc" | "desc",
+  itemLabel: (item: UsageRow) => string,
+): UsageGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      items: [...group.items].sort((a, b) => compare(sortValue(a, field, itemLabel(a)), sortValue(b, field, itemLabel(b)), order)),
+    }))
+    .sort((a, b) => compare(sortValue(a.summary, field, a.groupKey), sortValue(b.summary, field, b.groupKey), order));
 }
 
 export type UsageLiveSnapshot = {

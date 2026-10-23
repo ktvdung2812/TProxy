@@ -105,6 +105,8 @@ export function ModelTargetCombobox({
       return;
     }
     if (event.key === "Escape") {
+      // First Esc only closes the suggestion list; keep it from also closing an enclosing Modal.
+      if (open) event.stopPropagation();
       setOpen(false);
       return;
     }

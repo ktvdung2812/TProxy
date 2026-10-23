@@ -1,44 +1,20 @@
-import { Button } from "../ui";
+import { Button, cn } from "../ui";
+import { useTranslation } from "react-i18next";
+import { ActionMenu, PageNote } from "../page-kit";
 import type { ConnectionMethod, ConnectionProfile } from "./connectionMethods";
+import { methodDescription, methodIcon, methodShortText, methodText, profileNotice } from "./connectionText";
 
 type Props = {
   profile: ConnectionProfile;
   onMethod: (method: ConnectionMethod) => void;
   busy?: boolean;
   size?: "sm" | "md";
-  /** empty = first-time connect (prominent); footer = provider already has accounts */
+  /** empty = first-time connect (every method spelled out); footer = provider already has accounts */
   placement?: "empty" | "footer";
 };
 
-function methodLabel(method: ConnectionMethod, placement: "empty" | "footer"): string {
-  if (placement === "footer" && method.kind === "oauth") {
-    return "Add account";
-  }
-  return method.label;
-}
-
-function methodVariant(
-  method: ConnectionMethod,
-  placement: "empty" | "footer",
-): "primary" | "secondary" {
-  if (placement === "footer") {
-    return "secondary";
-  }
-  if (method.kind === "oauth" || method.kind === "import_cursor") {
-    return "primary";
-  }
-  return "secondary";
-}
-
-/** Provider-specific connection action buttons (9router-style). */
-export function ProviderConnectionActions({
-  profile,
-  onMethod,
-  busy,
-  size = "sm",
-  placement = "empty",
-}: Props) {
-  const methods = profile.methods;
+/** Split methods the way 9router does: real sign-ins first, file imports aside. */
+function splitMethods(methods: ConnectionMethod[]) {
   const cursorPrimary =
     methods.some((method) => method.kind === "import_cursor") &&
     !methods.some(
@@ -51,83 +27,114 @@ export function ProviderConnectionActions({
     );
 
   const primary = methods.filter((method) => {
-    if (method.kind === "import_9router" || method.kind === "import_cliproxy" || method.kind === "import_sub2api") return false;
+    if (method.kind === "import_data") return false;
     if (method.kind === "import_cursor" && !cursorPrimary) return false;
     return true;
   });
   const secondary = methods.filter(
     (method) =>
-      method.kind === "import_9router" ||
-      method.kind === "import_cliproxy" ||
-      method.kind === "import_sub2api" ||
+      method.kind === "import_data" ||
       (method.kind === "import_cursor" && !cursorPrimary),
   );
+  return { primary, secondary };
+}
 
+/**
+ * Provider-specific connection actions. On an empty provider every method is
+ * spelled out with its description; once accounts exist the first method is
+ * the toolbar's primary button and the rest live in its menu.
+ */
+export function ProviderConnectionActions({
+  profile,
+  onMethod,
+  busy,
+  size = "sm",
+  placement = "empty",
+}: Props) {
+  const { t } = useTranslation();
+  const { primary, secondary } = splitMethods(profile.methods);
+
+  if (placement === "footer") {
+    const [first, ...rest] = primary.length > 0 ? primary : secondary;
+    const others = primary.length > 0 ? [...rest, ...secondary] : rest;
+    if (!first) return null;
+    return (
+      <div className="pv-connect-compact">
+        <Button
+          size={size}
+          variant="primary"
+          icon={first.kind === "oauth" ? "person_add" : methodIcon(first.kind)}
+          loading={busy && (first.kind === "oauth" || first.kind === "import_cursor")}
+          disabled={!first.available || busy}
+          title={first.unavailableReason || methodDescription(first, t)}
+          onClick={() => onMethod(first)}
+        >
+          {methodShortText(first, t)}
+        </Button>
+        {others.length > 0 ? (
+          <ActionMenu
+            label={t("providers.method.moreWays")}
+            icon="expand_more"
+            disabled={busy}
+            items={others.map((method) => ({
+              key: `${method.kind}-${method.label}`,
+              icon: methodIcon(method.kind),
+              label: methodText(method, t),
+              hint: method.unavailableReason || methodDescription(method, t),
+              disabled: !method.available,
+              onSelect: () => onMethod(method),
+            }))}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  const notice = profileNotice(profile, t);
   return (
-    <div className="provider-connection-actions">
-      {profile.notice ? <p className="provider-connection-notice">{profile.notice}</p> : null}
-      <div className="provider-connection-buttons">
-        {primary.map((method) => (
-          <Button
+    <div className="pv-connect">
+      {notice ? <PageNote icon="info">{notice}</PageNote> : null}
+      <div className={cn("pv-methods", size === "md" && "is-large")}>
+        {primary.map((method, index) => (
+          <button
             key={`${method.kind}-${method.label}`}
-            size={size}
-            variant={methodVariant(method, placement)}
-            icon={iconForMethod(method.kind)}
-            loading={busy && (method.kind === "oauth" || method.kind === "import_cursor")}
+            type="button"
+            className={cn("pv-method", index === 0 && "is-recommended")}
             disabled={!method.available || busy}
-            title={method.unavailableReason || method.description}
+            title={method.unavailableReason}
             onClick={() => onMethod(method)}
           >
-            {methodLabel(method, placement)}
-          </Button>
+            <span className={cn("material-symbols-outlined", busy && index === 0 && "animate-spin")} aria-hidden>
+              {busy && index === 0 ? "progress_activity" : methodIcon(method.kind)}
+            </span>
+            <span className="pv-method-copy">
+              <span className="pv-method-title">
+                <strong>{methodText(method, t)}</strong>
+                {index === 0 ? <span className="pv-method-badge">{t("providers.method.recommended")}</span> : null}
+              </span>
+              {methodDescription(method, t) ? <small>{methodDescription(method, t)}</small> : null}
+            </span>
+            <span className="material-symbols-outlined pv-method-go" aria-hidden>arrow_forward</span>
+          </button>
         ))}
       </div>
       {secondary.length > 0 ? (
-        <div className="provider-connection-secondary">
+        <div className="pv-connect-secondary">
           {secondary.map((method) => (
             <button
               key={`${method.kind}-${method.label}`}
               type="button"
-              className="provider-connection-link"
+              className="cp-tool-btn"
               disabled={!method.available || busy}
-              title={method.description}
+              title={methodDescription(method, t)}
               onClick={() => onMethod(method)}
             >
-              <span className="material-symbols-outlined">{iconForMethod(method.kind)}</span>
-              {method.label}
+              <span className="material-symbols-outlined" aria-hidden>{methodIcon(method.kind)}</span>
+              <span>{methodText(method, t)}</span>
             </button>
           ))}
         </div>
       ) : null}
     </div>
   );
-}
-
-function iconForMethod(kind: ConnectionMethod["kind"]): string {
-  switch (kind) {
-    case "oauth":
-      return "login";
-    case "api_key":
-      return "key";
-    case "cookie":
-      return "cookie";
-    case "service_account":
-      return "badge";
-    case "none":
-      return "lock_open";
-    case "import_cliproxy":
-      return "upload";
-    case "import_sub2api":
-      return "upload_file";
-    case "import_cursor":
-      return "edit";
-    case "connect_kiro":
-      return "shield";
-    case "import_9router":
-      return "cloud_download";
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
 }

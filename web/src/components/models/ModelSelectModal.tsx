@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { discoverProviderModels, type DiscoveredModel } from "../providers/api";
+import { ProviderLogo } from "../providers/ProviderLogo";
 import { Button, Input, Modal } from "../ui";
+import { EmptyPanel, PageNote } from "../page-kit";
 import type { ModelFormData, ModelRecord, ProviderOption, RouteRecord } from "./types";
 import { buildModelFormFromSelection, isProviderModelMapped } from "./utils";
 
@@ -45,6 +48,7 @@ export function ModelSelectModal({
   onClose,
   onSubmit,
 }: Props) {
+  const { t } = useTranslation();
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, DiscoveredModel[]>>({});
   const [errorsByProvider, setErrorsByProvider] = useState<Record<string, string>>({});
   const [loadingModels, setLoadingModels] = useState(false);
@@ -131,11 +135,12 @@ export function ModelSelectModal({
 
   const filteredGroups = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const groups = new Map<string, { label: string; items: SelectableModel[]; error?: string }>();
+    const groups = new Map<string, { label: string; type: string; items: SelectableModel[]; error?: string }>();
 
     for (const option of providerOptions) {
       groups.set(option.value, {
         label: option.label,
+        type: providers.find((provider) => provider.id === option.value)?.type || option.value,
         items: [],
         error: errorsByProvider[option.value],
       });
@@ -155,7 +160,7 @@ export function ModelSelectModal({
     return [...groups.entries()]
       .map(([providerId, group]) => ({ providerId, ...group }))
       .filter((group) => group.items.length > 0 || group.error || !loadingModels);
-  }, [errorsByProvider, loadingModels, providerOptions, searchQuery, selectableModels]);
+  }, [errorsByProvider, loadingModels, providerOptions, providers, searchQuery, selectableModels]);
 
   const selectedItem = useMemo(() => {
     if (!selection) return null;
@@ -190,15 +195,15 @@ export function ModelSelectModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Add virtual model"
-      subtitle="Select a supported model from your configured providers. Metadata is generated automatically."
+      title={t("models.select.title")}
+      subtitle={t("models.select.subtitle")}
       icon="apps"
       size="lg"
       className="model-select-modal"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -208,17 +213,19 @@ export function ModelSelectModal({
             disabled={!canSubmit}
             onClick={handleSubmit}
           >
-            Add model
+            {t("models.select.add")}
           </Button>
         </>
       }
     >
       <div className="model-select-form">
         {providerOptions.length === 0 ? (
-          <div className="model-select-empty">
-            <p>No providers configured yet.</p>
-            <Link to="/providers">Set up providers</Link> before adding virtual models.
-          </div>
+          <EmptyPanel
+            compact
+            icon="dns"
+            title={t("models.select.noProviders")}
+            action={<Link to="/providers" onClick={onClose}>{t("models.select.setUpProviders")}</Link>}
+          />
         ) : (
           <>
             <div className="model-select-toolbar">
@@ -226,12 +233,12 @@ export function ModelSelectModal({
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search supported models…"
+                  placeholder={t("models.select.search")}
                   icon="search"
                 />
               </div>
               <span className="model-select-count">
-                {loadingModels ? "Loading supported models…" : `${totalSupported} available`}
+                {loadingModels ? t("models.select.loading") : t("models.select.available", { count: totalSupported })}
               </span>
             </div>
 
@@ -239,20 +246,23 @@ export function ModelSelectModal({
               {loadingModels && filteredGroups.every((group) => group.items.length === 0) ? (
                 <div className="model-select-loading">
                   <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                  <p>Discovering supported models from all providers…</p>
+                  <p>{t("models.select.discovering")}</p>
                 </div>
               ) : null}
 
               {!loadingModels && filteredGroups.length === 0 ? (
-                <p className="cli-tool-hint">No supported models match your search.</p>
+                <p className="cli-tool-hint">{t("models.select.noMatch")}</p>
               ) : null}
 
               {filteredGroups.map((group) => (
                 <section key={group.providerId} className="model-select-group">
                   <div className="model-select-group-head">
-                    <h4>{group.label}</h4>
+                    <h4 className="md-select-group-title">
+                      <ProviderLogo className="cp-tab-logo" providerId={group.providerId} providerType={group.type} />
+                      {group.label}
+                    </h4>
                     <span className="model-select-group-meta">
-                      {group.items.length > 0 ? `${group.items.length} models` : "No models"}
+                      {group.items.length > 0 ? t("models.select.groupCount", { count: group.items.length }) : t("models.select.groupEmpty")}
                     </span>
                   </div>
 
@@ -291,26 +301,26 @@ export function ModelSelectModal({
 
             {previewForm ? (
               <div className="model-select-preview">
-                <p className="model-select-preview-title">Generated virtual model</p>
+                <p className="model-select-preview-title">{t("models.select.preview")}</p>
                 <div className="model-select-preview-grid">
                   <div>
-                    <span>Model ID</span>
+                    <span>{t("models.modelId")}</span>
                     <code>{previewForm.id}</code>
                   </div>
                   <div>
-                    <span>Display name</span>
+                    <span>{t("models.displayName")}</span>
                     <strong>{previewForm.display_name}</strong>
                   </div>
                   <div>
-                    <span>Provider</span>
+                    <span>{t("models.select.provider")}</span>
                     <strong>{selectedItem?.providerLabel}</strong>
                   </div>
                   <div>
-                    <span>Upstream</span>
+                    <span>{t("models.select.upstream")}</span>
                     <code>{selectedItem?.model.id}</code>
                   </div>
                   <div>
-                    <span>Capabilities</span>
+                    <span>{t("models.capabilities")}</span>
                     <strong>{previewForm.capabilities.join(", ")}</strong>
                   </div>
                 </div>
@@ -318,10 +328,9 @@ export function ModelSelectModal({
             ) : null}
 
             {!loadingModels && totalSupported === 0 ? (
-              <p className="cli-tool-hint">
-                No supported models are available yet. Check provider credentials or try discovery on the{" "}
-                <Link to="/providers">Providers</Link> page.
-              </p>
+              <PageNote icon="info" action={<Link to="/providers" onClick={onClose}>{t("models.select.openProviders")}</Link>}>
+                {t("models.select.noneAvailable")}
+              </PageNote>
             ) : null}
           </>
         )}

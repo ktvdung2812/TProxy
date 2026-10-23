@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiKeySelect, type ApiKeyOption } from "../cli-tools/ApiKeySelect";
 import { gatewayBaseUrl } from "../apis/utils";
-import { Button, Card, Field, Input, Select } from "../ui";
+import { Field, Input, Select } from "../ui";
+import { SectionHead, Segmented, ToolButton } from "../page-kit";
 import type { ClaudeMappingResponse } from "./api";
 import {
   buildBashExports,
@@ -20,7 +21,7 @@ import {
   resolveTierTargets,
 } from "./codegen";
 
-type Client = "claude" | "codex" | "cursor" | "models";
+type Client = "claude" | "codex" | "cursor";
 
 type Props = {
   client: Client;
@@ -41,19 +42,7 @@ const GPT_MODEL_OPTIONS = (Object.keys(GPT_CLIENT_TIER_PLACEHOLDERS) as GptCoden
   label: GPT_CLIENT_TIER_PLACEHOLDERS[tier] || tier,
 }));
 
-const CLAUDE_FORMAT_HINTS: Record<ClaudeFormat, string> = {
-  "claude-settings":
-    "Paste into ~/.claude/settings.json. Client keeps placeholder tier names (fable, sonnet, …); tproxy maps them on /v1/messages.",
-  shell: "One-shot Claude Code env exports for this machine.",
-};
-
-const CODEX_FORMAT_HINTS: Record<CodexFormat, string> = {
-  "codex-config":
-    "Paste into ~/.codex/config.toml. Client keeps GPT codenames (gpt-sol, gpt-terra, gpt-luna); tproxy maps them on /v1/chat/completions.",
-  "codex-auth":
-    "Paste into ~/.codex/auth.json (same folder as config.toml). Codex sends OPENAI_API_KEY to tproxy as the API key.",
-};
-
+/** Client config generator: keeps placeholder names on the client so tproxy can retarget them server-side. */
 export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
   const { t } = useTranslation();
   const [baseUrl, setBaseUrl] = useState(() => gatewayBaseUrl());
@@ -81,24 +70,14 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
         content: buildCursorSetupGuide(baseUrl, apiKey, overrides),
         filename: "cursor-setup.txt",
         language: "text",
-        hint: "Use a publicly reachable base URL (tunnel). Add each custom model ID in Cursor Settings → Models.",
+        hint: t("mapping.cursorSetupHint"),
       };
     }
 
     if (client === "codex") {
       return codexFormat === "codex-auth"
-        ? {
-            content: buildCodexAuth(apiKey),
-            filename: "~/.codex/auth.json",
-            language: "json",
-            hint: CODEX_FORMAT_HINTS["codex-auth"],
-          }
-        : {
-            content: buildCodexConfig(baseUrl, gptModel),
-            filename: "~/.codex/config.toml",
-            language: "toml",
-            hint: CODEX_FORMAT_HINTS["codex-config"],
-          };
+        ? { content: buildCodexAuth(apiKey), filename: "~/.codex/auth.json", language: "json", hint: t("mapping.codexAuthFormatHint") }
+        : { content: buildCodexConfig(baseUrl, gptModel), filename: "~/.codex/config.toml", language: "toml", hint: t("mapping.codexSettingsFormatHint") };
     }
 
     if (claudeFormat === "claude-settings") {
@@ -106,24 +85,14 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
         content: buildClaudeSettings(baseUrl, apiKey, primaryModel),
         filename: "~/.claude/settings.json",
         language: "json",
-        hint: CLAUDE_FORMAT_HINTS["claude-settings"],
+        hint: t("mapping.claudeSettingsFormatHint"),
       };
     }
 
     return shell === "bash"
-      ? {
-          content: buildBashExports(baseUrl, apiKey, primaryModel),
-          filename: "claude-code.sh",
-          language: "bash",
-          hint: CLAUDE_FORMAT_HINTS.shell,
-        }
-      : {
-          content: buildPowerShellExports(baseUrl, apiKey, primaryModel),
-          filename: "claude-code.ps1",
-          language: "powershell",
-          hint: CLAUDE_FORMAT_HINTS.shell,
-        };
-  }, [client, claudeFormat, codexFormat, shell, baseUrl, apiKey, primaryModel, gptModel, overrides]);
+      ? { content: buildBashExports(baseUrl, apiKey, primaryModel), filename: "claude-code.sh", language: "bash", hint: t("mapping.shellFormatHint") }
+      : { content: buildPowerShellExports(baseUrl, apiKey, primaryModel), filename: "claude-code.ps1", language: "powershell", hint: t("mapping.shellFormatHint") };
+  }, [client, claudeFormat, codexFormat, shell, baseUrl, apiKey, primaryModel, gptModel, overrides, t]);
 
   const copyContent = async () => {
     try {
@@ -135,178 +104,124 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
     }
   };
 
-  const title = client === "claude" ? "Claude Code" : client === "codex" ? "Codex CLI" : "Cursor IDE";
-  const description =
-    client === "claude"
-      ? "Generate client config that keeps placeholder tier names — tproxy rewrites them on /v1/messages."
-      : client === "codex"
-        ? "Generate Codex config with GPT codenames like gpt-sol — tproxy rewrites them on /v1/chat/completions."
-        : "Generate Cursor setup notes. Add the listed custom model IDs in Settings → Models; tproxy rewrites them on /v1/chat/completions.";
+  const title = t(`mapping.codePanelTitle_${client}`);
+  const description = client === "claude" ? t("mapping.claudeCodeDesc") : client === "codex" ? t("mapping.codexCodeDesc") : t("mapping.cursorCodeDesc");
+  const targets =
+    client === "cursor"
+      ? cursorTargets.map((row) => ({ key: row.id, source: row.id, target: row.target }))
+      : visibleTiers.map((tier) => ({
+          key: tier,
+          source: client === "codex" ? GPT_CLIENT_TIER_PLACEHOLDERS[tier as GptCodenameTier] || tier : tier,
+          target: serverTargets[tier] || "",
+        }));
 
   return (
-    <Card pad="md" className="mapping-card mapping-card-wide mapping-code-panel">
-      <div className="mapping-card-head">
-        <span className="material-symbols-outlined">code</span>
-        <div>
-          <strong>Generate code · {title}</strong>
-          <p>{description}</p>
-        </div>
-      </div>
-
-      <div className="mapping-code-form">
-        <Field
-          label={t("mapping.gatewayBaseUrl")}
-          hint={
-            client === "claude"
-              ? "Anthropic-compatible endpoint, usually your tproxy origin with /v1."
-              : client === "cursor"
-                ? "Public OpenAI-compatible URL (tunnel / cloud). Cursor does not support localhost."
-                : "OpenAI-compatible endpoint, usually your tproxy origin with /v1."
-          }
-        >
-          <Input
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            placeholder="http://localhost:28120/v1"
+    <section className="cp-panel mp-panel mp-code">
+      <SectionHead
+        leading={<span className="cp-section-icon material-symbols-outlined" aria-hidden>code</span>}
+        title={t("mapping.generateCode", { title })}
+        subtitle={description}
+      />
+      <div className="mp-code-body">
+        <div className="mp-code-form">
+          <Field
+            label={t("mapping.gatewayBaseUrl")}
+            hint={client === "claude" ? t("mapping.claudeGatewayHint") : client === "cursor" ? t("mapping.cursorGatewayHint") : t("mapping.codexGatewayHint")}
+          >
+            <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://localhost:28120/v1" />
+          </Field>
+          <ApiKeySelect
+            apiKeys={apiKeys}
+            value={apiKey}
+            onChange={setApiKey}
+            emptyMessage={t("mapping.createApiKeyHint")}
+            missingSecretMessage={t("mapping.revealSecretHint")}
           />
-        </Field>
-        <ApiKeySelect
-          apiKeys={apiKeys}
-          value={apiKey}
-          onChange={setApiKey}
-          emptyMessage="Create an API key on the APIs page to generate client config."
-          missingSecretMessage="Reveal or paste the key secret in APIs — it is stored locally in this browser."
-        />
-        {client === "claude" ? (
-          <Field
-            label="Primary model"
-            hint="ANTHROPIC_MODEL and CLAUDE_CODE_SUBAGENT_MODEL — placeholder name, not the upstream target."
-          >
-            <Select value={primaryModel} onChange={(event) => setPrimaryModel(event.target.value as MappingTier)}>
-              {PRIMARY_MODEL_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ) : client === "codex" ? (
-          <Field
-            label="Primary model"
-            hint="Codex model field — GPT codename placeholder mapped to the configured tier target."
-          >
-            <Select value={gptModel} onChange={(event) => setGptModel(event.target.value as GptCodenameTier)}>
-              {GPT_MODEL_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ) : null}
-      </div>
-
-      {client === "cursor" ? (
-        <div className="mapping-code-targets">
-          <span className="mapping-code-targets-label">Cursor custom model targets</span>
-          <div className="mapping-code-targets-grid">
-            {cursorTargets.map((row) => (
-              <div key={row.id} className="mapping-code-target-chip">
-                <code>{row.id}</code>
-                <span className="mapping-placeholder-arrow">→</span>
-                <code>{row.target || "—"}</code>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="mapping-code-targets">
-          <span className="mapping-code-targets-label">Server-side tier targets</span>
-          <div className="mapping-code-targets-grid">
-            {visibleTiers.map((tier) => (
-              <div key={tier} className="mapping-code-target-chip">
-                <code>{tier}</code>
-                <span className="mapping-placeholder-arrow">→</span>
-                <code>{serverTargets[tier] || "—"}</code>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {client === "claude" ? (
-        <div className="mapping-code-toolbar">
-          <div className="usage-segmented">
-            <button
-              type="button"
-              className={claudeFormat === "claude-settings" ? "active" : ""}
-              onClick={() => setClaudeFormat("claude-settings")}
-            >
-              settings.json
-            </button>
-            <button
-              type="button"
-              className={claudeFormat === "shell" ? "active" : ""}
-              onClick={() => setClaudeFormat("shell")}
-            >
-              Shell exports
-            </button>
-          </div>
-          {claudeFormat === "shell" ? (
-            <div className="usage-segmented">
-              <button
-                type="button"
-                className={shell === "bash" ? "active" : ""}
-                onClick={() => setShell("bash")}
-              >
-                Bash
-              </button>
-              <button
-                type="button"
-                className={shell === "powershell" ? "active" : ""}
-                onClick={() => setShell("powershell")}
-              >
-                PowerShell
-              </button>
-            </div>
+          {client === "claude" ? (
+            <Field label={t("mapping.primaryModel")} hint={t("mapping.primaryModelClaudeHint")}>
+              <Select value={primaryModel} onChange={(event) => setPrimaryModel(event.target.value as MappingTier)}>
+                {PRIMARY_MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
+            </Field>
+          ) : client === "codex" ? (
+            <Field label={t("mapping.primaryModel")} hint={t("mapping.primaryModelCodexHint")}>
+              <Select value={gptModel} onChange={(event) => setGptModel(event.target.value as GptCodenameTier)}>
+                {GPT_MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
+            </Field>
           ) : null}
         </div>
-      ) : client === "codex" ? (
-        <div className="mapping-code-toolbar">
-          <div className="usage-segmented">
-            <button
-              type="button"
-              className={codexFormat === "codex-config" ? "active" : ""}
-              onClick={() => setCodexFormat("codex-config")}
-            >
-              config.toml
-            </button>
-            <button
-              type="button"
-              className={codexFormat === "codex-auth" ? "active" : ""}
-              onClick={() => setCodexFormat("codex-auth")}
-            >
-              auth.json
-            </button>
+
+        <div className="mp-code-targets">
+          <span className="mp-kicker">{client === "cursor" ? t("mapping.cursorTargetsLabel") : t("mapping.serverTierTargetsLabel")}</span>
+          {targets.length === 0 ? (
+            <span className="mp-dim">{t("mapping.noCursorTargets")}</span>
+          ) : (
+            <div className="mp-chips">
+              {targets.map((row) => (
+                <span key={row.key} className="mp-chip" title={`${row.source} → ${row.target || "—"}`}>
+                  <code>{row.source}</code>
+                  <span className="material-symbols-outlined" aria-hidden>arrow_forward</span>
+                  <code className="mp-chip-target">{row.target || "—"}</code>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mp-code-block">
+          <div className="mp-code-head">
+            {client === "claude" ? (
+              <>
+                <Segmented
+                  label={t("mapping.formatLabel")}
+                  value={claudeFormat}
+                  onChange={setClaudeFormat}
+                  items={[
+                    { value: "claude-settings", label: "settings.json" },
+                    { value: "shell", label: t("mapping.shellExports") },
+                  ]}
+                />
+                {claudeFormat === "shell" ? (
+                  <Segmented
+                    label={t("mapping.shellLabel")}
+                    value={shell}
+                    onChange={setShell}
+                    items={[
+                      { value: "bash", label: "Bash" },
+                      { value: "powershell", label: "PowerShell" },
+                    ]}
+                  />
+                ) : null}
+              </>
+            ) : client === "codex" ? (
+              <Segmented
+                label={t("mapping.formatLabel")}
+                value={codexFormat}
+                onChange={setCodexFormat}
+                items={[
+                  { value: "codex-config", label: "config.toml" },
+                  { value: "codex-auth", label: "auth.json" },
+                ]}
+              />
+            ) : null}
+            <span className="mp-code-file">
+              {filename} · {language}
+            </span>
+            <ToolButton icon={copied ? "check" : "content_copy"} tone={copied ? "success" : undefined} onClick={() => void copyContent()}>
+              {copied ? t("mapping.copied") : t("mapping.copy")}
+            </ToolButton>
           </div>
+          <p className="mp-code-hint">{hint}</p>
+          <pre className="mp-pre custom-scrollbar">
+            <code>{content}</code>
+          </pre>
         </div>
-      ) : null}
-
-      <p className="mapping-code-format-hint">{hint}</p>
-
-      <div className="cli-tool-codeblock">
-        <div className="cli-tool-codeblock-head">
-          <span>
-            {filename} · {language}
-          </span>
-          <Button variant="ghost" size="sm" icon={copied ? "check" : "content_copy"} onClick={() => void copyContent()}>
-            {copied ? "Copied" : "Copy"}
-          </Button>
-        </div>
-        <pre>
-          <code>{content}</code>
-        </pre>
       </div>
-    </Card>
+    </section>
   );
 }

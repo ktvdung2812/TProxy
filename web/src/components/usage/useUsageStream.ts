@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UsageStats } from "./api";
 import { sameUsageLiveSnapshot, type UsageLiveSnapshot } from "./utils";
 
 export type UsageLiveUpdate = Pick<UsageStats, "activeRequests" | "recentRequests" | "errorProvider">;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
+
+/** "connecting" until the first response, "live" while the stream is open, "retrying" between attempts. */
+export type UsageStreamState = "off" | "connecting" | "live" | "retrying";
 
 export function useUsageStream(
   secret: string,
@@ -13,13 +16,18 @@ export function useUsageStream(
 ) {
   const onUpdateRef = useRef(onUpdate);
   const lastSnapshotRef = useRef<UsageLiveSnapshot | null>(null);
+  const [state, setState] = useState<UsageStreamState>("off");
 
   useEffect(() => {
     onUpdateRef.current = onUpdate;
   }, [onUpdate]);
 
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (!enabled) {
+      setState("off");
+      return undefined;
+    }
+    setState("connecting");
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = 1000;
@@ -28,6 +36,7 @@ export function useUsageStream(
 
     function scheduleReconnect() {
       if (cancelled) return;
+      setState("retrying");
       reconnectTimer = setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
         connect();
@@ -68,6 +77,7 @@ export function useUsageStream(
         if (!response.ok || !response.body) throw new Error(`usage stream failed: ${response.status}`);
 
         reconnectDelay = 1000;
+        setState("live");
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let pending = "";
@@ -98,4 +108,6 @@ export function useUsageStream(
       controller?.abort();
     };
   }, [secret, enabled]);
+
+  return state;
 }

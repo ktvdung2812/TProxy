@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, Button, Card, EmptyState, Input } from "../ui";
+import { EmptyPanel, IconAction, LinkButton, SearchField, SectionHead, StatusPill, Tag, ToneCounts, ToolButton } from "../page-kit";
+import { cn } from "../ui";
 import { discoverProviderModels, testModel } from "./api";
 import type { DiscoveredModel } from "./api";
 import type { Credential } from "./types";
@@ -10,286 +11,253 @@ type Props = {
   credentials: Credential[];
   secret: string;
   discoverNonce?: number;
+  /** Re-runs discovery bypassing the cache; owned by the detail page so the notice is shared. */
+  onDiscover?: () => void;
 };
 
-/**
- * Models card for a provider detail page — upstream models discovered from accounts.
- */
-export function ModelsSection({
-  providerId,
-  credentials,
-  secret,
-  discoverNonce = 0,
-}: Props) {
+type TestResult = { ok: boolean; latency?: number; error?: string };
+
+/** Upstream models discovered from the provider's enabled accounts, with per-model reachability tests. */
+export function ModelsSection({ providerId, credentials, secret, discoverNonce = 0, onDiscover }: Props) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState<string | null>(null);
   const [discovering, setDiscovering] = useState(false);
-  const [availableModels, setAvailableModels] = useState<DiscoveredModel[]>([]);
+  const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [modelTestResults, setModelTestResults] = useState<Record<string, "ok" | "error">>({});
-  const [testingModelId, setTestingModelId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [testingId, setTestingId] = useState<string | null>(null);
   const [testingAll, setTestingAll] = useState(false);
-  const [testError, setTestError] = useState("");
 
-  const enabledCredentials = useMemo(
-    () => credentials.filter((credential) => credential.enabled),
-    [credentials],
-  );
+  const enabledCount = useMemo(() => credentials.filter((credential) => credential.enabled).length, [credentials]);
+  const normalized = query.trim().toLowerCase();
 
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-
-  const filteredAvailableModels = useMemo(() => {
-    if (!normalizedQuery) return availableModels;
-    return availableModels.filter((model) => {
-      const haystack = [model.id, model.name, model.owned_by, ...(model.capabilities || [])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
-    });
-  }, [availableModels, normalizedQuery]);
+  const filtered = useMemo(() => {
+    if (!normalized) return models;
+    return models.filter((model) =>
+      [model.id, model.name, model.owned_by, ...(model.capabilities || [])].filter(Boolean).join(" ").toLowerCase().includes(normalized),
+    );
+  }, [models, normalized]);
 
   useEffect(() => {
-    if (enabledCredentials.length === 0) {
-      setAvailableModels([]);
+    if (enabledCount === 0) {
+      setModels([]);
       setDiscoveryError(null);
       return;
     }
-
     let cancelled = false;
     setDiscovering(true);
     setDiscoveryError(null);
-
     discoverProviderModels(secret, providerId, discoverNonce > 0)
       .then((result) => {
         if (cancelled) return;
-        setAvailableModels(result.data || []);
-        if (result.error?.message) {
-          setDiscoveryError(result.error.message);
-        }
+        setModels(result.data || []);
+        if (result.error?.message) setDiscoveryError(result.error.message);
       })
       .catch((cause) => {
         if (cancelled) return;
-        setAvailableModels([]);
+        setModels([]);
         setDiscoveryError(cause instanceof Error ? cause.message : t("providers.modelDiscoveryFailed"));
       })
       .finally(() => {
         if (!cancelled) setDiscovering(false);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [providerId, secret, enabledCredentials.length, discoverNonce]);
+    // t is left out on purpose: a language switch must not re-run discovery.
+  }, [providerId, secret, enabledCount, discoverNonce]);
 
-  const handleCopy = async (text: string, key: string) => {
+  const copy = async (id: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(key);
+      await navigator.clipboard.writeText(id);
+      setCopied(id);
       window.setTimeout(() => setCopied(null), 1500);
     } catch {
       /* clipboard blocked */
     }
   };
 
-  const runModelTest = async (model: DiscoveredModel) => {
-    const result = await testModel(secret, {
-      provider_id: providerId,
-      model_id: model.id,
-      kind: "llm",
-      credential_ids: model.credential_ids,
-    });
-    setModelTestResults((prev) => ({ ...prev, [model.id]: result.ok ? "ok" : "error" }));
-    if (!result.ok) {
-      const latency = result.latency_ms ? ` (${result.latency_ms} ms)` : "";
-      setTestError(`${model.id}: ${result.error || t("providers.modelNotReachable")}${latency}`);
-    }
-    return result.ok;
-  };
-
-  const handleTestUpstreamModel = async (model: DiscoveredModel) => {
-    if (testingModelId || testingAll) return;
-    setTestingModelId(model.id);
-    setTestError("");
+  const runTest = async (model: DiscoveredModel) => {
     try {
-      await runModelTest(model);
+      const result = await testModel(secret, { provider_id: providerId, model_id: model.id, kind: "llm", credential_ids: model.credential_ids });
+      setResults((prev) => ({
+        ...prev,
+        [model.id]: { ok: result.ok, latency: result.latency_ms, error: result.ok ? undefined : result.error || t("providers.modelNotReachable") },
+      }));
     } catch (cause) {
-      setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
-      setTestError(cause instanceof Error ? cause.message : t("providers.testFailed"));
-    } finally {
-      setTestingModelId(null);
+      setResults((prev) => ({ ...prev, [model.id]: { ok: false, error: cause instanceof Error ? cause.message : t("providers.testFailed") } }));
     }
   };
 
-  const handleTestAllModels = async () => {
-    if (testingModelId || testingAll || availableModels.length === 0) return;
-    setTestingAll(true);
-    setTestError("");
+  const testOne = async (model: DiscoveredModel) => {
+    if (testingId || testingAll) return;
+    setTestingId(model.id);
     try {
-      for (const model of availableModels) {
-        setTestingModelId(model.id);
-        try {
-          await runModelTest(model);
-        } catch (cause) {
-          setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
-          setTestError(cause instanceof Error ? cause.message : `Test failed for ${model.id}`);
-        }
+      await runTest(model);
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const testAll = async () => {
+    if (testingId || testingAll || models.length === 0) return;
+    setTestingAll(true);
+    try {
+      for (const model of models) {
+        setTestingId(model.id);
+        await runTest(model);
       }
     } finally {
-      setTestingModelId(null);
+      setTestingId(null);
       setTestingAll(false);
     }
   };
 
-  const accountCount = enabledCredentials.length;
-  const availableSubtitle = discovering
-    ? t("providers.discoveringFromAccounts")
-    : `${availableModels.length} model${availableModels.length === 1 ? "" : "s"} across ${accountCount} account${accountCount === 1 ? "" : "s"}`;
-
-  const cardSubtitle = discovering
-    ? t("providers.loadingFromAccounts")
-    : enabledCredentials.length === 0
-      ? "Connect an account to discover upstream models"
-      : normalizedQuery
-        ? `${filteredAvailableModels.length} of ${availableModels.length} matching`
-        : `${availableModels.length} upstream model${availableModels.length === 1 ? "" : "s"}`;
+  const tested = Object.values(results);
+  const okCount = tested.filter((result) => result.ok).length;
+  const failCount = tested.length - okCount;
+  const subtitle = discovering
+    ? t("providers.modelsSectionDiscoveringFrom")
+    : enabledCount === 0
+      ? t("providers.modelsSectionCardSubtitleConnect")
+      : normalized
+        ? t("providers.modelsSectionCardSubtitleFiltered", { filtered: filtered.length, total: models.length })
+        : t("providers.models.summary", { count: models.length, accounts: enabledCount });
 
   return (
-    <Card
-      pad="md"
-      className="section"
-      title="Models"
-      subtitle={cardSubtitle}
-      icon="apps"
-      action={
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Button
-            variant="outline"
-            size="sm"
-            icon={testingAll ? "progress_activity" : "science"}
-            onClick={() => void handleTestAllModels()}
-            disabled={testingAll || !!testingModelId || availableModels.length === 0 || discovering}
-            aria-label={t("providers.testAllModels")}
-            title={t("providers.testAllModels")}
-          >
-            {testingAll ? "Testing..." : "Test all"}
-          </Button>
-          <Input
-            icon="search"
-            placeholder="Search models..."
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            style={{ width: 220 }}
-            aria-label="Search models"
-          />
+    <section className="cp-panel pv-panel pv-models" aria-label={t("providers.modelsTitle")}>
+      <SectionHead
+        leading={<span className="cp-section-icon material-symbols-outlined" aria-hidden>apps</span>}
+        title={t("providers.modelsTitle")}
+        subtitle={subtitle}
+        meta={
+          tested.length > 0 ? (
+            <ToneCounts
+              label={t("providers.models.testResults")}
+              items={[
+                { tone: "success", count: okCount, label: t("providers.models.reachable") },
+                { tone: "danger", count: failCount, label: t("providers.models.unreachable") },
+              ]}
+            />
+          ) : null
+        }
+        actions={
+          enabledCount > 0 ? (
+            <>
+              <ToolButton
+                icon="science"
+                spinning={testingAll}
+                disabled={testingAll || testingId !== null || models.length === 0 || discovering}
+                onClick={() => void testAll()}
+                title={t("providers.testAllModels")}
+              >
+                {testingAll ? t("providers.testing") : t("providers.testAll")}
+              </ToolButton>
+              {onDiscover ? (
+                <IconAction icon="refresh" label={t("providers.discoverModels")} spinning={discovering} disabled={discovering} onClick={onDiscover} />
+              ) : null}
+            </>
+          ) : null
+        }
+      />
+
+      {models.length > 0 ? (
+        <div className="pv-models-tools">
+          <SearchField value={query} onChange={setQuery} placeholder={t("providers.models.searchPlaceholder")} shortcut={false} className="pv-models-search" />
+          {discoveryError ? <span className="pv-models-warning" title={discoveryError}>{discoveryError}</span> : null}
         </div>
-      }
-    >
-      {enabledCredentials.length === 0 ? (
-        <EmptyState
-          icon="key_off"
-          text="No accounts connected yet."
-          hint="Add a credential to discover upstream models available from this provider."
-        />
-      ) : discovering && availableModels.length === 0 ? (
-        <EmptyState icon="progress_activity" text="Discovering models from all accounts..." />
-      ) : availableModels.length === 0 && !normalizedQuery ? (
-        <EmptyState
-          icon="apps"
-          text="No models discovered from connected accounts."
-          hint={discoveryError || "Check account health or try Discover models again."}
-        />
-      ) : normalizedQuery && filteredAvailableModels.length === 0 ? (
-        <EmptyState
-          icon="search"
-          text={`No models match "${searchQuery.trim()}".`}
-          hint="Try a different model id, name, or capability."
-        />
-      ) : filteredAvailableModels.length > 0 ? (
-        <div>
-          {testError ? (
-            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--color-danger)", wordBreak: "break-word" }}>
-              {testError}
-            </p>
-          ) : null}
-          <div className="model-table-wrap">
-            <table className="model-table">
-              <thead>
-                <tr>
-                  <th>Model</th>
-                  <th>Capabilities</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredAvailableModels.map((model) => {
-                  const testStatus = modelTestResults[model.id];
-                  const isTesting = testingModelId === model.id;
-                  return (
-                    <tr
-                      key={model.id}
-                      className={
-                        testStatus === "ok"
-                          ? "model-table-test-ok"
-                          : testStatus === "error"
-                            ? "model-table-test-error"
-                            : undefined
-                      }
-                    >
-                      <td>
-                        <div className="model-table-identity">
-                          <div className="model-table-name">{model.name?.trim() || model.id}</div>
-                          {model.name?.trim() && model.name.trim() !== model.id ? (
-                            <code>{model.id}</code>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="model-table-capabilities">
-                          {model.capabilities?.map((cap) => (
-                            <Badge key={cap} variant="default" size="sm">{cap}</Badge>
-                          ))}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="model-table-actions">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            icon={isTesting ? "progress_activity" : testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "science"}
-                            onClick={() => void handleTestUpstreamModel(model)}
-                            disabled={isTesting || testingAll || enabledCredentials.length === 0}
-                            aria-label="Test model"
-                            title={isTesting ? "Testing..." : "Test model"}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            icon={copied === model.id ? "check" : "content_copy"}
-                            onClick={() => handleCopy(model.id, model.id)}
-                            aria-label="Copy model id"
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : normalizedQuery ? (
-        <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-muted)" }}>
-          No upstream models match your search.
-        </p>
       ) : null}
 
-      {enabledCredentials.length > 0 && (
-        <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-          {availableSubtitle}
-        </p>
+      {enabledCount === 0 ? (
+        <EmptyPanel compact icon="key_off" title={t("providers.modelsSectionNoAccounts")} description={t("providers.modelsSectionNoAccountsHint")} />
+      ) : discovering && models.length === 0 ? (
+        <div className="cp-skeleton pv-models-skeleton" aria-label={t("providers.modelsSectionDiscovering")}>
+          <span />
+          <span />
+          <span />
+        </div>
+      ) : models.length === 0 ? (
+        <EmptyPanel
+          compact
+          icon={discoveryError ? "error" : "apps"}
+          title={t("providers.modelsSectionNoModels")}
+          description={discoveryError || t("providers.modelsSectionNoModelsHint")}
+          action={onDiscover ? <LinkButton onClick={onDiscover}>{t("providers.discoverModels")}</LinkButton> : null}
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyPanel
+          compact
+          icon="search_off"
+          title={t("providers.modelsSectionNoMatch", { query: query.trim() })}
+          description={t("providers.modelsSectionNoMatchHint")}
+          action={<LinkButton onClick={() => setQuery("")}>{t("providers.list.clearFilters")}</LinkButton>}
+        />
+      ) : (
+        <div className="cp-list pv-model-list">
+          <div className="cp-list-head" aria-hidden>
+            <span>{t("providers.colModel")}</span>
+            <span>{t("providers.colCapabilities")}</span>
+            <span>{t("providers.models.colTest")}</span>
+            <span />
+          </div>
+          {filtered.map((model) => {
+            const result = results[model.id];
+            const testing = testingId === model.id;
+            const name = model.name?.trim();
+            const accounts = model.credential_ids?.length ?? 0;
+            return (
+              <div key={model.id} className={cn("cp-list-row pv-model-row", result && (result.ok ? "is-ok" : "is-failed"))}>
+                <span className="cp-cell cp-cell-main">
+                  <strong title={name || model.id}>{name || model.id}</strong>
+                  <small title={model.id}>
+                    {name && name !== model.id ? model.id : model.owned_by || model.id}
+                    {accounts > 0 ? ` · ${t("providers.models.accounts", { count: accounts })}` : ""}
+                  </small>
+                </span>
+                <span className="cp-cell pv-model-caps">
+                  {(model.capabilities || []).map((capability) => (
+                    <Tag key={capability} tone="neutral">{capability}</Tag>
+                  ))}
+                </span>
+                <span className="cp-cell">
+                  {testing ? (
+                    <StatusPill tone="info" loading>{t("providers.testing")}</StatusPill>
+                  ) : result ? (
+                    <StatusPill tone={result.ok ? "success" : "danger"} title={result.error}>
+                      {result.ok
+                        ? result.latency
+                          ? t("providers.models.okLatency", { ms: result.latency })
+                          : t("providers.models.ok")
+                        : t("providers.models.failed")}
+                    </StatusPill>
+                  ) : (
+                    <span className="cp-cell-mono pv-dim">—</span>
+                  )}
+                </span>
+                <span className="cp-cell cp-cell-actions">
+                  <IconAction
+                    icon="science"
+                    label={t("providers.testModel")}
+                    spinning={testing}
+                    disabled={testing || testingAll}
+                    onClick={() => void testOne(model)}
+                  />
+                  <IconAction
+                    icon={copied === model.id ? "check" : "content_copy"}
+                    label={t("providers.copyModelId")}
+                    active={copied === model.id}
+                    onClick={() => void copy(model.id)}
+                  />
+                </span>
+                {result && !result.ok && result.error ? (
+                  <span className="pv-model-error" title={result.error}>{result.error}</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       )}
-    </Card>
+    </section>
   );
 }

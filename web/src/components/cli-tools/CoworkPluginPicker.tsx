@@ -26,19 +26,23 @@ export function CoworkPluginPicker({ catalog, active, onChange }: Props) {
   };
 
   return (
-    <div className="cli-tool-field-stack">
-      <p className="cli-tool-step-title">{t("cliTools.coworkPlugins")}</p>
-      <p className="cli-tool-step-desc">{t("cliTools.coworkPluginsDesc")}</p>
-      {catalog.map((plugin) => (
-        <div key={plugin.name} className="cli-tool-plugin-row">
-          <Toggle
-            label={plugin.title || plugin.name}
-            checked={selected.includes(plugin.name)}
-            onChange={(event) => toggle(plugin.name, event.target.checked)}
-          />
-          <code>{plugin.url}</code>
-        </div>
-      ))}
+    <div className="ct-option-group">
+      <div className="ct-option-head">
+        <strong>{t("cliTools.coworkPlugins")}</strong>
+        <p>{t("cliTools.coworkPluginsDesc")}</p>
+      </div>
+      <ul className="ct-plugin-list">
+        {catalog.map((plugin) => (
+          <li key={plugin.name}>
+            <Toggle
+              label={plugin.title || plugin.name}
+              checked={selected.includes(plugin.name)}
+              onChange={(event) => toggle(plugin.name, event.target.checked)}
+            />
+            <code title={plugin.url}>{plugin.url}</code>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -12,9 +12,7 @@ export type ConnectionMethodKind =
   | "cookie"
   | "service_account"
   | "none"
-  | "import_cliproxy"
-  | "import_sub2api"
-  | "import_9router"
+  | "import_data"
   | "import_cursor"
   | "connect_kiro";
 
@@ -50,8 +48,6 @@ const CLIPROXY_IMPORT_TYPES = new Set([
   "openai-compatible",
   "anthropic-compatible",
 ]);
-
-const SUB2API_IMPORT_TYPES = new Set(["codex", "claude", "antigravity", "xai"]);
 
 const OAUTH_READY_TYPES = new Set(OAUTH_PROVIDER_TYPES);
 
@@ -147,9 +143,9 @@ export function resolveConnectionProfile(
           available: true,
         },
         {
-          kind: "import_9router",
-          label: "Import 9router backup",
-          description: "Restore credentials from a 9router export via Import Data.",
+          kind: "import_data",
+          label: "Import data",
+          description: "Select JSON files; the format is detected and converted automatically.",
           available: true,
         },
       ],
@@ -170,9 +166,9 @@ export function resolveConnectionProfile(
           available: true,
         },
         {
-          kind: "import_9router",
-          label: "Import 9router backup",
-          description: "Restore credentials from a 9router export via Import Data.",
+          kind: "import_data",
+          label: "Import data",
+          description: "Select JSON files; the format is detected and converted automatically.",
           available: true,
         },
       ],
@@ -204,13 +200,6 @@ export function resolveConnectionProfile(
         available: true,
         oauthMode: defaultOAuthMode(providerType, presetId),
       });
-    } else if (CLIPROXY_IMPORT_TYPES.has(providerType)) {
-      methods.push({
-        kind: "import_cliproxy",
-        label: "Import CLIProxyAPI auth JSON",
-        description: "Paste an exported OAuth token file from CLIProxyAPI.",
-        available: true,
-      });
     }
   }
 
@@ -239,28 +228,10 @@ export function resolveConnectionProfile(
     });
   }
 
-  if (oauthAvailable(providerType) && hasOAuthMode) {
-    methods.push({
-      kind: "import_cliproxy",
-      label: "Import CLIProxyAPI OAuth JSON",
-      description: "Connect using a CLIProxyAPI OAuth auth export.",
-      available: true,
-    });
-  }
-
-  if (SUB2API_IMPORT_TYPES.has(providerType)) {
-    methods.push({
-      kind: "import_sub2api",
-      label: "Import sub2api accounts",
-      description: "Import OAuth accounts from a sub2api JSON export, including refresh tokens and account metadata.",
-      available: true,
-    });
-  }
-
   methods.push({
-    kind: "import_9router",
-    label: "Import 9router backup",
-    description: "Restore credentials from a 9router export via Import Data.",
+    kind: "import_data",
+    label: "Import data",
+    description: "Select JSON files; the format is detected and converted automatically.",
     available: true,
   });
 
@@ -279,7 +250,7 @@ export function resolveConnectionProfile(
     showAdvancedCredential: true,
     notice:
       oauthUnavailable
-        ? "Interactive OAuth is not available for this provider yet. Use Import 9router backup if you already have credentials."
+        ? "Interactive OAuth is not available for this provider yet. Use Import data if you already have exported credentials."
         : preset?.auth_hint && isCookie
           ? preset.auth_hint
           : undefined,

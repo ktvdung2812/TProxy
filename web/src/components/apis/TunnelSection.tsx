@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { Button, ConfirmDialog, Field, Input, Modal, Toggle } from "../ui";
+import { Button, ConfirmDialog, Field, Input, Modal, Toggle, cn } from "../ui";
+import { StatusPill, ToolButton, type Tone } from "../page-kit";
 import { SecurityWarning } from "./SecurityWarning";
 import {
   checkTailscale,
@@ -23,74 +24,92 @@ type Props = {
   apiKeyCount: number;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
+  /** Reports the live state of both methods so the page can show it outside this panel. */
+  onSummary?: (summary: RemoteAccessSummary) => void;
 };
 
 const STATUS_POLL_MS = 5000;
 const PING_INTERVAL_MS = 3000;
 const MISS_THRESHOLD = 3;
 
-type EndpointTunnelRowProps = {
-  label: string;
-  active?: boolean;
+export type TunnelState = "checking" | "off" | "busy" | "online" | "unreachable" | "reconnecting" | "error";
+
+export type RemoteAccessSummary = {
+  loading: boolean;
+  cloudflare: { state: TunnelState; url?: string };
+  tailscale: { state: TunnelState; url?: string };
+};
+
+export const STATE_TONE: Record<TunnelState, Tone> = {
+  checking: "neutral",
+  off: "muted",
+  busy: "info",
+  online: "success",
+  unreachable: "warning",
+  reconnecting: "warning",
+  error: "danger",
+};
+
+type TunnelCardProps = {
+  icon: string;
+  title: string;
+  description: string;
+  state: TunnelState;
   url?: string;
+  message?: string;
+  facts?: ReactNode;
   copyId: string;
   copied: string | null;
   onCopy: (text: string, id: string) => void;
-  statusText?: string;
-  statusTone?: "warn" | "error" | "muted";
-  trailing?: React.ReactNode;
+  actions?: ReactNode;
 };
 
-function EndpointTunnelRow({
-  label,
-  active,
-  url,
-  copyId,
-  copied,
-  onCopy,
-  statusText,
-  statusTone = "muted",
-  trailing,
-}: EndpointTunnelRowProps) {
+/** One remote-access method: what it is, its live state and the start/stop controls. */
+function TunnelCard({ icon, title, description, state, url, message, facts, copyId, copied, onCopy, actions }: TunnelCardProps) {
+  const { t } = useTranslation();
+  const tone = STATE_TONE[state];
   return (
-    <div className="endpoint-row">
-      <span className={active ? "endpoint-row-badge active" : "endpoint-row-badge"}>{label}</span>
-      {url ? (
-        <>
-          <Input value={url} readOnly className="endpoint-row-input" />
-          <button
-            type="button"
-            className="endpoint-row-copy"
-            onClick={() => onCopy(url, copyId)}
-            aria-label={`Copy ${label}`}
-          >
-            <span className="material-symbols-outlined">{copied === copyId ? "check" : "content_copy"}</span>
-          </button>
-        </>
-      ) : statusText ? (
-        <div className={`endpoint-row-status-box ${statusTone}`}>
-          {statusTone === "warn" ? (
-            <span className="material-symbols-outlined endpoint-row-status-icon">progress_activity</span>
-          ) : null}
-          <span>{statusText}</span>
+    <article className={cn("cp-card ap-tunnel", `cp-tone-${tone}`)} aria-label={title}>
+      <header className="cp-card-head">
+        <span className="material-symbols-outlined cp-section-icon" aria-hidden>{icon}</span>
+        <div className="cp-card-title">
+          <strong>{title}</strong>
+          <div className="cp-card-tags">
+            <StatusPill tone={tone} loading={state === "checking" || state === "busy" || state === "reconnecting"}>
+              {t(`apis.tunnel.state.${state}`)}
+            </StatusPill>
+          </div>
         </div>
-      ) : (
-        <div className="endpoint-row-placeholder" />
-      )}
-      {trailing ? <div className="endpoint-row-trailing">{trailing}</div> : null}
-    </div>
+      </header>
+      <div className="cp-card-body">
+        <p className="ap-tunnel-desc">{description}</p>
+        {url ? (
+          <button type="button" className="ap-url ap-tunnel-url" onClick={() => onCopy(url, copyId)} title={t("apis.copyEndpoint", { label: title })}>
+            <span className="ap-url-text">{url}</span>
+            <span className="material-symbols-outlined" aria-hidden>{copied === copyId ? "check" : "content_copy"}</span>
+          </button>
+        ) : null}
+        {message ? (
+          <p className={cn("ap-tunnel-msg", `cp-tone-${tone}`)} role={state === "error" ? "alert" : "status"}>
+            <span className={cn("material-symbols-outlined", (state === "busy" || state === "reconnecting") && "animate-spin")} aria-hidden>
+              {state === "error" ? "error" : state === "busy" || state === "reconnecting" ? "progress_activity" : state === "unreachable" ? "warning" : "info"}
+            </span>
+            <span>{message}</span>
+          </p>
+        ) : null}
+        {facts}
+      </div>
+      {actions ? (
+        <footer className="cp-card-foot">
+          <span />
+          <div className="ap-tunnel-actions">{actions}</div>
+        </footer>
+      ) : null}
+    </article>
   );
 }
 
-function PowerButton({ title, onClick }: { title: string; onClick: () => void }) {
-  return (
-    <button type="button" className="endpoint-row-power" onClick={onClick} title={title}>
-      <span className="material-symbols-outlined">power_settings_new</span>
-    </button>
-  );
-}
-
-export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props) {
+export function TunnelSection({ secret, apiKeyCount, onError, onNotice, onSummary }: Props) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const [tunnel, setTunnel] = useState<CloudflareTunnelStatus | null>(null);
@@ -381,280 +400,229 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
     }
   };
 
-  const renderTunnelRow = () => {
-    if (loading) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          copyId="tunnel_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={t("apis.tunnel.checking")}
-        />
-      );
+  const startCloudflare = () => {
+    if (apiKeyCount === 0) {
+      setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
+      return;
     }
-    if (tunnelLoading) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          active
-          copyId="tunnel_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={tunnelProgress || t("apis.tunnel.creating")}
-          statusTone="muted"
-        />
-      );
-    }
+    openCloudflare();
+  };
+
+  const stopCloudflareButton = (
+    <ToolButton icon="power_settings_new" tone="danger" onClick={() => setShowDisableModal(true)} title={t("apis.tunnel.disableTunnel")}>
+      {t("apis.tunnel.stop")}
+    </ToolButton>
+  );
+  const configureCloudflareButton = (label = t("apis.tunnel.configure"), icon = "tune") => (
+    <ToolButton icon={icon} onClick={openCloudflare}>{label}</ToolButton>
+  );
+
+  // Same state machine as before, expressed as one view per state.
+  const cloudflareView = ((): { state: TunnelState; url?: string; message?: string; actions?: ReactNode } => {
+    if (loading) return { state: "checking", message: t("apis.tunnel.checking") };
+    if (tunnelLoading) return { state: "busy", message: tunnelProgress || t("apis.tunnel.creating") };
     if (tunnelStatusMessage) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          copyId="tunnel_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={tunnelStatusMessage}
-          statusTone="error"
-          trailing={
-            <>
-              {tunnelEnabled ? (
-                <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
-              ) : (
-                <Button size="sm" onClick={openCloudflare}>{t("apis.tunnel.enable")}</Button>
-              )}
-              {tunnelEnabled ? (
-                <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
-              ) : null}
-            </>
-          }
-        />
-      );
+      return {
+        state: "error",
+        message: tunnelStatusMessage,
+        actions: tunnelEnabled ? (
+          <>
+            {configureCloudflareButton()}
+            {stopCloudflareButton}
+          </>
+        ) : (
+          <ToolButton icon="play_arrow" onClick={openCloudflare}>{t("apis.tunnel.start")}</ToolButton>
+        ),
+      };
     }
     if (!tunnelEnabled) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          copyId="tunnel_url"
-          copied={copied}
-          onCopy={copy}
-          trailing={
-            <Button
-              size="sm"
-              onClick={() => {
-                if (apiKeyCount === 0) {
-                  setTunnelStatusMessage(t("apis.tunnel.createKeyFirst"));
-                  return;
-                }
-                openCloudflare();
-              }}
-            >
-              {t("apis.tunnel.enable")}
-            </Button>
-          }
-        />
-      );
+      return { state: "off", actions: <ToolButton icon="play_arrow" onClick={startCloudflare}>{t("apis.tunnel.start")}</ToolButton> };
     }
     if (tunnelHealthy) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          active
-          url={normalizeBaseUrl(tunnelPublicUrl)}
-          copyId="tunnel_url"
-          copied={copied}
-          onCopy={copy}
-          trailing={
-            <>
-              <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
-              <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
-            </>
-          }
-        />
-      );
+      return {
+        state: "online",
+        url: normalizeBaseUrl(tunnelPublicUrl),
+        actions: (
+          <>
+            {configureCloudflareButton()}
+            {stopCloudflareButton}
+          </>
+        ),
+      };
     }
     if (tunnel?.connected) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tunnel")}
-          active
+      return {
+        state: "unreachable",
+        message: t("apis.tunnel.hostnameUnreachable"),
+        actions: (
+          <>
+            {configureCloudflareButton()}
+            {stopCloudflareButton}
+          </>
+        ),
+      };
+    }
+    return {
+      state: "reconnecting",
+      message: tunnelEverReachableRef.current === tunnelPublicUrl ? t("apis.tunnel.tunnelReconnecting") : t("apis.tunnel.tunnelChecking"),
+      actions: (
+        <>
+          {configureCloudflareButton(t("apis.tunnel.reconnect"), "sync")}
+          {stopCloudflareButton}
+        </>
+      ),
+    };
+  })();
+
+  const stopTailscaleButton = (
+    <ToolButton icon="power_settings_new" tone="danger" onClick={() => setShowDisableTsModal(true)} title={t("apis.tunnel.disableTailscale")}>
+      {t("apis.tunnel.stop")}
+    </ToolButton>
+  );
+
+  const tailscaleView = ((): { state: TunnelState; url?: string; message?: string; actions?: ReactNode } => {
+    if (loading) return { state: "checking", message: t("apis.tunnel.checking") };
+    if (tsLoading) {
+      return {
+        state: "busy",
+        message: tsProgress || t("apis.tunnel.connecting"),
+        actions: tsAuthUrl ? (
+          <ToolButton icon="open_in_new" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
+            {t("apis.tunnel.openLogin")}
+          </ToolButton>
+        ) : undefined,
+      };
+    }
+    if (tsStatusMessage) {
+      return { state: "error", message: tsStatusMessage, actions: <ToolButton icon="play_arrow" onClick={() => void openTailscale()}>{t("apis.tunnel.start")}</ToolButton> };
+    }
+    if (!tsEnabled) {
+      return { state: "off", actions: <ToolButton icon="play_arrow" onClick={() => void openTailscale()}>{t("apis.tunnel.start")}</ToolButton> };
+    }
+    if (tsHealthy) return { state: "online", url: normalizeBaseUrl(tsUrl), actions: stopTailscaleButton };
+    return { state: "reconnecting", message: t("apis.tunnel.tailscaleReconnecting"), actions: stopTailscaleButton };
+  })();
+
+  const cloudflareUrl = cloudflareView.url;
+  const tailscaleUrl = tailscaleView.url;
+  useEffect(() => {
+    onSummary?.({
+      loading,
+      cloudflare: { state: cloudflareView.state, url: cloudflareUrl },
+      tailscale: { state: tailscaleView.state, url: tailscaleUrl },
+    });
+  }, [onSummary, loading, cloudflareView.state, cloudflareUrl, tailscaleView.state, tailscaleUrl]);
+
+  const anyEnabled = tunnelEnabled || tsEnabled;
+
+  return (
+    <div className="ap-remote">
+      {anyEnabled && apiKeyCount === 0 ? <SecurityWarning tone="danger" message={t("apis.tunnel.activeNoKeys")} /> : null}
+
+      <div className="cp-grid" style={{ ["--cp-card-min" as string]: "340px" }}>
+        <TunnelCard
+          icon="cloud"
+          title={t("apis.tunnel.cloudflareTitle")}
+          description={t("apis.tunnel.cloudflareCardDesc")}
           copyId="tunnel_url"
           copied={copied}
           onCopy={copy}
-          statusText={t("apis.tunnel.hostnameUnreachable")}
-          statusTone="warn"
-          trailing={
-            <>
-              <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.configure")}</Button>
-              <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
-            </>
+          {...cloudflareView}
+          facts={
+            tunnel?.hostname || tunnel?.serviceUrl ? (
+              <dl className="cp-facts ap-tunnel-facts">
+                {tunnel?.hostname ? <div><dt>{t("apis.tunnel.hostname")}</dt><dd title={tunnel.hostname}>{tunnel.hostname}</dd></div> : null}
+                {tunnel?.serviceUrl ? <div><dt>{t("apis.tunnel.service")}</dt><dd title={tunnel.serviceUrl}>{tunnel.serviceUrl}</dd></div> : null}
+              </dl>
+            ) : null
           }
         />
-      );
-    }
-    return (
-      <EndpointTunnelRow
-        label={t("apis.tunnel.tunnel")}
-        active
-        copyId="tunnel_url"
-        copied={copied}
-        onCopy={copy}
-        statusText={tunnelEverReachableRef.current === tunnelPublicUrl ? t("apis.tunnel.tunnelReconnecting") : t("apis.tunnel.tunnelChecking")}
-        statusTone="warn"
-        trailing={
+        <TunnelCard
+          icon="hub"
+          title={t("apis.tunnel.tailscaleTitle")}
+          description={t("apis.tunnel.tailscaleCardDesc")}
+          copyId="ts_url"
+          copied={copied}
+          onCopy={copy}
+          {...tailscaleView}
+        />
+      </div>
+
+      {anyEnabled ? (
+        <section className={cn("cp-panel ap-dashboard-access", tunnelDashboardAccess && "is-on")} aria-label={t("apis.tunnel.dashboard")}>
+          <span className="material-symbols-outlined cp-section-icon" aria-hidden>admin_panel_settings</span>
+          <div className="ap-dashboard-access-copy">
+            <strong>
+              {t("apis.tunnel.allowDashboard")}
+              {tunnelDashboardAccess ? <StatusPill tone="warning">{t("apis.tunnel.dashboardExposed")}</StatusPill> : null}
+            </strong>
+            <p>{t(tunnelDashboardAccess ? "apis.tunnel.dashboardOnHint" : "apis.tunnel.dashboardOffHint")}</p>
+          </div>
+          <Toggle
+            checked={tunnelDashboardAccess}
+            onChange={() => void handleDashboardAccess(!tunnelDashboardAccess)}
+            aria-label={t("apis.tunnel.allowDashboard")}
+          />
+        </section>
+      ) : null}
+
+      <Modal
+        open={showEnableModal}
+        title={t("apis.tunnel.enableCloudflareTitle")}
+        subtitle={t("apis.tunnel.cloudflareDesc")}
+        icon="cloud"
+        onClose={closeCloudflare}
+        footer={
           <>
-            <Button size="sm" variant="outline" onClick={openCloudflare}>{t("apis.tunnel.reconnect")}</Button>
-            <PowerButton title={t("apis.tunnel.disableTunnel")} onClick={() => setShowDisableModal(true)} />
+            <Button type="button" variant="secondary" disabled={tunnelLoading} onClick={closeCloudflare}>{t("common.cancel")}</Button>
+            <Button
+              type="submit"
+              form="ap-cloudflare-form"
+              icon="play_arrow"
+              loading={tunnelLoading}
+              disabled={!tunnelHostname.trim() || (!tunnelToken.trim() && !tunnel?.tokenConfigured)}
+            >
+              {t("apis.tunnel.startTunnel")}
+            </Button>
           </>
         }
-      />
-    );
-  };
-
-  const renderTailscaleRow = () => {
-    if (loading) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tailscale")}
-          copyId="ts_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={t("apis.tunnel.checking")}
-        />
-      );
-    }
-    if (tsLoading) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tailscale")}
-          active
-          copyId="ts_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={tsProgress || t("apis.tunnel.connecting")}
-          statusTone="muted"
-          trailing={
-            tsAuthUrl ? (
-              <Button size="sm" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
-                Open login
-              </Button>
-            ) : undefined
-          }
-        />
-      );
-    }
-    if (tsStatusMessage) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tailscale")}
-          copyId="ts_url"
-          copied={copied}
-          onCopy={copy}
-          statusText={tsStatusMessage}
-          statusTone="error"
-          trailing={<Button size="sm" onClick={() => void openTailscale()}>Enable</Button>}
-        />
-      );
-    }
-    if (!tsEnabled) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tailscale")}
-          copyId="ts_url"
-          copied={copied}
-          onCopy={copy}
-          trailing={<Button size="sm" onClick={() => void openTailscale()}>Enable</Button>}
-        />
-      );
-    }
-    if (tsHealthy) {
-      return (
-        <EndpointTunnelRow
-          label={t("apis.tunnel.tailscale")}
-          active
-          url={normalizeBaseUrl(tsUrl)}
-          copyId="ts_url"
-          copied={copied}
-          onCopy={copy}
-          trailing={<PowerButton title={t("apis.tunnel.disableTailscale")} onClick={() => setShowDisableTsModal(true)} />}
-        />
-      );
-    }
-    return (
-      <EndpointTunnelRow
-        label={t("apis.tunnel.tailscale")}
-        active
-        copyId="ts_url"
-        copied={copied}
-        onCopy={copy}
-        statusText={t("apis.tunnel.tailscaleReconnecting")}
-        statusTone="warn"
-        trailing={<PowerButton title={t("apis.tunnel.disableTailscale")} onClick={() => setShowDisableTsModal(true)} />}
-      />
-    );
-  };
-
-  return (
-    <div className="tunnel-section">
-      {renderTunnelRow()}
-      {renderTailscaleRow()}
-
-      {(tunnelEnabled || tsEnabled) && apiKeyCount === 0 ? (
-        <div className="apis-card-warning">
-          <SecurityWarning message={t("apis.tunnel.activeNoKeys")} />
-        </div>
-      ) : null}
-
-      {tunnelEnabled || tsEnabled ? (
-        <div className="endpoint-row tunnel-dashboard-row">
-          <span className={tunnelDashboardAccess ? "endpoint-row-badge active" : "endpoint-row-badge"}>{t("apis.tunnel.dashboard")}</span>
-          <label className="tunnel-dashboard-toggle">
-            <Toggle checked={tunnelDashboardAccess} onChange={() => void handleDashboardAccess(!tunnelDashboardAccess)} />
-            <span>{t("apis.tunnel.allowDashboard")}</span>
-          </label>
-        </div>
-      ) : null}
-
-      <Modal open={showEnableModal} title={t("apis.tunnel.enableCloudflareTitle")} onClose={closeCloudflare}>
-        <form onSubmit={(event) => { event.preventDefault(); void handleEnableTunnel(); }}>
-          <p className="modal-copy">{t("apis.tunnel.cloudflareDesc")}</p>
-          <div style={{ display: "grid", gap: 16 }}>
-            <Field label={t("apis.tunnel.hostname")} hint={t("apis.tunnel.hostnameHint")} required>
-              <Input
-                aria-label={t("apis.tunnel.hostname")}
-                value={tunnelHostname}
-                onChange={(event) => setTunnelHostname(event.target.value)}
-                placeholder="api.example.com"
-                autoCapitalize="none"
-                spellCheck={false}
-                disabled={tunnelLoading}
-                required
-              />
-            </Field>
-            <Field label={t("apis.tunnel.token")} hint={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenHint" : "apis.tunnel.tokenHint")} required={!tunnel?.tokenConfigured}>
-              <Input
-                aria-label={t("apis.tunnel.token")}
-                type="password"
-                value={tunnelToken}
-                onChange={(event) => setTunnelToken(event.target.value)}
-                placeholder={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenPlaceholder" : "apis.tunnel.tokenPlaceholder")}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                disabled={tunnelLoading}
-                required={!tunnel?.tokenConfigured}
-              />
-            </Field>
+      >
+        <form id="ap-cloudflare-form" className="ap-modal-form" onSubmit={(event) => { event.preventDefault(); void handleEnableTunnel(); }}>
+          <Field label={t("apis.tunnel.hostname")} hint={t("apis.tunnel.hostnameHint")} required>
+            <Input
+              aria-label={t("apis.tunnel.hostname")}
+              value={tunnelHostname}
+              onChange={(event) => setTunnelHostname(event.target.value)}
+              placeholder="api.example.com"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={tunnelLoading}
+              required
+            />
+          </Field>
+          <Field label={t("apis.tunnel.token")} hint={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenHint" : "apis.tunnel.tokenHint")} required={!tunnel?.tokenConfigured}>
+            <Input
+              aria-label={t("apis.tunnel.token")}
+              type="password"
+              value={tunnelToken}
+              onChange={(event) => setTunnelToken(event.target.value)}
+              placeholder={t(tunnel?.tokenConfigured ? "apis.tunnel.savedTokenPlaceholder" : "apis.tunnel.tokenPlaceholder")}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={tunnelLoading}
+              required={!tunnel?.tokenConfigured}
+            />
+          </Field>
+          <div className="ap-modal-steps">
+            <p>{t("apis.tunnel.routeHint")}</p>
+            <code>{tunnel?.serviceUrl || "http://127.0.0.1:28120"}</code>
+            <a href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener noreferrer" className="cp-link-btn">
+              {t("apis.tunnel.openCloudflare")}
+            </a>
           </div>
-          <p className="modal-copy">{t("apis.tunnel.routeHint")} <code>{tunnel?.serviceUrl || "http://127.0.0.1:28120"}</code></p>
-          <p className="modal-copy">
-            <a href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">{t("apis.tunnel.openCloudflare")}</a>
-          </p>
-          {tunnelStatusMessage ? <p className="modal-copy" role="alert">{tunnelStatusMessage}</p> : null}
-          {tunnelLoading ? <p className="modal-copy" role="status">{tunnelProgress}</p> : null}
-          <div className="modal-actions">
-            <Button type="submit" loading={tunnelLoading} disabled={!tunnelHostname.trim() || (!tunnelToken.trim() && !tunnel?.tokenConfigured)}>{t("apis.tunnel.startTunnel")}</Button>
-            <Button type="button" variant="ghost" disabled={tunnelLoading} onClick={closeCloudflare}>{t("common.cancel")}</Button>
-          </div>
+          {tunnelStatusMessage ? <p className="ap-tunnel-msg cp-tone-danger" role="alert"><span className="material-symbols-outlined" aria-hidden>error</span><span>{tunnelStatusMessage}</span></p> : null}
+          {tunnelLoading ? <p className="ap-tunnel-msg cp-tone-info" role="status"><span className="material-symbols-outlined animate-spin" aria-hidden>progress_activity</span><span>{tunnelProgress}</span></p> : null}
         </form>
       </Modal>
 
@@ -663,23 +631,31 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         title={t("apis.tunnel.disableTunnel")}
         message={t("apis.tunnel.disableTunnelConfirm")}
         confirmText={t("common.disable")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onConfirm={() => void handleDisableTunnel()}
         onClose={() => setShowDisableModal(false)}
       />
 
-      <Modal open={showTsModal} title={t("apis.tunnel.tailscaleFunnelTitle")} onClose={() => setShowTsModal(false)}>
+      <Modal
+        open={showTsModal}
+        title={t("apis.tunnel.tailscaleFunnelTitle")}
+        icon="hub"
+        onClose={() => setShowTsModal(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowTsModal(false)}>{t("common.cancel")}</Button>
+            <Button onClick={() => void (tsInstalled === false ? openTailscale() : handleConnectTailscale())}>
+              {tsInstalled === false ? t("apis.tunnel.retryCheck") : t("apis.tunnel.connect")}
+            </Button>
+          </>
+        }
+      >
         <p className="modal-copy">
           {tsInstalled === false
             ? t("apis.tunnel.installTailscale")
             : t("apis.tunnel.connectTailscale")}
         </p>
-        <div className="modal-actions">
-          <Button onClick={() => void (tsInstalled === false ? openTailscale() : handleConnectTailscale())}>
-            {tsInstalled === false ? t("apis.tunnel.retryCheck") : "Connect"}
-          </Button>
-          <Button variant="ghost" onClick={() => setShowTsModal(false)}>Cancel</Button>
-        </div>
       </Modal>
 
       <ConfirmDialog
@@ -687,6 +663,7 @@ export function TunnelSection({ secret, apiKeyCount, onError, onNotice }: Props)
         title={t("apis.tunnel.disableTailscale")}
         message={t("apis.tunnel.disableTailscaleConfirm")}
         confirmText={t("common.disable")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onConfirm={() => void handleDisableTailscale()}
         onClose={() => setShowDisableTsModal(false)}

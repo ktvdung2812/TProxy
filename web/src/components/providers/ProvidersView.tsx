@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../ui";
-import { ImportDataCard } from "../import/ImportDataCard";
+import { EmptyPanel } from "../page-kit";
 import { ImportModal } from "../import/ImportModal";
 import { AddProviderModal } from "./AddProviderModal";
 import { ProviderDetail } from "./ProviderDetail";
@@ -9,12 +9,11 @@ import { ProviderList } from "./ProviderList";
 import { ProviderTypeDetail } from "./ProviderTypeDetail";
 import { resolveProviderSlug, type ProviderTypeInfo } from "./catalog";
 import { resolveConnectionProfile, type ConnectionMethod } from "./connectionMethods";
-import { checkProviderHealth, deleteProvider, exportAuthBundle, fetchNinerouterPresets, importAuthBundle, saveProvider, type NinerouterPreset } from "./api";
+import { checkProviderHealth, deleteProvider, exportAuthBundle, fetchNinerouterPresets, saveProvider, type NinerouterPreset } from "./api";
 import { AddCredentialModal } from "./AddCredentialModal";
 import { CursorImportModal } from "./CursorImportModal";
 import { KiroOAuthModal } from "./KiroOAuthModal";
 import { OAuthModal } from "./OAuthModal";
-import type { ImportSource } from "../import/utils";
 import type { Credential, ModelAlias, Provider } from "./types";
 
 type Props = {
@@ -22,7 +21,6 @@ type Props = {
   credentials: Record<string, Credential[]>;
   aliases: ModelAlias[];
   secret: string;
-  searchQuery?: string;
   selectedId: string | null;
   snapshotLoading?: boolean;
   onSelect: (id: string | null) => void;
@@ -37,7 +35,6 @@ export function ProvidersView({
   credentials,
   aliases,
   secret,
-  searchQuery = "",
   selectedId,
   snapshotLoading = false,
   onSelect,
@@ -50,10 +47,11 @@ export function ProvidersView({
   const [showAdd, setShowAdd] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Provider | null>(null);
   const [testingSection, setTestingSection] = useState<string | null>(null);
+  const [checkingIds, setCheckingIds] = useState<Set<string>>(() => new Set());
   const [authBusy, setAuthBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [showOAuth, setShowOAuth] = useState(false);
-  const [importSource, setImportSource] = useState<ImportSource | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const [oauthProviderId, setOauthProviderId] = useState<string | null>(null);
   const [oauthProviderType, setOauthProviderType] = useState<string | null>(null);
   const [oauthPresetId, setOauthPresetId] = useState<string | null>(null);
@@ -64,7 +62,6 @@ export function ProvidersView({
   const [catalogProviderId, setCatalogProviderId] = useState<string | null>(null);
   const [showCursorImport, setShowCursorImport] = useState(false);
   const [showKiroOAuth, setShowKiroOAuth] = useState(false);
-  const importInputId = "tproxy-auth-bundle-import";
 
   useEffect(() => {
     if (!secret) {
@@ -103,12 +100,8 @@ export function ProvidersView({
 
   if (awaitingProviderResolution) {
     return (
-      <section className="section">
-        <div className="section-head">
-          <p className="eyebrow">Providers</p>
-          <h2>Loading provider…</h2>
-          <p>Fetching provider catalog metadata.</p>
-        </div>
+      <section className="cp-page">
+        <EmptyPanel loading title={t("providers.providersViewLoadingProvider")} description={t("providers.providersViewLoadingDesc")} />
       </section>
     );
   }
@@ -141,8 +134,8 @@ export function ProvidersView({
     }
     // File imports create only the providers actually present in the export.
     // Opening or cancelling the picker must not leave an empty provider behind.
-    if (method.kind === "import_cliproxy" || method.kind === "import_sub2api" || method.kind === "import_9router") {
-      setImportSource(method.kind === "import_cliproxy" ? "cliproxy" : method.kind === "import_sub2api" ? "sub2api" : "9router");
+    if (method.kind === "import_data") {
+      setShowImport(true);
       return;
     }
     setConnectBusy(true);
@@ -183,10 +176,11 @@ export function ProvidersView({
 
   const handleTestSection = async (providerIds: string[], section: string) => {
     if (providerIds.length === 0) {
-      onError("No configured providers to test in this section");
+      onError(t("providers.noProvidersToTest"));
       return;
     }
     setTestingSection(section);
+    setCheckingIds(new Set(providerIds));
     let ok = 0;
     let failed = 0;
     try {
@@ -198,11 +192,47 @@ export function ProvidersView({
         } catch {
           failed++;
         }
+        setCheckingIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
       }
-      onNotice(`Health check finished: ${ok} healthy, ${failed} failed`);
+      onNotice(t("providers.healthCheckFinished", { ok, failed }));
       onMutated();
     } finally {
       setTestingSection(null);
+      setCheckingIds(new Set());
+    }
+  };
+
+  const handleCheckProvider = async (provider: Provider) => {
+    setCheckingIds((current) => new Set(current).add(provider.ID));
+    try {
+      const result = await checkProviderHealth(secret, provider.ID);
+      const summary = result.checked != null
+        ? t("providers.list.checkSummary", { healthy: result.healthy ?? 0, checked: result.checked })
+        : result.status || t("providers.providerHealthStatusChecked");
+      const suffix = !result.ok && result.last_error ? t("providers.providerHealthSummarySuffix", { error: result.last_error }) : "";
+      onNotice(`${t("providers.providerHealthSummary", { id: provider.Name || provider.ID, summary })}${suffix}`);
+      onMutated();
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : t("providers.healthCheckFailed"));
+    } finally {
+      setCheckingIds((current) => {
+        const next = new Set(current);
+        next.delete(provider.ID);
+        return next;
+      });
+    }
+  };
+
+  const handleCopyId = async (provider: Provider) => {
+    try {
+      await navigator.clipboard.writeText(provider.ID);
+      onNotice(t("providers.list.copiedId", { id: provider.ID }));
+    } catch {
+      onError(t("providers.list.copyFailed"));
     }
   };
 
@@ -216,24 +246,9 @@ export function ProvidersView({
       anchor.download = "tproxy-auth-bundle.json";
       anchor.click();
       URL.revokeObjectURL(url);
-      onNotice("OAuth auth bundle exported");
+      onNotice(t("providers.authExportSuccess"));
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : t("providers.authExportFailed"));
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const handleImportAuth = async (file: File) => {
-    setAuthBusy(true);
-    try {
-      const text = await file.text();
-      const bundle = JSON.parse(text) as unknown;
-      await importAuthBundle(secret, bundle);
-      onNotice("OAuth auth bundle imported");
-      onMutated();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : t("providers.authImportFailed"));
     } finally {
       setAuthBusy(false);
     }
@@ -245,12 +260,44 @@ export function ProvidersView({
     setConfirmDelete(null);
     try {
       await deleteProvider(secret, target.ID);
-      onNotice(`Provider ${target.ID} deleted`);
+      onNotice(t("providers.providerDeleted", { id: target.ID }));
       onMutated();
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : t("providers.deleteFailed"));
     }
   };
+
+  const importModal = (
+    <ImportModal
+      key="import"
+      open={showImport}
+      secret={secret}
+      onClose={() => setShowImport(false)}
+      onNotice={onNotice}
+      onError={onError}
+      onMutated={onMutated}
+    />
+  );
+
+  const addProviderModal = (
+    <AddProviderModal
+      open={showAdd}
+      secret={secret}
+      presetType={addPreset}
+      onClose={() => {
+        setShowAdd(false);
+        setAddPreset(undefined);
+      }}
+      onSaved={(providerId) => {
+        onNotice(t("providers.providerCreated", { id: providerId }));
+        onMutated();
+        // Open the instance just created. Selecting its type resolved to the
+        // first provider of that type (e.g. OpenRouter for a new openai-compatible one).
+        onSelect(providerId);
+        setAddPreset(undefined);
+      }}
+    />
+  );
 
   if (resolved?.kind === "instance") {
     const provider = resolved.provider;
@@ -262,21 +309,13 @@ export function ProvidersView({
           aliases={aliases}
           secret={secret}
           presets={presets}
-          onOpenImport={(source) => setImportSource(source)}
+          onOpenImport={() => setShowImport(true)}
           onBack={() => onSelect(null)}
           onMutated={onMutated}
           onNotice={onNotice}
           onError={onError}
         />
-        <ImportModal
-          open={importSource !== null}
-          secret={secret}
-          initialSource={importSource ?? "9router"}
-          onClose={() => setImportSource(null)}
-          onNotice={onNotice}
-          onError={onError}
-          onMutated={onMutated}
-        />
+        {importModal}
       </>
     );
   }
@@ -309,7 +348,7 @@ export function ProvidersView({
             setOauthPresetId(null);
           }}
           onComplete={() => {
-            onNotice(`${catalog.name} connected`);
+            onNotice(t("providers.providerConnected", { name: catalog.name }));
             onMutated();
             onSelect(catalog.presetId || catalog.type);
           }}
@@ -326,27 +365,19 @@ export function ProvidersView({
             setCatalogCredentialMethod(null);
           }}
           onSaved={() => {
-            onNotice("Credential saved");
+            onNotice(t("providers.credentialSaved"));
             onMutated();
             onSelect(catalog.presetId || catalog.type);
           }}
         />
-        <ImportModal
-          open={importSource !== null}
-          secret={secret}
-          initialSource={importSource ?? "9router"}
-          onClose={() => setImportSource(null)}
-          onNotice={onNotice}
-          onError={onError}
-          onMutated={onMutated}
-        />
+        {importModal}
         <CursorImportModal
           open={showCursorImport}
           secret={secret}
           providerId={catalogProviderId || catalog.presetId || catalog.type}
           onClose={() => setShowCursorImport(false)}
           onComplete={() => {
-            onNotice("Cursor token imported");
+            onNotice(t("providers.cursorImported"));
             onMutated();
             onSelect(catalog.presetId || catalog.type);
           }}
@@ -359,92 +390,44 @@ export function ProvidersView({
           providerType={catalog.type}
           onClose={() => setShowKiroOAuth(false)}
           onComplete={() => {
-            onNotice("Kiro credential connected");
+            onNotice(t("providers.kiroConnected"));
             onMutated();
             onSelect(catalog.presetId || catalog.type);
           }}
           onError={onError}
         />
-        <AddProviderModal
-          open={showAdd}
-          secret={secret}
-          presetType={addPreset}
-          onClose={() => {
-            setShowAdd(false);
-            setAddPreset(undefined);
-          }}
-          onSaved={(providerId, providerType) => {
-            onNotice(`Provider ${providerId} created`);
-            onMutated();
-            onSelect(providerType ?? providerId);
-            setAddPreset(undefined);
-          }}
-        />
+        {addProviderModal}
       </>
     );
   }
 
   return (
     <>
-      <ImportDataCard onOpen={() => setImportSource("9router")} />
-      <ImportModal
-        open={importSource !== null}
-        secret={secret}
-        initialSource={importSource ?? "9router"}
-        onClose={() => setImportSource(null)}
-        onNotice={onNotice}
-        onError={onError}
-        onMutated={onMutated}
-      />
       <ProviderList
         providers={providers}
         credentials={credentials}
-        secret={secret}
-        searchQuery={searchQuery}
-        onAddOpenAI={() => openAdd("openai-compatible")}
-        onAddAnthropic={() => openAdd("anthropic-compatible")}
-        onTestSection={(section, ids) => void handleTestSection(ids, section)}
+        presets={presets}
+        presetsLoading={!presetsLoaded}
+        snapshotLoading={snapshotLoading}
+        checkingIds={checkingIds}
         testingSection={testingSection}
+        exportBusy={authBusy}
+        onAdd={openAdd}
+        onImport={() => setShowImport(true)}
+        onExportAuth={() => void handleExportAuth()}
+        onCheck={(provider) => void handleCheckProvider(provider)}
+        onTestSection={(section, ids) => void handleTestSection(ids, section)}
+        onCopyId={(provider) => void handleCopyId(provider)}
+        onDelete={setConfirmDelete}
       />
-      <div className="auth-bundle-toolbar">
-        <button type="button" className="auth-bundle-btn" onClick={() => void handleExportAuth()} disabled={authBusy}>
-          Export OAuth bundle
-        </button>
-        <label className="auth-bundle-btn" htmlFor={importInputId}>
-          Import OAuth bundle
-        </label>
-        <input
-          id={importInputId}
-          type="file"
-          accept="application/json,.json"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) void handleImportAuth(file);
-          }}
-        />
-      </div>
-      <AddProviderModal
-        open={showAdd}
-        secret={secret}
-        presetType={addPreset}
-        onClose={() => {
-          setShowAdd(false);
-          setAddPreset(undefined);
-        }}
-        onSaved={(providerId, providerType) => {
-          onNotice(`Provider ${providerId} created`);
-          onMutated();
-          onSelect(providerType ?? providerId);
-          setAddPreset(undefined);
-        }}
-      />
+      {importModal}
+      {addProviderModal}
       <ConfirmDialog
         open={confirmDelete !== null}
-        title={`Delete provider ${confirmDelete?.ID}?`}
-        message="This removes the provider configuration. Linked credentials remain but become unbound."
-        confirmText="Delete provider"
+        title={t("providers.deleteProviderConfirm", { id: confirmDelete?.Name || confirmDelete?.ID })}
+        message={t("providers.deleteProviderMessage")}
+        confirmText={t("providers.deleteProvider")}
+        cancelText={t("common.cancel")}
         variant="danger"
         onConfirm={handleDelete}
         onClose={() => setConfirmDelete(null)}

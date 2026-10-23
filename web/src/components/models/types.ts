@@ -20,6 +20,10 @@ export type ProviderOption = {
   id: string;
   label: string;
   type: string;
+  /** Provider health from the snapshot (healthy, degraded, auth_required…). */
+  status?: string;
+  enabled?: boolean;
+  lastError?: string;
 };
 
 export type RouteFormData = {

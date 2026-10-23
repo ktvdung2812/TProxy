@@ -336,7 +336,7 @@ export function OAuthModal({
     <Modal
       open={open}
       onClose={handleCancel}
-      title={`Connect ${info.name}`}
+      title={t("providers.oauthConnectTitle", { name: info.name })}
       subtitle={t("providers.oauthSubtitle")}
       icon="lock_person"
       size="lg"
@@ -344,38 +344,38 @@ export function OAuthModal({
         phase === "idle" ? (
           <>
             <Button variant="secondary" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" icon="login" disabled={!info.supportsOAuth} onClick={handleStart}>
-              Sign in
+              {t("providers.oauthSignIn")}
             </Button>
           </>
         ) : phase === "complete" ? (
           <Button variant="primary" icon="check" onClick={onClose}>
-            Done
+            {t("providers.oauthDone")}
           </Button>
         ) : showBrowserConnect ? (
           <>
             <Button variant="secondary" onClick={handleCancel}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="outline" icon="open_in_new" onClick={() => authUrl && openAuthWindow(authUrl)} disabled={!authUrl}>
-              Open login page
+              {t("providers.oauthOpenLoginPage")}
             </Button>
             <Button variant="primary" icon="link" onClick={() => void handleManualCallback()} disabled={!manualUrl.trim()}>
-              Submit callback URL
+              {t("providers.oauthSubmitCallbackUrl")}
             </Button>
           </>
         ) : (
           <Button variant="danger" icon="close" onClick={handleCancel} disabled={isStarting}>
-            Cancel authorization
+            {t("providers.oauthCancelAuthorization")}
           </Button>
         )
       }
     >
       {phase === "idle" && !autoStart && (
         <Field label={t("providers.accountLabel")} hint={t("providers.accountLabelHint")}>
-          <Input placeholder="e.g. primary" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <Input placeholder={t("providers.oauthAccountLabelPlaceholder")} value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
       )}
 
@@ -387,44 +387,44 @@ export function OAuthModal({
           </div>
 
           <div className="oauth-divider">
-            <span>Or paste callback URL manually</span>
+            <span>{t("providers.oauthPasteCallbackManually")}</span>
           </div>
 
           <div className="oauth-step">
-            <p className="oauth-step-label">Step 1: Open this URL in your browser</p>
+            <p className="oauth-step-label">{t("providers.oauthStep1OpenUrl")}</p>
             <div className="oauth-url-row">
               <Input value={authUrl} readOnly className="oauth-url-input" />
               <Button variant="secondary" size="sm" icon={copied ? "check" : "content_copy"} onClick={() => void handleCopyAuthUrl()} disabled={!authUrl}>
                 {copied ? t("common.copied") : t("common.copy")}
               </Button>
               <Button variant="secondary" size="sm" icon="open_in_new" onClick={() => authUrl && openAuthWindow(authUrl)} disabled={!authUrl}>
-                Open
+                {t("providers.oauthOpen")}
               </Button>
             </div>
           </div>
 
           <div className="oauth-step">
-            <p className="oauth-step-label">Step 2: Paste the callback URL here</p>
+            <p className="oauth-step-label">{t("providers.oauthStep2PasteCallback")}</p>
             <p className="oauth-step-hint">
               {providerType === "cline" || providerType === "clinepass"
-                ? "After sign-in, paste the full URL from authkit.cline.bot (for example .../device?code=...)."
+                ? t("providers.oauthCallbackHintCline")
                 : providerType === "claude"
-                  ? "After authorization, paste the full callback URL from the address bar, or the authorization code Claude shows (format: code#state)."
+                  ? t("providers.oauthCallbackHintClaude")
                   : providerType === "devin"
-                    ? "After sign-in, paste the authorization code Devin shows in the browser."
-                    : "After authorization, copy the full URL from your browser address bar."}
+                    ? t("providers.oauth.callbackHintDevin")
+                    : t("providers.oauthCallbackHintDefault")}
             </p>
             <Input
               placeholder={
                 providerType === "cline" || providerType === "clinepass"
-                  ? "https://authkit.cline.bot/device?user_code=...&code=..."
+                  ? t("providers.oauthCallbackPlaceholderCline")
                   : providerType === "claude"
-                    ? "http://localhost:…/callback?code=…&state=…  or  code#state"
+                    ? t("providers.oauthCallbackPlaceholderClaude")
                     : providerType === "devin"
-                      ? "Paste the authorization code…"
+                      ? t("providers.oauth.placeholderDevin")
                       : allowsStatelessOAuthCallback(providerType)
-                        ? "http://localhost:1455/auth/callback?code=..."
-                        : "http://localhost:1455/auth/callback?code=...&state=..."
+                        ? t("providers.oauthCallbackPlaceholderStateless")
+                        : t("providers.oauthCallbackPlaceholderDefault")
               }
               value={manualUrl}
               onChange={(e) => setManualUrl(e.target.value)}
@@ -438,14 +438,14 @@ export function OAuthModal({
         <div className="oauth-connect">
           <div className="oauth-status pending">
             <span className="material-symbols-outlined animate-spin">progress_activity</span>
-            <span>{isStarting ? t("providers.startingAuth") : "Waiting for authorization to complete…"}</span>
+            <span>{isStarting ? t("providers.startingAuth") : t("providers.oauthWaitingDevice")}</span>
           </div>
           <p className="oauth-step-hint">
-            Complete sign-in in the browser tab that opened. This provider uses device authorization — no code entry is required in the dashboard.
+            {t("providers.oauthDeviceHint")}
           </p>
           {startResp?.verification_uri && (
             <Button variant="outline" size="sm" icon="open_in_new" onClick={() => window.open(startResp.verification_uri, "_blank", "noopener,noreferrer")}>
-              Reopen sign-in page
+              {t("providers.oauthReopenSignIn")}
             </Button>
           )}
         </div>
@@ -454,14 +454,14 @@ export function OAuthModal({
       {phase === "complete" && (
         <div className="oauth-status success">
           <span className="material-symbols-outlined">check_circle</span>
-          <span>Your {info.name} account has been connected. Closing in 3 seconds…</span>
+          <span>{t("providers.oauthConnected", { name: info.name })}</span>
         </div>
       )}
 
       {phase === "failed" && (
         <div className="oauth-status error">
           <span className="material-symbols-outlined">error</span>
-          <span>Connection failed: {errorMsg}</span>
+          <span>{t("providers.oauthConnectionFailed", { error: errorMsg })}</span>
         </div>
       )}
 

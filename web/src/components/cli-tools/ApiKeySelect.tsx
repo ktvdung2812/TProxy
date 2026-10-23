@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { getStoredApiKeySecret, storeApiKeySecret } from "../../lib/apiKeySecrets";
 import { Field, Input, Select } from "../ui";
@@ -45,6 +46,7 @@ export function ApiKeySelect({
   emptyMessage,
   missingSecretMessage,
 }: Props) {
+  const { t } = useTranslation();
   const enabledKeys = useMemo(() => apiKeys.filter((key) => key.enabled !== false), [apiKeys]);
   const [selectedId, setSelectedId] = useState(() => resolveSelectedId(value, enabledKeys));
   // Once the user picks "Custom…", stop snapping the selection back to a saved key.
@@ -100,13 +102,9 @@ export function ApiKeySelect({
     return (
       <div className={stackClass}>
         <p className="cli-tool-hint">
-          {emptyMessage ?? (
-            <>
-              No API keys yet. Create one in <Link to="/apis">APIs</Link> before configuring this CLI tool.
-            </>
-          )}
+          {emptyMessage ?? <Trans i18nKey="cliTools.keySelect.noKeys" components={[<Link key="apis" to="/apis" />]} />}
         </p>
-        <Field label="Custom key">
+        <Field label={t("cliTools.keySelect.customKey")}>
           <Input
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -126,15 +124,15 @@ export function ApiKeySelect({
           {key.name && key.name !== key.id ? `${key.name} (${key.id})` : key.id}
         </option>
       ))}
-      <option value={CUSTOM_KEY_ID}>Custom…</option>
+      <option value={CUSTOM_KEY_ID}>{t("cliTools.customApiKey")}</option>
     </Select>
   );
 
   return (
     <div className={stackClass}>
-      {embedded ? select : <Field label="Select key">{select}</Field>}
+      {embedded ? select : <Field label={t("cliTools.selectKey")}>{select}</Field>}
       {customMode ? (
-        <Field label="Custom key" hint="Not saved in this browser — used for this apply only.">
+        <Field label={t("cliTools.keySelect.customKey")} hint={t("cliTools.keySelect.customKeyHint")}>
           <Input
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -145,12 +143,8 @@ export function ApiKeySelect({
         </Field>
       ) : showSecretField ? (
         <Field
-          label="API key value"
-          hint={
-            hasSecret
-              ? "Used in command previews below. Saved in this browser."
-              : "Paste the secret shown when the key was created, or it will be resolved from TPROXY_API_KEY when available."
-          }
+          label={t("cliTools.apiKeyValue")}
+          hint={hasSecret ? t("cliTools.apiKeyValueHint") : t("cliTools.apiKeyValueHintNoSecret")}
         >
           <Input
             value={value}
@@ -163,18 +157,16 @@ export function ApiKeySelect({
       ) : hasSecret ? (
         embedded ? null : (
           <p className="cli-tool-hint">
-            Using key <strong>{selectedKey?.name || selectedKey?.id}</strong>. Manage keys in{" "}
-            <Link to="/apis">APIs</Link>.
+            <Trans
+              i18nKey="cliTools.keySelect.usingKey"
+              values={{ name: selectedKey?.name || selectedKey?.id }}
+              components={[<strong key="name" />, <Link key="apis" to="/apis" />]}
+            />
           </p>
         )
       ) : (
         <p className="cli-tool-hint">
-          {missingSecretMessage ?? (
-            <>
-              Secret for this key is not saved in this browser. Create a new key in{" "}
-              <Link to="/apis">APIs</Link> and save the secret when it is shown.
-            </>
-          )}
+          {missingSecretMessage ?? <Trans i18nKey="cliTools.keySelect.secretMissing" components={[<Link key="apis" to="/apis" />]} />}
         </p>
       )}
     </div>

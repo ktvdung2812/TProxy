@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "../ui";
+import { Modal } from "../ui";
+import { CopyAction } from "./CopyBits";
 
 export type ManualConfigEntry = {
   filename: string;
@@ -14,37 +14,24 @@ type Props = {
   configs: ManualConfigEntry[];
 };
 
-export function ManualConfigModal({ open, onClose, title = "Manual configuration", configs }: Props) {
+/** Every file the tool needs, ready to paste on the machine where it runs. */
+export function ManualConfigModal({ open, onClose, title, configs }: Props) {
   const { t } = useTranslation();
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-
-  const copyConfig = async (text: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedIndex(index);
-      window.setTimeout(() => setCopiedIndex(null), 2000);
-    } catch {
-      /* clipboard may be unavailable */
-    }
-  };
 
   return (
-    <Modal open={open} onClose={onClose} title={title} size="lg" icon="content_copy">
-      <div className="manual-config-list">
+    <Modal open={open} onClose={onClose} title={title || t("cliTools.manualConfig")} size="lg" icon="content_copy">
+      <div className="ct-manual">
+        <p className="ct-hint">{t("cliTools.manualModal.hint", { count: configs.length })}</p>
         {configs.map((config, index) => (
-          <div key={`${config.filename}-${index}`} className="manual-config-item">
-            <div className="manual-config-head">
-              <span className="manual-config-filename">{config.filename}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={copiedIndex === index ? "check" : "content_copy"}
-                onClick={() => void copyConfig(config.content, index)}
-              >
-                {copiedIndex === index ? t("common.copied") : t("common.copy")}
-              </Button>
+          <div key={`${config.filename}-${index}`} className="ct-code">
+            <div className="ct-code-head">
+              <span className="ct-code-file">
+                <span className="material-symbols-outlined" aria-hidden>description</span>
+                {config.filename}
+              </span>
+              <CopyAction text={config.content} label={t("cliTools.manualModal.copyFile", { file: config.filename })} bordered={false} />
             </div>
-            <pre className="manual-config-pre">
+            <pre>
               <code>{config.content}</code>
             </pre>
           </div>

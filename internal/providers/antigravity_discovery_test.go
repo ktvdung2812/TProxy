@@ -20,6 +20,8 @@ const antigravityCatalogue = `{"models":{
 	"gemini-3-pro-image":{"displayName":"Gemini 3 Pro Image"},
 	"claude-sonnet-4-6":{"displayName":"Claude Sonnet 4.6 (Thinking)"},
 	"claude-opus-4-6-thinking":{},
+	"gemini-4-argon":{},
+	"gemini-3.8-flash-high":{},
 	"gemini-3.5-flash-low":{},
 	"gpt-oss-120b-medium":{},
 	"internal-scratch":{"displayName":"Internal","isInternal":true},
@@ -88,6 +90,8 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 		"gemini-3-pro-image",
 		"claude-sonnet-4-6",
 		"claude-opus-4-6-thinking",
+		"gemini-4-argon",
+		"gemini-3.8-flash-high",
 		"gemini-3.5-flash-low",
 		"gpt-oss-120b-medium",
 		"no-display-name",
@@ -107,6 +111,8 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 	}
 	for modelID, wantName := range map[string]string{
 		"claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
+		"gemini-4-argon":           "Gemini 4 Argon",
+		"gemini-3.8-flash-high":    "Gemini 3.8 Flash (High)",
 		"gemini-3.5-flash-low":     "Gemini 3.5 Flash (Medium)",
 		"gpt-oss-120b-medium":      "GPT-OSS 120B (Medium)",
 	} {

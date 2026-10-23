@@ -53,13 +53,13 @@ export function Button({
       {...props}
     >
       {loading ? (
-        <span className="material-symbols-outlined animate-spin">progress_activity</span>
+        <span className="material-symbols-outlined animate-spin" aria-hidden>progress_activity</span>
       ) : icon ? (
-        <span className="material-symbols-outlined">{icon}</span>
+        <span className="material-symbols-outlined" aria-hidden>{icon}</span>
       ) : null}
       {children}
       {iconRight && !loading ? (
-        <span className="material-symbols-outlined">{iconRight}</span>
+        <span className="material-symbols-outlined" aria-hidden>{iconRight}</span>
       ) : null}
     </button>
   );

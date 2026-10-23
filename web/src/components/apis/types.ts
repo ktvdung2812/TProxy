@@ -69,6 +69,8 @@ export type ApiModelOption = {
 };
 
 export type ProxyEndpoint = {
+  /** Stable key for the translated description. */
+  id: string;
   path: string;
   methods: string[];
   description: string;

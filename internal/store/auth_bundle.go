@@ -125,6 +125,16 @@ func (s *Store) ExportAuthBundle(ctx context.Context) ([]byte, error) {
 }
 
 func (s *Store) ImportAuthBundle(ctx context.Context, data []byte) error {
+	return s.importAuthBundle(ctx, data, false)
+}
+
+// PreviewAuthBundle performs the same validation and decryption as an import,
+// rolling back the transaction so providers and credentials remain unchanged.
+func (s *Store) PreviewAuthBundle(ctx context.Context, data []byte) error {
+	return s.importAuthBundle(ctx, data, true)
+}
+
+func (s *Store) importAuthBundle(ctx context.Context, data []byte, dryRun bool) error {
 	if len(data) > maxAuthBundleBytes {
 		return fmt.Errorf("auth bundle exceeds %d bytes", maxAuthBundleBytes)
 	}
@@ -132,7 +142,7 @@ func (s *Store) ImportAuthBundle(ctx context.Context, data []byte) error {
 	if err := json.Unmarshal(data, &bundle); err != nil {
 		return fmt.Errorf("parse auth bundle: %w", err)
 	}
-	return s.applyAuthBundle(ctx, bundle)
+	return s.applyAuthBundle(ctx, bundle, dryRun)
 }
 
 func (s *Store) buildAuthBundle(ctx context.Context) (authBundle, error) {
@@ -172,7 +182,7 @@ func (s *Store) buildAuthBundle(ctx context.Context) (authBundle, error) {
 	return bundle, rows.Err()
 }
 
-func (s *Store) applyAuthBundle(ctx context.Context, bundle authBundle) error {
+func (s *Store) applyAuthBundle(ctx context.Context, bundle authBundle, dryRun bool) error {
 	if bundle.Version != 1 {
 		return fmt.Errorf("unsupported auth bundle version %d", bundle.Version)
 	}
@@ -276,6 +286,9 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,'','','',?) ON CONFLICT(id) DO UPDATE SET provider_
 		if _, err = tx.ExecContext(ctx, `DELETE FROM credential_model_cooldowns WHERE credential_id=?`, item.ID); err != nil {
 			return rollback(err)
 		}
+	}
+	if dryRun {
+		return tx.Rollback()
 	}
 	return tx.Commit()
 }

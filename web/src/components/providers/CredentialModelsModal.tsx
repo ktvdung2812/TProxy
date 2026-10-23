@@ -136,7 +136,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
           await runModelTest(model);
         } catch (cause) {
           setModelTestResults((prev) => ({ ...prev, [model.id]: "error" }));
-          setTestError(cause instanceof Error ? cause.message : `Test failed for ${model.id}`);
+          setTestError(cause instanceof Error ? cause.message : t("providers.models.testFailedFor", { id: model.id }));
         }
       }
     } finally {
@@ -146,8 +146,8 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
   };
 
   const summaryText = normalizedQuery
-    ? `${filteredModels.length} of ${models.length} model${models.length === 1 ? "" : "s"}`
-    : `${models.length} model${models.length === 1 ? "" : "s"} available on this account`;
+    ? t("providers.modelsSectionCardSubtitleFiltered", { filtered: filteredModels.length, total: models.length })
+    : t("providers.models.onAccount", { count: models.length });
 
   return (
     <Modal
@@ -159,7 +159,7 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
       size="lg"
       headerAction={
         !loading && models.length > 0 ? (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div className="pv-modal-tools">
             <Button
               variant="outline"
               size="sm"
@@ -169,49 +169,49 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
               aria-label={t("providers.testAllModels")}
               title={t("providers.testAllModels")}
             >
-              {testingAll ? "Testing..." : "Test all"}
+              {testingAll ? t("providers.testing") : t("providers.testAll")}
             </Button>
             <Input
               icon="search"
-              placeholder="Search models..."
+              placeholder={t("providers.models.searchPlaceholder")}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              style={{ width: "100%", maxWidth: 240 }}
-              aria-label="Search models"
+              aria-label={t("providers.models.searchPlaceholder")}
             />
           </div>
         ) : null
       }
       footer={
         <Button variant="secondary" onClick={onClose}>
-          Close
+          {t("common.close")}
         </Button>
       }
     >
       {loading ? (
-        <EmptyState icon="progress_activity" text="Loading supported models..." />
+        <EmptyState icon="progress_activity" text={t("providers.models.loadingAccount")} />
       ) : error && models.length === 0 ? (
-        <EmptyState icon="error" text="Could not load models for this account." hint={error} />
+        <EmptyState icon="error" text={t("providers.credentialModelsLoadFailed")} hint={error} />
       ) : models.length === 0 ? (
         <EmptyState
           icon="apps"
-          text="No models discovered for this account."
-          hint="The upstream did not return any models, or this provider type does not support discovery."
+          text={t("providers.models.noneOnAccount")}
+          hint={t("providers.credentialModelsNoDiscovery")}
         />
       ) : normalizedQuery && filteredModels.length === 0 ? (
         <EmptyState
           icon="search"
-          text={`No models match "${searchQuery.trim()}".`}
-          hint="Try a different model id, name, provider, or capability."
+          text={t("providers.modelsSectionNoMatch", { query: searchQuery.trim() })}
+          hint={t("providers.modelsSectionNoMatchHint")}
         />
       ) : (
         <div>
           {testError ? (
-            <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--color-danger)", wordBreak: "break-word" }}>
+            <p className="pv-form-error" role="alert">
+              <span className="material-symbols-outlined" aria-hidden>error</span>
               {testError}
             </p>
           ) : null}
-          <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--color-text-muted)" }}>
+          <p className="pv-modal-summary">
             {summaryText}
             {error ? ` · ${error}` : ""}
           </p>
@@ -219,9 +219,9 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
             <table className="model-table">
               <thead>
                 <tr>
-                  <th>Model</th>
-                  <th>Capabilities</th>
-                  <th style={{ textAlign: "right" }}>Actions</th>
+                  <th>{t("providers.colModel")}</th>
+                  <th>{t("providers.colCapabilities")}</th>
+                  <th className="pv-th-end">{t("providers.colActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -262,15 +262,16 @@ export function CredentialModelsModal({ open, credential, providerId, secret, on
                           icon={isTesting ? "progress_activity" : testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "science"}
                           onClick={() => void handleTestModel(model)}
                           disabled={isTesting || testingAll}
-                          aria-label="Test model"
-                          title={isTesting ? "Testing..." : "Test model"}
+                          aria-label={t("providers.testModel")}
+                          title={isTesting ? t("providers.testing") : t("providers.testModel")}
                         />
                         <Button
                           variant="ghost"
                           size="sm"
                           icon={copied === model.id ? "check" : "content_copy"}
                           onClick={() => void handleCopy(model.id)}
-                          aria-label="Copy model id"
+                          aria-label={t("providers.copyModelId")}
+                          title={t("providers.copyModelId")}
                         />
                       </div>
                     </td>

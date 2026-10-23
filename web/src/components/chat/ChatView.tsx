@@ -1,19 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { Badge, Button, Input, cn } from "../ui";
-import { ChatMarkdown } from "./ChatMarkdown";
-import { streamChatCompletion } from "./api";
-import type { ChatAttachment, ChatModelOption, ChatSession } from "./types";
+import { useViewportWidth } from "../../hooks/useViewportWidth";
+import { GuideToggle, IconAction, PageGuide, isDialogOpen, useStoredState, usePageGuide } from "../page-kit";
+import { cn } from "../ui";
+import { streamChatCompletion, type ChatRequestOptions } from "./api";
+import { ChatComposer } from "./ChatComposer";
+import { ChatModelPicker, useGroupLabel } from "./ChatModelPicker";
+import { ChatSettingsPanel, useUsableApiKeys, type ChatApiKeyOption } from "./ChatSettingsPanel";
+import { ChatSidebar } from "./ChatSidebar";
+import { ChatEmptyState, ChatThread } from "./ChatThread";
+import type { ChatAttachment, ChatMessage, ChatModelOption, ChatParams, ChatSession } from "./types";
 import {
   STORAGE_KEYS,
   buildUserContent,
   cloneSession,
   createId,
   fileToDataUrl,
-  formatRelativeTime,
   makeSessionTitle,
+  modKeyLabel,
   safeParse,
   textValue,
 } from "./utils";
@@ -25,10 +30,25 @@ type Props = {
   providerLabels?: Record<string, string>;
   providerError?: string;
   apiKey: string;
+  /** Client API-key records, used to offer keys whose secret this browser has saved. */
+  apiKeys?: ChatApiKeyOption[];
   onApiKeyChange: (value: string) => void;
   onInvalidClientApiKey: () => void;
   onError: (message: string) => void;
 };
+
+const EMPTY_PARAMS: ChatParams = { systemPrompt: "", temperature: "", maxTokens: "" };
+/** Below this width the history and settings become overlays. */
+const NARROW = 900;
+
+function requestOptions(params: ChatParams): ChatRequestOptions {
+  const options: ChatRequestOptions = {};
+  const temperature = Number(params.temperature);
+  if (params.temperature.trim() && Number.isFinite(temperature)) options.temperature = temperature;
+  const maxTokens = Number(params.maxTokens);
+  if (params.maxTokens.trim() && Number.isInteger(maxTokens) && maxTokens > 0) options.max_tokens = maxTokens;
+  return options;
+}
 
 export function ChatView({
   models,
@@ -37,105 +57,59 @@ export function ChatView({
   providerLabels = {},
   providerError = "",
   apiKey,
+  apiKeys = [],
   onApiKeyChange,
   onInvalidClientApiKey,
-  onError,
 }: Props) {
   const { t } = useTranslation();
-  const presetPrompts = useMemo(
-    () => [
-      { label: t("chat.explainSimply"), prompt: t("chat.explainSimply") },
-      { label: t("chat.codeReview"), prompt: t("chat.codeReview") },
-      { label: t("chat.debugHelp"), prompt: t("chat.debugHelp") },
-      { label: t("chat.summarize"), prompt: t("chat.summarize") },
-    ],
-    [t],
-  );
-  const { copied, copy } = useCopyToClipboard();
+  const guide = usePageGuide("chat");
+  const groupLabel = useGroupLabel();
+  const narrow = useViewportWidth() < NARROW;
+  const usableKeys = useUsableApiKeys(apiKeys);
+
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const saved = safeParse<ChatSession[]>(localStorage.getItem(STORAGE_KEYS.sessions), []);
     return Array.isArray(saved)
       ? saved.map((session) => ({
           ...session,
-          messages: Array.isArray(session.messages) ? session.messages : [],
+          // A stream cut off by a reload can never finish; show it as stopped.
+          messages: Array.isArray(session.messages)
+            ? session.messages.map((message) =>
+                message.status === "streaming" ? { ...message, status: "done" as const, stopped: true } : message,
+              )
+            : [],
         }))
       : [];
   });
-  const [activeSessionId, setActiveSessionId] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.activeSessionId) || "",
-  );
-  const [activeModelId, setActiveModelId] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.activeModelId) || "",
-  );
+  const [activeSessionId, setActiveSessionId] = useState(() => localStorage.getItem(STORAGE_KEYS.activeSessionId) || "");
+  const [activeModelId, setActiveModelId] = useState(() => localStorage.getItem(STORAGE_KEYS.activeModelId) || "");
   const [draft, setDraft] = useState(() => localStorage.getItem(STORAGE_KEYS.draft) || "");
+  const [params, setParams] = useState<ChatParams>(() => ({
+    ...EMPTY_PARAMS,
+    ...safeParse<Partial<ChatParams>>(localStorage.getItem(STORAGE_KEYS.params), {}),
+  }));
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState("");
-  const [streamingText, setStreamingText] = useState("");
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [modelSearchQuery, setModelSearchQuery] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [sidebarPref, setSidebarPref] = useStoredState<"open" | "closed">(STORAGE_KEYS.sidebar, "open", ["open", "closed"]);
+  const [panelPref, setPanelPref] = useStoredState<"open" | "closed">(STORAGE_KEYS.panel, "closed", ["open", "closed"]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState(false);
   const [chatError, setChatError] = useState("");
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
-  const settingsRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const stickToBottomRef = useRef(true);
   const initializedRef = useRef(false);
 
-  const modelIndex = useMemo(() => {
-    const map = new Map<string, ChatModelOption>();
-    for (const model of models) map.set(model.id, model);
-    return map;
-  }, [models]);
+  const sidebarShown = narrow ? drawerOpen : sidebarPref === "open";
+  const panelShown = narrow ? mobilePanel : panelPref === "open";
+  const setPanel = (open: boolean) => (narrow ? setMobilePanel(open) : setPanelPref(open ? "open" : "closed"));
 
-  const modelGroups = useMemo(() => {
-    const groups = new Map<string, ChatModelOption[]>();
-    for (const model of models) {
-      const items = groups.get(model.group) || [];
-      items.push(model);
-      groups.set(model.group, items);
-    }
-    return Array.from(groups.entries())
-      .map(([group, items]) => ({ group, items: items.sort((a, b) => a.name.localeCompare(b.name)) }))
-      .sort((a, b) => {
-        const order = (group: string) => {
-          if (group === "models") return 0;
-          if (group === "combos") return 1;
-          return 2;
-        };
-        const diff = order(a.group) - order(b.group);
-        return diff !== 0 ? diff : a.group.localeCompare(b.group);
-      });
-  }, [models]);
-
-  const filteredModelGroups = useMemo(() => {
-    const query = modelSearchQuery.trim().toLowerCase();
-    return modelGroups
-      .map((group) => ({
-        ...group,
-        items: group.items.filter((model) => {
-          if (!query) return true;
-          const haystack = [model.name, model.id, model.requestModel, group.group]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-          return haystack.includes(query);
-        }),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [modelGroups, modelSearchQuery]);
-
-  const loadingProviderGroups = useMemo(
-    () =>
-      loadingProviderIds.map((providerId) => ({
-        id: providerId,
-        label: providerLabels[providerId] || providerId,
-      })),
-    [loadingProviderIds, providerLabels],
-  );
+  const modelIndex = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
 
   const activeModel = useMemo(() => {
     if (activeModelId && modelIndex.has(activeModelId)) return modelIndex.get(activeModelId)!;
@@ -151,11 +125,14 @@ export function ChatView({
     [sessions, activeSessionId],
   );
   const currentMessages = currentSession?.messages || [];
-  const sessionItems = useMemo(
-    () => [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [sessions],
+  const hasKey = Boolean(apiKey.trim());
+  const canSend = !isSending && !!activeModel && hasKey && (draft.trim().length > 0 || attachments.length > 0);
+  const keyLabel = usableKeys.find((key) => key.secret === apiKey.trim());
+
+  const loadingProviders = useMemo(
+    () => loadingProviderIds.map((id) => ({ id, label: providerLabels[id] || id })),
+    [loadingProviderIds, providerLabels],
   );
-  const canSend = !isSending && !!activeModel && !!apiKey.trim() && (draft.trim().length > 0 || attachments.length > 0);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
@@ -165,35 +142,21 @@ export function ChatView({
   }, [sessions, activeSessionId, activeModelId, draft]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
-        setSettingsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    localStorage.setItem(STORAGE_KEYS.params, JSON.stringify(params));
+  }, [params]);
 
+  // Follow the stream only while the reader is at the bottom.
   useEffect(() => {
-    if (!modelMenuOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setModelMenuOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [modelMenuOpen]);
-
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    // The empty state reads top-down; only a thread follows the bottom.
+    if (currentMessages.length === 0) scroller.scrollTop = 0;
+    else if (stickToBottomRef.current) scroller.scrollTop = scroller.scrollHeight;
+  }, [currentMessages]);
   useEffect(() => {
-    if (!modelMenuOpen) setModelSearchQuery("");
-  }, [modelMenuOpen]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [currentMessages, streamingText]);
+    stickToBottomRef.current = true;
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!chatError) return;
@@ -203,62 +166,51 @@ export function ChatView({
 
   useEffect(() => {
     if (initializedRef.current || models.length === 0) return;
-
-    const defaultModel = activeModelId && modelIndex.has(activeModelId)
-      ? modelIndex.get(activeModelId)!
-      : models[0];
-
+    const defaultModel = activeModelId && modelIndex.has(activeModelId) ? modelIndex.get(activeModelId)! : models[0];
     if (sessions.length > 0) {
       const session = sessions.find((item) => item.id === activeSessionId) || sessions[0];
-      const sessionModel = session?.modelId && modelIndex.has(session.modelId)
-        ? modelIndex.get(session.modelId)!
-        : defaultModel;
+      const sessionModel = session?.modelId && modelIndex.has(session.modelId) ? modelIndex.get(session.modelId)! : defaultModel;
       initializedRef.current = true;
       setActiveSessionId(session.id);
       setActiveModelId(sessionModel.id);
       return;
     }
-
-    const session: ChatSession = {
-      id: createId(),
-      title: t("chat.newChat"),
-      modelId: defaultModel.id,
-      modelName: defaultModel.name,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-    };
-
+    const session = newSession(defaultModel);
     initializedRef.current = true;
     setSessions([session]);
     setActiveSessionId(session.id);
     setActiveModelId(defaultModel.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [models, modelIndex, sessions, activeSessionId, activeModelId]);
+
+  function newSession(model: ChatModelOption): ChatSession {
+    const now = new Date().toISOString();
+    return { id: createId(), title: t("chat.newChat"), modelId: model.id, modelName: model.name, createdAt: now, updatedAt: now, messages: [] };
+  }
 
   const updateSession = (sessionId: string, updater: (session: ChatSession) => ChatSession) => {
     setSessions((prev) => prev.map((session) => (session.id === sessionId ? updater(cloneSession(session)) : session)));
   };
+  const updateMessage = (sessionId: string, messageId: string, patch: Partial<ChatMessage>) => {
+    updateSession(sessionId, (session) => ({
+      ...session,
+      messages: session.messages.map((message) => (message.id === messageId ? { ...message, ...patch } : message)),
+      updatedAt: new Date().toISOString(),
+    }));
+  };
 
-  const ensureSessionForModel = (model: ChatModelOption): ChatSession => ({
-    id: createId(),
-    title: t("chat.newChat"),
-    modelId: model.id,
-    modelName: model.name,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    messages: [],
-  });
+  const focusComposer = () => window.requestAnimationFrame(() => textareaRef.current?.focus());
 
   const handleNewChat = () => {
     if (!activeModel) return;
-    const session = ensureSessionForModel(activeModel);
+    const session = newSession(activeModel);
     setSessions((prev) => [session, ...prev]);
     setActiveSessionId(session.id);
     setActiveModelId(session.modelId);
     setDraft("");
     setAttachments([]);
-    setStreamingMessageId("");
-    setStreamingText("");
+    setDrawerOpen(false);
+    focusComposer();
   };
 
   const handleSelectSession = (sessionId: string) => {
@@ -266,6 +218,7 @@ export function ChatView({
     if (!session) return;
     setActiveSessionId(sessionId);
     setActiveModelId(session.modelId);
+    setDrawerOpen(false);
   };
 
   const handleDeleteSession = (sessionId: string) => {
@@ -283,531 +236,396 @@ export function ChatView({
     }
   };
 
+  const handleDeleteAll = () => {
+    abortRef.current?.abort();
+    if (activeModel) {
+      const session = newSession(activeModel);
+      setSessions([session]);
+      setActiveSessionId(session.id);
+    } else {
+      setSessions([]);
+      setActiveSessionId("");
+    }
+  };
+
   const handleSelectModel = (modelId: string) => {
     const model = modelIndex.get(modelId);
     if (!model) return;
-
     const current = sessions.find((session) => session.id === activeSessionId);
     if (current && current.messages.length > 0) {
-      const session = ensureSessionForModel(model);
+      // Keep each conversation on one model: switching starts a new chat.
+      const session = newSession(model);
       setSessions((prev) => [session, ...prev]);
       setActiveSessionId(session.id);
     } else if (current) {
-      setSessions((prev) => prev.map((item) => (item.id === current.id ? {
-        ...item,
-        modelId: model.id,
-        modelName: model.name,
-      } : item)));
+      setSessions((prev) => prev.map((item) => (item.id === current.id ? { ...item, modelId: model.id, modelName: model.name } : item)));
     } else {
-      const session = ensureSessionForModel(model);
+      const session = newSession(model);
       setSessions((prev) => [session, ...prev]);
       setActiveSessionId(session.id);
     }
-
     setActiveModelId(model.id);
-    setModelMenuOpen(false);
+    setPickerOpen(false);
+    focusComposer();
   };
 
-  const handleAttachFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAttachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    if (files.length === 0) return;
-
     const images = files.filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) {
-      event.target.value = "";
-      return;
-    }
-
-    const converted = await Promise.all(images.map(async (file) => ({
-      id: createId(),
-      name: file.name,
-      type: file.type,
-      dataUrl: await fileToDataUrl(file),
-    })));
-
-    setAttachments((prev) => [...prev, ...converted]);
     event.target.value = "";
+    if (images.length === 0) return;
+    const converted = await Promise.all(
+      images.map(async (file) => ({ id: createId(), name: file.name, type: file.type, dataUrl: await fileToDataUrl(file) })),
+    );
+    setAttachments((prev) => [...prev, ...converted]);
   };
 
-  const removeAttachment = (attachmentId: string) => {
-    setAttachments((prev) => prev.filter((attachment) => attachment.id !== attachmentId));
-  };
-
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
     abortRef.current?.abort();
-  };
+  }, []);
 
-  const sendMessage = async () => {
-    const model = activeModel;
-    if (!model || !apiKey.trim()) {
-      if (!apiKey.trim()) {
-        setChatError(t("chat.apiKeyRequired"));
-        return;
-      }
-    }
-
-    const userText = draft.trim();
-    if (!userText && attachments.length === 0) return;
-
-    let sessionId = activeSessionId;
-    let session = sessions.find((item) => item.id === sessionId);
-    if (!session) {
-      const created = ensureSessionForModel(model);
-      sessionId = created.id;
-      session = created;
-      setSessions((prev) => [created, ...prev]);
-      setActiveSessionId(sessionId);
-    }
-
-    const userMessage = {
-      id: createId(),
-      role: "user" as const,
-      content: userText,
-      attachments: attachments.map((attachment) => ({ ...attachment })),
-      createdAt: new Date().toISOString(),
-    };
-
-    const assistantMessageId = createId();
-    const assistantMessage = {
-      id: assistantMessageId,
-      role: "assistant" as const,
+  /** Streams an assistant answer for `history` (which ends with the user turn) into the session. */
+  const runCompletion = async (sessionId: string, model: ChatModelOption, history: ChatMessage[], title?: string) => {
+    const assistantId = createId();
+    const assistant: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
       content: "",
       createdAt: new Date().toISOString(),
-      status: "streaming" as const,
-    };
-
-    const nextMessages = [...(session.messages || []), userMessage, assistantMessage];
-    setSessions((prev) => prev.map((item) => (item.id === sessionId ? {
-      ...item,
-      modelId: model.id,
+      status: "streaming",
       modelName: model.name,
-      messages: nextMessages,
-      updatedAt: new Date().toISOString(),
-      title: item.title === t("chat.newChat") ? makeSessionTitle(userText) : item.title,
-    } : item)));
-    setDraft("");
-    setAttachments([]);
+    };
+    setSessions((prev) =>
+      prev.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              modelId: model.id,
+              modelName: model.name,
+              messages: [...history, assistant],
+              updatedAt: new Date().toISOString(),
+              title: title ?? item.title,
+            }
+          : item,
+      ),
+    );
+    stickToBottomRef.current = true;
     setIsSending(true);
-    setStreamingMessageId(assistantMessageId);
-    setStreamingText("");
+    setStreamingMessageId(assistantId);
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    const requestMessages = nextMessages
-      .filter((message) => !(message.role === "assistant" && message.id === assistantMessageId))
-      .map((message) => ({
-        role: message.role,
-        content: message.role === "user" ? buildUserContent(message) : message.content,
-      }));
+    const system = params.systemPrompt.trim();
+    const requestMessages = [
+      ...(system ? [{ role: "system", content: system }] : []),
+      ...history
+        // Failed or empty assistant turns are UI notes, not model output.
+        .filter((message) => message.role === "user" || (message.status !== "error" && textValue(message.content)))
+        .map((message) => ({
+          role: message.role,
+          content: message.role === "user" ? buildUserContent(message) : message.content,
+        })),
+    ];
 
+    const started = performance.now();
+    let firstTokenMs: number | undefined;
     try {
       const assistantText = await streamChatCompletion(
         apiKey.trim(),
         model.requestModel || model.id,
         requestMessages,
         {
-          signal: abortRef.current.signal,
+          signal: controller.signal,
           onDelta: (text) => {
-            setStreamingText(text);
-            updateSession(sessionId, (currentSession) => ({
-              ...currentSession,
-              messages: currentSession.messages.map((message) => (
-                message.id === assistantMessageId
-                  ? { ...message, content: text, status: "streaming" }
-                  : message
-              )),
-              updatedAt: new Date().toISOString(),
-            }));
+            if (firstTokenMs === undefined) firstTokenMs = performance.now() - started;
+            updateMessage(sessionId, assistantId, { content: text, status: "streaming" });
           },
         },
+        requestOptions(params),
       );
-
-      updateSession(sessionId, (currentSession) => ({
-        ...currentSession,
-        messages: currentSession.messages.map((message) => (
-          message.id === assistantMessageId
-            ? { ...message, content: assistantText || message.content, status: "done" }
-            : message
-        )),
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.id === assistantId
+            ? { ...message, content: assistantText || message.content, status: "done", firstTokenMs, durationMs: performance.now() - started }
+            : message,
+        ),
         updatedAt: new Date().toISOString(),
       }));
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      if (cause instanceof DOMException && cause.name === "AbortError") {
+        // Keep whatever streamed so far and mark it as stopped.
+        updateMessage(sessionId, assistantId, { status: "done", stopped: true, firstTokenMs, durationMs: performance.now() - started });
+        return;
+      }
       const errorText = cause instanceof Error ? cause.message : t("chat.failedToSend");
       const invalidClientApiKey = errorText.trim().toLowerCase() === "invalid client api key";
       if (invalidClientApiKey) onInvalidClientApiKey();
-      updateSession(sessionId, (currentSession) => ({
-        ...currentSession,
-        messages: currentSession.messages.map((message) => (
-          message.id === assistantMessageId
-            ? {
-                ...message,
-                content: message.content || `Error: ${invalidClientApiKey ? t("chat.invalidApiKey") : errorText}`,
-                status: "error",
-              }
-            : message
-        )),
+      // The failed turn shows the error inline (with Retry); no banner on top of it.
+      const shown = invalidClientApiKey ? t("chat.invalidApiKey") : errorText;
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.id === assistantId
+            ? { ...message, content: message.content || `Error: ${shown}`, status: "error", durationMs: performance.now() - started }
+            : message,
+        ),
         updatedAt: new Date().toISOString(),
       }));
-      setChatError(invalidClientApiKey ? t("chat.invalidApiKey") : errorText);
     } finally {
-      setIsSending(false);
-      setStreamingMessageId("");
-      setStreamingText("");
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        setIsSending(false);
+        setStreamingMessageId("");
+        abortRef.current = null;
+      }
     }
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      if (canSend) void sendMessage();
+  const sendMessage = async () => {
+    const model = activeModel;
+    if (!hasKey) {
+      setChatError(t("chat.apiKeyRequired"));
+      setPanel(true);
+      return;
     }
+    if (!model) return;
+    const userText = draft.trim();
+    if (!userText && attachments.length === 0) return;
+
+    let sessionId = activeSessionId;
+    let session = sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      const created = newSession(model);
+      sessionId = created.id;
+      session = created;
+      setSessions((prev) => [created, ...prev]);
+      setActiveSessionId(sessionId);
+    }
+
+    const userMessage: ChatMessage = {
+      id: createId(),
+      role: "user",
+      content: userText,
+      attachments: attachments.map((attachment) => ({ ...attachment })),
+      createdAt: new Date().toISOString(),
+    };
+    const title = session.messages.length === 0 ? makeSessionTitle(userText, t("chat.imageMessage")) : undefined;
+    setDraft("");
+    setAttachments([]);
+    await runCompletion(sessionId, model, [...session.messages, userMessage], title);
+  };
+
+  const regenerate = () => {
+    if (!currentSession || !activeModel || isSending) return;
+    if (!hasKey) {
+      setChatError(t("chat.apiKeyRequired"));
+      setPanel(true);
+      return;
+    }
+    const messages = currentSession.messages;
+    let index = messages.length - 1;
+    while (index >= 0 && messages[index].role !== "assistant") index -= 1;
+    if (index < 0) return;
+    void runCompletion(currentSession.id, activeModel, messages.slice(0, index));
   };
 
   const applyPreset = (prompt: string) => {
-    setDraft((current) => (current.trim() ? `${current}\n\n${prompt} ` : `${prompt} `));
+    setDraft((current) => (current.trim() ? `${current}\n\n${prompt}` : prompt));
+    focusComposer();
   };
 
+  // Esc stops a running answer; Ctrl/Cmd+K opens the model picker.
+  const sendingRef = useRef(isSending);
+  sendingRef.current = isSending;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && sendingRef.current && !isDialogOpen()) {
+        event.preventDefault();
+        handleStop();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !isDialogOpen()) {
+        event.preventDefault();
+        setPickerOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [handleStop]);
+
+  const paramsSummary = [
+    params.systemPrompt.trim() ? t("chat.systemShort") : "",
+    requestOptions(params).temperature !== undefined ? `T ${requestOptions(params).temperature}` : "",
+    requestOptions(params).max_tokens !== undefined ? t("chat.maxShort", { count: requestOptions(params).max_tokens }) : "",
+  ].filter(Boolean).join(" · ");
+
+  const blockedReason = !activeModel ? t("chat.blockedNoModel") : !hasKey ? t("chat.blockedNoKey") : undefined;
+
   return (
-    <section className="chat-page">
-      <aside className={cn("chat-sidebar", !sidebarOpen && "is-collapsed")}>
-        <div className="chat-sidebar-header">
-          <Button variant="primary" size="sm" icon="add" block onClick={handleNewChat} disabled={!activeModel}>
-            New chat
-          </Button>
-          <button
-            type="button"
-            className="chat-sidebar-toggle"
-            onClick={() => setSidebarOpen((value) => !value)}
-            aria-label={sidebarOpen ? t("chat.collapseHistory") : t("chat.expandHistory")}
-          >
-            <span className="material-symbols-outlined">{sidebarOpen ? "left_panel_close" : "left_panel_open"}</span>
-          </button>
-        </div>
+    <section className="ch-page">
+      <PageGuide
+        open={guide.open}
+        onDismiss={guide.dismiss}
+        title={t("chat.guideTitle")}
+        steps={[
+          { icon: "smart_toy", text: t("chat.guideStep1") },
+          { icon: "vpn_key", text: t("chat.guideStep2") },
+          { icon: "keyboard", text: t("chat.guideStep3") },
+        ]}
+      />
 
-        {sidebarOpen ? (
-          <div className="chat-session-list custom-scrollbar">
-            {sessionItems.length === 0 ? (
-              <div className="chat-session-empty">No conversations yet.</div>
-            ) : sessionItems.map((session) => {
-              const isActive = session.id === activeSessionId;
-              const latestMessage = [...session.messages].reverse().find((message) => message.role === "user");
-              return (
-                <div key={session.id} className={cn("chat-session-item", isActive && "is-active")}>
-                  <button type="button" className="chat-session-button" onClick={() => handleSelectSession(session.id)}>
-                    <span className="chat-session-title">{session.title}</span>
-                    <span className="chat-session-preview">
-                      {textValue(latestMessage?.content) || t("chat.emptyChat")}
-                    </span>
-                    <span className="chat-session-time">{formatRelativeTime(session.updatedAt)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-session-delete"
-                    onClick={() => handleDeleteSession(session.id)}
-                    aria-label={t("chat.deleteChat")}
-                  >
-                    <span className="material-symbols-outlined">delete</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+      <div className={cn("ch-shell", !sidebarShown && "is-sidebar-hidden", panelShown && "is-panel-open")}>
+        {sidebarShown ? (
+          <>
+            {narrow ? <button type="button" className="ch-backdrop" aria-label={t("chat.close")} onClick={() => setDrawerOpen(false)} /> : null}
+            <ChatSidebar
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              canCreate={Boolean(activeModel)}
+              onNewChat={handleNewChat}
+              onSelect={handleSelectSession}
+              onDelete={handleDeleteSession}
+              onDeleteAll={handleDeleteAll}
+              onCollapse={() => (narrow ? setDrawerOpen(false) : setSidebarPref("closed"))}
+            />
+          </>
         ) : null}
-      </aside>
 
-      <div className="chat-main">
-        {chatError ? (
-          <div className="chat-error-banner">
-            <span className="material-symbols-outlined">error</span>
-            <span>{chatError}</span>
-            <button type="button" className="chat-error-dismiss" onClick={() => setChatError("")} aria-label={t("common.dismissError")}>
-              <span className="material-symbols-outlined">close</span>
-            </button>
-          </div>
-        ) : null}
-        <div className="chat-toolbar">
-          <div ref={modelMenuRef} className="chat-model-picker">
+        <div className="ch-main">
+          <header className="ch-bar">
+            {!sidebarShown ? (
+              <IconAction
+                icon={narrow ? "history" : "left_panel_open"}
+                label={t("chat.expandHistory")}
+                bordered
+                onClick={() => (narrow ? setDrawerOpen(true) : setSidebarPref("open"))}
+              />
+            ) : null}
             <button
               type="button"
-              className="chat-model-trigger"
-              onClick={() => setModelMenuOpen((value) => !value)}
-              disabled={models.length === 0}
+              className="ch-model-trigger"
+              onClick={() => setPickerOpen(true)}
+              disabled={models.length === 0 && loadingProviders.length === 0}
+              title={`${t("chat.changeModel")} (${modKeyLabel()} K)`}
             >
-              <span className="material-symbols-outlined">smart_toy</span>
-              <div className="chat-model-trigger-text">
-                <span className="chat-model-name">{activeModel?.name || t("chat.selectModel")}</span>
-                <span className="chat-model-id">{activeModel?.requestModel || activeModel?.id || "No models configured"}</span>
-              </div>
-              <span className="material-symbols-outlined">expand_more</span>
+              <span className="material-symbols-outlined ch-model-trigger-icon" aria-hidden>smart_toy</span>
+              <span className="ch-model-trigger-text">
+                <strong>{activeModel?.name || t("chat.selectModel")}</strong>
+                <span>
+                  {activeModel ? `${groupLabel(activeModel.group)} · ${activeModel.requestModel || activeModel.id}` : t("chat.noModelsConfigured")}
+                </span>
+              </span>
+              {loadingProviderModels ? (
+                <span className="material-symbols-outlined animate-spin ch-model-trigger-spin" aria-hidden>progress_activity</span>
+              ) : null}
+              <kbd className="cp-kbd">{modKeyLabel()} K</kbd>
+              <span className="material-symbols-outlined" aria-hidden>expand_more</span>
             </button>
 
-            {modelMenuOpen ? (
-              <div className="chat-model-overlay" onClick={() => setModelMenuOpen(false)}>
-                <div className="chat-model-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-                  <div className="chat-model-modal-head">
-                    <div>
-                      <h3>Select model</h3>
-                      <p>{models.length} available{loadingProviderModels ? " · discovering more…" : ""}</p>
-                    </div>
-                    <button
-                      type="button"
-                      className="chat-model-modal-close"
-                      onClick={() => setModelMenuOpen(false)}
-                      aria-label={t("chat.close")}
-                    >
-                      <span className="material-symbols-outlined">close</span>
-                    </button>
-                  </div>
-
-                  <div className="chat-model-modal-search">
-                    <Input
-                      value={modelSearchQuery}
-                      onChange={(event) => setModelSearchQuery(event.target.value)}
-                      placeholder={t("chat.searchModels")}
-                      icon="search"
-                    />
-                  </div>
-
-                  <div className="chat-model-menu custom-scrollbar">
-                    {filteredModelGroups.length === 0 && !loadingProviderModels ? (
-                      <div className="chat-model-menu-empty">
-                        {models.length === 0 ? (
-                          <>
-                            No models available. Connect providers in{" "}
-                            <Link to="/providers">Providers</Link> or configure models in{" "}
-                            <Link to="/models">PPM</Link>.
-                          </>
-                        ) : (
-                          "No models match your search."
-                        )}
-                      </div>
-                    ) : (
-                      filteredModelGroups.map((group) => (
-                        <div key={group.group} className="chat-model-group">
-                          <div className="chat-model-group-header">
-                            <span>{group.group}</span>
-                            <Badge size="sm">{group.items.length}</Badge>
-                          </div>
-                          <div className="chat-model-grid">
-                            {group.items.map((model) => {
-                              const isActive = model.id === activeModelId;
-                              return (
-                                <button
-                                  key={model.id}
-                                  type="button"
-                                  className={cn("chat-model-option", isActive && "is-active")}
-                                  onClick={() => handleSelectModel(model.id)}
-                                >
-                                  <span className="chat-model-option-name">{model.name}</span>
-                                  <span className="chat-model-option-id">{model.requestModel || model.id}</span>
-                                  {isActive ? <span className="material-symbols-outlined">check_circle</span> : null}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))
-                    )}
-
-                    {loadingProviderGroups.map((provider) => (
-                      <div key={`loading-${provider.id}`} className="chat-model-group chat-model-group-loading">
-                        <div className="chat-model-group-header">
-                          <span>{provider.label}</span>
-                          <Badge size="sm">…</Badge>
-                        </div>
-                        <div className="chat-model-menu-loading">
-                          <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                          Discovering supported models…
-                        </div>
-                      </div>
-                    ))}
-
-                    {providerError ? <div className="chat-model-menu-error">{providerError}</div> : null}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="chat-toolbar-actions">
-            <div ref={settingsRef} className="chat-settings">
-              <Button
-                variant="secondary"
-                size="sm"
-                icon="settings"
-                onClick={() => setSettingsOpen((value) => !value)}
+            <div className="ch-bar-end">
+              <button
+                type="button"
+                className={cn("ch-key-pill cp-status", hasKey ? "cp-tone-success" : "cp-tone-warning")}
+                onClick={() => setPanel(true)}
+                title={t("chat.clientApiKey")}
               >
-                Settings
-              </Button>
-              {settingsOpen ? (
-                <div className="chat-settings-panel">
-                  <label className="chat-settings-label">Client API key</label>
-                  <Input
-                    type="password"
-                    icon="vpn_key"
-                    value={apiKey}
-                    onChange={(event) => onApiKeyChange(event.target.value)}
-                    placeholder="tproxy API key"
-                  />
-                  <p className="chat-settings-hint">
-                    Uses <code>/v1/chat/completions</code> with a client API key from{" "}
-                    <Link to="/apis">APIs</Link> — not the dashboard management password.
-                  </p>
-                </div>
-              ) : null}
+                <span className="material-symbols-outlined" aria-hidden>{hasKey ? "vpn_key" : "key_off"}</span>
+                <span>{hasKey ? keyLabel?.name || keyLabel?.id || t("chat.customKeyShort") : t("chat.noKey")}</span>
+              </button>
+              <IconAction
+                icon="tune"
+                label={t("chat.settingsTitle")}
+                bordered
+                active={panelShown}
+                aria-pressed={panelShown}
+                onClick={() => setPanel(!panelShown)}
+              />
+              <GuideToggle open={guide.open} onToggle={guide.toggle} />
             </div>
-          </div>
-        </div>
+          </header>
 
-        <div className="chat-messages custom-scrollbar">
-          {currentMessages.length === 0 ? (
-            <div className="chat-empty">
-              <div className="chat-empty-icon">
-                <span className="material-symbols-outlined">chat</span>
-              </div>
-              <h2>Start a conversation</h2>
-              <p>
-                Chat with virtual models, combos, or any model discovered from your configured provider accounts.
-              </p>
-              <div className="chat-presets">
-                {presetPrompts.map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    className="chat-preset"
-                    onClick={() => applyPreset(preset.prompt)}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="chat-thread">
-              {currentMessages.map((message) => {
-                const isUser = message.role === "user";
-                const isAssistant = message.role === "assistant";
-                const isStreaming = isAssistant && message.id === streamingMessageId && message.status === "streaming";
-                const content = textValue(message.content) || (isAssistant ? streamingText : "");
-
-                return (
-                  <div key={message.id} className={cn("chat-message", isUser ? "is-user" : "is-assistant", message.status === "error" && "is-error")}>
-                    <div className="chat-message-meta">
-                      <span>{isUser ? t("chat.you") : activeModel?.name || t("chat.assistant")}</span>
-                    </div>
-
-                    {message.attachments?.length ? (
-                      <div className="chat-attachments">
-                        {message.attachments.map((attachment) => (
-                          <a
-                            key={attachment.id}
-                            href={attachment.dataUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="chat-attachment"
-                          >
-                            <img src={attachment.dataUrl} alt={attachment.name} />
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    <div className="chat-message-content">
-                      {isAssistant ? (
-                        <ChatMarkdown content={content} streaming={isStreaming} />
-                      ) : (
-                        content
-                      )}
-                    </div>
-
-                    {content && !isStreaming ? (
-                      <div className="chat-message-actions">
-                        <button
-                          type="button"
-                          className="chat-message-copy"
-                          onClick={() => copy(content, message.id)}
-                          aria-label={copied === message.id ? t("common.copied") : t("chat.copyMessage")}
-                          title={copied === message.id ? t("common.copied") : t("chat.copyMessage")}
-                        >
-                          <span className="material-symbols-outlined">
-                            {copied === message.id ? "check" : "content_copy"}
-                          </span>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        <div className="chat-composer-wrap">
-          {attachments.length > 0 ? (
-            <div className="chat-composer-attachments">
-              {attachments.map((attachment) => (
-                <div key={attachment.id} className="chat-composer-attachment">
-                  <span>{attachment.name}</span>
-                  <button type="button" onClick={() => removeAttachment(attachment.id)} aria-label={t("chat.removeAttachment")}>
-                    <span className="material-symbols-outlined">close</span>
-                  </button>
-                </div>
-              ))}
+          {chatError ? (
+            <div className="ch-error" role="alert">
+              <span className="material-symbols-outlined" aria-hidden>error</span>
+              <span>{chatError}</span>
+              <IconAction icon="close" label={t("common.dismissError")} onClick={() => setChatError("")} />
             </div>
           ) : null}
 
-          <div className="chat-composer">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Message AI…"
-              rows={1}
-              className="chat-composer-input custom-scrollbar"
-            />
-            <div className="chat-composer-actions">
-              <button
-                type="button"
-                className="chat-composer-icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!activeModel}
-                aria-label="Attach image"
-              >
-                <span className="material-symbols-outlined">attach_file</span>
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="sr-only"
-                onChange={(event) => void handleAttachFiles(event)}
+          <div
+            ref={scrollRef}
+            className="ch-scroll custom-scrollbar"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              stickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+            }}
+          >
+            {currentMessages.length === 0 ? (
+              <ChatEmptyState
+                noModels={models.length === 0 && !loadingProviderModels}
+                modelName={activeModel?.name}
+                hasKey={hasKey}
+                onOpenPicker={() => setPickerOpen(true)}
+                onOpenSettings={() => setPanel(true)}
+                onPreset={applyPreset}
               />
-              <span className="chat-composer-model">{activeModel?.name || "No model"}</span>
-              <div className="chat-composer-send">
-                {isSending ? (
-                  <button type="button" className="chat-stop-btn" onClick={handleStop} aria-label="Stop">
-                    <span className="material-symbols-outlined">stop</span>
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className={cn("chat-send-btn", canSend && "is-ready")}
-                  onClick={() => void sendMessage()}
-                  disabled={!canSend}
-                  aria-label="Send"
-                >
-                  <span className="material-symbols-outlined">arrow_upward</span>
-                </button>
-              </div>
-            </div>
+            ) : (
+              <ChatThread
+                ref={endRef}
+                messages={currentMessages}
+                streamingMessageId={streamingMessageId}
+                fallbackModelName={currentSession?.modelName || activeModel?.name || ""}
+                canRegenerate={!isSending && Boolean(activeModel)}
+                onRegenerate={regenerate}
+              />
+            )}
           </div>
-          <p className="chat-footer-note">Responses stream through your tproxy gateway.</p>
+
+          <ChatComposer
+            ref={textareaRef}
+            draft={draft}
+            onDraftChange={setDraft}
+            attachments={attachments}
+            onAttach={(event) => void handleAttachFiles(event)}
+            onRemoveAttachment={(id) => setAttachments((prev) => prev.filter((attachment) => attachment.id !== id))}
+            canSend={canSend}
+            isSending={isSending}
+            disabled={!activeModel}
+            blockedReason={blockedReason}
+            modelName={activeModel?.name}
+            paramsSummary={paramsSummary}
+            onSend={() => void sendMessage()}
+            onStop={handleStop}
+            onOpenPicker={() => setPickerOpen(true)}
+            onOpenSettings={() => setPanel(true)}
+          />
         </div>
+
+        {panelShown ? (
+          <>
+            {narrow ? <button type="button" className="ch-backdrop" aria-label={t("chat.close")} onClick={() => setPanel(false)} /> : null}
+            <ChatSettingsPanel
+              apiKeys={apiKeys}
+              apiKey={apiKey}
+              onApiKeyChange={onApiKeyChange}
+              params={params}
+              onParamsChange={setParams}
+              onClose={() => setPanel(false)}
+            />
+          </>
+        ) : null}
       </div>
+
+      <ChatModelPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        models={models}
+        activeModelId={activeModel?.id || ""}
+        onSelect={handleSelectModel}
+        loadingProviders={loadingProviders}
+        providerError={providerError}
+      />
     </section>
   );
 }
