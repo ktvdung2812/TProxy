@@ -69,6 +69,7 @@ func (b *Builder) Build() (*Service, error) {
 	requestRouter.SetModelsRegistry(modelsRegistry)
 	requestRouter.SetAllowUpstreamModels(cfg.Server.AllowUpstreamModels)
 	requestRouter.ConfigureRouting(cfg.Routing)
+	requestRouter.ConfigureUpstream(cfg.Upstream)
 	server := api.NewServer(cfg, dataStore, requestRouter)
 	server.SetConfigPath(b.configPath)
 	return &Service{config: cfg, configPath: b.configPath, store: dataStore, handler: server.Handler(), apiServer: server}, nil

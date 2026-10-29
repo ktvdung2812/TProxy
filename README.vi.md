@@ -57,7 +57,7 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - **Protocol mapping** — định tuyến trong suốt Claude/GPT placeholder để các công cụ như Claude Code và Codex giữ nguyên tên tier gốc trong khi tproxy viết lại model ID upstream phía server.
 - **Auto-combo** — preset không cần cấu hình như `auto`, `auto/coding:fast`, `auto/reasoning:pro`.
 - **Fusion routing** — thực thi song song trên nhiều model với xếp hạng kiểu arena.
-- **Session affinity** — định tuyến sticky với TTL có thể cấu hình.
+- **Session affinity** — định tuyến sticky với TTL có thể cấu hình, kế thừa credential của phiên cha cho subagent, và chế độ `quota` chỉ đổi binding khi hết quota hoặc lỗi xác thực.
 - **Lập lịch theo số liệu thực** — độ trễ/TTFT, tải hiện tại, tỷ lệ lỗi và quota gần nhất được dùng cho các chiến lược latency-aware, capacity-aware, health-first, least-used và quota-aware.
 
 ### Tương thích giao thức

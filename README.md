@@ -58,7 +58,7 @@ tproxy is designed for **local machines, developer workstations, and single-node
 - **Protocol mapping** — transparent Claude/GPT placeholder routing so tools like Claude Code and Codex keep their native tier names while tproxy rewrites upstream model IDs server-side.
 - **Auto-combo resolution** — zero-config presets such as `auto`, `auto/coding:fast`, `auto/reasoning:pro`.
 - **Fusion routing** — parallel execution across models with arena-style ranking.
-- **Session affinity** — sticky routing with configurable TTL.
+- **Session affinity** — sticky routing with configurable TTL, parent-session inheritance for subagents, and a `quota` rebind mode that only moves a session when the account is out of quota or cannot authenticate.
 - **Measured scheduling** — latency/TTFT, current load, errors, and recent quota drive the latency-aware, capacity-aware, health-first, least-used, and quota-aware strategies.
 
 ### Protocol compatibility
@@ -508,6 +508,17 @@ routing:
   strategy: round-robin
   session-affinity: true
   session-affinity-ttl: 1h
+  # Keep a subagent on its parent's account (metadata.parent_session_id or
+  # X-Parent-Session-ID) and choose whether a failover moves the binding:
+  # "any" rebinds on every failover, "quota" only on 429/401/403.
+  # session-affinity-subagents: true
+  # session-affinity-rebind-on: any
+
+upstream:
+  codex:
+    # Hold the Codex handshake until the first token so an HTTP 200 that hides an
+    # "at capacity" error can still fail over.
+    stream-bootstrap-buffering: false
 
 client-api-keys:
   - id: local

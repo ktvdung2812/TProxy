@@ -1180,6 +1180,7 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 	if request.SessionID == "" {
 		request.SessionID = sessionIDFromRequest(r, request.Raw)
 	}
+	attachParentSessionID(r, &request)
 	liveTracked := false
 	defer func() {
 		if liveTracked {
@@ -1372,6 +1373,9 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 	requestedModel = resolveIngressModel(r, requestedModel)
 	request := parseGemini(body, requestID, requestedModel)
 	request.Stream = action == "streamGenerateContent"
+	if request.SessionID == "" {
+		request.SessionID = sessionIDFromRequest(r, request.Raw)
+	}
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	attachClientPolicyMetadata(&request, key)
 	attachIngressMetadata(r, &request)
@@ -1738,6 +1742,7 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		s.setConfig(next)
 		s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 		s.router.ConfigureRouting(next.Routing)
+		s.router.ConfigureUpstream(next.Upstream)
 		_ = s.router.SyncAccountRotationSettings(r.Context())
 		s.loadManagementSecret(r.Context())
 		s.loadGatewaySettings(r.Context())
@@ -3324,6 +3329,7 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 	s.setConfig(&next)
 	s.router.SetAllowUpstreamModels(next.Server.AllowUpstreamModels)
 	s.router.ConfigureRouting(next.Routing)
+	s.router.ConfigureUpstream(next.Upstream)
 	s.loadManagementSecret(r.Context())
 	s.setRemoteManagement(next.Server.AllowRemoteManagement)
 	s.loadGatewaySettings(r.Context())

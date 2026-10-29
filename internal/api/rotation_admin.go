@@ -120,6 +120,7 @@ func (s *Server) adminPutAccountRotation(w http.ResponseWriter, r *http.Request)
 		s.setConfig(&next)
 	}
 	s.router.ConfigureRouting(s.currentConfig().Routing)
+	s.router.ConfigureUpstream(s.currentConfig().Upstream)
 	if err := s.router.SyncAccountRotationSettings(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "rotation_sync_failed", err.Error(), useClientRequestID(r))
 		return
