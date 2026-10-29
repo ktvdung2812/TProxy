@@ -7,6 +7,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
 // xAI integration follows the dual-API model used by Pi (packages/ai):
@@ -94,6 +95,7 @@ func xaiModelUsesResponsesAPI(model string) bool {
 
 func xaiResponsesBody(request canonical.Request) map[string]any {
 	body := codexBody(request)
+	thinking.Apply(thinking.ProviderXAI, request.UpstreamModel, body, thinking.FromSources(request))
 	xaiNormalizeResponsesBody(body, request)
 	return body
 }
@@ -107,22 +109,23 @@ func xaiNormalizeResponsesBody(body map[string]any, request canonical.Request) {
 	if sessionID != "" {
 		body["prompt_cache_key"] = sessionID
 	}
+	if cfg := thinking.FromSources(request); cfg.Effort == "none" {
+		delete(body, "reasoning")
+		delete(body, "include")
+		return
+	}
+	// xAI accepts the Reasoning object but rejects its summary field, and clamps
+	// the effort to low|medium|high.
 	if reasoning, ok := body["reasoning"].(map[string]any); ok {
 		delete(reasoning, "summary")
-		reasoning["effort"] = xaiWireReasoningEffort(stringValue(reasoning["effort"]))
+		reasoning["effort"] = thinking.XAIWireReasoningEffort(stringValue(reasoning["effort"]))
 		body["reasoning"] = reasoning
 	}
 	body["include"] = []any{"reasoning.encrypted_content"}
 }
 
-func xaiWireReasoningEffort(effort string) string {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "low", "medium", "high":
-		return strings.ToLower(strings.TrimSpace(effort))
-	default:
-		return "medium"
-	}
-}
+// xaiWireReasoningEffort is kept for callers that already have a label.
+func xaiWireReasoningEffort(effort string) string { return thinking.XAIWireReasoningEffort(effort) }
 
 func xaiHeaders(provider store.Provider, credential store.Credential, streaming bool, request canonical.Request) http.Header {
 	headers := authHeaders(provider, credential)

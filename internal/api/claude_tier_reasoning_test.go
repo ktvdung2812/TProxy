@@ -5,15 +5,17 @@ import (
 
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
-func TestApplyClaudeTierReasoningEffort(t *testing.T) {
-	server := &Server{
-		claudeAliases: bridge.NewResolver(bridge.Config{}),
-	}
-	server.claudeAliases.SetReasoningEffortOverrides(bridge.ReasoningEffortOverrides{
-		bridge.RoleFable: "high",
-	})
+func aliasServer(role bridge.Role, effort string) *Server {
+	server := &Server{claudeAliases: bridge.NewResolver(bridge.Config{})}
+	server.claudeAliases.SetReasoningEffortOverrides(bridge.ReasoningEffortOverrides{role: effort})
+	return server
+}
+
+func TestApplyClaudeTierReasoningEffortContributesHint(t *testing.T) {
+	server := aliasServer(bridge.RoleFable, "high")
 
 	request := canonical.Request{
 		PublicModelID: "codex:gpt-5.6-sol",
@@ -24,18 +26,20 @@ func TestApplyClaudeTierReasoningEffort(t *testing.T) {
 		Metadata: map[string]any{claudeClientModelMetadataKey: "fable"},
 	}
 	server.applyClaudeTierReasoningEffort(&request)
-	if got := request.Raw["reasoning_effort"]; got != "high" {
-		t.Fatalf("reasoning_effort = %#v, want high", got)
+
+	// The alias no longer writes into the client's pass-through body.
+	if _, ok := request.Raw["reasoning_effort"]; ok {
+		t.Fatalf("alias must not write reasoning_effort into Raw: %#v", request.Raw)
+	}
+	// It contributes a hint that Normalize resolves.
+	normalized := thinking.Normalize(request)
+	if got := normalized.Reasoning["effort"]; got != "high" {
+		t.Fatalf("effort = %#v, want high", got)
 	}
 }
 
 func TestApplyClaudeTierReasoningEffortRespectsClientThinking(t *testing.T) {
-	server := &Server{
-		claudeAliases: bridge.NewResolver(bridge.Config{}),
-	}
-	server.claudeAliases.SetReasoningEffortOverrides(bridge.ReasoningEffortOverrides{
-		bridge.RoleFable: "high",
-	})
+	server := aliasServer(bridge.RoleFable, "high")
 
 	request := canonical.Request{
 		PublicModelID: "codex:gpt-5.6-sol",
@@ -49,8 +53,17 @@ func TestApplyClaudeTierReasoningEffortRespectsClientThinking(t *testing.T) {
 		Metadata: map[string]any{claudeClientModelMetadataKey: "fable"},
 	}
 	server.applyClaudeTierReasoningEffort(&request)
-	if _, ok := request.Raw["reasoning_effort"]; ok {
-		t.Fatalf("expected client thinking to win over mapping effort")
+	if _, ok := request.Metadata[thinking.MetadataAliasEffort]; ok {
+		t.Fatalf("expected client thinking to suppress the alias hint")
+	}
+
+	// The client's budget survives normalization; the alias effort never replaces it.
+	normalized := thinking.Normalize(request)
+	if got := normalized.Reasoning["effort"]; got != "high" {
+		t.Fatalf("budget 12000 should map to high, got %#v", got)
+	}
+	if got := normalized.Reasoning["budget_tokens"]; got != 12000 {
+		t.Fatalf("client budget lost: %#v", normalized.Reasoning)
 	}
 }
 

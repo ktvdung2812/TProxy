@@ -16,6 +16,7 @@ import (
 	"github.com/tproxy/tproxy/internal/canonical"
 	devinpkg "github.com/tproxy/tproxy/internal/providers/devin"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
 type devinAdapter struct{ client *http.Client }
@@ -236,7 +237,7 @@ func buildDevinChatRequest(request canonical.Request, apiKey string) devinChatBu
 	if value, ok := numberValueAny(request.Raw["top_p"]); ok {
 		topP = &value
 	}
-	effort := stringValue(request.Reasoning["effort"])
+	effort := thinking.FromSources(request).Effort
 	return devinChatBuild{
 		request: devinpkg.ChatRequest{
 			APIKey:       apiKey,

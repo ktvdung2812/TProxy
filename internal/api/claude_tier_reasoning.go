@@ -4,10 +4,18 @@ import (
 	"strings"
 
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
+// applyClaudeTierReasoningEffort contributes the Claude tier alias's effort to a
+// request whose client expressed no thinking preference of its own.
+//
+// It records the alias effort as a hint in Metadata instead of writing
+// reasoning_effort into Raw: Raw is the client's pass-through body and stays
+// untouched, and thinking.Normalize (running on the router) resolves the hint
+// against every client source before anything reaches an adapter.
 func (s *Server) applyClaudeTierReasoningEffort(request *canonical.Request) {
-	if request == nil || request.Raw == nil {
+	if request == nil {
 		return
 	}
 	clientModel := strings.TrimSpace(request.PublicModelID)
@@ -22,26 +30,11 @@ func (s *Server) applyClaudeTierReasoningEffort(request *canonical.Request) {
 	if effort == "" || claudeRequestHasReasoningPreference(request.Raw) {
 		return
 	}
-	request.Raw["reasoning_effort"] = effort
+	thinking.SetAliasEffort(request, effort)
 }
 
+// claudeRequestHasReasoningPreference reports whether the client already chose a
+// thinking level, in which case an alias must not override it.
 func claudeRequestHasReasoningPreference(body map[string]any) bool {
-	if _, ok := body["reasoning_effort"]; ok {
-		return true
-	}
-	if reasoning, ok := body["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok && strings.TrimSpace(effort) != "" {
-			return true
-		}
-	}
-	if thinking, ok := body["thinking"].(map[string]any); ok {
-		switch strings.TrimSpace(strings.ToLower(stringValue(thinking["type"]))) {
-		case "enabled", "adaptive":
-			return true
-		}
-		if budget, ok := thinking["budget_tokens"]; ok && intValue(budget) > 0 {
-			return true
-		}
-	}
-	return false
+	return thinking.FromRaw(body).Set
 }

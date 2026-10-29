@@ -13,6 +13,7 @@ import (
 	"github.com/tproxy/tproxy/internal/canonical"
 	cursorpkg "github.com/tproxy/tproxy/internal/providers/cursor"
 	"github.com/tproxy/tproxy/internal/store"
+	thinkpkg "github.com/tproxy/tproxy/internal/thinking"
 )
 
 type cursorAdapter struct{ client *http.Client }
@@ -87,7 +88,10 @@ func (a *cursorAdapter) postCursor(ctx context.Context, provider store.Provider,
 		return nil, err
 	}
 	body := buildOpenAIBody(request)
-	messages, tools, reasoningEffort := cursorMessagesFromBody(body)
+	messages, tools := cursorMessagesFromBody(body)
+	// Cursor's protobuf carries the effort as its own field, fed from the
+	// normalized config instead of the body it was just derived from.
+	reasoningEffort := thinkpkg.FromSources(request).Effort
 	forceAgent := cursorForceAgentMode(request)
 	protobufBody := cursorpkg.GenerateCursorBody(messages, request.UpstreamModel, tools, reasoningEffort, forceAgent)
 
@@ -133,7 +137,7 @@ func cursorForceAgentMode(request canonical.Request) bool {
 	return strings.Contains(ua, "claude-cli") || strings.Contains(ua, "claude-code") || strings.Contains(ua, "claude code")
 }
 
-func cursorMessagesFromBody(body map[string]any) ([]cursorpkg.Message, []cursorpkg.OpenAITool, string) {
+func cursorMessagesFromBody(body map[string]any) ([]cursorpkg.Message, []cursorpkg.OpenAITool) {
 	rawMessages, _ := body["messages"].([]any)
 	messages := make([]cursorpkg.Message, 0, len(rawMessages))
 	for _, raw := range rawMessages {
@@ -190,12 +194,7 @@ func cursorMessagesFromBody(body map[string]any) ([]cursorpkg.Message, []cursorp
 		}
 		tools = append(tools, tool)
 	}
-
-	reasoningEffort := ""
-	if v, ok := body["reasoning_effort"].(string); ok {
-		reasoningEffort = v
-	}
-	return messages, tools, reasoningEffort
+	return messages, tools
 }
 
 func streamCursorBuffer(buffer []byte, request canonical.Request, out chan<- canonical.Event) {

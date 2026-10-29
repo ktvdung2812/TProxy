@@ -15,6 +15,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
 const (
@@ -381,21 +382,13 @@ func parsePplxMessages(request canonical.Request) pplxParsedMessages {
 	return out
 }
 
+// requestWantsThinking reports whether this request asked for reasoning, read
+// from the one normalized thinking config instead of three separate sources.
 func requestWantsThinking(request canonical.Request) bool {
-	if request.Reasoning != nil {
-		if effort := strings.ToLower(stringValue(request.Reasoning["effort"])); effort != "" && effort != "none" {
-			return true
-		}
-	}
-	if request.Raw != nil {
-		if request.Raw["thinking"] == true {
-			return true
-		}
-		if effort := strings.ToLower(stringValue(request.Raw["reasoning_effort"])); effort != "" && effort != "none" {
-			return true
-		}
-	}
-	return false
+	cfg := thinking.FromSources(request)
+	// Set with no effort is an explicit "enabled"/"adaptive"/true without a
+	// level: still a thinking request, only "none" opts out.
+	return cfg.Set && cfg.Effort != "none"
 }
 
 func buildPplxQuery(parsed pplxParsedMessages, followUpUUID string, tools []map[string]any) string {

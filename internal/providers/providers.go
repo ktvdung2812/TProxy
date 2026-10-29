@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
 )
 
@@ -628,6 +628,14 @@ func openAIBody(provider store.Provider, request canonical.Request) map[string]a
 }
 
 func buildOpenAIBody(request canonical.Request) map[string]any {
+	body := buildOpenAIBodyForSource(request)
+	// A Chat Completions body carries a flat reasoning_effort, whatever the
+	// client protocol was, so the effort-only shape applies to every branch.
+	thinking.Apply("", request.UpstreamModel, body, thinking.FromSources(request))
+	return body
+}
+
+func buildOpenAIBodyForSource(request canonical.Request) map[string]any {
 	if request.Source == canonical.ProtocolClaude && len(request.Raw) > 0 {
 		return claudeopenai.ClaudeToOpenAIRequest(request.UpstreamModel, request.Raw, request.Stream)
 	}
@@ -655,9 +663,6 @@ func buildOpenAIBody(request canonical.Request) map[string]any {
 	}
 	if request.MaxTokens > 0 {
 		body["max_tokens"] = request.MaxTokens
-	}
-	for key, value := range request.Reasoning {
-		body[key] = value
 	}
 	return body
 }
@@ -796,12 +801,6 @@ func codexBody(request canonical.Request) map[string]any {
 		if choice, ok := openAI["tool_choice"]; ok {
 			request.ToolChoice = choice
 		}
-		if effort, ok := openAI["reasoning_effort"].(string); ok && strings.TrimSpace(effort) != "" {
-			if request.Raw == nil {
-				request.Raw = map[string]any{}
-			}
-			request.Raw["reasoning_effort"] = effort
-		}
 	}
 	shortMap, reverseMap := buildCodexToolNameMaps(request.Tools, codexInputForToolMaps(request))
 	var body map[string]any
@@ -838,27 +837,10 @@ func codexBody(request canonical.Request) map[string]any {
 	if request.ToolChoice != nil {
 		body["tool_choice"] = codexToolChoice(request.ToolChoice, shortMap)
 	}
-	// Merge client reasoning settings into body["reasoning"] before
-	// normalization: request.Reasoning carries the OpenAI-protocol reasoning
-	// object, and Raw may hold a top-level reasoning_effort (OpenAI clients and
-	// the Claude→OpenAI translation above). Writing them flat at top level would
-	// both drop the effort and leak unknown params upstream.
-	if len(request.Reasoning) > 0 {
-		reasoning, _ := body["reasoning"].(map[string]any)
-		if reasoning == nil {
-			reasoning = map[string]any{}
-		}
-		for key, value := range request.Reasoning {
-			reasoning[key] = value
-		}
-		body["reasoning"] = reasoning
-	}
-	if _, ok := body["reasoning_effort"]; !ok {
-		if effort := request.Raw["reasoning_effort"]; effort != nil {
-			body["reasoning_effort"] = effort
-		}
-	}
-	codexNormalizeReasoning(body)
+	// Write the resolved thinking choice in Codex's wire shape. request.Reasoning
+	// has already been normalized to {effort, budget_tokens} by thinking.Normalize,
+	// so the adapter no longer re-derives it from Raw or a default.
+	thinking.Apply(thinking.ProviderCodex, request.UpstreamModel, body, thinking.FromSources(request))
 	// Codex /responses rejects requests unless store is explicitly false.
 	body["store"] = false
 	delete(body, "previous_response_id")
@@ -868,32 +850,11 @@ func codexBody(request canonical.Request) map[string]any {
 	return body
 }
 
+// codexNormalizeReasoning writes the Codex reasoning object from whatever the
+// body carries. It is a thin wrapper over thinking.Apply so the legacy entry
+// point (used by diagnostics) shares the one implementation.
 func codexNormalizeReasoning(body map[string]any) {
-	effort := ""
-	if reasoning, ok := body["reasoning"].(map[string]any); ok {
-		effort = strings.TrimSpace(stringValue(reasoning["effort"]))
-		if stringValue(reasoning["summary"]) == "" {
-			reasoning["summary"] = "auto"
-		}
-	}
-	if effort == "" {
-		if value, ok := body["reasoning_effort"].(string); ok {
-			effort = strings.TrimSpace(value)
-		}
-	}
-	delete(body, "reasoning_effort")
-	effort = bridge.NormalizeReasoningEffort(effort)
-	if effort == "" {
-		effort = "low"
-	}
-	if effort == "none" {
-		delete(body, "reasoning")
-		delete(body, "include")
-		return
-	}
-	effort = bridge.CodexWireReasoningEffort(effort)
-	body["reasoning"] = map[string]any{"effort": effort, "summary": "auto"}
-	body["include"] = []any{"reasoning.encrypted_content"}
+	thinking.Apply(thinking.ProviderCodex, "", body, thinking.FromSources(canonical.Request{Raw: body}))
 }
 
 // applyCodexResponsesLiteContext enforces the upstream Responses Lite contract:
@@ -1288,6 +1249,10 @@ func anthropicBody(request canonical.Request) map[string]any {
 	if request.Temperature != nil {
 		body["temperature"] = *request.Temperature
 	}
+	// The Claude wire shape only carries thinking as a budget, so an effort-only
+	// choice is not written here; the Claude→OpenAI translation already handles
+	// that direction for OpenAI-shaped targets.
+	thinking.Apply(thinking.ProviderClaude, request.UpstreamModel, body, thinking.FromSources(request))
 	return body
 }
 
@@ -1696,6 +1661,7 @@ func geminiBody(request canonical.Request) map[string]any {
 	if toolConfig := geminiToolConfig(request.ToolChoice); toolConfig != nil {
 		body["toolConfig"] = toolConfig
 	}
+	thinking.Apply(thinking.ProviderGemini, request.UpstreamModel, body, thinking.FromSources(request))
 	return body
 }
 

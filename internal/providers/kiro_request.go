@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
 const (
@@ -57,7 +58,7 @@ func buildKiroPayload(request canonical.Request, credential store.Credential) (m
 		profileARN = resolveKiroDefaultProfile(authMethod)
 	}
 	systemParts := []string{}
-	if resolved.thinking || kiroThinkingRequested(body) {
+	if resolved.thinking || kiroThinkingRequested(request) {
 		systemParts = append(systemParts, fmt.Sprintf("<thinking_mode>enabled</thinking_mode>\n<max_thinking_length>%d</max_thinking_length>", kiroThinkingBudget))
 	}
 	if resolved.agentic {
@@ -122,16 +123,16 @@ func resolveKiroDefaultProfile(authMethod string) string {
 	return kiroDefaultBuilder
 }
 
-func kiroThinkingRequested(body map[string]any) bool {
-	if effort := stringValue(firstValue(body, "reasoning_effort")); effort != "" && effort != "none" && effort != "off" {
-		return true
+// kiroThinkingRequested reports whether this request asked for thinking, using
+// the normalized thinking config rather than re-reading the body Kiro just
+// built from it.
+func kiroThinkingRequested(request canonical.Request) bool {
+	if cfg := thinking.FromSources(request); cfg.Set {
+		// Set with no effort is an explicit "enabled"/"adaptive" without a
+		// level: still a thinking request, only "none" opts out.
+		return cfg.Effort != "none"
 	}
-	if reasoning, ok := body["reasoning"].(map[string]any); ok {
-		if effort := stringValue(reasoning["effort"]); effort != "" && effort != "none" && effort != "off" {
-			return true
-		}
-	}
-	model := strings.ToLower(stringValue(body["model"]))
+	model := strings.ToLower(request.UpstreamModel)
 	return strings.Contains(model, "thinking") || strings.Contains(model, "-reason")
 }
 
