@@ -25,6 +25,7 @@ const antigravityCatalogue = `{"models":{
 	"gemini-3.5-flash-low":{},
 	"gpt-oss-120b-medium":{},
 	"internal-scratch":{"displayName":"Internal","isInternal":true},
+	"gemini-4-argon-disabled":{"displayName":"Gemini 4 Argon","disabled":true,"tagTitle":"Unavailable"},
 	"tab_flash_lite_preview":{"displayName":"Tab Completion"},
 	"gemini-2.5-pro":{"displayName":"Legacy Pro"},
 	"no-display-name":{}
@@ -71,9 +72,9 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 	if authorization != "Bearer token-value" {
 		t.Errorf("Authorization = %q", authorization)
 	}
-	// Cloud Code is called by the IDE, not the Hub launcher.
-	if !strings.HasPrefix(userAgent, "antigravity/ide/") {
-		t.Errorf("User-Agent = %q, want the Antigravity IDE agent", userAgent)
+	// Gemini 4 Argon is only listed to the Antigravity App (hub) client.
+	if !strings.HasPrefix(userAgent, "antigravity/hub/") {
+		t.Errorf("User-Agent = %q, want the Antigravity App agent", userAgent)
 	}
 	// The catalogue is per project, so the scope has to be sent.
 	if requestBody["project"] != "cloud-project" {
@@ -100,10 +101,11 @@ func TestAntigravityDiscoveryReturnsCatalogue(t *testing.T) {
 			t.Errorf("model %q missing from discovery", want)
 		}
 	}
-	// Editor scaffolding and models flagged internal are not routable.
-	for _, unwanted := range []string{"internal-scratch", "tab_flash_lite_preview", "gemini-2.5-pro"} {
+	// Editor scaffolding, models flagged internal and the disabled placeholders
+	// shown for models outside the account's plan are not routable.
+	for _, unwanted := range []string{"internal-scratch", "tab_flash_lite_preview", "gemini-2.5-pro", "gemini-4-argon-disabled"} {
 		if _, ok := got[unwanted]; ok {
-			t.Errorf("internal model %q leaked into discovery", unwanted)
+			t.Errorf("unroutable model %q leaked into discovery", unwanted)
 		}
 	}
 	if got["gemini-3-flash"].Name != "Gemini 3 Flash" {
@@ -188,6 +190,57 @@ func TestAntigravityDiscoveryReportsAuthFailure(t *testing.T) {
 	}
 }
 
+// The hosts do not carry the same catalogue, so a model listed by only one of
+// them has to be discovered, whichever host it is.
+func TestAntigravityDiscoveryMergesHostCatalogues(t *testing.T) {
+	daily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"models":{"gemini-3-flash":{"displayName":"Gemini 3 Flash"},"gemini-daily-preview":null}}`))
+	}))
+	defer daily.Close()
+	prod := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"models":{"gemini-3-flash":{"displayName":"Gemini 3 Flash"},"gemini-3.7-flash":{}}}`))
+	}))
+	defer prod.Close()
+	defer antigravityHostsForTest(daily.URL, prod.URL)()
+
+	registry := NewRegistry()
+	registry.client = daily.Client()
+	models, err := registry.DiscoverModels(context.Background(), store.Provider{Type: "antigravity"}, antigravityOAuthCredential())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, model := range models {
+		ids = append(ids, model.ID)
+	}
+	if strings.Join(ids, ",") != "gemini-3-flash,gemini-3.7-flash,gemini-daily-preview" {
+		t.Fatalf("models = %v, want the union of both hosts", ids)
+	}
+}
+
+// One host failing must not hide the catalogue the other one serves.
+func TestAntigravityDiscoverySurvivesOneHostFailing(t *testing.T) {
+	daily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer daily.Close()
+	prod := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"models":{"gemini-new-preview":null}}`))
+	}))
+	defer prod.Close()
+	defer antigravityHostsForTest(daily.URL, prod.URL)()
+
+	registry := NewRegistry()
+	registry.client = daily.Client()
+	models, err := registry.DiscoverModels(context.Background(), store.Provider{Type: "antigravity"}, antigravityOAuthCredential())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "gemini-new-preview" || models[0].Name != "gemini-new-preview" {
+		t.Fatalf("models = %+v, want the model from the healthy host", models)
+	}
+}
+
 func TestAntigravityDiscoveryRequiresAccessToken(t *testing.T) {
 	registry := NewRegistry()
 	_, err := registry.DiscoverModels(context.Background(), store.Provider{ID: "antigravity", Type: "antigravity"}, store.Credential{AuthType: "oauth"})
@@ -212,4 +265,14 @@ func antigravityModelsURLForTest(baseURL string) func() {
 	original := antigravityModelsURL
 	antigravityModelsURL = baseURL + "/v1internal:fetchAvailableModels"
 	return func() { antigravityModelsURL = original }
+}
+
+// antigravityHostsForTest points the daily and prod hosts at local servers and
+// returns a function that restores them.
+func antigravityHostsForTest(daily, prod string) func() {
+	oldDaily, oldProd, oldURL := antigravityDailyBaseURL, antigravityProdBaseURL, antigravityModelsURL
+	antigravityDailyBaseURL, antigravityProdBaseURL, antigravityModelsURL = daily, prod, antigravityDefaultModelsURL
+	return func() {
+		antigravityDailyBaseURL, antigravityProdBaseURL, antigravityModelsURL = oldDaily, oldProd, oldURL
+	}
 }

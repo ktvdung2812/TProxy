@@ -2,17 +2,26 @@
 // Cloud Code (Antigravity) endpoints.
 //
 // Cloud Code sees this build number in the User-Agent, in X-Client-Version and
-// in the onboarding metadata. Measured against a live account, none of those is
-// currently gated: 2.1.1, 2.2.1, 2.8.1 and 2.25.0 were all accepted, under both the
-// "ide" and "hub" component names. That can change without notice, which is the
-// argument for tracking the real build rather than pinning one and forgetting
-// it — the version was previously hard-coded in five places across three
-// packages, and had drifted six releases behind.
+// in the onboarding metadata. Requests are not rejected on it — 2.1.1, 2.2.1,
+// 2.8.1 and 2.25.0 were all accepted under both the "ide" and "hub" component
+// names — but the model catalogue is shaped by it. Measured against live
+// accounts on 2026-10-23:
+//
+//   - announcing 1.20.0 instead of 2.25.0 drops the Gemini 3.8 Flash
+//     High/Medium/Low models from fetchAvailableModels;
+//   - Gemini 4 Argon is listed only for the "hub" component, never for "ide",
+//     whatever the account's plan.
+//
+// Stale or mismatched identity therefore hides new models rather than failing
+// loudly, which is the argument for tracking the real build rather than pinning
+// one and forgetting it — the version was previously hard-coded in five places
+// across three packages, and had drifted six releases behind.
 //
 // The build is published by Antigravity's own auto-updater manifest, which
-// reports the same number as the public changelog at antigravity.google/changelog
-// (verified: manifest 2.25.0 == auto-updater manifest "2.25.0").
-// TPROXY_ANTIGRAVITY_IDE_VERSION pins a specific build and disables tracking.
+// reports the same number as the Antigravity App entries of the public
+// changelog at antigravity.google/docs/changelog (verified: manifest 2.25.0 ==
+// App v2.25.0). TPROXY_ANTIGRAVITY_IDE_VERSION pins a specific build and
+// disables tracking.
 package antigravity
 
 import (
@@ -75,9 +84,13 @@ func Version() string {
 }
 
 // UserAgent is the agent string used for generate, stream, model list and quota
-// requests. The component is "ide" because the editor is what issues them.
+// requests. Since Antigravity 2.0 the agent runs in the App (the "hub"), which
+// is the client those requests come from and the one whose build the manifest
+// reports; the separate IDE ships on its own, older version line. Announcing
+// "ide" with the App's build described a client that does not exist and hid
+// models offered only to the App, such as Gemini 4 Argon.
 func UserAgent() string {
-	return fmt.Sprintf("antigravity/ide/%s %s", Version(), idePlatform)
+	return fmt.Sprintf("antigravity/hub/%s %s", Version(), idePlatform)
 }
 
 // OnboardUserAgent is the longer control-plane agent string used by onboardUser.

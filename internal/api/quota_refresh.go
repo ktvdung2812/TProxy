@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tproxy/tproxy/internal/antigravity"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/store"
 )
@@ -28,6 +29,13 @@ func (s *Server) refreshAccountQuotas(ctx context.Context) {
 	for _, provider := range items {
 		if !provider.Enabled || (!providers.SupportsQuota(provider.Type) && !providers.SupportsQuota(provider.ID)) {
 			continue
+		}
+		if provider.Type == "antigravity" {
+			// Cloud Code gates newer models on the announced client build. The
+			// start-up check only covers providers that already existed, so one
+			// connected later would announce the fallback build forever. Repeat
+			// calls are a no-op.
+			antigravity.StartVersionRefresh(ctx)
 		}
 		credentials, err := s.store.Credentials(ctx, provider.ID)
 		if err != nil {

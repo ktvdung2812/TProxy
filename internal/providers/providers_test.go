@@ -209,7 +209,7 @@ func TestClaudeOAuthAdapterUsesBearerAndClaudeHeaders(t *testing.T) {
 
 func TestAntigravityAdapterWrapsCloudCodeRequestAndNormalizesResponses(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/ide/") {
+		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/hub/") {
 			t.Fatalf("headers = %+v", r.Header)
 		}
 		// No Antigravity client sends a correlation header, so sending one only
