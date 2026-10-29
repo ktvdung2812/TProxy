@@ -74,6 +74,15 @@ tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển v�
 - OAuth profile: **Codex**, **Claude**, **Kimi**, **xAI**, **Antigravity** (Google Cloud Code), **Copilot**, **Cursor**, **Kiro** và nhiều hơn nữa.
 - Provider API-key: Tavily search, ElevenLabs audio, image/video aliases, HTTP plugin tùy chọn.
 - **Proxy pool mã hóa** (HTTP/S, SOCKS5) gắn với từng provider hoặc credential.
+- Provider **Meta Muse** dùng Meta Model API chính thức (`https://api.meta.ai/v1`),
+  xác thực bằng Model API key và tự khám phá các model `muse-spark-*`/
+  `muse-wonder-1.0`. Ngoài API key, Muse còn hỗ trợ **đăng nhập bằng tài khoản Meta**
+  (OAuth device code — cùng flow của Muse CLI chính thức): sau khi duyệt mã,
+  tproxy đổi token tài khoản tại `POST /muse-code/key` để lấy khóa `LLM|`
+  gắn với gói subscription, rồi lưu khóa đó làm credential. Token tài khoản chỉ
+  được giữ để mint lại khóa định kỳ (~20h). Yêu cầu subscription Muse đang hoạt
+  động; tài khoản không có sub sẽ bị từ chối thay vì âm thầm tính phí pay-as-you-go.
+  Tài khoản Meta Managed Account/business vẫn phải dùng Model API key.
 - **Tự động nhập JSON** tại Providers → Import data hoặc mục Connections của provider. Chọn một hoặc nhiều file 9router, CLIProxyAPI, sub2api, token OAuth ChatGPT hoặc OAuth bundle của tproxy; ứng dụng tự nhận diện từng định dạng và xem trước trước khi lưu. File token ChatGPT được tự chuyển thành tài khoản Codex. Hỗ trợ giới hạn số tài khoản và bỏ qua trùng lặp cho sub2api và ChatGPT. OAuth bundle vẫn cần master key phù hợp. API chung: `POST /api/admin/import?dry_run=true`; các endpoint nhập theo định dạng vẫn được giữ.
 
 Với sub2api, có thể chọn nhiều file JSON cùng lúc. Khi chọn nhiều file hoặc một file chứa nhiều tài khoản, kiểm tra số tài khoản trong từng file và chọn số dòng cần nhập từ đầu file (ban đầu là một). Dashboard mặc định bật **Bỏ qua tài khoản đã tồn tại**, nhận diện theo credential ID hoặc email OAuth trên cùng provider. Provider được chuẩn bị trước khi lưu credential. Các file được xử lý lần lượt; lỗi ở file sau không hoàn tác những file đã nhập thành công.

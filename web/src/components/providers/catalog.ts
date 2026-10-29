@@ -2,7 +2,7 @@
    Provider catalog — static metadata for tdproxy provider types.
    Ported in spirit from 9router's constants/providers.js, but scoped to the
    types tdproxy's Go backend actually supports (internal/config/config.go:566):
-   openai-compatible, anthropic-compatible, gemini, vertex, ollama, codex,
+   muse, openai-compatible, anthropic-compatible, gemini, vertex, ollama, codex,
    claude, kimi, xai, antigravity, tavily, elevenlabs, image, video, plugin-http.
    ============================================================ */
 
@@ -41,6 +41,7 @@ export type ProviderTypeInfo = {
 
 /* The authoritative allowlist — must match internal/config/config.go:566-570 */
 export const ALL_PROVIDER_TYPES = [
+  "muse",
   "openai-compatible",
   "anthropic-compatible",
   "gemini",
@@ -75,6 +76,21 @@ export const ALL_PROVIDER_TYPES = [
 ] as const;
 
 const CATALOG: Record<string, ProviderTypeInfo> = {
+  muse: {
+    type: "muse",
+    name: "Meta Muse",
+    icon: "auto_awesome",
+    textIcon: "MU",
+    category: "apikey",
+    listSection: "apikey",
+    color: "#1877f2",
+    description: "Meta Model API with Muse Spark and Muse Wonder through an OpenAI-compatible endpoint.",
+    website: "https://dev.meta.ai/docs/",
+    apiKeyUrl: "https://dev.meta.ai/",
+    defaultAuthType: "api_key",
+    supportsOAuth: true,
+    defaultBaseUrl: "https://api.meta.ai/v1",
+  },
   "openai-compatible": {
     type: "openai-compatible",
     name: "OpenAI Compatible",
@@ -595,7 +611,7 @@ export function parseClineCallbackUrl(raw: string): string | null {
 export function defaultOAuthMode(type: string, presetId?: string): "browser" | "device" {
   if (presetId === "grok-cli" || presetId === "github") return "device";
   if (type === "kimi" || type === "xai" || type === "qwen" || type === "qoder" || type === "copilot" ||
-    type === "kilocode" || type === "codebuddy-cn" || type === "kiro") {
+    type === "kilocode" || type === "codebuddy-cn" || type === "kiro" || type === "muse") {
     return "device";
   }
   if (type === "cline" || type === "clinepass" || type === "iflow" || type === "kimchi" || type === "gitlab") {
@@ -633,6 +649,7 @@ export const TYPES_BY_CATEGORY: Record<ProviderCategory, ProviderTypeInfo[]> = {
 
 /** Gallery entries for the Add Provider picker — curated, most common first. */
 export const ADDABLE_PROVIDERS: ProviderTypeInfo[] = [
+  CATALOG.muse,
   CATALOG["openai-compatible"],
   CATALOG["anthropic-compatible"],
   CATALOG["gemini"],

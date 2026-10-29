@@ -178,7 +178,21 @@ flowchart LR
 
 tproxy supports a broad catalog including:
 
-`openai-compatible` · `anthropic-compatible` · `gemini` · `vertex` · `ollama` · `codex` · `claude` · `kimi` · `xai` · `antigravity` · `copilot` · `cursor` · `kiro` · `qwen` · `tavily` · `elevenlabs` · `image` · `video` · `plugin-http` · and additional OAuth presets (Qoder, Cline, GitLab, Kimchi, …).
+`muse` · `openai-compatible` · `anthropic-compatible` · `gemini` · `vertex` · `ollama` · `codex` · `claude` · `kimi` · `xai` · `antigravity` · `copilot` · `cursor` · `kiro` · `qwen` · `tavily` · `elevenlabs` · `image` · `video` · `plugin-http` · and additional OAuth presets (Qoder, Cline, GitLab, Kimchi, …).
+
+The `muse` provider uses Meta Model API (`https://api.meta.ai/v1`) with a Meta
+Model API key. It discovers the available `muse-spark-*` and `muse-wonder-1.0`
+models from `GET /v1/models`; use the model IDs returned by Meta when creating
+routes.
+
+Muse also supports **Sign in with Meta** (OAuth device code, the same flow the
+official Muse CLI uses). After you approve the device code, tproxy exchanges
+the account token at `POST /muse-code/key` for a subscription-backed `LLM|`
+inference key and stores that key — the account token is kept only to re-mint
+credentials as they age out (default every ~20h). Login requires an active
+Muse subscription; accounts without one are rejected rather than silently
+billed pay-as-you-go. Meta Managed Accounts and business workspaces still
+need a Model API key.
 
 See the provider catalog in the dashboard or `web/src/components/providers/catalog.ts` for the full list and connection methods.
 

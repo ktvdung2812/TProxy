@@ -121,7 +121,7 @@ func openAISupportsStreamOptions(provider store.Provider) bool {
 	case "glm", "glm-cn", "codex", "ollama", "ollama-local", "deepseek", "perplexity", "perplexity-agent":
 		return false
 	default:
-		return provider.Type == "openai-compatible" || provider.Type == "openai"
+		return provider.Type == "muse" || provider.Type == "openai-compatible" || provider.Type == "openai"
 	}
 }
 

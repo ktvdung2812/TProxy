@@ -42,6 +42,37 @@ func TestBuildIndexLookupOpenAI(t *testing.T) {
 	}
 }
 
+func TestBuildIndexLookupMusePrefersMeta(t *testing.T) {
+	payload := map[string]any{
+		"meta": map[string]any{
+			"id": "meta",
+			"models": map[string]any{
+				"muse-spark-1.3": map[string]any{
+					"id":   "muse-spark-1.3",
+					"cost": map[string]any{"input": 1.25, "output": 4.25},
+				},
+			},
+		},
+		"openrouter": map[string]any{
+			"id": "openrouter",
+			"models": map[string]any{
+				"muse-spark-1.3": map[string]any{
+					"id":   "muse-spark-1.3",
+					"cost": map[string]any{"input": 9.0, "output": 9.0},
+				},
+			},
+		},
+	}
+	catalog := &Catalog{byModel: buildIndex(payload)}
+	rates, ok := catalog.Lookup(store.Provider{Type: "muse", ID: "muse-main"}, "muse-spark-1.3")
+	if !ok {
+		t.Fatal("expected muse pricing lookup to succeed")
+	}
+	if rates.InputPerMillion != 1.25 || rates.OutputPerMillion != 4.25 {
+		t.Fatalf("rates = %+v, want meta entry", rates)
+	}
+}
+
 func TestEstimateCostUsesCacheReadRate(t *testing.T) {
 	cost := EstimateCost(canonical.Usage{
 		InputTokens:  1000,

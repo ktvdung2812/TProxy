@@ -17,7 +17,7 @@ import {
 import type { Provider } from "./types";
 
 /** Generic adapter types share one logo; a preset id names the real brand. */
-const GENERIC_LOGO_TYPES = new Set(["openai-compatible", "anthropic-compatible", "image", "video", "tavily", "elevenlabs"]);
+const GENERIC_LOGO_TYPES = new Set(["openai-compatible", "anthropic-compatible", "muse", "image", "video", "tavily", "elevenlabs"]);
 
 export function providerLogoId(providerId: string | undefined, providerType: string, isPreset: boolean) {
   return isPreset && providerId && GENERIC_LOGO_TYPES.has(providerType) ? providerId : undefined;

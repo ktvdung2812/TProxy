@@ -98,6 +98,7 @@ type Registry struct {
 // built-in adapter. Administrator model overrides remain authoritative.
 func (r *Registry) Capabilities(providerType string) []string {
 	capabilities := map[string][]string{
+		"muse":                 {"text", "vision", "tools", "reasoning"},
 		"openai-compatible":    {"text", "vision", "tools", "reasoning", "embedding", "image-output", "video-output", "tts", "stt"},
 		"image":                {"image-output"},
 		"video":                {"video-output"},
@@ -139,6 +140,7 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		return AdapterDescriptor{}, err
 	}
 	protocols := map[string]string{
+		"muse":              "openai",
 		"openai-compatible": "openai", "image": "openai", "video": "openai", "ollama": "openai", "kimi": "openai", "xai": "openai",
 		"grok-web": "openai", "perplexity-web": "openai",
 		"anthropic-compatible": "anthropic", "claude": "anthropic", "codex": "responses", "gemini": "gemini", "vertex": "gemini",
@@ -295,6 +297,7 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 func NewRegistry() *Registry {
 	client := &http.Client{Transport: newProxyTransport()}
 	return &Registry{client: client, items: map[string]Adapter{
+		"muse":                 &openAIAdapter{client: client},
 		"openai-compatible":    &openAIAdapter{client: client},
 		"image":                &openAIAdapter{client: client},
 		"video":                &openAIAdapter{client: client},

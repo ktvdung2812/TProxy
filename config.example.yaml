@@ -280,6 +280,17 @@ providers:
   #       auth-type: api_key
   #       secret-env: ELEVENLABS_API_KEY
   #       priority: 100
+  # Meta Model API (OpenAI-compatible; discovers muse-spark-*/muse-wonder-*
+  # from GET /v1/models). base-url defaults to https://api.meta.ai/v1.
+  # - id: meta-muse
+  #   type: muse
+  #   enabled: true
+  #   credentials:
+  #     - id: meta-muse-key
+  #       label: Meta Model API key
+  #       auth-type: api_key
+  #       secret-env: META_MODEL_API_KEY
+  #       priority: 100
 
 models:
   - id: td-coder-pro

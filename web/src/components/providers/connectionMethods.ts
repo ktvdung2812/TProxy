@@ -92,6 +92,7 @@ export function resolveConnectionProfile(
   const authModes = preset?.auth_modes ?? [];
   const hasOAuthMode =
     authModes.includes("oauth") ||
+    catalog.supportsOAuth ||
     preset?.has_oauth ||
     preset?.auth_type === "oauth" ||
     preset?.category === "oauth" ||

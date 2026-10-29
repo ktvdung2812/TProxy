@@ -548,6 +548,38 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		provider.Type = "cursor"
 	}
 	switch provider.Type {
+	case "muse":
+		if provider.Name == "" {
+			provider.Name = "Meta Muse"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.meta.ai/v1"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		// RFC 8628 device login against auth.meta.com, using the public
+		// first-party Muse CLI client. Meta rejects any scope parameter.
+		// The returned dca: token is exchanged at /muse-code/key for an
+		// LLM| inference key; see auth.muse_oauth.go.
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://auth.meta.com/oidc/device/authorization/"
+		}
+		if provider.OAuth.TokenURL == "" {
+			provider.OAuth.TokenURL = "https://auth.meta.com/oidc/device/token/"
+		}
+		if provider.OAuth.ClientID == "" {
+			provider.OAuth.ClientID = "1031625952748946"
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		// Minted keys are good for roughly a day; re-mint with the stored dca:
+		// token before the window closes.
+		if provider.OAuth.MaxTokenAge == "" {
+			provider.OAuth.MaxTokenAge = "20h"
+		}
+		if provider.OAuth.HardMaxTokenAge == "" {
+			provider.OAuth.HardMaxTokenAge = "24h"
+		}
 	case "codex":
 		if provider.Name == "" {
 			provider.Name = "OpenAI Codex"
@@ -1173,7 +1205,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
+		case "muse", "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}

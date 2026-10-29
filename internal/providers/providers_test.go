@@ -774,6 +774,21 @@ func TestEndpointVersionlessOpenAIPaths(t *testing.T) {
 	}
 }
 
+func TestMuseProviderUsesOpenAIAdapterAndDiscovery(t *testing.T) {
+	registry := NewRegistry()
+	descriptor, err := registry.Describe("muse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.ProtocolFamily != "openai" || !descriptor.ModelDiscovery {
+		t.Fatalf("muse descriptor = %+v", descriptor)
+	}
+	provider := store.Provider{ID: "meta", Type: "muse", BaseURL: "https://api.meta.ai/v1"}
+	if got := modelsDiscoveryURL(provider); got != "https://api.meta.ai/v1/models" {
+		t.Fatalf("modelsDiscoveryURL() = %q", got)
+	}
+}
+
 func TestDiscoveryPathGLMUsesModelsEndpoint(t *testing.T) {
 	provider := store.Provider{ID: "glm", Type: "openai-compatible", BaseURL: "https://api.z.ai/api/paas/v4"}
 	if got := modelsDiscoveryURL(provider); got != "https://api.z.ai/api/paas/v4/models" {

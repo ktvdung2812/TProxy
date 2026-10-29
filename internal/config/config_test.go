@@ -245,6 +245,27 @@ func TestProviderDefaultsForAntigravity(t *testing.T) {
 	}
 }
 
+func TestProviderDefaultsForMuse(t *testing.T) {
+	provider := ProviderConfig{ID: "meta", Type: "muse"}
+	ApplyProviderDefaults(&provider)
+	if provider.Name != "Meta Muse" || provider.BaseURL != "https://api.meta.ai/v1" {
+		t.Fatalf("muse defaults = %+v", provider)
+	}
+	if provider.OAuth == nil ||
+		provider.OAuth.DeviceCodeURL != "https://auth.meta.com/oidc/device/authorization/" ||
+		provider.OAuth.TokenURL != "https://auth.meta.com/oidc/device/token/" ||
+		provider.OAuth.ClientID != "1031625952748946" ||
+		provider.OAuth.DeviceFlow != "rfc8628" {
+		t.Fatalf("muse oauth defaults = %+v", provider.OAuth)
+	}
+	if provider.OAuth.MaxTokenAge == "" || provider.OAuth.HardMaxTokenAge == "" {
+		t.Fatal("muse re-mint cadence not configured")
+	}
+	if err := validateOAuth("meta", "muse", provider.OAuth); err != nil {
+		t.Fatalf("muse oauth defaults invalid: %v", err)
+	}
+}
+
 func TestProviderDefaultsForTavily(t *testing.T) {
 	provider := ProviderConfig{ID: "search", Type: "tavily"}
 	ApplyProviderDefaults(&provider)
