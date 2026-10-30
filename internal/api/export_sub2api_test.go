@@ -20,7 +20,8 @@ func TestAdminExportSub2api(t *testing.T) {
 	handler := NewServer(cfg, dataStore, router.New(dataStore, providers.NewRegistry())).Handler()
 	ctx := context.Background()
 
-	importRequest := httptest.NewRequest(http.MethodPost, "/api/admin/import/sub2api", strings.NewReader(`{"accounts":[{"platform":"openai","type":"oauth","credentials":{"email":"member@example.com","access_token":"synthetic-token","chatgpt_account_id":"workspace"}}]}`))
+	token := strings.Repeat("synthetic-token", 512)
+	importRequest := httptest.NewRequest(http.MethodPost, "/api/admin/import/sub2api", strings.NewReader(`{"accounts":[{"platform":"openai","type":"oauth","credentials":{"email":"member@example.com","access_token":"`+token+`","chatgpt_account_id":"workspace"}}]}`))
 	importRequest.RemoteAddr = "127.0.0.1:1234"
 	withDefaultManagementAuth(importRequest)
 	importRequest.Header.Set("Content-Type", "application/json")
@@ -51,5 +52,8 @@ func TestAdminExportSub2api(t *testing.T) {
 	var bundle importsub2api.Export
 	if err = json.Unmarshal(exportRecorder.Body.Bytes(), &bundle); err != nil || len(bundle.Accounts) != 1 {
 		t.Fatalf("bundle=%+v err=%v", bundle, err)
+	}
+	if bundle.Accounts[0].Credentials["access_token"] != token {
+		t.Fatal("exported access token is incomplete")
 	}
 }

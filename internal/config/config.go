@@ -1332,7 +1332,7 @@ func isSupportedDeviceFlow(flow string) bool {
 
 func oauthRequiresClientID(providerType string, oauth *OAuthConfig) bool {
 	switch providerType {
-	case "cline", "clinepass", "kimchi", "kilocode", "codebuddy-cn", "kiro":
+	case "cline", "clinepass", "kimchi", "kilocode", "codebuddy-cn", "kiro", "devin":
 		return false
 	case "gitlab":
 		return false
@@ -1342,7 +1342,7 @@ func oauthRequiresClientID(providerType string, oauth *OAuthConfig) bool {
 
 func isCustomOAuthProviderType(providerType string) bool {
 	switch providerType {
-	case "qoder", "kilocode", "codebuddy-cn", "kiro", "kimchi", "iflow", "gitlab":
+	case "qoder", "kilocode", "codebuddy-cn", "kiro", "kimchi", "iflow", "gitlab", "devin":
 		return true
 	default:
 		return false

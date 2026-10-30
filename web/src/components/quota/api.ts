@@ -18,24 +18,23 @@ export type CredentialQuota = {
   message?: string;
   reset_credits?: {
     available_count: number;
-    credits?: Array<{
-      status: string;
-      granted_at?: string;
-      expires_at?: string;
-    }>;
+    credits?: CodexResetCredit[];
   };
   quotas: Record<string, QuotaEntry>;
   credential_enabled?: boolean;
   quota_auto_disabled?: boolean;
 };
 
+export type CodexResetCredit = {
+  id?: string;
+  status: string;
+  granted_at?: string;
+  expires_at?: string;
+};
+
 export type CodexResetCredits = {
   available_count: number;
-  credits?: Array<{
-    status: string;
-    granted_at?: string;
-    expires_at?: string;
-  }>;
+  credits?: CodexResetCredit[];
 };
 
 export type CodexResetConsumeResult = {

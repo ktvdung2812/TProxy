@@ -164,6 +164,22 @@ func TestValidateAllowsCursorImportedOAuthWithoutProviderOAuth(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsDevinWithoutOAuthClientConfig(t *testing.T) {
+	// Devin uses a hardcoded headless PKCE flow, so provider-level OAuth
+	// (as exported by the dashboard) carries no client id or endpoint URLs.
+	cfg := Config{
+		Database: DatabaseConfig{Driver: "sqlite"},
+		Providers: []ProviderConfig{{
+			ID: "devin", Type: "devin", Enabled: true,
+			OAuth:       &OAuthConfig{},
+			Credentials: []CredentialConfig{{ID: "devin-account", AuthType: "oauth", Secret: `{"access_token":"token"}`}},
+		}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("devin oauth without client id should validate: %v", err)
+	}
+}
+
 func TestProviderDefaultsForCodexAndClaude(t *testing.T) {
 	codex := ProviderConfig{ID: "codex", Type: "codex"}
 	ApplyProviderDefaults(&codex)

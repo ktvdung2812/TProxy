@@ -2695,6 +2695,17 @@ button:disabled,
 .quota-reset-modal-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
 .quota-reset-modal-table th, .quota-reset-modal-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border-subtle); text-align: left; }
 .quota-reset-modal-table th { font-size: 11px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: color-mix(in srgb, var(--color-surface-2) 55%, transparent); }
+.quota-reset-use-btn {
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--color-warning);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.quota-reset-use-btn:hover { background: color-mix(in srgb, var(--color-warning) 18%, transparent); }
 .quota-bulk-results { display: grid; gap: 8px; max-height: 60vh; overflow: auto; }
 .quota-bulk-result { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--color-border-subtle); border-radius: 10px; }
 .quota-bulk-result > .material-symbols-outlined { font-size: 18px; flex: 0 0 auto; }
@@ -10959,13 +10970,13 @@ textarea,
 .qt-hidden-chip:hover { border-style: solid; border-color: var(--color-primary); color: var(--color-primary); }
 
 .qt-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 2px; }
-.qt-credit-btn {
+.qt-credit-group {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
   height: 26px;
   margin-right: 4px;
-  padding: 0 8px 0 6px;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-warning) 10%, transparent);
@@ -10975,9 +10986,24 @@ textarea,
   font-weight: 700;
   cursor: pointer;
 }
-.qt-credit-btn .material-symbols-outlined { font-size: 15px; }
-.qt-credit-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--color-warning) 18%, transparent); }
-.qt-credit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.qt-credit-group:hover { background: color-mix(in srgb, var(--color-warning) 18%, transparent); }
+.qt-credit-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+}
+.qt-credit-count .material-symbols-outlined,
+.qt-credit-expiry .material-symbols-outlined { font-size: 15px; }
+.qt-credit-expiry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 26px;
+  border-left: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
 
 .qt-list { --cp-list-cols: 22px 46px minmax(180px, 1.3fr) 132px minmax(280px, 2.4fr) 136px 44px 118px; --cp-list-min: 1000px; }
 .qt-row { min-height: 56px; }

@@ -944,7 +944,6 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
       renewalDate: formatRenewalDate(quota?.renews_at),
       isCodex,
       resetCredits: getCodexResetCreditCount(quota),
-      resettingCredit: resettingLimitId === credential.id,
       refreshing: Boolean(loading[credential.id]) || clearingCooldownId === credential.id,
       deleting: deletingId === credential.id,
       selected: selectedCredentialIds.has(credential.id),
@@ -1459,6 +1458,9 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         secret={secret}
         credential={resetCreditsCredential}
         onClose={() => setResetCreditsCredential(null)}
+        onUse={() => {
+          if (resetCreditsCredential) setResetConfirmCredential(resetCreditsCredential);
+        }}
       />
 
       <QuotaAccountDetailModal

@@ -47,7 +47,6 @@ export type QuotaAccountView = {
   renewalDate: string | null;
   isCodex: boolean;
   resetCredits: number;
-  resettingCredit: boolean;
   refreshing: boolean;
   deleting: boolean;
   selected: boolean;
@@ -199,7 +198,7 @@ function menuItems(view: QuotaAccountView, handlers: QuotaAccountHandlers, t: TF
           onSelect: () => handlers.consumeResetCredit(credential),
         }
       : null,
-    view.isCodex
+    view.isCodex && view.resetCredits > 0
       ? { key: "credits", icon: "schedule", label: t("quota.viewResetExpiry"), onSelect: () => handlers.viewResetCredits(credential) }
       : null,
     { key: "edit", icon: "tune", label: t("quota.menu.editProvider"), hint: t("quota.menu.editProviderHint"), disabled: view.busy, onSelect: () => handlers.edit(credential) },
@@ -216,16 +215,18 @@ function QuickActions({ view, handlers }: Pick<ItemProps, "view" | "handlers">) 
       {view.isCodex && view.resetCredits > 0 ? (
         <button
           type="button"
-          className="qt-credit-btn"
-          disabled={view.busy || view.loading}
-          onClick={() => handlers.consumeResetCredit(view.credential)}
-          title={t("quota.useResetCredit", { count: view.resetCredits })}
-          aria-label={t("quota.useResetCredit", { count: view.resetCredits })}
+          className="qt-credit-group"
+          onClick={() => handlers.viewResetCredits(view.credential)}
+          title={t("quota.viewResetExpiry")}
+          aria-label={t("quota.viewResetExpiry")}
         >
-          <span className={cn("material-symbols-outlined", view.resettingCredit && "animate-spin")} aria-hidden>
-            {view.resettingCredit ? "progress_activity" : "bolt"}
+          <span className="qt-credit-count">
+            <span className="material-symbols-outlined" aria-hidden>bolt</span>
+            {view.resetCredits}
           </span>
-          {view.resetCredits}
+          <span className="qt-credit-expiry" aria-hidden>
+            <span className="material-symbols-outlined">schedule</span>
+          </span>
         </button>
       ) : null}
       <IconAction

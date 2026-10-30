@@ -21,6 +21,7 @@ const (
 
 // CodexResetCredit is one Codex rate-limit reset credit entry.
 type CodexResetCredit struct {
+	ID        string `json:"id,omitempty"`
 	Status    string `json:"status"`
 	GrantedAt string `json:"granted_at,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
@@ -48,11 +49,8 @@ func codexResetCreditsFromUsage(payload map[string]any) *CodexResetCredits {
 	if !ok {
 		return nil
 	}
-	count := int(numberValue(firstValue(raw, "available_count", "availableCount")))
-	if count < 0 {
-		count = 0
-	}
-	return &CodexResetCredits{AvailableCount: count}
+	credits := parseCodexResetCredits(raw)
+	return &credits
 }
 
 // CodexResetCredits fetches Codex reset-credit inventory for a credential.
@@ -128,8 +126,14 @@ func (r *Registry) ConsumeCodexResetCredit(ctx context.Context, provider store.P
 }
 
 func parseCodexResetCredits(payload map[string]any) CodexResetCredits {
+	original := payload
+	payload = unwrapCodexResetCredits(payload)
+	countValue := firstValue(payload, "available_count", "availableCount")
+	if countValue == nil {
+		countValue = firstValue(original, "available_count", "availableCount")
+	}
 	result := CodexResetCredits{
-		AvailableCount: int(numberValue(firstValue(payload, "available_count", "availableCount"))),
+		AvailableCount: int(numberValue(countValue)),
 	}
 	if result.AvailableCount < 0 {
 		result.AvailableCount = 0
@@ -141,12 +145,29 @@ func parseCodexResetCredits(payload map[string]any) CodexResetCredits {
 			continue
 		}
 		result.Credits = append(result.Credits, CodexResetCredit{
+			ID:        stringValue(firstValue(credit, "id", "credit_id", "creditId")),
 			Status:    stringValue(firstValue(credit, "status")),
 			GrantedAt: parseResetAt(firstValue(credit, "granted_at", "grantedAt")),
 			ExpiresAt: parseResetAt(firstValue(credit, "expires_at", "expiresAt")),
 		})
 	}
 	return result
+}
+
+func unwrapCodexResetCredits(payload map[string]any) map[string]any {
+	for _, key := range []string{"reset_credits", "rate_limit_reset_credits", "data"} {
+		nested, ok := payload[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, hasCredits := nested["credits"]; hasCredits {
+			return nested
+		}
+		if firstValue(nested, "available_count", "availableCount") != nil {
+			return nested
+		}
+	}
+	return payload
 }
 
 func codexResetErrorMessage(body []byte, status int) string {

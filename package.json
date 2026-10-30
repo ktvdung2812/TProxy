@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "node scripts/free-ports.mjs && concurrently -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
+    "dev": "node scripts/ensure-deps.mjs && node scripts/ensure-tools.mjs && node scripts/free-ports.mjs && concurrently -n backend,web -c blue,green \"npm run dev:backend\" \"npm run dev:web\"",
     "dev:web": "node scripts/wait-for-backend.mjs && npm --prefix web run dev",
     "dev:backend": "node scripts/dev-backend.mjs",
-    "build": "node scripts/sync-version.mjs && npm --prefix web run build && go build -o bin/tproxy ./cmd/tproxy",
+    "build": "node scripts/ensure-deps.mjs && node scripts/ensure-tools.mjs && node scripts/sync-version.mjs && npm --prefix web run build && node scripts/go.mjs build -o bin/tproxy ./cmd/tproxy",
     "start": "node scripts/start-backend.mjs"
   },
   "devDependencies": {
