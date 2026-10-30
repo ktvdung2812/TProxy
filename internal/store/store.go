@@ -419,7 +419,7 @@ func (s *Store) SaveProvider(ctx context.Context, providerCfg config.ProviderCon
 		return rollback(errors.New("provider id and type are required"))
 	}
 	switch providerCfg.Type {
-	case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
+	case "muse", "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 	default:
 		return rollback(fmt.Errorf("unsupported provider type %q", providerCfg.Type))
 	}

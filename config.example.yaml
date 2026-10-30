@@ -24,6 +24,15 @@ routing:
   sticky-round-robin-limit: 3
   session-affinity: true
   session-affinity-ttl: 1h
+  # Let a subagent session inherit its parent's credential when it has none of
+  # its own. The parent is read from metadata.parent_session_id or the
+  # X-Parent-Session-ID header. Defaults to true.
+  session-affinity-subagents: true
+  # Which successful failovers move a session binding:
+  #   any   - every failover rebinds (default, the historical behaviour)
+  #   quota - only 429/401/403 rebind; a transient 5xx moves that one request
+  #           but leaves the session on its original account
+  session-affinity-rebind-on: any
   # Per-provider overrides (optional):
   # provider-strategies:
   #   codex-main:
@@ -72,6 +81,18 @@ routing:
     max-wait: ""
     # Pause between same-credential attempts. Default 500ms.
     backoff: 500ms
+
+# Per-wire-family behaviour that is not routing policy.
+upstream:
+  codex:
+    # Codex can answer HTTP 200, emit a few handshake frames, and only then
+    # report "Selected model is at capacity". By that point the response headers
+    # are committed and failover is impossible. Turning this on holds the
+    # handshake until the first real token, so an overload becomes a normal 429
+    # retry on another credential and the client never sees the failed attempt.
+    # The hold is capped (48 events / 1 MiB) rather than timed out, so a long
+    # reasoning turn is never cut off. Off by default.
+    stream-bootstrap-buffering: false
 
 # Keep idle connections alive. Proxies and load balancers often drop a
 # connection that sends nothing for 30-60s, which looks like a truncated stream.
@@ -258,6 +279,17 @@ providers:
   #       label: ElevenLabs API key
   #       auth-type: api_key
   #       secret-env: ELEVENLABS_API_KEY
+  #       priority: 100
+  # Meta Model API (OpenAI-compatible; discovers muse-spark-*/muse-wonder-*
+  # from GET /v1/models). base-url defaults to https://api.meta.ai/v1.
+  # - id: meta-muse
+  #   type: muse
+  #   enabled: true
+  #   credentials:
+  #     - id: meta-muse-key
+  #       label: Meta Model API key
+  #       auth-type: api_key
+  #       secret-env: META_MODEL_API_KEY
   #       priority: 100
 
 models:

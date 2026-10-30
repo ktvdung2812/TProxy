@@ -152,6 +152,7 @@ func attachIngressMetadata(r *http.Request, request *canonical.Request) {
 	if request == nil {
 		return
 	}
+	attachParentSessionID(r, request)
 	route, ok := ingressRouteFromContext(r)
 	if !ok {
 		return

@@ -8,16 +8,15 @@ import (
 	"testing"
 )
 
-// Cloud Code is only ever called by the IDE, so the agent string has to name
-// the IDE surface. Announcing the Hub build described a client that does not
-// make these calls at all.
-func TestUserAgentAnnouncesTheIDESurface(t *testing.T) {
+// Since Antigravity 2.0 Cloud Code is called by the App (the hub), and the
+// catalogue lists some models, such as Gemini 4 Argon, only to that client.
+func TestUserAgentAnnouncesTheHubSurface(t *testing.T) {
 	agent := UserAgent()
-	if !strings.HasPrefix(agent, "antigravity/ide/") {
-		t.Fatalf("UserAgent() = %q, want the antigravity/ide/ prefix", agent)
+	if !strings.HasPrefix(agent, "antigravity/hub/") {
+		t.Fatalf("UserAgent() = %q, want the antigravity/hub/ prefix", agent)
 	}
-	if strings.Contains(agent, "/hub/") {
-		t.Fatalf("UserAgent() = %q, still announces the Hub surface", agent)
+	if strings.Contains(agent, "/ide/") {
+		t.Fatalf("UserAgent() = %q, still announces the IDE surface", agent)
 	}
 	if !strings.HasSuffix(agent, " darwin/arm64") {
 		t.Fatalf("UserAgent() = %q, want the platform suffix", agent)

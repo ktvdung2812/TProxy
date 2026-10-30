@@ -41,6 +41,13 @@ func (m *Manager) prepareProviderToken(ctx context.Context, provider store.Provi
 			return token, email, err
 		}
 	}
+	if provider.Type == "muse" {
+		var err error
+		token, email, err = m.enrichMuseToken(ctx, provider, token, email)
+		if err != nil {
+			return token, email, err
+		}
+	}
 	if isClineProvider(provider.Type) {
 		var err error
 		token, email, err = m.enrichClineToken(ctx, token, email)

@@ -27,6 +27,7 @@ import (
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/resilience"
 	"github.com/tproxy/tproxy/internal/store"
+	"github.com/tproxy/tproxy/internal/thinking"
 )
 
 type Router struct {
@@ -36,6 +37,8 @@ type Router struct {
 	quotaCache            map[string]QuotaSnapshot
 	quotaInflight         map[string]*quotaFlight
 	quotaSlots            chan struct{}
+	quotaWarmupMu         sync.Mutex
+	quotaWarmups          map[string]time.Time
 	accountMu             sync.Mutex
 	accounts              map[string]*AccountRuntime
 	store                 *store.Store
@@ -56,6 +59,9 @@ type Router struct {
 	providerStrategies    map[string]store.ProviderRotationStrategy
 	sessionAffinity       bool
 	sessionTTL            time.Duration
+	sessionSubagents      bool
+	sessionRebindMode     string
+	codexBootstrapBuffer  bool
 	sessions              map[string]sessionBinding
 	providerStreams       map[string]int
 	modelCapacity         map[string]time.Time
@@ -123,7 +129,8 @@ func New(dataStore *store.Store, registry *providers.Registry) *Router {
 		cooldowns: CooldownSettingsFromConfig(config.CooldownConfig{}), strategy: StrategyRoundRobin,
 		stickyRoundRobinLimit: defaultStickyRoundRobinLimit, providerStrategies: map[string]store.ProviderRotationStrategy{},
 		sessionTTL: time.Hour, sessions: make(map[string]sessionBinding), providerStreams: make(map[string]int),
-		modelCapacity:   make(map[string]time.Time),
+		sessionSubagents: true, sessionRebindMode: config.SessionRebindAny,
+		modelCapacity: make(map[string]time.Time), quotaWarmups: make(map[string]time.Time),
 		circuitBreakers: resilience.NewRegistry(),
 		arena:           intelligence.NewArena(),
 	}
@@ -283,11 +290,22 @@ func (r *Router) ConfigureRouting(cfg config.RoutingConfig) {
 	r.providerStrategies = providerStrategies
 	r.sessionAffinity = cfg.SessionAffinity
 	r.sessionTTL = ttl
+	r.sessionSubagents = cfg.SubagentSessionsEnabled()
+	r.sessionRebindMode = cfg.RebindMode()
 	r.cooldowns = CooldownSettingsFromConfig(cfg.Cooldown)
 	r.cooldown = r.cooldowns.Fallback
 	r.retry = RetrySettingsFromConfig(cfg.Retry)
 	r.mu.Unlock()
 	r.configureFailover(cfg.Failover)
+}
+
+// ConfigureUpstream applies per-wire-family behaviours. Unlike routing policy
+// these do not change which credential is chosen, only how a stream from that
+// family is handed to the client.
+func (r *Router) ConfigureUpstream(cfg config.UpstreamConfig) {
+	r.mu.Lock()
+	r.codexBootstrapBuffer = cfg.Codex.StreamBootstrapBuffering
+	r.mu.Unlock()
 }
 
 // configureFailover applies the provider failover policy to the circuit breaker
@@ -681,6 +699,10 @@ func (r *Router) ProviderDescriptor(ctx context.Context, providerID string) (pro
 }
 
 func (r *Router) Execute(ctx context.Context, model store.PublicModel, request canonical.Request) (*Result, error) {
+	// Resolve the client's thinking choice once, here, so every attempt of this
+	// request (including failover) shares one decision and every adapter reads the
+	// same shape.
+	request = thinking.Normalize(request)
 	if r.shouldExecuteFusion(model) && !fusionChildRequest(request) {
 		return r.executeFusion(ctx, model, request)
 	}
@@ -692,6 +714,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 	var lastErr error
 	retry := r.retrySettings()
 	credentialsTried := 0
+	// previousFailure records why the request left the credential before this one,
+	// so session affinity can decide whether the move deserves to stick.
+	previousFailure := FailureNone
 	for index, selection := range selections {
 		if !retry.allowCredentialAttempt(credentialsTried) {
 			break
@@ -715,6 +740,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
+			previousFailure = failureReasonForStatus(providers.Status(lastErr))
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
@@ -773,7 +799,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			r.recordAccount(selection, outcomeStatus(errExecute), nil)
 		}
 		if errExecute == nil {
-			r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID)
+			r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID, previousFailure)
 			r.clearSuccessfulCooldown(ctx, selection)
 			r.recordProviderSuccess(model.ID, selection.Provider.ID)
 			if r.arena != nil {
@@ -797,6 +823,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if r.arena != nil && !localPolicyError(errExecute) {
 			r.arena.RecordOutcome(selection.Credential, false)
 		}
+		previousFailure = failureReasonForStatus(status)
 		if disableFallback(request) {
 			return nil, errExecute
 		}
@@ -812,6 +839,9 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 }
 
 func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, request canonical.Request) (*StreamResult, error) {
+	// Same one-time normalization as Execute: HTTP and WebSocket both land here,
+	// and a failover attempt must reuse the first decision.
+	request = thinking.Normalize(request)
 	start := time.Now()
 	selections, err := r.selections(ctx, model, request)
 	if err != nil {
@@ -820,6 +850,9 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 	var lastErr error
 	retry := r.retrySettings()
 	credentialsTried := 0
+	// previousFailure records why the request left the credential before this one,
+	// so session affinity can decide whether the move deserves to stick.
+	previousFailure := FailureNone
 	for index, selection := range selections {
 		if !retry.allowCredentialAttempt(credentialsTried) {
 			break
@@ -841,6 +874,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
+			previousFailure = failureReasonForStatus(providers.Status(lastErr))
 			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
@@ -876,34 +910,53 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			continue
 		}
 		dispatched := false
+		attemptCtx, cancelAttempt := context.WithCancel(ctx)
 		call := func() (<-chan canonical.Event, error) {
 			attemptRequest := requestForProvider(request, selection.Provider)
-			if err := r.admitProviderRequest(ctx, selection.Provider, attemptRequest); err != nil {
+			if err := r.admitProviderRequest(attemptCtx, selection.Provider, attemptRequest); err != nil {
 				return nil, err
 			}
 			dispatched = true
-			return adapter.ExecuteStream(ctx, selection.Provider, selection.Credential, attemptRequest)
+			return adapter.ExecuteStream(attemptCtx, selection.Provider, selection.Credential, attemptRequest)
 		}
-		events, errExecute := call()
+		buffered := r.bootstrapBufferingEnabled(selection.Provider, request)
+		dial := func() (<-chan canonical.Event, error) {
+			next, err := call()
+			if err != nil || !buffered {
+				return next, err
+			}
+			// Codex can hide an overload behind HTTP 200 and a few handshake
+			// frames. Hold that handshake here so the failure becomes a retryable
+			// error instead of a response that is already committed.
+			held, err := readBootstrap(next)
+			if err != nil {
+				cancelAttempt()
+				drainBootstrap(next)
+				return nil, err
+			}
+			return replayBootstrap(held, next), nil
+		}
+		next, errExecute := dial()
 		if errExecute != nil && (providers.Status(errExecute) == 401 || providers.Status(errExecute) == 403) {
 			if refreshed, refreshErr, ok := r.refreshAfterAuthError(ctx, selection); ok {
 				selection.Credential = refreshed
-				events, errExecute = call()
+				next, errExecute = dial()
 			} else if refreshErr != nil {
 				errExecute = asCredentialError(refreshErr)
 			}
 		}
-		errExecute = validateStreamResult(events, errExecute)
+		errExecute = validateStreamResult(next, errExecute)
 		// Streams have not emitted anything yet at this point, so re-dialling the
 		// same credential after a transient failure is safe.
 		for attempt := 0; retry.shouldRetrySameCredential(attempt, errExecute); attempt++ {
 			if !retry.sleepBackoff(ctx) {
 				break
 			}
-			events, errExecute = call()
-			errExecute = validateStreamResult(events, errExecute)
+			next, errExecute = dial()
+			errExecute = validateStreamResult(next, errExecute)
 		}
 		if errExecute != nil {
+			cancelAttempt()
 			releaseAccount()
 			if !dispatched {
 				credentialsTried--
@@ -920,6 +973,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 				r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
 			}
 			r.recordProviderFailure(model.ID, selection.Provider.ID, status, errExecute)
+			previousFailure = failureReasonForStatus(status)
 			if disableFallback(request) {
 				return nil, errExecute
 			}
@@ -928,8 +982,8 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			}
 			return nil, errExecute
 		}
-		r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID)
-		wrapped := r.wrapEvents(ctx, model, selection, request, start, events, func() { releaseAccount(); r.releaseProviderStream(selection.Provider) })
+		r.bindSession(model.ID, routingSessionID(request), selection.Credential.ID, previousFailure)
+		wrapped := r.wrapEvents(ctx, model, selection, request, start, next, func() { cancelAttempt(); releaseAccount(); r.releaseProviderStream(selection.Provider) })
 		return &StreamResult{Selection: selection, Events: wrapped}, nil
 	}
 	if lastErr == nil {
@@ -1787,7 +1841,7 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			Message: fmt.Sprintf("no provider is currently able to serve %s", model.ID),
 		}
 	}
-	selections = r.preferSession(model.ID, routingSessionID(request), selections)
+	selections = r.preferSession(model.ID, routingSessionID(request), routingParentSessionID(request), selections)
 	return selections, nil
 }
 
@@ -2062,25 +2116,58 @@ func (r *Router) rotateRoutes(modelID string, routes []store.RouteTarget) []stor
 	return result
 }
 
-func (r *Router) preferSession(modelID, sessionID string, selections []Selection) []Selection {
-	if sessionID == "" || len(selections) < 2 {
+// bootstrapBufferingEnabled reports whether a Codex stream from this provider
+// should hold its handshake before the first byte reaches the client.
+func (r *Router) bootstrapBufferingEnabled(provider store.Provider, request canonical.Request) bool {
+	if provider.Type != "codex" || request.Source != canonical.ProtocolResponses {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.codexBootstrapBuffer
+}
+
+// sessionStartCredential resolves which credential a request should start from.
+//
+// The child's own binding always wins. A subagent (a request carrying a parent
+// session id) with no binding of its own inherits the parent's credential when
+// that credential can still serve this selection set. Looking up the parent never
+// extends the parent's TTL: an active child must not keep a finished parent's
+// binding alive. Returns "" when there is nothing to prefer.
+func (r *Router) sessionStartCredential(modelID, sessionID, parentSessionID string) (credentialID, reason string) {
+	if sessionID == "" {
+		return "", ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.sessionAffinity {
+		return "", ""
+	}
+	if own := r.liveSessionLocked(modelID + ":" + sessionID); own != "" {
+		return own, "session-affinity"
+	}
+	if parentSessionID != "" && r.sessionSubagents {
+		if inherited := r.liveSessionLocked(modelID + ":" + parentSessionID); inherited != "" {
+			return inherited, "session-affinity-parent"
+		}
+	}
+	return "", ""
+}
+
+// preferSession puts the session's credential at the head of selections. The
+// credential only wins when it is still in the list, so a benched or removed
+// account never resurrects itself through an old binding.
+func (r *Router) preferSession(modelID, sessionID, parentSessionID string, selections []Selection) []Selection {
+	if len(selections) < 2 {
 		return selections
 	}
-	key := modelID + ":" + sessionID
-	r.mu.Lock()
-	enabled := r.sessionAffinity
-	binding, exists := r.sessions[key]
-	if exists && time.Now().After(binding.ExpiresAt) {
-		delete(r.sessions, key)
-		exists = false
-	}
-	r.mu.Unlock()
-	if !enabled || !exists {
+	credentialID, reason := r.sessionStartCredential(modelID, sessionID, parentSessionID)
+	if credentialID == "" {
 		return selections
 	}
 	for index, selection := range selections {
-		if selection.Credential.ID == binding.CredentialID {
-			selection.RoutingReason = "session-affinity"
+		if selection.Credential.ID == credentialID {
+			selection.RoutingReason = reason
 			result := make([]Selection, 0, len(selections))
 			result = append(result, selection)
 			result = append(result, selections[:index]...)
@@ -2091,7 +2178,28 @@ func (r *Router) preferSession(modelID, sessionID string, selections []Selection
 	return selections
 }
 
-func (r *Router) bindSession(modelID, sessionID, credentialID string) {
+// liveSessionLocked returns the credential a live binding points at, deleting it
+// when expired. Callers hold r.mu.
+func (r *Router) liveSessionLocked(key string) string {
+	binding, exists := r.sessions[key]
+	if !exists {
+		return ""
+	}
+	if time.Now().After(binding.ExpiresAt) {
+		delete(r.sessions, key)
+		return ""
+	}
+	return binding.CredentialID
+}
+
+// bindSession records that sessionID succeeded on credentialID.
+//
+// rebindOn decides whether a failover should move an existing binding:
+// "any" always rebinds (the historical behaviour), "quota" moves it only when
+// the previous credential failed with quota or auth status. A transient failure
+// or an unavailable sticky credential therefore moves one request without
+// dragging the session onto another account.
+func (r *Router) bindSession(modelID, sessionID, credentialID string, previous FailureReason) {
 	if sessionID == "" || credentialID == "" {
 		return
 	}
@@ -2099,6 +2207,12 @@ func (r *Router) bindSession(modelID, sessionID, credentialID string) {
 	defer r.mu.Unlock()
 	if !r.sessionAffinity {
 		return
+	}
+	key := modelID + ":" + sessionID
+	if existingCredential := r.liveSessionLocked(key); existingCredential != "" && existingCredential != credentialID {
+		if r.sessionRebindMode == config.SessionRebindQuota && !previous.IsQuota() {
+			return
+		}
 	}
 	if len(r.sessions) >= 4096 {
 		now := time.Now()
@@ -2116,7 +2230,7 @@ func (r *Router) bindSession(modelID, sessionID, credentialID string) {
 			delete(r.sessions, oldest)
 		}
 	}
-	r.sessions[modelID+":"+sessionID] = sessionBinding{CredentialID: credentialID, ExpiresAt: time.Now().Add(r.sessionTTL)}
+	r.sessions[key] = sessionBinding{CredentialID: credentialID, ExpiresAt: time.Now().Add(r.sessionTTL)}
 }
 
 func routeMatches(route store.RouteTarget, request canonical.Request) bool {
@@ -2361,7 +2475,22 @@ func routingSessionID(request canonical.Request) string {
 	if request.SessionID == "" {
 		return ""
 	}
+	return sessionKey(request, request.SessionID)
+}
+
+// routingParentSessionID hashes the parent session a subagent turn reports. The
+// hash includes the same client key and team as the child's, so a session from
+// another key or team can never be inherited even if the raw id collides.
+func routingParentSessionID(request canonical.Request) string {
+	parent, _ := request.Metadata[config.ParentSessionMetadataKey].(string)
+	if strings.TrimSpace(parent) == "" {
+		return ""
+	}
+	return sessionKey(request, strings.TrimSpace(parent))
+}
+
+func sessionKey(request canonical.Request, sessionID string) string {
 	// JSON tuple avoids ambiguous separators and includes authenticated ownership.
-	encoded, _ := json.Marshal([]string{requestClientAPIKeyID(request), fmt.Sprint(request.Metadata["team"]), request.SessionID})
+	encoded, _ := json.Marshal([]string{requestClientAPIKeyID(request), fmt.Sprint(request.Metadata["team"]), sessionID})
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }

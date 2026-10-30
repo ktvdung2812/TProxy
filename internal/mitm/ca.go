@@ -153,12 +153,11 @@ func (c *CA) Pool() *x509.CertPool {
 }
 
 // GetCertificate implements tls.Config.GetCertificate, issuing a leaf for the
-// requested SNI name. Clients that send no SNI receive a certificate for the
-// first intercepted host, which is the only name they could have dialled.
+// requested SNI name. Without SNI there is no host to sign for.
 func (c *CA) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	host := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
 	if host == "" {
-		host = AllHosts()[0]
+		return nil, errors.New("mitm: client offered no SNI")
 	}
 	return c.Leaf(host)
 }

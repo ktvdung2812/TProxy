@@ -65,6 +65,7 @@ var quotaSupportedTypes = map[string]bool{
 	"cline":             true,
 	"clinepass":         true,
 	"opencode-go":       true,
+	"muse":              true,
 }
 
 // SupportsQuota reports whether a provider type or preset ID has an upstream quota probe.
@@ -113,6 +114,8 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		return r.devinQuota(ctx, provider, credential), nil
 	case "cline", "clinepass":
 		return r.clineQuota(ctx, provider, credential), nil
+	case "muse":
+		return r.museQuota(ctx, provider, credential), nil
 	case "xai":
 		// Grok CLI subscription billing (not public api.x.ai pay-as-you-go keys).
 		if isGrokCLIQuotaProvider(provider) {
@@ -401,6 +404,111 @@ func firstMap(values map[string]any, keys ...string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// museQuota reads subscription state through the same /muse-code/key mint
+// endpoint used at login. Sign-in credentials carry the dca: account token in
+// OAuthToken.Extra; plain Meta API keys have no subscription usage surface.
+func (r *Registry) museQuota(ctx context.Context, provider store.Provider, credential store.Credential) CredentialQuota {
+	result := CredentialQuota{
+		CredentialID: credential.ID,
+		ProviderID:   provider.ID,
+		ProviderType: provider.Type,
+		Quotas:       map[string]QuotaEntry{},
+	}
+	dca := ""
+	if credential.OAuthToken != nil {
+		dca = stringValue(credential.OAuthToken.Extra["dca_token"])
+	}
+	if dca == "" {
+		result.Message = "Upstream quota API requires a Meta Muse sign-in credential"
+		return result
+	}
+	base := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(provider.BaseURL), "/"), "/v1")
+	if base == "" {
+		base = "https://api.meta.ai"
+	}
+	headers := http.Header{
+		"Authorization": []string{"Bearer " + dca},
+		"User-Agent":    []string{"muse-code/1.0.2"},
+		"Content-Type":  []string{"application/json"},
+		"Accept":        []string{"application/json"},
+	}
+	body, status, err := r.quotaPOST(ctx, base+"/muse-code/key", headers, map[string]any{"dca_token": dca})
+	if err != nil {
+		result.Message = fmt.Sprintf("Muse subscription API unavailable: %v", err)
+		return result
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		result.Message = "Muse account token expired; sign in again"
+		return result
+	}
+	if status < 200 || status >= 300 {
+		result.Message = fmt.Sprintf("Muse subscription API unavailable (HTTP %d)", status)
+		return result
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		result.Message = "invalid Muse subscription response"
+		return result
+	}
+	result.Plan = stringValue(firstValue(payload, "subs_tier_name", "plan"))
+	if active, ok := payload["is_subs_active"].(bool); ok && !active {
+		result.Message = "No active Muse subscription on this account"
+		return result
+	}
+	for name, entry := range museUsageWindows(payload, 0) {
+		result.Quotas[name] = entry
+	}
+	return result
+}
+
+// museUsageWindows walks the mint response for window-shaped objects
+// ({window_duration_mins|limit_window_seconds, used_percent, resets_at}) —
+// the shape CodexBar documents as the 5-hour and weekly weighted limits.
+func museUsageWindows(node map[string]any, depth int) map[string]QuotaEntry {
+	windows := map[string]QuotaEntry{}
+	if depth > 4 {
+		return windows
+	}
+	for key, raw := range node {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			if list, isList := raw.([]any); isList {
+				for _, element := range list {
+					if child, isMap := element.(map[string]any); isMap {
+						for name, entry := range museUsageWindows(child, depth+1) {
+							windows[name] = entry
+						}
+					}
+				}
+			}
+			continue
+		}
+		if _, hasPercent := item["used_percent"]; hasPercent {
+			if _, hasReset := item["resets_at"]; hasReset {
+				// codexWindowEntry reads limit_window_seconds; the Muse
+				// snapshot expresses the same duration in minutes.
+				normalized := item
+				if mins, valid := numberValueAny(item["window_duration_mins"]); valid && mins > 0 {
+					if _, hasSeconds := item["limit_window_seconds"]; !hasSeconds {
+						normalized = make(map[string]any, len(item)+1)
+						for field, value := range item {
+							normalized[field] = value
+						}
+						normalized["limit_window_seconds"] = mins * 60
+					}
+				}
+				entry := codexWindowEntry(strings.ToLower(key), normalized)
+				windows[entry.Name] = entry
+				continue
+			}
+		}
+		for name, entry := range museUsageWindows(item, depth+1) {
+			windows[name] = entry
+		}
+	}
+	return windows
 }
 
 func parseResetAt(value any) string {

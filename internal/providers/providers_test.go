@@ -209,7 +209,7 @@ func TestClaudeOAuthAdapterUsesBearerAndClaudeHeaders(t *testing.T) {
 
 func TestAntigravityAdapterWrapsCloudCodeRequestAndNormalizesResponses(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/ide/") {
+		if r.Header.Get("Authorization") != "Bearer antigravity-access" || !strings.HasPrefix(r.Header.Get("User-Agent"), "antigravity/hub/") {
 			t.Fatalf("headers = %+v", r.Header)
 		}
 		// No Antigravity client sends a correlation header, so sending one only
@@ -771,6 +771,21 @@ func TestEndpointVersionlessOpenAIPaths(t *testing.T) {
 		if got := endpoint(tc.base, tc.path); got != tc.want {
 			t.Fatalf("endpoint(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestMuseProviderUsesOpenAIAdapterAndDiscovery(t *testing.T) {
+	registry := NewRegistry()
+	descriptor, err := registry.Describe("muse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.ProtocolFamily != "openai" || !descriptor.ModelDiscovery {
+		t.Fatalf("muse descriptor = %+v", descriptor)
+	}
+	provider := store.Provider{ID: "meta", Type: "muse", BaseURL: "https://api.meta.ai/v1"}
+	if got := modelsDiscoveryURL(provider); got != "https://api.meta.ai/v1/models" {
+		t.Fatalf("modelsDiscoveryURL() = %q", got)
 	}
 }
 

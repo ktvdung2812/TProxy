@@ -1125,6 +1125,8 @@ func (m *Manager) performRefresh(ctx context.Context, provider store.Provider, c
 		token, err = m.refreshGitlabToken(ctx, old.RefreshToken, gitlabCfg)
 	case "kiro":
 		token, err = m.refreshKiroToken(ctx, old)
+	case "muse":
+		token, err = m.remintMuseKey(ctx, provider, old)
 	default:
 		token, err = m.exchangeRefresh(ctx, *oauthConfig, old.RefreshToken)
 	}

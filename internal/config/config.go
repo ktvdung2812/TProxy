@@ -19,6 +19,7 @@ type Config struct {
 	Database      DatabaseConfig      `yaml:"database"`
 	Security      SecurityConfig      `yaml:"security"`
 	Routing       RoutingConfig       `yaml:"routing"`
+	Upstream      UpstreamConfig      `yaml:"upstream" json:"upstream"`
 	Retention     RetentionConfig     `yaml:"retention"`
 	Streaming     StreamingConfig     `yaml:"streaming" json:"streaming"`
 	Limits        LimitPolicy         `yaml:"limits" json:"limits"`
@@ -29,6 +30,21 @@ type Config struct {
 	Models        []PublicModelConfig `yaml:"models"`
 	Combos        []ComboConfig       `yaml:"combos"`
 	ClaudeAliases ClaudeAliasConfig   `yaml:"claude-aliases" json:"claude_aliases"`
+}
+
+// UpstreamConfig holds per-wire-family behaviours that are not routing policy.
+type UpstreamConfig struct {
+	Codex CodexUpstreamConfig `yaml:"codex" json:"codex"`
+}
+
+// CodexUpstreamConfig covers Codex-specific stream handling.
+type CodexUpstreamConfig struct {
+	// StreamBootstrapBuffering holds a Codex Responses stream between the adapter
+	// and the client until the first real output arrives. Codex answers HTTP 200,
+	// sends a few handshake frames, and only then reports "at capacity" — by then
+	// the response headers are committed and failover is impossible. Buffering
+	// the handshake turns that into a normal 429 failover. Off by default.
+	StreamBootstrapBuffering bool `yaml:"stream-bootstrap-buffering" json:"stream_bootstrap_buffering"`
 }
 
 // StreamingConfig keeps idle connections alive. Load balancers and corporate
@@ -108,11 +124,49 @@ type RoutingConfig struct {
 	ProviderStrategies    map[string]ProviderRotationConfig `yaml:"provider-strategies" json:"provider_strategies,omitempty"`
 	SessionAffinity       bool                              `yaml:"session-affinity" json:"session_affinity"`
 	SessionAffinityTTL    string                            `yaml:"session-affinity-ttl" json:"session_affinity_ttl"`
-	Cooldown              CooldownConfig                    `yaml:"cooldown" json:"cooldown"`
-	Prewarm               PrewarmConfig                     `yaml:"prewarm" json:"prewarm"`
-	Failover              FailoverConfig                    `yaml:"failover" json:"failover"`
-	Retry                 RetryConfig                       `yaml:"retry" json:"retry"`
+	// SessionAffinitySubagents lets a child session inherit its parent's
+	// credential. Only meaningful when session-affinity is on. Defaults to true.
+	SessionAffinitySubagents *bool `yaml:"session-affinity-subagents" json:"session_affinity_subagents,omitempty"`
+	// SessionAffinityRebindOn decides which successful failovers move the
+	// session binding. "any" (default) keeps the pre-existing behaviour of
+	// rebinding after every failover; "quota" rebinds only after quota/auth
+	// failures (429/401/403), leaving the binding alone after transient ones.
+	SessionAffinityRebindOn string         `yaml:"session-affinity-rebind-on" json:"session_affinity_rebind_on,omitempty"`
+	Cooldown                CooldownConfig `yaml:"cooldown" json:"cooldown"`
+	Prewarm                 PrewarmConfig  `yaml:"prewarm" json:"prewarm"`
+	Failover                FailoverConfig `yaml:"failover" json:"failover"`
+	Retry                   RetryConfig    `yaml:"retry" json:"retry"`
 }
+
+// Session affinity rebind modes.
+const (
+	// SessionRebindAny rebinds after any successful failover. This is the
+	// historical behaviour and stays the default so running deployments keep it.
+	SessionRebindAny = "any"
+	// SessionRebindQuota rebinds only after a quota/auth failure, so a transient
+	// 5xx moves one request but leaves the session on its original credential.
+	SessionRebindQuota = "quota"
+)
+
+// SubagentSessionsEnabled reports whether a child session may inherit its
+// parent's credential. Defaults to true.
+func (r RoutingConfig) SubagentSessionsEnabled() bool {
+	return r.SessionAffinitySubagents == nil || *r.SessionAffinitySubagents
+}
+
+// RebindMode returns the normalized rebind mode, defaulting to "any".
+func (r RoutingConfig) RebindMode() string {
+	if strings.EqualFold(strings.TrimSpace(r.SessionAffinityRebindOn), SessionRebindQuota) {
+		return SessionRebindQuota
+	}
+	return SessionRebindAny
+}
+
+// SessionIDMetadataKey and the parent header name a child session's parent.
+const (
+	ParentSessionMetadataKey = "parent_session_id"
+	ParentSessionHeader      = "X-Parent-Session-ID"
+)
 
 // RetryConfig bounds how hard a single client request is retried before the
 // caller sees an error. Without limits a request can walk every credential of
@@ -494,6 +548,38 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 		provider.Type = "cursor"
 	}
 	switch provider.Type {
+	case "muse":
+		if provider.Name == "" {
+			provider.Name = "Meta Muse"
+		}
+		if provider.BaseURL == "" {
+			provider.BaseURL = "https://api.meta.ai/v1"
+		}
+		if provider.OAuth == nil {
+			provider.OAuth = &OAuthConfig{}
+		}
+		// RFC 8628 device login against auth.meta.com, using the public
+		// first-party Muse CLI client. Meta rejects any scope parameter.
+		// The returned dca: token is exchanged at /muse-code/key for an
+		// LLM| inference key; see auth.muse_oauth.go.
+		if provider.OAuth.DeviceCodeURL == "" {
+			provider.OAuth.DeviceCodeURL = "https://auth.meta.com/oidc/device/authorization/"
+		}
+		if provider.OAuth.TokenURL == "" {
+			provider.OAuth.TokenURL = "https://auth.meta.com/oidc/device/token/"
+		}
+		if provider.OAuth.ClientID == "" {
+			provider.OAuth.ClientID = "1031625952748946"
+		}
+		provider.OAuth.DeviceFlow = "rfc8628"
+		// Minted keys are good for roughly a day; re-mint with the stored dca:
+		// token before the window closes.
+		if provider.OAuth.MaxTokenAge == "" {
+			provider.OAuth.MaxTokenAge = "20h"
+		}
+		if provider.OAuth.HardMaxTokenAge == "" {
+			provider.OAuth.HardMaxTokenAge = "24h"
+		}
 	case "codex":
 		if provider.Name == "" {
 			provider.Name = "OpenAI Codex"
@@ -1076,6 +1162,11 @@ func (cfg *Config) Validate() error {
 	if _, err := time.ParseDuration(ttl); err != nil {
 		return fmt.Errorf("invalid session affinity ttl: %w", err)
 	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Routing.SessionAffinityRebindOn)) {
+	case "", SessionRebindAny, SessionRebindQuota:
+	default:
+		return fmt.Errorf("invalid session-affinity-rebind-on %q: want %q or %q", cfg.Routing.SessionAffinityRebindOn, SessionRebindAny, SessionRebindQuota)
+	}
 	for name, value := range map[string]string{"usage-events": cfg.Retention.UsageEvents, "audit-events": cfg.Retention.AuditEvents, "media-jobs": cfg.Retention.MediaJobs, "oauth-sessions": cfg.Retention.OAuthSessions, "cleanup-interval": cfg.Retention.CleanupInterval} {
 		parsed, err := time.ParseDuration(value)
 		if err != nil || parsed <= 0 {
@@ -1114,7 +1205,7 @@ func (cfg *Config) Validate() error {
 			}
 		}
 		switch provider.Type {
-		case "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
+		case "muse", "openai-compatible", "anthropic-compatible", "gemini", "vertex", "vertex-partner", "ollama", "codex", "claude", "kimi", "xai", "grok-web", "perplexity-web", "antigravity", "tavily", "elevenlabs", "image", "video", "plugin-http", "copilot", "qwen", "kiro", "qoder", "cursor", "cline", "clinepass", "iflow", "codebuddy-cn", "kilocode", "gitlab", "kimchi", "devin":
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", provider.ID, provider.Type)
 		}

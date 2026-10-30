@@ -15,6 +15,7 @@ const MODELS_DEV_LOGO_BASE = "https://models.dev/logos";
  */
 const MODELS_DEV_PROVIDER_BY_TYPE: Record<string, string> = {
   "openai-compatible": "openai",
+  muse: "muse",
   "anthropic-compatible": "anthropic",
   gemini: "google",
   vertex: "google-vertex",

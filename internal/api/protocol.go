@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/translator/claudeopenai"
@@ -475,6 +476,26 @@ func useClientRequestID(r *http.Request) string {
 	return security.NewID("req_")
 }
 
+// parentSessionIDFromRequest returns the session this request belongs to as a
+// child (a subagent turn). It reads the header first, then metadata, matching the
+// precedence sessionIDFromRequest uses.
+func parentSessionIDFromRequest(r *http.Request, bodies ...map[string]any) string {
+	if value := strings.TrimSpace(r.Header.Get(config.ParentSessionHeader)); value != "" {
+		return value
+	}
+	for _, body := range bodies {
+		if metadata, ok := body["metadata"].(map[string]any); ok {
+			if value := strings.TrimSpace(stringValue(metadata[config.ParentSessionMetadataKey])); value != "" {
+				return value
+			}
+		}
+		if value := strings.TrimSpace(stringValue(body[config.ParentSessionMetadataKey])); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func sessionIDFromRequest(r *http.Request, bodies ...map[string]any) string {
 	for _, header := range []string{"X-Session-ID", "Session_id", "Conversation-ID", "X-Conversation-ID", "X-Opencode-Session"} {
 		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
@@ -506,6 +527,22 @@ func sessionIDFromRequest(r *http.Request, bodies ...map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// attachParentSessionID records the parent session a subagent turn belongs to,
+// so the router can inherit its credential when the child has no binding yet.
+func attachParentSessionID(r *http.Request, request *canonical.Request) {
+	if request == nil {
+		return
+	}
+	parent := parentSessionIDFromRequest(r, request.Raw)
+	if parent == "" || parent == request.SessionID {
+		return
+	}
+	if request.Metadata == nil {
+		request.Metadata = map[string]any{}
+	}
+	request.Metadata[config.ParentSessionMetadataKey] = parent
 }
 
 func statusText(status int) string { return strconv.Itoa(status) }

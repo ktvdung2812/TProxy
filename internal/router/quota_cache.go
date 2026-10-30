@@ -129,7 +129,11 @@ func (r *Router) CredentialQuota(ctx context.Context, provider store.Provider, c
 }
 
 func (r *Router) RefreshQuotaIfDue(ctx context.Context, provider store.Provider, credential store.Credential) (providers.CredentialQuota, error) {
-	return r.refreshCredentialQuota(ctx, provider, credential, false)
+	quota, err := r.refreshCredentialQuota(ctx, provider, credential, false)
+	if err == nil {
+		r.warmQuotaWindow(ctx, provider, credential, quota)
+	}
+	return quota, err
 }
 
 func (r *Router) refreshCredentialQuota(ctx context.Context, provider store.Provider, credential store.Credential, force bool) (providers.CredentialQuota, error) {

@@ -43,6 +43,7 @@ var providerTypeAliases = map[string][]string{
 	"deepseek":          {"deepseek"},
 	"groq":              {"groq"},
 	"mistral":           {"mistral"},
+	"muse":              {"meta"},
 	"xai":               {"xai"},
 	"ollama":            {"ollama"},
 }

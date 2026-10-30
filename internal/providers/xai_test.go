@@ -67,6 +67,22 @@ func TestXAINormalizeResponsesBodyMatchesPiShape(t *testing.T) {
 	}
 }
 
+func TestXAIReasoningNoneRemovesReasoningInclude(t *testing.T) {
+	body := xaiResponsesBody(canonical.Request{
+		Source:        canonical.ProtocolResponses,
+		UpstreamModel: "grok-4.5",
+		Reasoning:     map[string]any{"effort": "none"},
+		Metadata:      map[string]any{"thinking_normalized": true, "thinking_set": true},
+		Raw:           map[string]any{"model": "grok-4.5", "input": "hello"},
+	})
+	if _, exists := body["reasoning"]; exists {
+		t.Fatalf("reasoning = %#v, want removed", body["reasoning"])
+	}
+	if _, exists := body["include"]; exists {
+		t.Fatalf("include = %#v, want removed", body["include"])
+	}
+}
+
 func TestApplyXAICompletionsCompat(t *testing.T) {
 	body := map[string]any{
 		"store":            false,

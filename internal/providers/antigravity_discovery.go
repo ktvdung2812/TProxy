@@ -16,9 +16,18 @@ import (
 // which left the provider page reporting "0 upstream models" even while the
 // quota badges for those very models rendered correctly beside it.
 //
-// The value is a variable so tests can point discovery at a local server; it is
-// never reassigned at runtime.
-var antigravityModelsURL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
+// The catalogue is per host as well as per account: the hosts in
+// antigravityBaseURLs do not always list the same models (see
+// antigravityShouldTryNextHost), so discovery asks every host and merges the
+// answers. Asking only one hid whatever the other one carried.
+const (
+	antigravityModelsPath       = "/v1internal:fetchAvailableModels"
+	antigravityDefaultModelsURL = "https://cloudcode-pa.googleapis.com" + antigravityModelsPath
+)
+
+// The value is a variable so tests can point discovery at a single local
+// server; it is never reassigned at runtime.
+var antigravityModelsURL = antigravityDefaultModelsURL
 
 // antigravityInternalModels are scaffolding entries the IDE uses for editor
 // features such as tab completion. They are not routable chat models, and
@@ -77,7 +86,37 @@ func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.
 		body["project"] = projectID
 	}
 	ctx = withCredentialProxy(ctx, credential)
-	payload, status, err := r.quotaPOST(ctx, antigravityModelsURL, antigravityQuotaHeaders(token), body)
+	merged := map[string]any{}
+	var lastErr error
+	for _, target := range antigravityModelCatalogURLs(provider) {
+		models, err := r.antigravityCatalog(ctx, target, token, body)
+		if err != nil {
+			// The token travels with the request, so another host would reject it
+			// just the same.
+			if Code(err) == "authorization_required" {
+				return nil, err
+			}
+			lastErr = err
+			continue
+		}
+		for modelID, entry := range models {
+			if existing, ok := merged[modelID]; !ok || existing == nil {
+				merged[modelID] = entry
+			}
+		}
+	}
+	if len(merged) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity returned no models for this account"}
+	}
+	return antigravityDiscoveredModels(r, merged)
+}
+
+// antigravityCatalog fetches the models map from one host.
+func (r *Registry) antigravityCatalog(ctx context.Context, target, token string, body map[string]any) (map[string]any, error) {
+	payload, status, err := r.quotaPOST(ctx, target, antigravityQuotaHeaders(token), body)
 	if err != nil {
 		return nil, &ProviderError{Code: "model_discovery_failed", Err: err}
 	}
@@ -92,10 +131,24 @@ func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.
 		return nil, &ProviderError{Status: http.StatusBadGateway, Code: "invalid_upstream_response", Err: err}
 	}
 	models, _ := data["models"].(map[string]any)
-	if len(models) == 0 {
-		return nil, &ProviderError{Code: "model_discovery_unsupported", Message: "Antigravity returned no models for this account"}
-	}
+	return models, nil
+}
 
+// antigravityModelCatalogURLs lists the catalogue endpoint on every host
+// generation may use. The test hook pins discovery to one server.
+func antigravityModelCatalogURLs(provider store.Provider) []string {
+	if antigravityModelsURL != antigravityDefaultModelsURL {
+		return []string{antigravityModelsURL}
+	}
+	bases := antigravityBaseURLs(provider)
+	urls := make([]string, 0, len(bases))
+	for _, base := range bases {
+		urls = append(urls, endpoint(base, antigravityModelsPath))
+	}
+	return urls
+}
+
+func antigravityDiscoveredModels(r *Registry, models map[string]any) ([]DiscoveredModel, error) {
 	items := make([]DiscoveredModel, 0, len(models))
 	for modelID, value := range models {
 		modelID = strings.TrimSpace(modelID)
@@ -107,9 +160,17 @@ func discoverAntigravityModels(ctx context.Context, r *Registry, provider store.
 		}
 		entry, _ := value.(map[string]any)
 		if entry == nil {
-			continue
+			// New catalog entries can be null while their metadata is still being
+			// rolled out. The ID is enough to make the model selectable.
+			entry = map[string]any{}
 		}
 		if isInternal, _ := entry["isInternal"].(bool); isInternal {
+			continue
+		}
+		// A plan that does not include a model gets a disabled placeholder under
+		// a different ID ("gemini-4-argon-disabled", tagged "Unavailable") so the
+		// App can show an upsell. It cannot be called.
+		if disabled, _ := entry["disabled"].(bool); disabled {
 			continue
 		}
 		name := antigravityModelDisplayName(modelID, entry)
