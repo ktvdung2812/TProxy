@@ -40,6 +40,7 @@ type OAuthToken struct {
 	RefreshToken string         `json:"refresh_token,omitempty"`
 	TokenType    string         `json:"token_type,omitempty"`
 	ExpiresAt    time.Time      `json:"expires_at,omitempty"`
+	RefreshedAt  time.Time      `json:"refreshed_at,omitempty"`
 	Extra        map[string]any `json:"extra,omitempty"`
 }
 

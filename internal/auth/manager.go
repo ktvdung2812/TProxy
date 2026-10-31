@@ -265,6 +265,7 @@ func (m *Manager) Start(ctx context.Context) {
 			defer m.backgroundWG.Done()
 			ticker := time.NewTicker(30 * time.Second)
 			defer ticker.Stop()
+			m.refreshExpiring(m.rootCtx)
 			for {
 				select {
 				case <-ticker.C:
@@ -1022,6 +1023,30 @@ func (m *Manager) EnsureValid(ctx context.Context, provider store.Provider, cred
 // adapters such as Copilot call this helper before applying their own token
 // transformation; keeping the generic path separate avoids recursive dispatch.
 func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Provider, credential store.Credential, force bool) (store.Credential, error) {
+	m.mu.Lock()
+	existing := m.refresh[credential.ID]
+	m.mu.Unlock()
+	if existing != nil {
+		select {
+		case <-existing.done:
+			return existing.credential, existing.err
+		case <-ctx.Done():
+			return credential, ctx.Err()
+		}
+	}
+	if m.store != nil && credential.ID != "" {
+		current, err := m.store.CredentialByID(ctx, credential.ID)
+		if err != nil {
+			return credential, err
+		}
+		if current.ProviderID != provider.ID || current.AuthType != "oauth" {
+			return credential, &Error{code: "authorization_required", permanent: true}
+		}
+		if oauthAccessChanged(credential, current) {
+			force = false
+		}
+		credential = current
+	}
 	token := credential.OAuthToken
 	if token == nil {
 		token = &store.OAuthToken{AccessToken: credential.Secret, TokenType: credential.TokenType}
@@ -1068,13 +1093,45 @@ func (m *Manager) ensureOAuthCredential(ctx context.Context, provider store.Prov
 	m.refresh[credential.ID] = call
 	m.mu.Unlock()
 
-	updated, err := m.performRefresh(ctx, provider, credential, *token)
+	// Another refresh may have finished between the initial read and acquiring
+	// the refresh slot. Never exchange a refresh token from that older snapshot.
+	current, err := m.store.CredentialByID(ctx, credential.ID)
+	updated := credential
+	if err == nil && oauthTokenChanged(credential, current) {
+		if oauthAccessChanged(credential, current) {
+			force = false
+		}
+		credential = current
+		token = credential.OAuthToken
+	}
+	if err == nil && (credential.ProviderID != provider.ID || credential.AuthType != "oauth" || token == nil) {
+		err = &Error{code: "authorization_required", permanent: true}
+	}
+	if err == nil && !force && (token.ExpiresAt.IsZero() || token.ExpiresAt.After(m.now().Add(window))) && !tokenOlderThan(credential, hardMaxTokenAge(provider.OAuth), m.now()) {
+		updated, err = m.ensureAntigravityProject(ctx, provider, credential)
+	} else if err == nil {
+		updated, err = m.performRefresh(ctx, provider, credential, *token)
+	}
 	m.mu.Lock()
 	call.credential, call.err = updated, err
 	delete(m.refresh, credential.ID)
 	close(call.done)
 	m.mu.Unlock()
 	return updated, err
+}
+
+func oauthTokenChanged(a, b store.Credential) bool {
+	if a.OAuthToken == nil || b.OAuthToken == nil {
+		return a.OAuthToken != nil || b.OAuthToken != nil || a.Secret != b.Secret
+	}
+	return a.OAuthToken.AccessToken != b.OAuthToken.AccessToken || a.OAuthToken.RefreshToken != b.OAuthToken.RefreshToken
+}
+
+func oauthAccessChanged(a, b store.Credential) bool {
+	if a.OAuthToken != nil && b.OAuthToken != nil {
+		return a.OAuthToken.AccessToken != b.OAuthToken.AccessToken
+	}
+	return a.Secret != b.Secret
 }
 
 func (m *Manager) ForceRefreshCredential(ctx context.Context, credentialID string) (CredentialStatus, error) {
@@ -1146,6 +1203,7 @@ func (m *Manager) performRefresh(ctx context.Context, provider store.Provider, c
 	if err != nil {
 		return credential, err
 	}
+	token.RefreshedAt = m.now().UTC()
 	if err = m.store.UpdateOAuthToken(ctx, credential.ID, token); err != nil {
 		return credential, err
 	}
@@ -1180,13 +1238,11 @@ func (m *Manager) refreshExpiring(ctx context.Context) {
 		if !expiring && !aged {
 			continue
 		}
+		if item.Credential.CooldownUntil.After(now) {
+			continue
+		}
 		if !expiring && aged {
-			// A credential in cooldown just failed; retrying it every tick would
-			// hammer the provider. Expiry-driven refreshes stay unthrottled because
-			// they are already bounded by the token lifetime.
-			if item.Credential.CooldownUntil.After(now) {
-				continue
-			}
+			// Space out repeated age-based attempts after transient failures.
 			if !m.ageRefreshDue(item.Credential.ID, now) {
 				continue
 			}
@@ -1900,15 +1956,11 @@ func hardMaxTokenAge(cfg *config.OAuthConfig) time.Duration {
 	return hard
 }
 
-// tokenRefreshedAt reports when the credential's token was last written. Both
-// UpdateOAuthToken and the login save stamp last_validated_at, so it doubles as
-// "last successful refresh". A credential that predates the column falls back to
-// its creation time; when neither is known the token is treated as due, which is
-// the safe direction — a redundant refresh costs one request, a skipped one can
-// cost the credential.
+// tokenRefreshedAt does not use LastValidated: successful health checks also
+// update it, even when the token itself has not changed.
 func tokenRefreshedAt(credential store.Credential) (time.Time, bool) {
-	if !credential.LastValidated.IsZero() {
-		return credential.LastValidated, true
+	if credential.OAuthToken != nil && !credential.OAuthToken.RefreshedAt.IsZero() {
+		return credential.OAuthToken.RefreshedAt, true
 	}
 	if !credential.CreatedAt.IsZero() {
 		return credential.CreatedAt, true
@@ -1932,6 +1984,7 @@ func tokenOlderThan(credential store.Credential, limit time.Duration, now time.T
 }
 
 func (m *Manager) saveOAuthCredentialFromLogin(ctx context.Context, item *session, providerID, label, email string, token store.OAuthToken) error {
+	token.RefreshedAt = m.now().UTC()
 	item.mu.Lock()
 	candidateID := item.credentialID
 	explicit := item.explicitCredential

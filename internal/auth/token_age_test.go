@@ -186,6 +186,110 @@ func TestTokenWithoutRefreshTokenIsNeverAgedOut(t *testing.T) {
 	}
 }
 
+func TestRefreshUsesCurrentTokenForOldSnapshots(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	var calls atomic.Int32
+	server := refreshServer(t, &calls)
+	defer server.Close()
+	dataStore, _ := newAuthStore(t, oauthConfig(server.URL))
+	ctx := context.Background()
+	if err := dataStore.SaveOAuthCredential(ctx, "oauth-provider", "oauth-account", "", "", store.OAuthToken{
+		AccessToken: "old", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := dataStore.Provider(ctx, "oauth-provider")
+	old, _ := dataStore.CredentialByID(ctx, "oauth-account")
+	manager := NewManager(dataStore, server.Client())
+	defer manager.Close()
+	if _, err := manager.EnsureValid(ctx, *provider, old, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, force := range []bool{false, true} {
+		updated, err := manager.EnsureValid(ctx, *provider, old, force)
+		if err != nil || updated.Secret != "rotated-access" {
+			t.Fatalf("force=%v, token=%q, err=%v", force, updated.Secret, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("refresh calls=%d, want 1", calls.Load())
+	}
+}
+
+func TestForcedRefreshUsesRotatedRefreshTokenWhenAccessIsUnchanged(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"access_token":"same","refresh_token":"new-refresh","expires_in":3600}`))
+			return
+		}
+		if r.Form.Get("refresh_token") != "new-refresh" {
+			t.Errorf("refresh token = %q, want rotated token", r.Form.Get("refresh_token"))
+		}
+		_, _ = w.Write([]byte(`{"access_token":"new","refresh_token":"new-refresh","expires_in":3600}`))
+	}))
+	defer server.Close()
+	dataStore, _ := newAuthStore(t, oauthConfig(server.URL))
+	ctx := context.Background()
+	if err := dataStore.SaveOAuthCredential(ctx, "oauth-provider", "oauth-account", "", "", store.OAuthToken{
+		AccessToken: "same", RefreshToken: "old-refresh", ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := dataStore.Provider(ctx, "oauth-provider")
+	old, _ := dataStore.CredentialByID(ctx, "oauth-account")
+	manager := NewManager(dataStore, server.Client())
+	defer manager.Close()
+	if _, err := manager.EnsureValid(ctx, *provider, old, false); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.EnsureValid(ctx, *provider, old, true)
+	if err != nil || updated.Secret != "new" || calls.Load() != 2 {
+		t.Fatalf("token=%q calls=%d err=%v", updated.Secret, calls.Load(), err)
+	}
+}
+
+func TestHealthValidationDoesNotResetTokenAge(t *testing.T) {
+	now := time.Now()
+	credential := store.Credential{
+		OAuthToken:    &store.OAuthToken{RefreshToken: "refresh", RefreshedAt: now.Add(-2 * time.Hour)},
+		LastValidated: now,
+		CreatedAt:     now.Add(-24 * time.Hour),
+	}
+	if !tokenOlderThan(credential, time.Hour, now) {
+		t.Fatal("health validation must not reset the token refresh clock")
+	}
+	credential.OAuthToken.RefreshedAt = time.Time{}
+	if !tokenOlderThan(credential, time.Hour, now) {
+		t.Fatal("legacy tokens must use creation time, not health validation")
+	}
+}
+
+func TestBackgroundRefreshRespectsCooldownForExpiringToken(t *testing.T) {
+	t.Setenv("TPROXY_TEST_OAUTH_CLIENT", "test-client")
+	var calls atomic.Int32
+	server := refreshServer(t, &calls)
+	defer server.Close()
+	dataStore, _ := newAuthStore(t, oauthConfig(server.URL))
+	ctx := context.Background()
+	if err := dataStore.SaveOAuthCredential(ctx, "oauth-provider", "oauth-account", "", "", store.OAuthToken{
+		AccessToken: "old", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetCooldown(ctx, "oauth-account", "unavailable", "", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(dataStore, server.Client())
+	defer manager.Close()
+	manager.refreshExpiring(ctx)
+	if calls.Load() != 0 {
+		t.Fatalf("refresh calls during cooldown=%d, want 0", calls.Load())
+	}
+}
+
 func TestTokenAgePolicyDefaultsAndOverrides(t *testing.T) {
 	if maxTokenAge(nil) != 48*time.Hour {
 		t.Errorf("default soft age = %v, want 48h", maxTokenAge(nil))
