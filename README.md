@@ -309,6 +309,11 @@ For a completely empty database, you can skip this and let tproxy seed defaults 
 
 **b) Environment secrets**
 
+`npm run dev` and `npm start` generate any missing `TPROXY_MASTER_KEY`,
+`TPROXY_MANAGEMENT_SECRET` and `TPROXY_API_KEY` into `.env.run` on first launch
+and reuse them afterwards — back that file up, since the master key decrypts
+stored provider credentials. For other launch methods, set them manually:
+
 ```bash
 cp .env.example .env.run
 ```
@@ -459,7 +464,7 @@ Then open the dashboard, log in, and:
 |---------|-----|
 | `address already in use` on `28120` | Stop the other process: `lsof -t -iTCP:28120 \| xargs kill` or run `bash scripts/free-ports.sh` before `npm run dev` |
 | `bin/tproxy not found` | Run `npm run build` |
-| Cannot save provider credentials | Set `TPROXY_MASTER_KEY` in `.env.run` and restart |
+| Cannot save provider credentials | Restart with `npm run dev` / `npm start` (generates `TPROXY_MASTER_KEY` in `.env.run`), or set it there manually |
 | OAuth callback fails on a remote host | Set `server.allow-remote-management: true` and configure `oauth.redirect-url` to your public URL |
 | Dashboard loads but API returns 401 | Check `TPROXY_API_KEY` / management secret; re-login from the dashboard |
 
@@ -472,10 +477,7 @@ If you already completed [Installation](#installation), tproxy should be running
 ```bash
 git clone https://github.com/ktvdung2812/TProxy.git
 cd TProxy
-cp config.example.yaml config.yaml
-cp .env.example .env.run
-go run ./cmd/tproxy --print-master-key   # add to .env.run as TPROXY_MASTER_KEY
-npm install && npm run dev
+npm install && npm run dev   # creates config.yaml and .env.run secrets on first run
 ```
 
 Open http://127.0.0.1:28120/dashboard/ (first local password: `123123`).

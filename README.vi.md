@@ -172,10 +172,7 @@ Cổng mặc định:
 ```bash
 git clone https://github.com/ktvdung2812/TProxy.git
 cd TProxy
-cp config.example.yaml config.yaml
-cp .env.example .env.run
-go run ./cmd/tproxy --print-master-key   # thêm vào .env.run dưới dạng TPROXY_MASTER_KEY
-npm install && npm run dev
+npm install && npm run dev   # lần đầu tự tạo config.yaml và các khóa trong .env.run
 ```
 
 Mở http://127.0.0.1:28120/dashboard/ (mật khẩu: `123123`).
