@@ -39,7 +39,7 @@ type Run = { key: string; data?: TranslationPreview; error?: string };
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 export function DiagnosticsView({ secret }: { secret: string }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const guide = usePageGuide("diagnostics");
   const { copied, copy } = useCopyToClipboard();
   const [source, setSource] = useState<SourceProtocol>("openai");
@@ -237,7 +237,7 @@ export function DiagnosticsView({ secret }: { secret: string }) {
             </p>
           ) : null}
           <footer className="dg-pane-foot">
-            <span>{t("diagnostics.inputStats", { count: lineCount, size: byteSize(body) })}</span>
+            <span>{t("diagnostics.inputStats", { count: lineCount, size: byteSize(body, i18n.language) })}</span>
             <span className="dg-shortcut"><kbd className="dg-kbd">{shortcut}</kbd> {t("diagnostics.shortcut")}</span>
           </footer>
         </section>
@@ -298,7 +298,7 @@ export function DiagnosticsView({ secret }: { secret: string }) {
                 <div><dt>{t("diagnostics.facts.tools")}</dt><dd>{Array.isArray(canonical.tools) ? canonical.tools.length : 0}</dd></div>
                 <div><dt>{t("diagnostics.facts.stream")}</dt><dd>{yesNo(canonical.stream)}</dd></div>
                 <div><dt>{t("diagnostics.facts.maxTokens")}</dt><dd>{canonical.max_tokens || "—"}</dd></div>
-                <div><dt>{t("diagnostics.facts.size")}</dt><dd>{byteSize(resultText)}</dd></div>
+                <div><dt>{t("diagnostics.facts.size")}</dt><dd>{byteSize(resultText, i18n.language)}</dd></div>
               </dl>
               <JsonView text={resultText} label={t(`diagnostics.${view}`)} />
               <div className="dg-notes">

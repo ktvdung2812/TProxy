@@ -39,6 +39,7 @@ func responsesWebSocketOriginAllowed(r *http.Request) bool {
 }
 
 func (s *Server) responsesWebSocket(w http.ResponseWriter, r *http.Request) {
+	stripClusterHeaders(r)
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "WebSocket GET upgrade required", useClientRequestID(r))
 		return
@@ -111,6 +112,11 @@ func (s *Server) responsesWebSocket(w http.ResponseWriter, r *http.Request) {
 			key, authErr := s.store.AuthenticateAPIKey(ctx, token)
 			if authErr != nil {
 				_ = writeWebSocketPolicyError(connection, &providers.ProviderError{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "invalid client API key"}, "")
+				return
+			}
+			key, policyErr := s.effectiveManagedKey(r.Context(), key)
+			if policyErr != nil {
+				_ = writeWebSocketPolicyError(connection, policyErr, "")
 				return
 			}
 			r = r.WithContext(context.WithValue(ctx, apiKeyContext, key))
@@ -197,7 +203,9 @@ func (s *Server) runResponsesWebSocketRequest(parent context.Context, connection
 	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok {
 		state.PublicModelID = model.ID
 	}
-	s.applyTokenSaver(&request, nil, r)
+	if !isClusterRelay(r) {
+		s.applyTokenSaver(&request, nil, r)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stream, err := s.router.ExecuteStream(ctx, *model, request)

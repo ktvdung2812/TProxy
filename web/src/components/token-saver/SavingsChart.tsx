@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -42,7 +43,7 @@ export function SavingsChart({ events, sampleSize }: { events: UsageEvent[] | nu
     const list: Bucket[] = [];
     for (let at = start; at <= end; at += HOUR_MS) {
       const date = new Date(at);
-      list.push({ label: `${date.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${String(date.getHours()).padStart(2, "0")}:00`, saved: 0, requests: 0 });
+      list.push({ label: `${date.toLocaleDateString(i18n.resolvedLanguage || i18n.language, { day: "2-digit", month: "2-digit" })} ${String(date.getHours()).padStart(2, "0")}:00`, saved: 0, requests: 0 });
     }
     for (const event of events) {
       const index = Math.floor((Date.parse(event.created_at) - start) / HOUR_MS);
@@ -51,7 +52,7 @@ export function SavingsChart({ events, sampleSize }: { events: UsageEvent[] | nu
       list[index].requests += 1;
     }
     return list;
-  }, [events]);
+  }, [events, i18n.resolvedLanguage]);
 
   const total = buckets.reduce((sum, bucket) => sum + bucket.saved, 0);
 

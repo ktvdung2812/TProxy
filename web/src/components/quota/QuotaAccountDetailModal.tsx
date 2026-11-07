@@ -69,23 +69,17 @@ function formatAuthType(value: string) {
   return value.replace(/_/g, " ");
 }
 
-function formatAddedAt(value?: string) {
+function formatAddedAt(value: string | undefined, language: string) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(language, {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function formatTokens(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
 }
 
 export function QuotaAccountDetailModal({
@@ -108,7 +102,7 @@ export function QuotaAccountDetailModal({
   onResetQuota,
   clock,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { masked } = useAccountMask();
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -145,7 +139,7 @@ export function QuotaAccountDetailModal({
       })
       .catch((cause) => {
         if (!cancelled) {
-          setLogsError(cause instanceof Error ? cause.message : "Failed to load request history");
+          setLogsError(cause instanceof Error ? cause.message : t("featureA.loadHistoryFailed"));
         }
       })
       .finally(() => {
@@ -214,7 +208,7 @@ export function QuotaAccountDetailModal({
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       controller?.abort();
     };
-  }, [open, secret, credential, applyLogs]);
+  }, [open, secret, credential, applyLogs, t]);
 
   useEffect(() => {
     if (!open || !credential) return;
@@ -230,7 +224,7 @@ export function QuotaAccountDetailModal({
       })
       .catch((cause) => {
         if (!cancelled) {
-          setHealthError(cause instanceof Error ? cause.message : "Health check failed");
+          setHealthError(cause instanceof Error ? cause.message : t("featureA.healthCheckFailed"));
         }
       })
       .finally(() => {
@@ -239,7 +233,7 @@ export function QuotaAccountDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [open, secret, credential]);
+  }, [open, secret, credential, t]);
 
   const refreshQuota = async () => {
     if (!credential) return;
@@ -249,7 +243,7 @@ export function QuotaAccountDetailModal({
       setLocalQuota(next);
       onQuotaUpdated?.(next);
     } catch (cause) {
-      setHealthError(cause instanceof Error ? cause.message : "Failed to refresh quota");
+      setHealthError(cause instanceof Error ? cause.message : t("featureA.refreshQuotaFailed"));
     } finally {
       setQuotaLoading(false);
     }
@@ -268,12 +262,12 @@ export function QuotaAccountDetailModal({
           name: entry.name,
           remaining: entry.remaining,
           resetAt: entry.reset_at!,
-          countdown: formatResetTime(entry.reset_at),
-          absolute: formatResetAbsolute(entry.reset_at),
+          countdown: formatResetTime(entry.reset_at, i18n.language),
+          absolute: formatResetAbsolute(entry.reset_at, i18n.language),
         }))
         .filter((entry) => entry.countdown !== "-")
         .sort((a, b) => new Date(a.resetAt).getTime() - new Date(b.resetAt).getTime()),
-    [entries, clock],
+    [entries, clock, i18n.language],
   );
   const usage = proxyUsage ?? { requests: 0, promptTokens: 0, completionTokens: 0 };
   const totalTokens = usage.promptTokens + usage.completionTokens;
@@ -291,7 +285,7 @@ export function QuotaAccountDetailModal({
       className="quota-account-modal"
       footer={(
         <div className="quota-account-modal-footer">
-          <Button variant="secondary" onClick={onClose}>Close</Button>
+          <Button variant="secondary" onClick={onClose}>{t("common.close")}</Button>
         </div>
       )}
     >
@@ -303,20 +297,20 @@ export function QuotaAccountDetailModal({
             <div className="quota-account-modal-title-row">
               <h4>{displayLabel}</h4>
               <Badge variant={credential.enabled ? "success" : "default"} size="sm" dot>
-                {credential.enabled ? "Enabled" : "Disabled"}
+                {credential.enabled ? t("common.enabled") : t("common.disabled")}
               </Badge>
               {credentialActive ? (
-                <Badge variant="info" size="sm" dot>Live</Badge>
+                <Badge variant="info" size="sm" dot>{t("featureA.live")}</Badge>
               ) : null}
             </div>
             <p className="quota-account-modal-meta">{maskAccountText(credential.email && credential.email !== label ? credential.email : credential.id, masked)}</p>
             <div className="quota-account-modal-toggle-row">
-              <span>Account routing</span>
+              <span>{t("featureA.accountRouting")}</span>
               <Toggle
                 checked={credential.enabled}
                 disabled={toggling || !accountToggleReady}
                 onChange={(event) => onToggleEnabled(event.target.checked)}
-                aria-label={credential.enabled ? "Disable account" : "Enable account"}
+                aria-label={credential.enabled ? t("featureA.disableAccount") : t("featureA.enableAccount")}
               />
             </div>
           </div>
@@ -325,72 +319,72 @@ export function QuotaAccountDetailModal({
         <div className="quota-account-modal-stats">
           <div className="quota-account-modal-stat">
             <strong>{usage.requests}</strong>
-            <span>Proxy requests</span>
+            <span>{t("featureA.proxyRequests")}</span>
           </div>
           <div className="quota-account-modal-stat">
-            <strong>{formatTokens(totalTokens)}</strong>
-            <span>Proxy tokens</span>
+            <strong>{new Intl.NumberFormat(i18n.language, { notation: "compact", maximumFractionDigits: 1 }).format(totalTokens)}</strong>
+            <span>{t("featureA.proxyTokens")}</span>
           </div>
           <div className="quota-account-modal-stat">
             <strong>{entries.length}</strong>
-            <span>Quota windows</span>
+            <span>{t("featureA.quotaWindows")}</span>
           </div>
           <div className="quota-account-modal-stat">
             <strong>{logs.length}</strong>
-            <span>Recent requests</span>
+            <span>{t("featureA.recentRequests")}</span>
           </div>
         </div>
 
         <div className="quota-account-modal-section">
-          <div className="quota-account-modal-section-head">
-            <h5>Account details</h5>
+          <div className="quota-account-modal-section-head" style={{ flexWrap: "wrap" }}>
+            <h5>{t("featureA.accountDetails")}</h5>
           </div>
           <dl className="quota-account-modal-details">
             <div>
-              <dt>Provider</dt>
+              <dt>{t("featureA.provider")}</dt>
               <dd>{info.name}</dd>
             </div>
             <div>
-              <dt>Auth type</dt>
+              <dt>{t("featureA.authType")}</dt>
               <dd className="capitalize">{formatAuthType(credential.auth_type)}</dd>
             </div>
             <div>
-              <dt>Credential ID</dt>
+              <dt>{t("featureA.credentialId")}</dt>
               <dd><code>{credential.id}</code></dd>
             </div>
             <div>
-              <dt>Health</dt>
+              <dt>{t("featureA.health")}</dt>
               <dd>
-                {healthLoading ? "Checking…" : (
+                {healthLoading ? t("featureA.checking") : (
                   <Badge
                     variant={healthStatus === "healthy" ? "success" : healthStatus ? "warning" : "default"}
                     size="sm"
                   >
-                    {healthStatus || "unknown"}
+                    {["healthy", "unhealthy", "degraded"].includes(healthStatus) ? t(`featureA.healthStatus.${healthStatus}`) : healthStatus || t("common.unknown")}
                   </Badge>
                 )}
               </dd>
             </div>
             <div>
-              <dt>Added</dt>
-              <dd>{formatAddedAt(credential.created_at)}</dd>
+              <dt>{t("featureA.added")}</dt>
+              <dd>{formatAddedAt(credential.created_at, i18n.language)}</dd>
             </div>
             {localQuota?.plan ? (
               <div>
-                <dt>Plan</dt>
+                <dt>{t("featureA.plan")}</dt>
                 <dd>{localQuota.plan}</dd>
               </div>
             ) : null}
             {localQuota?.renews_at ? (
               <div>
-                <dt>Renews at</dt>
-                <dd>{formatAddedAt(localQuota.renews_at)}</dd>
+                <dt>{t("featureA.renewsAt")}</dt>
+                <dd>{formatAddedAt(localQuota.renews_at, i18n.language)}</dd>
               </div>
             ) : null}
             {localQuota?.quota_auto_disabled ? (
               <div>
-                <dt>Auto-paused</dt>
-                <dd>Yes — quota reached 0%</dd>
+                <dt>{t("featureA.autoPaused")}</dt>
+                <dd>{t("featureA.autoPausedReason")}</dd>
               </div>
             ) : null}
           </dl>
@@ -399,19 +393,19 @@ export function QuotaAccountDetailModal({
         </div>
 
         <div className="quota-account-modal-section">
-          <div className="quota-account-modal-section-head">
+          <div className="quota-account-modal-section-head" style={{ flexWrap: "wrap" }}>
             <div className="quota-account-modal-section-head-main">
-              <h5>Upstream quotas</h5>
+              <h5>{t("featureA.upstreamQuotas")}</h5>
               {resetCountdowns.length > 0 ? (
                 <div className="quota-account-modal-section-countdowns">
                   {resetCountdowns.map((entry) => (
                     <span
                       key={entry.key}
                       className="quota-account-modal-section-countdown"
-                      title={entry.absolute ? `${formatQuotaName(entry.name)} · ${entry.absolute}` : formatQuotaName(entry.name)}
+                      title={entry.absolute ? `${formatQuotaName(entry.name, i18n.language)} · ${entry.absolute}` : formatQuotaName(entry.name, i18n.language)}
                     >
                       <span aria-hidden>{getColorEmoji(entry.remaining)}</span>
-                      <span>{formatQuotaName(entry.name)} in {entry.countdown}</span>
+                      <span>{t("featureA.quotaCountdown", { name: formatQuotaName(entry.name, i18n.language), time: entry.countdown })}</span>
                     </span>
                   ))}
                 </div>
@@ -460,7 +454,7 @@ export function QuotaAccountDetailModal({
               />
             )
           ) : (
-            <p className="quota-account-modal-empty">No quota data loaded for this account.</p>
+            <p className="quota-account-modal-empty">{t("featureA.noQuotaData")}</p>
           )}
         </div>
 
@@ -476,14 +470,14 @@ export function QuotaAccountDetailModal({
         <CredentialUsageChart secret={secret} credentialId={credential.id} active={open} />
 
         <div className="quota-account-modal-section">
-          <div className="quota-account-modal-section-head">
-            <h5>Request history</h5>
-            <span className="quota-account-modal-section-meta">Recent proxy traffic routed through this account</span>
+          <div className="quota-account-modal-section-head" style={{ flexWrap: "wrap" }}>
+            <h5>{t("featureA.requestHistory")}</h5>
+            <span className="quota-account-modal-section-meta">{t("featureA.requestHistoryHint")}</span>
           </div>
           {logsLoading && logs.length === 0 ? (
             <div className="quota-account-modal-state">
               <span className="material-symbols-outlined animate-spin">progress_activity</span>
-              <span>Loading request history…</span>
+              <span>{t("featureA.loadingHistory")}</span>
             </div>
           ) : logsError ? (
             <div className="quota-account-modal-state quota-account-modal-note-error">{logsError}</div>

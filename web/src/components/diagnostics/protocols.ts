@@ -47,7 +47,7 @@ export function checkJson(text: string): JsonCheck {
   }
 }
 
-export function byteSize(text: string) {
+export function byteSize(text: string, language?: string) {
   const bytes = new TextEncoder().encode(text).length;
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toLocaleString(language, { minimumFractionDigits: bytes < 10240 ? 1 : 0, maximumFractionDigits: bytes < 10240 ? 1 : 0 })} KB`;
 }

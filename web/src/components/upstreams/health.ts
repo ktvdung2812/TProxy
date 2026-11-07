@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { Tone } from "../page-kit";
 import { isOnCooldown } from "../providers/types";
 
@@ -114,9 +115,9 @@ function formatRelative(diffMs: number, language: string) {
 }
 
 export function compactNumber(value: number) {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+  return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
 export function formatUsd(value: number, maximumFractionDigits = 2) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits }).format(value || 0);
+  return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "currency", currency: "USD", maximumFractionDigits }).format(value || 0);
 }

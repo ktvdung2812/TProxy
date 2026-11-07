@@ -26,6 +26,7 @@ import {
   useStoredState,
 } from "../page-kit";
 import { fetchAdminSettings } from "../settings/api";
+import { managedSet } from "../clusters/utils";
 import { createApiKey, deleteApiKey, fetchApiKeyUsage, toggleApiKey, updateApiKey } from "./api";
 import { ApiEndpoints } from "./ApiEndpoints";
 import { ApiKeyCapacity } from "./ApiKeyCapacity";
@@ -63,6 +64,8 @@ type Props = {
   credentials: Record<string, ApiKeyCredential[]>;
   routes: Record<string, ApiKeyRoute[]>;
   combos: ApiKeyCombo[];
+  /** Keys received from the cluster hub (snapshot.cluster_managed.api_keys); they are read-only here. */
+  managedKeyIds?: string[];
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onMutated?: () => void;
@@ -91,8 +94,9 @@ function errorText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function ApisView({ secret, apiKeys, modelOptions, providers, credentials, routes, combos, onError, onNotice, onMutated }: Props) {
+export function ApisView({ secret, apiKeys, modelOptions, providers, credentials, routes, combos, managedKeyIds, onError, onNotice, onMutated }: Props) {
   const { t, i18n } = useTranslation();
+  const managedIds = useMemo(() => managedSet(managedKeyIds), [managedKeyIds]);
   useApiKeySecrets();
   // Bumps when a secret is saved in this browser, so masked secrets refresh.
   const secretsVersion = getApiKeySecretsVersion();
@@ -306,7 +310,8 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
     });
   };
 
-  const selectedKeys = apiKeys.filter((key) => selectedIds.includes(key.id));
+  // Cluster-managed keys are read-only, so bulk actions never touch them.
+  const selectedKeys = apiKeys.filter((key) => selectedIds.includes(key.id) && !managedIds.has(key.id));
 
   /** Runs one request per key; a failure on one key does not stop the others. */
   const runBulk = async (keys: ApiKeyRecord[], action: (key: ApiKeyRecord) => Promise<unknown>, notice: (done: number) => string) => {
@@ -375,11 +380,12 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
           secret: getStoredApiKeySecret(key.id),
           selected: selectedIds.includes(key.id),
           busy: bulkBusy || busyIds.has(key.id),
+          managed: managedIds.has(key.id),
         };
       }),
     // secretsVersion stands in for the browser-stored secrets read above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [apiKeys, usageById, selectedIds, bulkBusy, busyIds, secretsVersion],
+    [apiKeys, usageById, selectedIds, bulkBusy, busyIds, secretsVersion, managedIds],
   );
 
   const searched = useMemo(() => {
@@ -418,11 +424,14 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
     return list.sort((a, b) => HEALTH_ORDER.indexOf(a.health) - HEALTH_ORDER.indexOf(b.health) || byName(a, b));
   }, [searched, filter, sortMode]);
 
-  const allVisibleSelected = visible.length > 0 && visible.every((view) => view.selected);
-  const someVisibleSelected = visible.some((view) => view.selected);
+  const selectableVisible = visible.filter((view) => !view.managed);
+  const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every((view) => view.selected);
+  const someVisibleSelected = selectableVisible.some((view) => view.selected);
 
   const toggleSelection = (ids: string[], select: boolean) =>
-    setSelectedIds((current) => (select ? [...new Set([...current, ...ids])] : current.filter((id) => !ids.includes(id))));
+    setSelectedIds((current) =>
+      select ? [...new Set([...current, ...ids.filter((id) => !managedIds.has(id))])] : current.filter((id) => !ids.includes(id)),
+    );
 
   const toggleFilter = (next: KeyFilter) => setFilter((current) => (current === next ? "all" : next));
   const hasFilters = filter !== "all" || search.trim() !== "";
@@ -433,10 +442,16 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
 
   const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
+  // Edits to cluster-managed keys would be refused by the server; the list disables them too.
+  const unlessManaged = <A extends unknown[]>(action: (key: ApiKeyRecord, ...rest: A) => void) =>
+    (key: ApiKeyRecord, ...rest: A) => {
+      if (!managedIds.has(key.id)) action(key, ...rest);
+    };
+
   const handlers: ApiKeyRowHandlers = {
-    open: openEditModal,
+    open: unlessManaged(openEditModal),
     select: (key, select) => toggleSelection([key.id], select),
-    setEnabled,
+    setEnabled: unlessManaged(setEnabled),
     copy: (text, id) => {
       copy(text, id);
       onNotice(id.startsWith("id_") ? t("apis.idCopied", { id: text }) : t("apis.secretCopied"));
@@ -447,7 +462,7 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
       if (stored) setExampleApiKey(stored);
       scrollTo("ap-quick-start");
     },
-    revoke,
+    revoke: unlessManaged(revoke),
   };
 
   /* ---------------- Render ---------------- */
@@ -678,7 +693,7 @@ export function ApisView({ secret, apiKeys, modelOptions, providers, credentials
         selectAll={
           allVisibleSelected
             ? null
-            : { label: t("apis.selectAllCount", { count: visible.length }), onSelect: () => toggleSelection(visible.map((view) => view.key.id), true) }
+            : { label: t("apis.selectAllCount", { count: selectableVisible.length }), onSelect: () => toggleSelection(selectableVisible.map((view) => view.key.id), true) }
         }
       >
         <BulkButton icon="play_circle" disabled={bulkBusy || !selectedKeys.some((key) => !key.enabled)} onClick={() => bulkSetEnabled(true)}>

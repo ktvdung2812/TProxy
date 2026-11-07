@@ -1,0 +1,14 @@
+.topology-modal, .network-topology-shell .topology-node { background: var(--color-bg-elevated, var(--color-bg-alt)); }
+.network-topology-shell .topology-node { width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
+.network-topology-shell .topology-node > div { min-width: 0; }
+.network-topology-shell .react-flow__node-client { width: 260px; }
+.network-topology-shell .react-flow__node-gateway,
+.network-topology-shell .react-flow__node-provider,
+.network-topology-shell .react-flow__node-credential { width: 240px; }
+.topology-modal-table-wrap { overflow-x: auto; }
+.topology-modal-table { min-width: 560px; }
+.topology-modal-head > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .topology-modal-backdrop { padding: 12px; }
+  .topology-modal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

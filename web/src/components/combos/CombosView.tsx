@@ -38,12 +38,16 @@ type Props = {
   combos: ComboRecord[];
   models: ComboModelOption[];
   modelOptions: ModelOption[];
+  /** Combos received from the cluster hub; they are shown read-only. */
+  managedIds?: ReadonlySet<string>;
   /** True while the first snapshot is still loading. */
   loading?: boolean;
   onMutated?: () => void;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
 };
+
+const NO_MANAGED: ReadonlySet<string> = new Set();
 
 type HealthFilter = "all" | ComboHealth;
 type ClientFilter = "all" | ComboClient;
@@ -71,6 +75,7 @@ export function CombosView({
   combos,
   models,
   modelOptions,
+  managedIds = NO_MANAGED,
   loading = false,
   onMutated,
   onNotice,
@@ -133,16 +138,18 @@ export function CombosView({
     });
   }, [views, healthFilter, clientFilter, search, sortMode]);
 
-  const selectedCombos = useMemo(() => combos.filter((combo) => selectedIds.has(combo.id)), [combos, selectedIds]);
-  const allVisibleSelected = visibleViews.length > 0 && visibleViews.every((view) => selectedIds.has(view.combo.id));
-  const partlySelected = !allVisibleSelected && visibleViews.some((view) => selectedIds.has(view.combo.id));
+  // Combos received from the cluster hub are read-only, so they never join a bulk selection.
+  const selectedCombos = useMemo(() => combos.filter((combo) => selectedIds.has(combo.id) && !managedIds.has(combo.id)), [combos, selectedIds, managedIds]);
+  const selectableViews = useMemo(() => visibleViews.filter((view) => !managedIds.has(view.combo.id)), [visibleViews, managedIds]);
+  const allVisibleSelected = selectableViews.length > 0 && selectableViews.every((view) => selectedIds.has(view.combo.id));
+  const partlySelected = !allVisibleSelected && selectableViews.some((view) => selectedIds.has(view.combo.id));
 
   const toggleSelection = (ids: string[], select: boolean) => {
     setSelectedIds((current) => {
       const next = new Set(current);
       for (const id of ids) {
-        if (select) next.add(id);
-        else next.delete(id);
+        if (select && !managedIds.has(id)) next.add(id);
+        else if (!select) next.delete(id);
       }
       return next;
     });
@@ -274,16 +281,19 @@ export function CombosView({
     });
   };
 
+  // The server refuses edits to cluster-managed combos; the cards disable these actions too.
+  // Duplicating stays open: the copy is an ordinary local combo.
+  const editable = (combo: ComboRecord) => !managedIds.has(combo.id);
   const handlers: ComboItemHandlers = {
-    edit: openEdit,
+    edit: (combo) => editable(combo) && openEdit(combo),
     duplicate: openDuplicate,
-    setEnabled: (combo, enabled) => void setEnabled(combo, enabled),
+    setEnabled: (combo, enabled) => editable(combo) && void setEnabled(combo, enabled),
     select: (combo, select) => toggleSelection([combo.id], select),
     copyId: (combo) => {
       copy(combo.id, `combo-${combo.id}`);
       onNotice?.(t("combos.notice.copied", { id: combo.id }));
     },
-    remove: (combo) => confirmDelete([combo]),
+    remove: (combo) => editable(combo) && confirmDelete([combo]),
   };
 
   const hasFilters = healthFilter !== "all" || clientFilter !== "all" || search.trim() !== "";
@@ -440,9 +450,9 @@ export function CombosView({
                 {
                   key: "select-visible",
                   icon: "select_all",
-                  label: t("combos.quick.selectVisible", { count: visibleViews.length }),
-                  disabled: visibleViews.length === 0 || allVisibleSelected,
-                  onSelect: () => toggleSelection(visibleViews.map((view) => view.combo.id), true),
+                  label: t("combos.quick.selectVisible", { count: selectableViews.length }),
+                  disabled: selectableViews.length === 0 || allVisibleSelected,
+                  onSelect: () => toggleSelection(selectableViews.map((view) => view.combo.id), true),
                 },
               ]}
             />
@@ -478,11 +488,11 @@ export function CombosView({
                 type="checkbox"
                 className="cp-check"
                 checked={allVisibleSelected}
-                disabled={visibleViews.length === 0}
+                disabled={selectableViews.length === 0}
                 ref={(element) => {
                   if (element) element.indeterminate = partlySelected;
                 }}
-                onChange={(event) => toggleSelection(visibleViews.map((view) => view.combo.id), event.target.checked)}
+                onChange={(event) => toggleSelection(selectableViews.map((view) => view.combo.id), event.target.checked)}
                 aria-label={t("combos.selectAllVisible")}
               />
               <span className="cp-section-icon material-symbols-outlined" aria-hidden>layers</span>
@@ -534,6 +544,7 @@ export function CombosView({
                 selected={selectedIds.has(view.combo.id)}
                 busy={busyIds.has(view.combo.id) || bulkBusy}
                 copied={copied === `combo-${view.combo.id}`}
+                managed={managedIds.has(view.combo.id)}
               />
             ))}
           </div>
@@ -556,6 +567,7 @@ export function CombosView({
                 selected={selectedIds.has(view.combo.id)}
                 busy={busyIds.has(view.combo.id) || bulkBusy}
                 copied={copied === `combo-${view.combo.id}`}
+                managed={managedIds.has(view.combo.id)}
               />
             ))}
           </div>
@@ -571,7 +583,7 @@ export function CombosView({
         selectAll={
           allVisibleSelected
             ? null
-            : { label: t("combos.quick.selectVisible", { count: visibleViews.length }), onSelect: () => toggleSelection(visibleViews.map((view) => view.combo.id), true) }
+            : { label: t("combos.quick.selectVisible", { count: selectableViews.length }), onSelect: () => toggleSelection(selectableViews.map((view) => view.combo.id), true) }
         }
       >
         <BulkButton icon="toggle_on" disabled={bulkBusy} onClick={() => void bulkSetEnabled(true)}>

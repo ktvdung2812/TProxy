@@ -29,6 +29,7 @@ import { buildExampleModelOptions } from "./components/apis/utils";
 import { OverviewView } from "./components/overview/OverviewView";
 import { HealthOverviewView } from "./components/upstreams/HealthOverviewView";
 import { ProxyPoolsView } from "./components/proxy-pools/ProxyPoolsView";
+import { ClustersView } from "./components/clusters/ClustersView";
 import { CombosPage } from "./components/combos/CombosPage";
 import { MappingView } from "./components/mapping/MappingView";
 import { ModelsPage } from "./components/models/ModelsPage";
@@ -120,6 +121,8 @@ type Snapshot = {
     tokens_saved: number;
     estimated_cost_usd: number;
   };
+  /** Cluster members only: ids of items received from the hub, which are read-only here. */
+  cluster_managed?: { models?: string[] | null; combos?: string[] | null; api_keys?: string[] | null } | null;
 };
 
 const emptySnapshot: Snapshot = {
@@ -144,7 +147,7 @@ function ProvidersPage(props: Omit<ComponentProps<typeof ProvidersView>, "select
 }
 
 function App() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const activeRoute = matchRoute(location.pathname);
@@ -246,7 +249,7 @@ function App() {
         const code = data?.error?.code;
         if (code === "invalid_management_secret") {
           logout();
-          throw new Error(t("auth.sessionExpired"));
+          throw new Error(i18n.t("auth.sessionExpired"));
         }
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
@@ -255,11 +258,11 @@ function App() {
       void refreshAudit();
     } catch (cause) {
       if (loadTokenRef.current !== token) return;
-      setError(cause instanceof Error ? cause.message : t("common.loadStateFailed"));
+      setError(cause instanceof Error ? cause.message : i18n.t("common.loadStateFailed"));
     } finally {
       if (loadTokenRef.current === token) setLoading(false);
     }
-  }, [authHeaders, authState, logout, secret]);
+  }, [authHeaders, authState, i18n, logout, secret]);
 
   const refreshSnapshot = useCallback(() => {
     void load();
@@ -418,11 +421,11 @@ function App() {
         <button
           type="button"
           className="sidebar-backdrop"
-          aria-label={t("nav.collapseMenu")}
+          aria-label={t("nav.closeMenu")}
           onClick={() => setMobileNavOpen(false)}
         />
       ) : null}
-      <div className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow", isMobileSidebar && "is-mobile", mobileNavOpen && "is-open")}>
+      <div inert={isMobileSidebar && !mobileNavOpen} className={cn("sidebar-desktop", isNarrowSidebar && "is-narrow", isMobileSidebar && "is-mobile", mobileNavOpen && "is-open")}>
         <Sidebar
           online={online}
           collapsed={isMobileSidebar ? false : isNarrowSidebar}
@@ -528,6 +531,20 @@ function App() {
                 }
               />
               <Route
+                path="/clusters"
+                element={
+                  <ClustersView
+                    secret={secret}
+                    models={snapshot.models || undefined}
+                    combos={snapshot.combos || undefined}
+                    apiKeys={snapshot.api_keys || undefined}
+                    onError={setError}
+                    onNotice={setNotice}
+                    onMutated={refreshSnapshot}
+                  />
+                }
+              />
+              <Route
                 path="/quota"
                 element={
                   <QuotaTrackerView
@@ -596,6 +613,7 @@ function App() {
         credentials={snapshot.credentials || {}}
         routes={snapshot.routes || {}}
         combos={snapshot.combos || []}
+        managedKeyIds={snapshot.cluster_managed?.api_keys || undefined}
         onError={setError}
         onNotice={setNotice}
         onMutated={() => void load()}

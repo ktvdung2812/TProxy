@@ -91,7 +91,7 @@ export function ModelSelectModal({
               }
             } catch (error) {
               nextModels[option.value] = [];
-              nextErrors[option.value] = error instanceof Error ? error.message : "Failed to load models";
+              nextErrors[option.value] = error instanceof Error ? error.message : t("featureB.errors.loadModels");
             }
           }),
         );
@@ -103,7 +103,7 @@ export function ModelSelectModal({
         if (!cancelled) {
           setModelsByProvider({});
           setErrorsByProvider({});
-          setModelsError(error instanceof Error ? error.message : "Failed to load supported models");
+          setModelsError(error instanceof Error ? error.message : t("featureB.errors.loadSupportedModels"));
         }
       } finally {
         if (!cancelled) setLoadingModels(false);
@@ -304,7 +304,7 @@ export function ModelSelectModal({
                 <p className="model-select-preview-title">{t("models.select.preview")}</p>
                 <div className="model-select-preview-grid">
                   <div>
-                    <span>{t("models.modelId")}</span>
+                    <span>{t("featureB.terms.models_modelId")}</span>
                     <code>{previewForm.id}</code>
                   </div>
                   <div>
@@ -316,7 +316,7 @@ export function ModelSelectModal({
                     <strong>{selectedItem?.providerLabel}</strong>
                   </div>
                   <div>
-                    <span>{t("models.select.upstream")}</span>
+                    <span>{t("featureB.terms.models_select_upstream")}</span>
                     <code>{selectedItem?.model.id}</code>
                   </div>
                   <div>

@@ -45,6 +45,21 @@ func TestWrapEventsRecordsCanceledStreamUsage(t *testing.T) {
 	}
 }
 
+func TestWrapEventsPersistsClusterBorrower(t *testing.T) {
+	dataStore := workflowTestStore(t)
+	requestRouter := New(dataStore, providers.NewRegistry())
+	input := make(chan canonical.Event, 1)
+	input <- canonical.Event{Type: canonical.EventMessageEnd}
+	close(input)
+	request := canonical.Request{RequestID: "cluster-stream", Metadata: map[string]any{"cluster_borrower": "key:shared"}}
+	for range requestRouter.wrapEvents(context.Background(), workflowTestModel(), workflowTestSelection(), request, time.Now(), input, nil) {
+	}
+	usage, err := dataStore.RecentUsage(context.Background(), 1)
+	if err != nil || len(usage) != 1 || usage[0].ClusterBorrower != "key:shared" {
+		t.Fatalf("stream usage = %+v, %v", usage, err)
+	}
+}
+
 func TestWrapEventsMarksEOFWithoutTerminalEventAsFailure(t *testing.T) {
 	dataStore := workflowTestStore(t)
 	requestRouter := New(dataStore, providers.NewRegistry())

@@ -88,16 +88,17 @@ func (r *Router) executeFusion(ctx context.Context, model store.PublicModel, req
 		best.Response.Model = model.ID
 	}
 	_ = r.store.AddUsage(ctx, store.UsageEvent{
-		RequestID:     request.RequestID,
-		PublicModelID: model.ID,
-		ProviderID:    best.Selection.Provider.ID,
-		UpstreamModel: best.Selection.Route.UpstreamModel,
-		CredentialID:  best.Selection.Credential.ID,
-		Status:        200,
-		InputTokens:   best.Response.Usage.InputTokens,
-		OutputTokens:  best.Response.Usage.OutputTokens,
-		LatencyMS:     time.Since(start).Milliseconds(),
-		CreatedAt:     time.Now(),
+		RequestID:       request.RequestID,
+		ClusterBorrower: requestClusterBorrower(request),
+		PublicModelID:   model.ID,
+		ProviderID:      best.Selection.Provider.ID,
+		UpstreamModel:   best.Selection.Route.UpstreamModel,
+		CredentialID:    best.Selection.Credential.ID,
+		Status:          200,
+		InputTokens:     best.Response.Usage.InputTokens,
+		OutputTokens:    best.Response.Usage.OutputTokens,
+		LatencyMS:       time.Since(start).Milliseconds(),
+		CreatedAt:       time.Now(),
 	})
 	if r.arena != nil {
 		for _, winner := range winners {

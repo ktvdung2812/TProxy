@@ -154,7 +154,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
             <Field label={t("providers.label")}>
               <Input value={label} onChange={(event) => setLabel(event.target.value)} />
             </Field>
-            <Field label={t("providers.cursorImportAccessToken")}>
+            <Field label={t("featureB.terms.providers_cursorImportAccessToken")}>
               <textarea
                 className="input"
                 rows={3}
@@ -163,7 +163,7 @@ export function CursorImportModal({ open, secret, providerId, onClose, onComplet
                 placeholder="cursorAuth/accessToken"
               />
             </Field>
-            <Field label={t("providers.cursorImportMachineId")}>
+            <Field label={t("featureB.terms.providers_cursorImportMachineId")}>
               <Input
                 value={machineId}
                 onChange={(event) => setMachineId(event.target.value)}

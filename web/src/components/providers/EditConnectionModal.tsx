@@ -165,7 +165,7 @@ export function EditConnectionModal({ open, providerId, credential, proxyPools, 
           </Field>
         )}
         {proxyPools.length > 0 && (
-          <Field label={t("providers.editConnectionProxyPools")} hint={t("providers.editConnectionProxyPoolsHint")}>
+          <Field label={t("featureB.terms.providers_editConnectionProxyPools")} hint={t("providers.editConnectionProxyPoolsHint")}>
             <div className="pv-check-list">
               {proxyPools.map((pool) => (
                 <label key={pool.id} className="pv-check-item">

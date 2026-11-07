@@ -1,0 +1,91 @@
+{
+  "featureB": {
+    "validation": {
+      "addRoute": "Thêm ít nhất một tuyến nhà cung cấp",
+      "providerRequired": "Mỗi tuyến cần có nhà cung cấp",
+      "modelRequired": "Mỗi tuyến cần có mô hình nguồn"
+    },
+    "errors": {
+      "loadModels": "Không thể tải mô hình",
+      "loadSupportedModels": "Không thể tải các mô hình được hỗ trợ",
+      "loadFailover": "Không thể tải trạng thái chuyển dự phòng"
+    },
+    "topology": {
+      "perDay": "{{value}}/ngày",
+      "clientSummary": "{{requests}}/ngày · {{lastSeen}}",
+      "noActivity": "chưa có hoạt động",
+      "requestCount_one": "{{value}} yêu cầu",
+      "requestCount_other": "{{value}} yêu cầu",
+      "gatewaySummary_one": "{{requests}} hôm nay · {{providers}} nhà cung cấp",
+      "gatewaySummary_other": "{{requests}} hôm nay · {{providers}} nhà cung cấp",
+      "providerSummary_one": "{{credentials}} thông tin xác thực · {{requests}}",
+      "providerSummary_other": "{{credentials}} thông tin xác thực · {{requests}}",
+      "title": "Sơ đồ luồng yêu cầu",
+      "description": "Máy khách → tproxy → nhà cung cấp → thông tin xác thực, theo thứ tự từ trên xuống.",
+      "model": "Mô hình",
+      "provider": "Nhà cung cấp",
+      "credential": "Thông tin xác thực",
+      "noModelUsage": "Chưa ghi nhận mô hình nào được máy khách này sử dụng.",
+      "loadClients": "Không thể tải danh sách máy khách trong sơ đồ",
+      "modelUsage": "Mức sử dụng mô hình"
+    },
+    "proxyPools": {
+      "imported": "Đã nhập {{host}}"
+    },
+    "flow": {
+      "controls": "Điều khiển sơ đồ",
+      "zoomIn": "Phóng to",
+      "zoomOut": "Thu nhỏ",
+      "fitView": "Vừa khung nhìn",
+      "node": "Nút trong sơ đồ",
+      "edge": "Đường nối trong sơ đồ",
+      "handle": "Điểm kết nối",
+      "providerConnection": "Kết nối từ tproxy đến {{provider}}"
+    },
+    "providers": {
+      "usage": "{{requests}} yêu cầu · {{tokens}} token",
+      "plan": {
+        "free": "Miễn phí",
+        "enterprise": "Doanh nghiệp",
+        "business": "Kinh doanh",
+        "teams": "Nhóm",
+        "proCanceled": "Pro (Đã hủy)",
+        "proPastDue": "Pro (Quá hạn thanh toán)",
+        "maxCanceled": "Max (Đã hủy)"
+      }
+    },
+    "terms": {
+      "models_modelId": "Mã mô hình",
+      "models_priority_colProvider": "Nhà cung cấp · mô hình nguồn",
+      "models_priority_publicId": "Mã công khai",
+      "models_priority_upstream": "Mô hình nguồn",
+      "models_select_upstream": "Mô hình nguồn",
+      "operations_inputOutput": "Đầu vào / đầu ra",
+      "operations_modelResource": "Mô hình công khai",
+      "providers_account_cooldownFor": "Thời gian chờ · {{time}}",
+      "providers_addCredentialWebCookie": "Cookie web",
+      "providers_addProviderBaseUrl": "URL cơ sở",
+      "providers_addProviderId": "Mã nhà cung cấp",
+      "providers_authTypeServiceAccount": "Tài khoản dịch vụ",
+      "providers_credentialId": "Mã thông tin xác thực",
+      "providers_cursorImportAccessToken": "Mã truy cập",
+      "providers_cursorImportMachineId": "Mã máy",
+      "providers_editConnectionProxyPools": "Nhóm proxy",
+      "providers_kiroAuthAwsRegion": "Khu vực AWS",
+      "providers_kiroAuthIdcStartUrl": "URL khởi đầu IDC",
+      "providers_kiroAuthRefreshToken": "Mã làm mới",
+      "providers_serviceAccountJson": "JSON tài khoản dịch vụ",
+      "proxyPools_namePlaceholder": "Proxy văn phòng",
+      "proxyPools_poolId": "Mã nhóm proxy",
+      "proxyPools_proxyUrl": "URL proxy",
+      "settings_page_backupTitle": "Sao lưu và tải lại",
+      "settings_page_publicBaseUrl": "URL cơ sở công khai",
+      "settings_page_reloadLabel": "Tải lại config.yaml",
+      "settings_reloadConfig": "Tải lại cấu hình",
+      "settings_tokenSaverRTK": "Tiết kiệm token (RTK)",
+      "usage_publicModel": "Mô hình công khai",
+      "usage_table_providerChip": "Nhà cung cấp: {{name}}",
+      "usage_upstreamModel": "Mô hình nguồn"
+    }
+  }
+}

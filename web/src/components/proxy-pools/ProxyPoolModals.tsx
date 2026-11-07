@@ -77,12 +77,12 @@ export function ProxyPoolFormModal({
                 id: !editingPool && (!prev.id || prev.id === suggestPoolId(prev.name)) ? suggestPoolId(name) : prev.id,
               }));
             }}
-            placeholder={t("proxyPools.namePlaceholder")}
+            placeholder={t("featureB.terms.proxyPools_namePlaceholder")}
             required
           />
         </Field>
         {!editingPool ? (
-          <Field label={t("proxyPools.poolId")} required hint={t("proxyPools.poolIdHint")}>
+          <Field label={t("featureB.terms.proxyPools_poolId")} required hint={t("proxyPools.poolIdHint")}>
             <Input
               value={formData.id}
               onChange={(event) => setFormData((prev) => ({ ...prev, id: event.target.value }))}
@@ -92,7 +92,7 @@ export function ProxyPoolFormModal({
           </Field>
         ) : null}
         <Field
-          label={t("proxyPools.proxyUrl")}
+          label={t("featureB.terms.proxyPools_proxyUrl")}
           required={!editingPool}
           hint={editingPool ? t("proxyPools.proxyUrlHintEdit") : t("proxyPools.proxyUrlHintCreate")}
         >

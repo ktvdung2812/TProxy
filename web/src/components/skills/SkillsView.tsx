@@ -56,10 +56,6 @@ const GITHUB_REPO = "ktvdung2812/TProxy";
 const githubBlob = (skill: AgentSkill) => `https://github.com/${GITHUB_REPO}/blob/main/${skill.path}`;
 const githubRaw = (skill: AgentSkill) => `https://raw.githubusercontent.com/${GITHUB_REPO}/main/${skill.path}`;
 
-function pastePrompt(skill: AgentSkill): string {
-  return `Read this skill and use it with tproxy: ${skill.path}\n\nSet TPROXY_URL and TPROXY_KEY if not already configured.`;
-}
-
 type Filter = SkillCategory | "all";
 
 export function SkillsView() {
@@ -70,6 +66,7 @@ export function SkillsView() {
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
 
+  const pastePrompt = (skill: AgentSkill) => t("featureA.skillPrompt", { path: skill.path });
   const name = (skill: AgentSkill) => t(`skills.items.${skill.id}.name`, { defaultValue: skill.name });
   const description = (skill: AgentSkill) => t(`skills.items.${skill.id}.description`, { defaultValue: skill.description });
   const envBlock = `export TPROXY_URL="${gatewayBaseUrl().replace(/\/v1\/?$/, "")}"\nexport TPROXY_KEY="sk-..."`;

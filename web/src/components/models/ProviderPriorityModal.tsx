@@ -9,6 +9,7 @@ type Props = {
   open: boolean;
   secret: string;
   model: ModelRecord | null;
+  managed?: boolean;
   routes: RouteFormData[];
   providers: ProviderOption[];
   credentialCounts: Record<string, number>;
@@ -21,6 +22,7 @@ export function ProviderPriorityModal({
   open,
   secret,
   model,
+  managed = false,
   routes,
   providers,
   credentialCounts,
@@ -67,6 +69,7 @@ export function ProviderPriorityModal({
         active={open}
         secret={secret}
         model={model}
+        allowEmpty={managed}
         routes={routes}
         providers={providers}
         credentialCounts={credentialCounts}

@@ -1,0 +1,193 @@
+{
+  "featureA": {
+    "restrictRouting": "Giới hạn định tuyến tài khoản",
+    "restrictRoutingHint": "Không bắt buộc. Chọn nhà cung cấp có trong các tuyến PPM đã chọn, rồi chọn tài khoản của họ. Việc luân phiên và chuyển dự phòng chỉ dùng các tài khoản này.",
+    "selectRoutedModel": "Chọn ít nhất một mô hình ảo có tuyến PPM đang bật trước khi giới hạn tài khoản.",
+    "noProviderAccounts": "Chưa có tài khoản nào được cấu hình cho nhà cung cấp này.",
+    "removeUnavailable": "Xóa tài khoản không khả dụng",
+    "accountCount_one": "{{count}} tài khoản",
+    "accountCount_other": "{{count}} tài khoản",
+    "allAccounts": "Tất cả tài khoản",
+    "allow": "Cho phép {{name}}",
+    "unavailableAccounts_one": "{{count}} tài khoản đã chọn không còn khả dụng cho các mô hình này.",
+    "unavailableAccounts_other": "{{count}} tài khoản đã chọn không còn khả dụng cho các mô hình này.",
+    "noAccountModels": "Không có mô hình nào cho tài khoản này.",
+    "loadModelsFailed": "Không thể tải danh sách mô hình.",
+    "emptyResponse": "(phản hồi trống)",
+    "requestFailed": "Yêu cầu thất bại.",
+    "askSomething": "Nhập câu hỏi…",
+    "accountDisabled": "Tài khoản đã bị tắt",
+    "testChat": "Trò chuyện thử",
+    "noModels": "Không có mô hình",
+    "testChatHint": "Gửi tin nhắn để kiểm tra tài khoản này. Yêu cầu chỉ dùng tài khoản này và không chuyển dự phòng.",
+    "send": "Gửi",
+    "clearConversation": "Xóa cuộc trò chuyện",
+    "modelToTest": "Mô hình cần thử",
+    "chatLatency": "{{value}} ms",
+    "chatTokens": "{{value}} token",
+    "sending": "Đang gửi…",
+    "loadHistoryFailed": "Không thể tải lịch sử yêu cầu",
+    "healthCheckFailed": "Kiểm tra tình trạng thất bại",
+    "refreshQuotaFailed": "Không thể làm mới hạn mức",
+    "disableAccount": "Tắt tài khoản",
+    "enableAccount": "Bật tài khoản",
+    "checking": "Đang kiểm tra…",
+    "live": "Đang hoạt động",
+    "accountRouting": "Định tuyến tài khoản",
+    "proxyRequests": "Yêu cầu qua proxy",
+    "proxyTokens": "Token qua proxy",
+    "quotaWindows": "Khoảng hạn mức",
+    "recentRequests": "Yêu cầu gần đây",
+    "accountDetails": "Chi tiết tài khoản",
+    "provider": "Nhà cung cấp",
+    "authType": "Loại xác thực",
+    "credentialId": "ID thông tin xác thực",
+    "health": "Tình trạng",
+    "added": "Ngày thêm",
+    "plan": "Gói",
+    "renewsAt": "Gia hạn lúc",
+    "autoPaused": "Tự động tạm dừng",
+    "autoPausedReason": "Có — hạn mức còn 0%",
+    "upstreamQuotas": "Hạn mức phía nhà cung cấp",
+    "noQuotaData": "Chưa tải dữ liệu hạn mức cho tài khoản này.",
+    "requestHistory": "Lịch sử yêu cầu",
+    "requestHistoryHint": "Lưu lượng proxy gần đây qua tài khoản này",
+    "loadingHistory": "Đang tải lịch sử yêu cầu…",
+    "quotaCountdown": "{{name}} sau {{time}}",
+    "healthStatus": {
+      "healthy": "Khỏe mạnh",
+      "unhealthy": "Không khỏe",
+      "degraded": "Suy giảm"
+    },
+    "loadUsageFailed": "Không thể tải mức sử dụng tài khoản",
+    "loadModelUsageFailed": "Không thể tải mức sử dụng mô hình",
+    "accountUsageChart": "Biểu đồ sử dụng tài khoản",
+    "usagePeriod": "Khoảng thời gian sử dụng",
+    "accountUsage": "Mức sử dụng tài khoản",
+    "accountUsageHint": "Yêu cầu và token proxy được định tuyến qua tài khoản này.",
+    "loadingUsage": "Đang tải mức sử dụng…",
+    "noUsage": "Không có dữ liệu sử dụng trong khoảng thời gian này.",
+    "byModel": "Theo mô hình",
+    "model": "Mô hình",
+    "requests": "Yêu cầu",
+    "input": "Đầu vào",
+    "output": "Đầu ra",
+    "totalTokens": "Tổng token",
+    "period": {
+      "day": "Ngày",
+      "week": "Tuần",
+      "month": "Tháng"
+    },
+    "tokens": "Token",
+    "localUsage": "Mức sử dụng proxy cục bộ (toàn thời gian)",
+    "quotaCount_one": "{{count}} hạn mức",
+    "quotaCount_other": "{{count}} hạn mức",
+    "confirmReset": "Xác nhận đặt lại",
+    "resetForFree": "Đặt lại miễn phí",
+    "limitResets": "Lượt đặt lại hạn mức",
+    "limitResetsHint": "Lượt đặt lại miễn phí Claude cấp cho tài khoản này",
+    "loadingResets": "Đang tải lượt đặt lại hạn mức…",
+    "fullReset": "Đặt lại toàn bộ",
+    "fiveHourReset": "Đặt lại 5 giờ",
+    "refreshResets": "Làm mới lượt đặt lại hạn mức",
+    "ineligibleReason": "Không đủ điều kiện đặt lại toàn bộ ({{reason}}).",
+    "loadResetsFailed": "Không thể tải lượt đặt lại hạn mức",
+    "resetFailed": "Không thể đặt lại hạn mức",
+    "resetNotApplied": "Không thể đặt lại ({{result}}).",
+    "expires": "Hết hạn {{date}}",
+    "resetsLeft": "Còn {{left}} trên {{total}} lượt",
+    "clears": "Đặt lại {{windows}}",
+    "paused": "Đã tạm dừng",
+    "usableAtLimit": "Có thể dùng khi chạm hạn mức",
+    "refillsSession": "Khôi phục hạn mức phiên",
+    "perWeek": "{{count}} lượt mỗi tuần",
+    "nextAvailable": "Có thể dùng tiếp vào {{date}}",
+    "noSessionResets": "Hiện không có lượt nào. Lượt mới sẽ xuất hiện tại đây.",
+    "nextResetAfter": "Có thể đặt lại tiếp sau {{date}}.",
+    "resetWindows": {
+      "five_hour": "phiên",
+      "seven_day": "hàng tuần",
+      "seven_day_overage_included": "vượt mức hàng tuần"
+    },
+    "resetResults": {
+      "reset": "Đã đặt lại hạn mức.",
+      "already_used": "Lượt đặt lại này đã được sử dụng.",
+      "not_limited": "Không có gì để đặt lại — tài khoản chưa chạm hạn mức.",
+      "cooldown": "Tài khoản vừa dùng một lượt đặt lại; hãy thử lại sau ít phút.",
+      "ineligible": "Tài khoản này không đủ điều kiện dùng lượt đặt lại này.",
+      "unavailable": "Hiện không thể dùng lượt đặt lại này."
+    },
+    "weeklyUsed": "Đã dùng {{value}}% hạn mức hàng tuần",
+    "quotaRemaining": "{{name}}: còn {{value}}%",
+    "loadResetCreditsFailed": "Không thể tải lượt đặt lại",
+    "codexAccount": "Tài khoản Codex",
+    "lan": {
+      "windows": {
+        "0": {
+          "title": "PowerShell (Quản trị viên)",
+          "note": "Chạy trong phiên PowerShell với quyền quản trị."
+        },
+        "1": {
+          "title": "Command Prompt (Quản trị viên)"
+        }
+      },
+      "macos": {
+        "0": {
+          "title": "Packet Filter (tạm thời đến khi khởi động lại)",
+          "note": "Cần sudo. Để giữ quy tắc lâu dài, thêm dòng pass vào /etc/pf.conf rồi tải lại pf."
+        },
+        "1": {
+          "title": "Tường lửa ứng dụng (cho phép tệp thực thi tproxy)",
+          "note": "Thay /path/to/tproxy bằng đường dẫn thực tế đến tệp thực thi."
+        }
+      },
+      "linux": {
+        "0": {
+          "title": "UFW (Ubuntu / Debian)"
+        },
+        "1": {
+          "title": "firewalld (Fedora / RHEL)"
+        },
+        "2": {
+          "title": "iptables",
+          "note": "Lưu quy tắc bằng công cụ của bản phân phối (ví dụ: iptables-save)."
+        }
+      }
+    },
+    "discoverModelsFailed": "Không thể tìm mô hình từ các nhà cung cấp đã cấu hình.",
+    "requestFailedStatus": "Yêu cầu thất bại ({{status}})",
+    "readFileFailed": "Không thể đọc tệp",
+    "quotaNames": {
+      "session": "Phiên",
+      "weekly": "Hàng tuần",
+      "weekly limit": "Hạn mức hàng tuần",
+      "daily": "Hàng ngày",
+      "monthly": "Hàng tháng",
+      "monthly included": "Bao gồm hàng tháng",
+      "extra usage": "Mức sử dụng bổ sung",
+      "spend": "Chi tiêu",
+      "prepaid": "Trả trước",
+      "on-demand": "Theo nhu cầu",
+      "credits": "Tín dụng",
+      "unlimited": "Không giới hạn",
+      "remaining (usd)": "Còn lại (USD)"
+    },
+    "proxyUsage": "{{requests}} yêu cầu · {{tokens}} token",
+    "creditStatus": {
+      "available": "Khả dụng",
+      "used": "Đã dùng",
+      "expired": "Hết hạn"
+    },
+    "skillPrompt": "Đọc skill này và sử dụng với tproxy: {{path}}\n\nThiết lập TPROXY_URL và TPROXY_KEY nếu chưa cấu hình.",
+    "cursorGuide": {
+      "addMappings": "thêm ánh xạ trong Ánh xạ → Cursor trước",
+      "step1": "Settings → Models → bật OpenAI API key",
+      "step2": "Base URL (cần URL công khai hoặc đường hầm, không dùng localhost)",
+      "step4": "Thêm Custom Models bằng các ID mô hình Cursor đã ánh xạ",
+      "step5": "Trong cuộc trò chuyện, chọn một trong các mô hình tùy chỉnh đó.",
+      "routing": "tproxy viết lại từng ID mô hình Cursor theo Ánh xạ → Cursor, rồi định tuyến đến mô hình ảo hoặc bộ chọn nhà cung cấp đã chọn.",
+      "mappedModels": "Mô hình đã ánh xạ",
+      "none": "chưa có"
+    }
+  }
+}

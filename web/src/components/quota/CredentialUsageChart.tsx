@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
@@ -30,13 +31,10 @@ const PERIODS: Array<{ value: CredentialUsageChartPeriod; label: string }> = [
   { value: "month", label: "Month" },
 ];
 
-function formatTokens(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value || 0);
-}
 
 export function CredentialUsageChart({ secret, credentialId, active }: Props) {
+  const { t, i18n } = useTranslation();
+  const formatTokens = (value: number) => new Intl.NumberFormat(i18n.language, { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
   const [period, setPeriod] = useState<CredentialUsageChartPeriod>("week");
   const [points, setPoints] = useState<CredentialUsageChartPoint[]>([]);
   const [models, setModels] = useState<CredentialModelUsageEntry[]>([]);
@@ -55,7 +53,7 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
         if (!cancelled) setPoints(data);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load account usage");
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t("featureA.loadUsageFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -67,13 +65,13 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
       .catch((cause) => {
         if (!cancelled) {
           setModels([]);
-          setModelsError(cause instanceof Error ? cause.message : "Failed to load model usage");
+          setModelsError(cause instanceof Error ? cause.message : t("featureA.loadModelUsageFailed"));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [secret, credentialId, period, active]);
+  }, [secret, credentialId, period, active, t]);
 
   const hasUsage = useMemo(
     () => points.some((point) => point.requests > 0 || point.tokens > 0),
@@ -81,13 +79,13 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
   );
 
   return (
-    <section className="credential-usage-chart" aria-label="Account usage chart">
+    <section className="credential-usage-chart" aria-label={t("featureA.accountUsageChart")}>
       <div className="credential-usage-chart-toolbar">
         <div>
-          <h5>Account usage</h5>
-          <p>Requests and proxy tokens routed through this account.</p>
+          <h5>{t("featureA.accountUsage")}</h5>
+          <p>{t("featureA.accountUsageHint")}</p>
         </div>
-        <div className="credential-usage-chart-periods" aria-label="Usage period">
+        <div className="credential-usage-chart-periods" aria-label={t("featureA.usagePeriod")}>
           {PERIODS.map((option) => (
             <button
               key={option.value}
@@ -96,7 +94,7 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
               onClick={() => setPeriod(option.value)}
               aria-pressed={period === option.value}
             >
-              {option.label}
+              {t(`featureA.period.${option.value}`)}
             </button>
           ))}
         </div>
@@ -104,12 +102,12 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
       {loading ? (
         <div className="credential-usage-chart-state">
           <span className="material-symbols-outlined animate-spin">progress_activity</span>
-          Loading usage…
+          {t("featureA.loadingUsage")}
         </div>
       ) : error ? (
         <div className="credential-usage-chart-state is-error">{error}</div>
       ) : !hasUsage ? (
-        <div className="credential-usage-chart-state">No usage recorded for this period.</div>
+        <div className="credential-usage-chart-state">{t("featureA.noUsage")}</div>
       ) : (
         <div className="credential-usage-chart-canvas">
           <ResponsiveContainer width="100%" height={220}>
@@ -147,13 +145,13 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
                   fontSize: "12px",
                 }}
                 formatter={(value, name) => [
-                  name === "Tokens" ? formatTokens(Number(value)) : Number(value || 0).toLocaleString(),
+                  name === t("featureA.tokens") ? formatTokens(Number(value)) : Number(value || 0).toLocaleString(i18n.language),
                   name,
                 ]}
               />
               <Legend iconSize={8} wrapperStyle={{ fontSize: "11px" }} />
-              <Bar yAxisId="tokens" dataKey="tokens" name="Tokens" fill="var(--color-primary)" fillOpacity={0.68} radius={[4, 4, 0, 0]} />
-              <Line yAxisId="requests" type="monotone" dataKey="requests" name="Requests" stroke="var(--color-info)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              <Bar yAxisId="tokens" dataKey="tokens" name={t("featureA.tokens")} fill="var(--color-primary)" fillOpacity={0.68} radius={[4, 4, 0, 0]} />
+              <Line yAxisId="requests" type="monotone" dataKey="requests" name={t("featureA.requests")} stroke="var(--color-info)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -162,23 +160,23 @@ export function CredentialUsageChart({ secret, credentialId, active }: Props) {
         <div className="credential-usage-chart-state is-error credential-usage-models-error">{modelsError}</div>
       ) : models.length > 0 ? (
         <div className="credential-usage-models">
-          <h6>By model</h6>
+          <h6>{t("featureA.byModel")}</h6>
           <div className="logs-table-scroll">
             <table className="logs-table credential-usage-models-table">
               <thead>
                 <tr>
-                  <th>Model</th>
-                  <th className="right">Requests</th>
-                  <th className="right">Input</th>
-                  <th className="right">Output</th>
-                  <th className="right">Total tokens</th>
+                  <th>{t("featureA.model")}</th>
+                  <th className="right">{t("featureA.requests")}</th>
+                  <th className="right">{t("featureA.input")}</th>
+                  <th className="right">{t("featureA.output")}</th>
+                  <th className="right">{t("featureA.totalTokens")}</th>
                 </tr>
               </thead>
               <tbody>
                 {models.map((row) => (
                   <tr key={row.model}>
                     <td className="credential-usage-models-name">{row.model}</td>
-                    <td className="right">{row.requests.toLocaleString()}</td>
+                    <td className="right">{row.requests.toLocaleString(i18n.language)}</td>
                     <td className="right">{formatTokens(row.promptTokens)}</td>
                     <td className="right">{formatTokens(row.completionTokens)}</td>
                     <td className="right">{formatTokens(row.totalTokens)}</td>

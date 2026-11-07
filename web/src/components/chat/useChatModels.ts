@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useState } from "react";
 import { discoverProviderModels } from "../providers/api";
 import type { ChatModelOption } from "./types";
@@ -81,6 +82,7 @@ function sortModels(items: ChatModelOption[]): ChatModelOption[] {
 }
 
 export function useChatModels(secret: string, snapshot: SnapshotSlice) {
+  const { t } = useTranslation();
   const staticModels = useMemo(() => buildStaticModels(snapshot), [snapshot]);
   const [providerModels, setProviderModels] = useState<ChatModelOption[]>([]);
   const [loadingProviderIds, setLoadingProviderIds] = useState<string[]>([]);
@@ -152,7 +154,7 @@ export function useChatModels(secret: string, snapshot: SnapshotSlice) {
       if (failures > 0 && staticModels.length === 0) {
         setProviderModels((current) => {
           if (current.length === 0) {
-            setProviderError("Failed to discover models from configured providers.");
+            setProviderError("discoverFailed");
           }
           return current;
         });
@@ -171,5 +173,5 @@ export function useChatModels(secret: string, snapshot: SnapshotSlice) {
 
   const loadingProviderModels = loadingProviderIds.length > 0;
 
-  return { models, staticModels, loadingProviderModels, loadingProviderIds, providerError };
+  return { models, staticModels, loadingProviderModels, loadingProviderIds, providerError: providerError ? t("featureA.discoverModelsFailed") : "" };
 }

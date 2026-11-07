@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const publicPort = 28120;
+const publicPort = Number(process.env.TPROXY_DEV_PORT || 28120);
 const backendPort = 28122;
-const backend = `http://127.0.0.1:${backendPort}`;
+const backend = process.env.TPROXY_DEV_BACKEND || `http://127.0.0.1:${backendPort}`;
 const devBindHost = process.env.TPROXY_DEV_BIND_HOST || "127.0.0.1";
 
 export default defineConfig({

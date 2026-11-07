@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { ChatAttachment, ChatMessage } from "./types";
 
 export const STORAGE_KEYS = {
@@ -97,7 +98,7 @@ export async function fileToDataUrl(file: File): Promise<string> {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.onerror = () => reject(reader.error || new Error(i18n.t("featureA.readFileFailed")));
     reader.readAsDataURL(file);
   });
 }
@@ -111,7 +112,7 @@ export function cloneSession<T extends { messages: ChatMessage[] }>(session: T):
 
 export function formatDuration(ms?: number): string {
   if (ms === undefined || !Number.isFinite(ms)) return "";
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toLocaleString(i18n.language, { minimumFractionDigits: ms < 10000 ? 1 : 0, maximumFractionDigits: ms < 10000 ? 1 : 0 })}s`;
 }
 
 /** "⌘" on Apple keyboards, "Ctrl" elsewhere — for shortcut hints. */

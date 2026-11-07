@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { Button, cn } from "../ui";
 import {
@@ -15,50 +16,19 @@ type Props = {
   onReset?: () => void;
 };
 
-const windowLabels: Record<string, string> = {
-  five_hour: "session",
-  seven_day: "weekly",
-  seven_day_overage_included: "weekly overage",
-};
-
-const resultMessages: Record<string, string> = {
-  reset: "Limits reset.",
-  already_used: "This reset was already used.",
-  not_limited: "Nothing to reset — the account is not at a limit.",
-  cooldown: "A reset was just used on this account; try again shortly.",
-  ineligible: "This account is not eligible for this reset.",
-  unavailable: "This reset isn't available right now.",
-};
-
-function formatDate(value?: string) {
+function formatDate(value: string | undefined, language: string, withTime = false) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function formatDateTime(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return date.toLocaleString(language, { month: "short", day: "numeric", ...(withTime ? { hour: "numeric", minute: "2-digit" } : {}) });
 }
 
 function grantUsable(data: ClaudeLimitResetsData, grant: ClaudeResetGrant) {
   return data.eligible && grant.usable_now && !grant.paused && grant.resets_left > 0;
 }
 
-function grantMeta(grant: ClaudeResetGrant) {
-  const parts: string[] = [];
-  if (grant.ends_at) parts.push(`Expires ${formatDate(grant.ends_at)}`);
-  if (grant.resets_total > 1) parts.push(`${grant.resets_left} of ${grant.resets_total} left`);
-  if (grant.clears?.length) parts.push(`Clears ${grant.clears.map((name) => windowLabels[name] ?? name.replace(/_/g, " ")).join(", ")}`);
-  if (grant.paused) parts.push("Paused");
-  else if (grant.use_requires_limit && !grant.usable_now) parts.push("Usable once a limit is hit");
-  return parts.join(" · ");
-}
-
 export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Props) {
+  const { t, i18n } = useTranslation();
   const [data, setData] = useState<ClaudeLimitResetsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -72,11 +42,11 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
     try {
       setData(await fetchClaudeLimitResets(secret, credentialId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to load limit resets");
+      setError(cause instanceof Error ? cause.message : t("featureA.loadResetsFailed"));
     } finally {
       setLoading(false);
     }
-  }, [secret, credentialId]);
+  }, [secret, credentialId, t]);
 
   useEffect(() => {
     setData(null);
@@ -93,14 +63,14 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
     try {
       const result = await claimClaudeLimitReset(secret, credentialId, program, grantId);
       if (result.ok) {
-        setNotice(resultMessages.reset);
+        setNotice(t("featureA.resetResults.reset"));
         onReset?.();
       } else {
-        setError(resultMessages[result.result] ?? `Reset not applied (${result.result}).`);
+        setError(t(`featureA.resetResults.${result.result}`, { defaultValue: t("featureA.resetNotApplied", { result: result.result }) }));
       }
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to reset limits");
+      setError(cause instanceof Error ? cause.message : t("featureA.resetFailed"));
     } finally {
       setClaimingKey(null);
     }
@@ -109,9 +79,9 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
   const renderAction = (key: string, enabled: boolean, program: ClaudeResetProgram, grantId?: string) => {
     if (confirmKey === key) {
       return (
-        <div className="claude-limit-reset-actions">
-          <Button variant="secondary" size="sm" onClick={() => setConfirmKey(null)}>Cancel</Button>
-          <Button variant="danger" size="sm" onClick={() => void claim(key, program, grantId)}>Confirm reset</Button>
+        <div className="claude-limit-reset-actions" style={{ flexWrap: "wrap" }}>
+          <Button variant="secondary" size="sm" onClick={() => setConfirmKey(null)}>{t("common.cancel")}</Button>
+          <Button variant="danger" size="sm" onClick={() => void claim(key, program, grantId)}>{t("featureA.confirmReset")}</Button>
         </div>
       );
     }
@@ -123,7 +93,7 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
         loading={claimingKey === key}
         onClick={() => setConfirmKey(key)}
       >
-        Reset for free
+        {t("featureA.resetForFree")}
       </Button>
     );
   };
@@ -135,16 +105,16 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
     <div className="quota-account-modal-section">
       <div className="quota-account-modal-section-head">
         <div className="quota-account-modal-section-head-main">
-          <h5>Limit resets</h5>
-          <span className="quota-account-modal-section-meta">Free resets Claude grants this account</span>
+          <h5>{t("featureA.limitResets")}</h5>
+          <span className="quota-account-modal-section-meta">{t("featureA.limitResetsHint")}</span>
         </div>
         <button
           type="button"
           className="quota-tracker-icon-btn"
           disabled={loading}
           onClick={() => void load()}
-          aria-label="Refresh limit resets"
-          title="Refresh limit resets"
+          aria-label={t("featureA.refreshResets")}
+          title={t("featureA.refreshResets")}
         >
           <span className={cn("material-symbols-outlined", loading && "animate-spin")}>refresh</span>
         </button>
@@ -152,19 +122,19 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
       {error ? <p className="quota-account-modal-note quota-account-modal-note-error">{error}</p> : null}
       {notice ? <p className="quota-account-modal-note">{notice}</p> : null}
       {loading && !data ? (
-        <p className="quota-account-modal-empty">Loading limit resets…</p>
+        <p className="quota-account-modal-empty">{t("featureA.loadingResets")}</p>
       ) : data ? (
         <div className="claude-limit-reset-list">
           {!data.eligible && data.ineligible_reason ? (
-            <p className="quota-account-modal-note">Not eligible for full resets ({data.ineligible_reason.replace(/_/g, " ")}).</p>
+            <p className="quota-account-modal-note">{t("featureA.ineligibleReason", { reason: data.ineligible_reason.replace(/_/g, " ")})}</p>
           ) : null}
           {data.grants.map((grant) => {
             const key = `grant:${grant.id}`;
             return (
               <div key={grant.id} className="claude-limit-reset-row">
                 <div className="claude-limit-reset-copy">
-                  <strong title={grant.label || grant.id}>Full reset</strong>
-                  <span>{grantMeta(grant)}</span>
+                  <strong title={grant.label || grant.id}>{t("featureA.fullReset")}</strong>
+                  <span>{[grant.ends_at && t("featureA.expires", { date: formatDate(grant.ends_at, i18n.language) }), grant.resets_total > 1 && t("featureA.resetsLeft", { left: grant.resets_left, total: grant.resets_total }), grant.clears?.length && t("featureA.clears", { windows: grant.clears.map((name) => t(`featureA.resetWindows.${name}`, { defaultValue: name.replace(/_/g, " ")})).join(", ")}), grant.paused ? t("featureA.paused") : grant.use_requires_limit && !grant.usable_now ? t("featureA.usableAtLimit") : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 {renderAction(key, grantUsable(data, grant), "cedar_ember", grant.id)}
               </div>
@@ -172,19 +142,19 @@ export function ClaudeLimitResets({ secret, credentialId, active, onReset }: Pro
           })}
           <div className={cn("claude-limit-reset-row", !session?.available && "claude-limit-reset-row-muted")}>
             <div className="claude-limit-reset-copy">
-              <strong>5-hour reset</strong>
+              <strong>{t("featureA.fiveHourReset")}</strong>
               <span>
                 {session?.available
-                  ? `Refills the session limit${session.resets_per_week ? ` · ${session.resets_per_week} per week` : ""}`
+                  ? t("featureA.refillsSession") + (session.resets_per_week ? ` · ${t("featureA.perWeek", { count: session.resets_per_week })}` : "")
                   : session?.next_available_at
-                    ? `Next available ${formatDateTime(session.next_available_at)}`
-                    : "None right now. When you get one, it shows up here."}
+                    ? t("featureA.nextAvailable", { date: formatDate(session.next_available_at, i18n.language, true) })
+                    : t("featureA.noSessionResets")}
               </span>
             </div>
             {session?.available ? renderAction(sessionKey, session.eligible, "juniper_tide") : null}
           </div>
           {data.cooldown_until ? (
-            <p className="quota-account-modal-note">Next reset possible after {formatDateTime(data.cooldown_until)}.</p>
+            <p className="quota-account-modal-note">{t("featureA.nextResetAfter", { date: formatDate(data.cooldown_until, i18n.language, true) })}</p>
           ) : null}
         </div>
       ) : null}

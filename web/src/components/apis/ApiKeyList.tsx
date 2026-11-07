@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import { maskApiKeySecret } from "../../lib/apiKeySecrets";
 import { Toggle, cn } from "../ui";
 import { ActionMenu, IconAction, StatusPill, Tag, type ActionMenuItem, type Tone } from "../page-kit";
+import { ManagedTag } from "../clusters/ManagedTag";
 import type { ApiKeyRecord, ApiKeyUsage } from "./types";
 import { hasOwnLimits, type ApiKeyHealth } from "./utils";
 
@@ -15,6 +16,8 @@ export type ApiKeyRowView = {
   secret?: string;
   selected: boolean;
   busy: boolean;
+  /** Received from the cluster hub: shown, but not editable here. */
+  managed?: boolean;
 };
 
 export type ApiKeyRowHandlers = {
@@ -78,8 +81,9 @@ function openOnKey(event: KeyboardEvent<HTMLElement>, open: () => void) {
 
 function menuItems(view: ApiKeyRowView, handlers: ApiKeyRowHandlers, t: TFunction): ActionMenuItem[] {
   const { key } = view;
+  const managedHint = view.managed ? t("clusters.managed.hint") : undefined;
   const items: Array<ActionMenuItem | null> = [
-    { key: "edit", icon: "tune", label: t("apis.menu.edit"), hint: t("apis.menu.editHint"), onSelect: () => handlers.open(key) },
+    { key: "edit", icon: "tune", label: t("apis.menu.edit"), hint: managedHint ?? t("apis.menu.editHint"), disabled: view.managed, onSelect: () => handlers.open(key) },
     view.usage?.effective_limits
       ? { key: "capacity", icon: "speed", label: t("apis.menu.capacity"), hint: t("apis.sharedCapacity", { count: view.usage.eligible_account_count ?? 0 }), onSelect: () => handlers.showCapacity(key) }
       : null,
@@ -92,7 +96,7 @@ function menuItems(view: ApiKeyRowView, handlers: ApiKeyRowHandlers, t: TFunctio
       onSelect: () => handlers.useInExample(key),
     },
     { key: "copy-id", icon: "fingerprint", label: t("apis.menu.copyId"), hint: key.id, onSelect: () => handlers.copy(key.id, `id_${key.id}`) },
-    { key: "revoke", icon: "delete", label: t("apis.revokeKey"), danger: true, disabled: view.busy, onSelect: () => handlers.revoke(key) },
+    { key: "revoke", icon: "delete", label: t("apis.revokeKey"), hint: managedHint, danger: true, disabled: view.busy || view.managed, onSelect: () => handlers.revoke(key) },
   ];
   return items.filter(Boolean) as ActionMenuItem[];
 }
@@ -110,22 +114,31 @@ function ApiKeyRow({ view, handlers }: { view: ApiKeyRowView; handlers: ApiKeyRo
     key.policy?.endpoints?.length ? t("apis.endpointsShort", { count: key.policy.endpoints.length }) : null,
   ].filter(Boolean).join(" · ");
   const copyId = `secret_${key.id}`;
+  const managedHint = view.managed ? t("clusters.managed.hint") : undefined;
+  // A cluster-managed key opens nothing: the hub owns its settings.
+  const openProps = view.managed
+    ? { title: managedHint }
+    : {
+        role: "button",
+        tabIndex: 0,
+        "aria-label": t("apis.openKey", { name }),
+        onClick: () => handlers.open(key),
+        onKeyDown: (event: KeyboardEvent<HTMLElement>) => openOnKey(event, () => handlers.open(key)),
+      };
 
   return (
     <div
-      className={cn("cp-list-row ap-key-row", `ap-health-${health}`, !key.enabled && "is-off", view.selected && "is-selected")}
+      className={cn("cp-list-row ap-key-row", `ap-health-${health}`, !key.enabled && "is-off", view.selected && "is-selected", view.managed && "is-managed")}
       style={{ ["--cp-row-tone" as string]: `var(--color-${HEALTH_TONE[health] === "neutral" ? "border" : HEALTH_TONE[health]})` }}
-      role="button"
-      tabIndex={0}
-      aria-label={t("apis.openKey", { name })}
-      onClick={() => handlers.open(key)}
-      onKeyDown={(event) => openOnKey(event, () => handlers.open(key))}
+      {...openProps}
     >
       <span className="cp-cell ap-key-check cp-keep-bright">
         <input
           type="checkbox"
           className="cp-check"
           checked={view.selected}
+          disabled={view.managed}
+          title={managedHint}
           onClick={stop}
           onChange={(event) => handlers.select(key, event.target.checked)}
           aria-label={t("apis.selectKey", { name })}
@@ -140,6 +153,7 @@ function ApiKeyRow({ view, handlers }: { view: ApiKeyRowView; handlers: ApiKeyRo
       </span>
       <span className="cp-cell ap-key-status cp-keep-bright">
         <StatusPill tone={HEALTH_TONE[health]} title={t(`apis.healthHint.${health}`)}>{t(`apis.health.${health}`)}</StatusPill>
+        {view.managed ? <ManagedTag /> : null}
         {hasOwnLimits(key) ? <Tag tone="info" title={t("apis.ownLimitsHint")}>{t("apis.ownLimitsTag")}</Tag> : null}
       </span>
       <span className="cp-cell ap-key-secret" onClick={stop}>
@@ -154,7 +168,7 @@ function ApiKeyRow({ view, handlers }: { view: ApiKeyRowView; handlers: ApiKeyRo
             />
           </>
         ) : (
-          <button type="button" className="ap-secret-missing" onClick={() => handlers.open(key)} title={t("apis.secretNotSavedHint")}>
+          <button type="button" className="ap-secret-missing" disabled={view.managed} onClick={() => handlers.open(key)} title={managedHint ?? t("apis.secretNotSavedHint")}>
             <span className="material-symbols-outlined" aria-hidden>key_off</span>
             {t("apis.secretNotSavedShort")}
           </button>
@@ -188,11 +202,11 @@ function ApiKeyRow({ view, handlers }: { view: ApiKeyRowView; handlers: ApiKeyRo
       <span
         className="cp-cell ap-key-toggle cp-keep-bright"
         onClick={stop}
-        title={key.enabled ? t("apis.pauseKey") : t("apis.resumeKey")}
+        title={managedHint ?? (key.enabled ? t("apis.pauseKey") : t("apis.resumeKey"))}
       >
         <Toggle
           checked={key.enabled}
-          disabled={view.busy}
+          disabled={view.busy || view.managed}
           onChange={(event) => handlers.setEnabled(key, event.target.checked)}
           aria-label={key.enabled ? t("apis.pauseKey") : t("apis.resumeKey")}
         />

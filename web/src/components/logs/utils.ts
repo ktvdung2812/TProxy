@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 /* Pure helpers for the Logs view (time/latency formatting, status buckets, percentiles). */
 import type { TFunction } from "i18next";
 import type { RequestLog } from "../../hooks/useRequestLogStream";
@@ -17,7 +18,7 @@ export function fmtTimeAgo(iso?: string): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(i18n.language);
 }
 
 /** Localised relative time ("5m ago" / "5 phút trước"); falls back to the date after a week. */
@@ -34,7 +35,7 @@ export function fmtAgo(iso: string | undefined, t: TFunction, now = Date.now()):
   if (hr < 24) return t("logs.ago.hours", { count: hr });
   const day = Math.floor(hr / 24);
   if (day < 7) return t("logs.ago.days", { count: day });
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(i18n.language);
 }
 
 /** Format an ISO timestamp as a compact local clock (HH:MM:SS). */
@@ -42,7 +43,7 @@ export function fmtClock(iso?: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString(undefined, { hour12: false });
+  return d.toLocaleTimeString(i18n.language, { hour12: false });
 }
 
 /** Format a full absolute timestamp used in the row tooltip. */
@@ -50,14 +51,14 @@ export function fmtAbsolute(iso?: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  return d.toLocaleString(i18n.language);
 }
 
 /** Human-readable latency: "45 ms" or "1.2s". */
 export function fmtLatency(ms?: number): string {
   if (ms == null || Number.isNaN(ms)) return "—";
   if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`;
+  return `${(ms / 1000).toLocaleString(i18n.language, { minimumFractionDigits: ms % 1000 === 0 ? 0 : 1, maximumFractionDigits: ms % 1000 === 0 ? 0 : 1 })}s`;
 }
 
 export type SortOrder = "asc" | "desc";

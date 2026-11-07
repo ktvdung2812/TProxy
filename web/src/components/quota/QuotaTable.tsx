@@ -26,19 +26,19 @@ function isSessionQuotaRow(row: QuotaRow) {
 }
 
 export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (rows.length === 0) return null;
 
-  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
+  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage, i18n.language);
 
   return (
     <div className="quota-tracker-table-wrap">
       <div className="quota-tracker-table-meta">
         <span>
-          {rows.length} quota{rows.length === 1 ? "" : "s"}
+          {t("featureA.quotaCount", { count: rows.length })}
         </span>
         {proxyUsageLabel ? (
-          <span className="quota-tracker-table-meta-usage" title="Local proxy usage (all time)">
+          <span className="quota-tracker-table-meta-usage" title={t("featureA.localUsage")}>
             {proxyUsageLabel}
           </span>
         ) : null}
@@ -47,8 +47,8 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
         <tbody>
           {rows.map((row) => {
             const tone = getColorTone(row.remaining);
-            const countdown = formatResetTime(row.reset_at);
-            const absoluteReset = formatResetAbsolute(row.reset_at);
+            const countdown = formatResetTime(row.reset_at, i18n.language);
+            const absoluteReset = formatResetAbsolute(row.reset_at, i18n.language);
             const countdownLabel = countdown !== "-" ? t("quota.resetsIn", { time: countdown }) : "—";
 
             const isLive = credentialActive && isSessionQuotaRow(row);
@@ -60,7 +60,7 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                     {getColorEmoji(row.remaining)}
                   </span>
                   <span className="quota-tracker-name">
-                    {formatQuotaName(row.name)}
+                    {formatQuotaName(row.name, i18n.language)}
                   </span>
                 </td>
                 <td className="quota-tracker-cell quota-tracker-cell-bar">
@@ -70,7 +70,7 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                   <div className="quota-tracker-usage">
                     <span
                       className={cn("quota-tracker-percent", `quota-tracker-percent-${tone}`)}
-                      title={`${Math.round(row.used).toLocaleString()} / ${row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString()}`}
+                      title={`${Math.round(row.used).toLocaleString(i18n.language)} / ${row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString(i18n.language)}`}
                     >
                       {t("quota.percentLeft", { value: row.remaining })}
                     </span>
@@ -88,8 +88,8 @@ export function QuotaTable({ rows, credentialActive = false, proxyUsage, onHide 
                       type="button"
                       className="quota-tracker-hide-btn"
                       onClick={() => onHide(row)}
-                      aria-label={`Hide quota ${row.name}`}
-                      title="Hide this quota row"
+                      aria-label={t("quota.hideQuotaNamed", { name: row.name })}
+                      title={t("quota.hideQuotaRow")}
                     >
                       <span className="material-symbols-outlined">visibility_off</span>
                     </button>

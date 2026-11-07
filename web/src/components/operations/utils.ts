@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { Tone } from "../page-kit";
 import type { Credential } from "../providers/types";
 import type { OperationsAccount, OperationsAlert, OperationsMetric } from "./api";
@@ -117,23 +118,25 @@ export function accountTone(account: OperationsAccount): Tone | null {
   return null;
 }
 
-export const fmtNumber = (value: number) => (value || 0).toLocaleString(undefined, { maximumFractionDigits: 1 });
-export const fmtPercent = (ratio: number) => `${(ratio * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+export const fmtNumber = (value: number) => (value || 0).toLocaleString(i18n.resolvedLanguage || i18n.language, { maximumFractionDigits: 1 });
+export const fmtPercent = (ratio: number) => `${(ratio * 100).toLocaleString(i18n.resolvedLanguage || i18n.language, { maximumFractionDigits: 1 })}%`;
 export const fmtMs = (value: number | null | undefined) =>
-  value === null || value === undefined ? "—" : `${(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} ms`;
+  value === null || value === undefined ? "—" : `${(value || 0).toLocaleString(i18n.resolvedLanguage || i18n.language, { maximumFractionDigits: 0 })} ms`;
 
 /** "42m", "5h 3m", "2d 4h" — compact age for alert chips. */
 export function fmtAge(fromIso: string, now = Date.now()) {
   const minutes = Math.max(0, Math.floor((now - Date.parse(fromIso)) / 60_000));
   if (!Number.isFinite(minutes)) return "—";
-  if (minutes < 1) return "<1m";
-  if (minutes < 60) return `${minutes}m`;
+  const unit = (value: number, name: "minute" | "hour" | "day") =>
+    new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value);
+  if (minutes < 1) return `<${unit(1, "minute")}`;
+  if (minutes < 60) return unit(minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours < 24) return `${unit(hours, "hour")} ${unit(minutes % 60, "minute")}`;
+  return `${unit(Math.floor(hours / 24), "day")} ${unit(hours % 24, "hour")}`;
 }
 
 export function fmtClock(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleTimeString();
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleTimeString(i18n.resolvedLanguage || i18n.language);
 }

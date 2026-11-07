@@ -59,11 +59,14 @@ type RawResponse struct {
 }
 
 type RawRequest struct {
-	Method      string
-	Path        string
-	Body        []byte
-	ContentType string
-	Headers     http.Header
+	Method        string
+	Path          string
+	RawQuery      string
+	ClientID      string
+	UpstreamModel string
+	Body          []byte
+	ContentType   string
+	Headers       http.Header
 }
 
 type RawProxyAdapter interface {
@@ -90,8 +93,9 @@ type AdapterDescriptor struct {
 }
 
 type Registry struct {
-	client *http.Client
-	items  map[string]Adapter
+	client  *http.Client
+	items   map[string]Adapter
+	cluster *clusterPeerAdapter
 }
 
 // Capabilities returns the conservative capability set advertised by a
@@ -130,6 +134,7 @@ func (r *Registry) Capabilities(providerType string) []string {
 		"gitlab":               {"text", "tools", "reasoning"},
 		"kimchi":               {"text", "vision", "tools", "reasoning"},
 		"devin":                {"text", "vision", "tools", "reasoning"},
+		ClusterProviderType:    {"*"},
 	}
 	items := append([]string(nil), capabilities[providerType]...)
 	return items
@@ -147,16 +152,21 @@ func (r *Registry) Describe(providerType string) (AdapterDescriptor, error) {
 		"antigravity": "gemini", "tavily": "search", "elevenlabs": "audio", "plugin-http": "canonical-plugin",
 		"copilot": "openai", "vertex-partner": "openai", "qwen": "openai", "kiro": "kiro", "qoder": "qoder", "cursor": "cursor", "cline": "openai", "clinepass": "openai",
 		"iflow": "openai", "codebuddy-cn": "openai", "kilocode": "openai", "gitlab": "openai", "kimchi": "openai", "devin": "devin",
+		ClusterProviderType: "cluster",
 	}
 	// Antigravity is absent: it serves a real catalogue through
 	// fetchAvailableModels, the same endpoint the quota tracker uses.
-	noDiscovery := providerType == "tavily" || providerType == "elevenlabs" || providerType == "cursor" || providerType == "grok-web" || providerType == "perplexity-web"
+	noDiscovery := providerType == "tavily" || providerType == "elevenlabs" || providerType == "cursor" || providerType == "grok-web" || providerType == "perplexity-web" || providerType == ClusterProviderType
 	return AdapterDescriptor{ProviderType: providerType, ProtocolFamily: protocols[providerType], Capabilities: r.Capabilities(providerType), ModelDiscovery: !noDiscovery, BootstrapRetry: true}, nil
 }
 
 // HealthCheck performs a lightweight non-generation request. It is safe to
 // run from the dashboard and does not consume paid generation quota.
 func (r *Registry) HealthCheck(ctx context.Context, provider store.Provider, credential store.Credential) error {
+	if provider.Type == ClusterProviderType {
+		// Peer reachability is tracked by the cluster link and per-peer cooldowns.
+		return nil
+	}
 	if provider.Type == "tavily" || provider.Type == "elevenlabs" {
 		if strings.TrimSpace(provider.BaseURL) == "" {
 			return &ProviderError{Code: "health_check_failed", Message: "provider base URL is empty"}
@@ -184,6 +194,9 @@ func (r *Registry) DiscoverModels(ctx context.Context, provider store.Provider, 
 }
 
 func (r *Registry) discover(ctx context.Context, provider store.Provider, credential store.Credential) ([]DiscoveredModel, error) {
+	if provider.Type == ClusterProviderType {
+		return clusterDiscoveredModels(credential), nil
+	}
 	if provider.Type == "antigravity" {
 		return discoverAntigravityModels(ctx, r, provider, credential)
 	}
@@ -296,7 +309,8 @@ func (r *Registry) discover(ctx context.Context, provider store.Provider, creden
 
 func NewRegistry() *Registry {
 	client := &http.Client{Transport: newProxyTransport()}
-	return &Registry{client: client, items: map[string]Adapter{
+	cluster := &clusterPeerAdapter{}
+	return &Registry{client: client, cluster: cluster, items: map[string]Adapter{
 		"muse":                 &openAIAdapter{client: client},
 		"openai-compatible":    &openAIAdapter{client: client},
 		"image":                &openAIAdapter{client: client},
@@ -329,6 +343,7 @@ func NewRegistry() *Registry {
 		"kimchi":               &openAIAdapter{client: client},
 		"cursor":               &cursorAdapter{client: client},
 		"devin":                &devinAdapter{client: client},
+		ClusterProviderType:    cluster,
 	}}
 }
 
@@ -688,6 +703,10 @@ func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, cr
 	if err = json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return nil, &ProviderError{Status: 502, Code: "invalid_upstream_response", Err: err}
 	}
+	return openAIChatResponse(raw), nil
+}
+
+func openAIChatResponse(raw map[string]any) *canonical.Response {
 	// Cline / ClinePass (and some gateways) wrap chat.completion as {success, data:{...}}.
 	raw = unwrapOpenAIChatCompletion(raw)
 	result := &canonical.Response{Raw: raw, Role: "assistant", Model: stringValue(raw["model"]), ID: stringValue(raw["id"])}
@@ -702,7 +721,7 @@ func (a *openAIAdapter) Execute(ctx context.Context, provider store.Provider, cr
 		}
 	}
 	result.Usage = parseOpenAIUsage(raw["usage"])
-	return result, nil
+	return result
 }
 
 func (a *openAIAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
@@ -961,7 +980,12 @@ func (a *codexAdapter) Execute(ctx context.Context, provider store.Provider, cre
 	if err != nil {
 		return nil, err
 	}
-	result := &canonical.Response{Model: request.UpstreamModel, Role: "assistant", Raw: map[string]any{}}
+	return collectStreamResponse(events, request.UpstreamModel)
+}
+
+// collectStreamResponse folds a canonical event stream into one response.
+func collectStreamResponse(events <-chan canonical.Event, model string) (*canonical.Response, error) {
+	result := &canonical.Response{Model: model, Role: "assistant", Raw: map[string]any{}}
 	var text, reasoning strings.Builder
 	for event := range events {
 		switch event.Type {
@@ -1402,11 +1426,21 @@ func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider,
 		return nil, err
 	}
 	claudeDecloakResponse(raw, toolNames)
-	result := &canonical.Response{Raw: raw, ID: stringValue(raw["id"]), Model: stringValue(raw["model"]), Role: "assistant", FinishReason: stringValue(raw["stop_reason"])}
+	return claudeMessageResponse(raw), nil
+}
+
+func claudeMessageResponse(raw map[string]any) *canonical.Response {
+	result := &canonical.Response{Raw: raw, ID: stringValue(raw["id"]), Model: stringValue(raw["model"]), Role: "assistant", FinishReason: anthropicFinishToOpenAI(stringValue(raw["stop_reason"])), StopReason: stringValue(raw["stop_reason"])}
 	blocks, _ := raw["content"].([]any)
+	if sequence, ok := raw["stop_sequence"].(string); ok {
+		result.StopSequence = &sequence
+	}
 	var text strings.Builder
 	for _, value := range blocks {
 		block, _ := value.(map[string]any)
+		if block != nil {
+			result.ContentBlocks = append(result.ContentBlocks, block)
+		}
 		switch stringValue(block["type"]) {
 		case "text":
 			text.WriteString(stringValue(block["text"]))
@@ -1418,7 +1452,21 @@ func (a *anthropicAdapter) Execute(ctx context.Context, provider store.Provider,
 	}
 	result.Content = text.String()
 	result.Usage = parseClaudeUsage(raw["usage"])
-	return result, nil
+	return result
+}
+
+// anthropicFinishToOpenAI supplies the generic finish reason to non-Claude writers.
+func anthropicFinishToOpenAI(reason string) string {
+	switch reason {
+	case "tool_use":
+		return "tool_calls"
+	case "max_tokens":
+		return "length"
+	case "refusal":
+		return "content_filter"
+	default:
+		return "stop"
+	}
 }
 
 func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
@@ -1435,16 +1483,21 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 		defer response.Body.Close()
 		return nil, upstreamError(response)
 	}
+	return parseAnthropicStream(ctx, response.Body, toolNames, request.Source == canonical.ProtocolClaude), nil
+}
+
+func parseAnthropicStream(ctx context.Context, body io.ReadCloser, toolNames map[string]string, nativeFinish bool) <-chan canonical.Event {
 	out := make(chan canonical.Event, 16)
 	go func() {
 		defer close(out)
-		defer response.Body.Close()
-		scanner := bufio.NewScanner(response.Body)
+		defer body.Close()
+		scanner := bufio.NewScanner(body)
 		scanner.Buffer(make([]byte, 64<<10), 2<<20)
 		// Anthropic splits prompt/cache usage into message_start and output usage
 		// into message_delta. Emit cumulative snapshots because the router records
 		// the latest usage event as authoritative.
 		var streamUsage canonical.Usage
+		toolIndexes := map[int]int{}
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -1469,22 +1522,34 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 					out <- canonical.Event{Type: canonical.EventUsage, Usage: &current}
 				}
 			case "content_block_delta":
+				index := numberValue(raw["index"])
 				delta, _ := raw["delta"].(map[string]any)
 				if text := stringValue(delta["text"]); text != "" {
-					out <- canonical.Event{Type: canonical.EventTextDelta, Text: text}
+					out <- canonical.Event{Type: canonical.EventTextDelta, BlockIndex: &index, Text: text}
 				}
 				if thinking := stringValue(delta["thinking"]); thinking != "" {
-					out <- canonical.Event{Type: canonical.EventReasoningDelta, Reasoning: thinking}
+					out <- canonical.Event{Type: canonical.EventReasoningDelta, BlockIndex: &index, Reasoning: thinking}
+				}
+				if signature := stringValue(delta["signature"]); signature != "" {
+					out <- canonical.Event{Type: canonical.EventSignatureDelta, BlockIndex: &index, Signature: signature}
 				}
 				if inputJSON := stringValue(delta["partial_json"]); inputJSON != "" {
-					out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: map[string]any{"type": "function", "function": map[string]any{"arguments": inputJSON}}}
+					out <- canonical.Event{Type: canonical.EventToolCallDelta, BlockIndex: &index, ToolCall: map[string]any{"index": toolIndexes[index], "type": "function", "function": map[string]any{"arguments": inputJSON}}}
 				}
 			case "content_block_start":
+				index := numberValue(raw["index"])
 				block, _ := raw["content_block"].(map[string]any)
 				if stringValue(block["type"]) == "tool_use" {
-					name := claudeDecloakToolName(stringValue(block["name"]), toolNames)
-					out <- canonical.Event{Type: canonical.EventToolCallDelta, ToolCall: map[string]any{"id": block["id"], "type": "function", "function": map[string]any{"name": name, "arguments": ""}}}
+					toolIndexes[index] = len(toolIndexes)
+					block["name"] = claudeDecloakToolName(stringValue(block["name"]), toolNames)
 				}
+				out <- canonical.Event{Type: canonical.EventContentBlockStart, BlockIndex: &index, ContentBlock: block}
+				if stringValue(block["type"]) == "tool_use" {
+					out <- canonical.Event{Type: canonical.EventToolCallDelta, BlockIndex: &index, ToolCall: map[string]any{"index": toolIndexes[index], "id": block["id"], "type": "function", "function": map[string]any{"name": block["name"], "arguments": ""}}}
+				}
+			case "content_block_stop":
+				index := numberValue(raw["index"])
+				out <- canonical.Event{Type: canonical.EventContentBlockStop, BlockIndex: &index}
 			case "message_delta":
 				delta, _ := raw["delta"].(map[string]any)
 				if usage, ok := raw["usage"].(map[string]any); ok {
@@ -1493,7 +1558,15 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 					out <- canonical.Event{Type: canonical.EventUsage, Usage: &current}
 				}
 				if stop := stringValue(delta["stop_reason"]); stop != "" {
-					out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: stop}
+					var sequence *string
+					if value, ok := delta["stop_sequence"].(string); ok {
+						sequence = &value
+					}
+					finish := anthropicFinishToOpenAI(stop)
+					if nativeFinish {
+						finish = stop
+					}
+					out <- canonical.Event{Type: canonical.EventMessageEnd, FinishReason: finish, StopReason: stop, StopSequence: sequence}
 					return
 				}
 			case "message_stop":
@@ -1505,7 +1578,7 @@ func (a *anthropicAdapter) ExecuteStream(ctx context.Context, provider store.Pro
 			out <- canonical.Event{Type: canonical.EventError, Err: err}
 		}
 	}()
-	return out, nil
+	return out
 }
 
 type geminiAdapter struct{ client *http.Client }
@@ -1741,7 +1814,11 @@ func (a *geminiAdapter) Execute(ctx context.Context, provider store.Provider, cr
 	if err = json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
-	result := &canonical.Response{Raw: raw, Model: request.UpstreamModel, Role: "assistant"}
+	return geminiContentResponse(raw, request.UpstreamModel), nil
+}
+
+func geminiContentResponse(raw map[string]any, model string) *canonical.Response {
+	result := &canonical.Response{Raw: raw, Model: model, Role: "assistant"}
 	candidates, _ := raw["candidates"].([]any)
 	if len(candidates) > 0 {
 		candidate, _ := candidates[0].(map[string]any)
@@ -1763,7 +1840,7 @@ func (a *geminiAdapter) Execute(ctx context.Context, provider store.Provider, cr
 		result.Content = text.String()
 	}
 	result.Usage = parseGeminiUsage(raw["usageMetadata"])
-	return result, nil
+	return result
 }
 
 func (a *geminiAdapter) ExecuteStream(ctx context.Context, provider store.Provider, credential store.Credential, request canonical.Request) (<-chan canonical.Event, error) {
@@ -1787,12 +1864,16 @@ func (a *geminiAdapter) ExecuteStream(ctx context.Context, provider store.Provid
 		defer response.Body.Close()
 		return nil, upstreamError(response)
 	}
+	return parseGeminiStream(ctx, response.Body, request.UpstreamModel), nil
+}
+
+func parseGeminiStream(ctx context.Context, body io.ReadCloser, model string) <-chan canonical.Event {
 	out := make(chan canonical.Event, 16)
 	go func() {
 		defer close(out)
-		defer response.Body.Close()
-		out <- canonical.Event{Type: canonical.EventMessageStart, Model: request.UpstreamModel}
-		scanner := bufio.NewScanner(response.Body)
+		defer body.Close()
+		out <- canonical.Event{Type: canonical.EventMessageStart, Model: model}
+		scanner := bufio.NewScanner(body)
 		scanner.Buffer(make([]byte, 64<<10), 2<<20)
 		for scanner.Scan() {
 			select {
@@ -1843,7 +1924,7 @@ func (a *geminiAdapter) ExecuteStream(ctx context.Context, provider store.Provid
 			out <- canonical.Event{Type: canonical.EventMessageEnd}
 		}
 	}()
-	return out, nil
+	return out
 }
 
 func stringValue(value any) string {

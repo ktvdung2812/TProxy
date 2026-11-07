@@ -19,11 +19,11 @@ type Props = {
   onUse?: (credit: CodexResetCredit) => void;
 };
 
-function formatCreditDate(value?: string) {
-  if (!value) return "N/A";
+function formatCreditDate(value: string | undefined, language: string, missing: string) {
+  if (!value) return missing;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(language, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -32,7 +32,7 @@ function formatCreditDate(value?: string) {
   });
 }
 
-function formatTimeRemaining(value: string | undefined, missingLabel: string, expiredLabel: string) {
+function formatTimeRemaining(value: string | undefined, missingLabel: string, expiredLabel: string, language: string) {
   if (!value) return missingLabel;
   const diffMs = new Date(value).getTime() - Date.now();
   if (!Number.isFinite(diffMs)) return missingLabel;
@@ -40,7 +40,8 @@ function formatTimeRemaining(value: string | undefined, missingLabel: string, ex
   const totalHours = Math.ceil(diffMs / (60 * 60 * 1000));
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+  const unit = (value: number, name: "day" | "hour") => new Intl.NumberFormat(language, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value);
+  return days > 0 ? `${unit(days, "day")} ${unit(hours, "hour")}` : unit(hours, "hour");
 }
 
 function canUseCredit(credit: CodexResetCredit) {
@@ -51,7 +52,7 @@ function canUseCredit(credit: CodexResetCredit) {
 }
 
 export function CodexResetCreditsModal({ open, secret, credential, onClose, onUse }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { masked } = useAccountMask();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -78,7 +79,7 @@ export function CodexResetCreditsModal({ open, secret, credential, onClose, onUs
         if (!cancelled) setData(result);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load reset credits");
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t("featureA.loadResetCreditsFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -86,7 +87,7 @@ export function CodexResetCreditsModal({ open, secret, credential, onClose, onUs
     return () => {
       cancelled = true;
     };
-  }, [open, secret, credential]);
+  }, [open, secret, credential, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,7 +95,7 @@ export function CodexResetCreditsModal({ open, secret, credential, onClose, onUs
     return () => window.clearInterval(timer);
   }, [open]);
 
-  const label = maskAccountText(credential?.label || credential?.email || credential?.id || "Codex account", masked);
+  const label = maskAccountText(credential?.label || credential?.email || credential?.id || t("featureA.codexAccount"), masked);
 
   return (
     <Modal open={open} onClose={onClose} title={t("quota.codexResetCreditExpiry")} subtitle={label} size="lg">
@@ -126,11 +127,11 @@ export function CodexResetCreditsModal({ open, secret, credential, onClose, onUs
                 {credits.map((credit, index) => (
                   <tr key={credit.id || `${credit.status}-${credit.expires_at || index}`}>
                     <td>
-                      <span className="quota-reset-status">{credit.status || "unknown"}</span>
+                      <span className="quota-reset-status">{["available", "used", "expired"].includes(credit.status?.toLowerCase()) ? t(`featureA.creditStatus.${credit.status.toLowerCase()}`) : credit.status || t("common.unknown")}</span>
                     </td>
-                    <td>{formatCreditDate(credit.granted_at)}</td>
-                    <td>{formatCreditDate(credit.expires_at)}</td>
-                    <td>{formatTimeRemaining(credit.expires_at, t("quota.notAvailable"), t("quota.expired"))}</td>
+                    <td>{formatCreditDate(credit.granted_at, i18n.language, t("quota.notAvailable"))}</td>
+                    <td>{formatCreditDate(credit.expires_at, i18n.language, t("quota.notAvailable"))}</td>
+                    <td>{formatTimeRemaining(credit.expires_at, t("quota.notAvailable"), t("quota.expired"), i18n.language)}</td>
                     <td>
                       {onUse && canUseCredit(credit) ? (
                         <button

@@ -15,21 +15,22 @@ import (
 )
 
 type Config struct {
-	Server        ServerConfig        `yaml:"server"`
-	Database      DatabaseConfig      `yaml:"database"`
-	Security      SecurityConfig      `yaml:"security"`
-	Routing       RoutingConfig       `yaml:"routing"`
-	Upstream      UpstreamConfig      `yaml:"upstream" json:"upstream"`
-	Retention     RetentionConfig     `yaml:"retention"`
-	Streaming     StreamingConfig     `yaml:"streaming" json:"streaming"`
-	Limits        LimitPolicy         `yaml:"limits" json:"limits"`
-	Teams         []TeamPolicyConfig  `yaml:"teams" json:"teams"`
-	ProxyPools    []ProxyPoolConfig   `yaml:"proxy-pools"`
-	ClientAPIKeys []ClientAPIKey      `yaml:"client-api-keys"`
-	Providers     []ProviderConfig    `yaml:"providers"`
-	Models        []PublicModelConfig `yaml:"models"`
-	Combos        []ComboConfig       `yaml:"combos"`
-	ClaudeAliases ClaudeAliasConfig   `yaml:"claude-aliases" json:"claude_aliases"`
+	Server        ServerConfig             `yaml:"server"`
+	Database      DatabaseConfig           `yaml:"database"`
+	Security      SecurityConfig           `yaml:"security"`
+	Routing       RoutingConfig            `yaml:"routing"`
+	Upstream      UpstreamConfig           `yaml:"upstream" json:"upstream"`
+	Retention     RetentionConfig          `yaml:"retention"`
+	Streaming     StreamingConfig          `yaml:"streaming" json:"streaming"`
+	Limits        LimitPolicy              `yaml:"limits" json:"limits"`
+	Teams         []TeamPolicyConfig       `yaml:"teams" json:"teams"`
+	ProxyPools    []ProxyPoolConfig        `yaml:"proxy-pools"`
+	ClientAPIKeys []ClientAPIKey           `yaml:"client-api-keys"`
+	Providers     []ProviderConfig         `yaml:"providers"`
+	Models        []PublicModelConfig      `yaml:"models"`
+	ClusterRoutes []ClusterRouteAttachment `yaml:"cluster-routes,omitempty" json:"cluster_routes,omitempty"`
+	Combos        []ComboConfig            `yaml:"combos"`
+	ClaudeAliases ClaudeAliasConfig        `yaml:"claude-aliases" json:"claude_aliases"`
 }
 
 // UpstreamConfig holds per-wire-family behaviours that are not routing policy.
@@ -411,6 +412,11 @@ type ComboConfig struct {
 type ComboItemConfig struct {
 	PublicModelID string `yaml:"public-model" json:"public_model_id"`
 	RouteTargetID string `yaml:"route-target" json:"route_target_id,omitempty"`
+}
+
+type ClusterRouteAttachment struct {
+	Model  string              `yaml:"model" json:"model"`
+	Routes []RouteTargetConfig `yaml:"routes" json:"routes"`
 }
 
 type RouteTargetConfig struct {
@@ -1240,6 +1246,19 @@ func (cfg *Config) Validate() error {
 			}
 			if credential.AuthType == "oauth" && provider.OAuth == nil && !oauthConfigOptional(provider.Type) {
 				return fmt.Errorf("provider %q credential %q requires oauth configuration", provider.ID, credential.ID)
+			}
+		}
+	}
+	for _, attachment := range cfg.ClusterRoutes {
+		if strings.TrimSpace(attachment.Model) == "" {
+			return errors.New("cluster route model is required")
+		}
+		for _, route := range attachment.Routes {
+			if route.Provider == "tproxy-cluster" {
+				return fmt.Errorf("cluster route for %q cannot use provider %q", attachment.Model, route.Provider)
+			}
+			if _, exists := providerIDs[route.Provider]; !exists {
+				return fmt.Errorf("cluster route for %q references unknown provider %q", attachment.Model, route.Provider)
 			}
 		}
 	}

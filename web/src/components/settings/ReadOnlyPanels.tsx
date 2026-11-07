@@ -37,7 +37,7 @@ export function FeaturesPanel({ loading, settings }: { loading: boolean; setting
               {capture ? t("common.enabled") : t("common.disabled")}
             </StatusPill>
           </SettingRow>
-          <SettingRow label={t("settings.tokenSaverRTK")} hint={t("settings.page.tokenSaverHint")}>
+          <SettingRow label={t("featureB.terms.settings_tokenSaverRTK")} hint={t("settings.page.tokenSaverHint")}>
             <div className="st-inline">
               <StatusPill tone={rtk ? "success" : "muted"}>{rtk ? t("common.enabled") : t("common.disabled")}</StatusPill>
               <Link className="cp-link-btn" to="/token-saver">{t("settings.configure")}</Link>

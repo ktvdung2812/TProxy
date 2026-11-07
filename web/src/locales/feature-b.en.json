@@ -1,0 +1,91 @@
+{
+  "featureB": {
+    "validation": {
+      "addRoute": "Add at least one provider route",
+      "providerRequired": "Each route needs a provider",
+      "modelRequired": "Each route needs an upstream model"
+    },
+    "errors": {
+      "loadModels": "Failed to load models",
+      "loadSupportedModels": "Failed to load supported models",
+      "loadFailover": "Failed to load failover state"
+    },
+    "topology": {
+      "perDay": "{{value}}/day",
+      "clientSummary": "{{requests}}/day · {{lastSeen}}",
+      "noActivity": "no activity",
+      "requestCount_one": "{{value}} request",
+      "requestCount_other": "{{value}} requests",
+      "gatewaySummary_one": "{{requests}} today · {{providers}} provider",
+      "gatewaySummary_other": "{{requests}} today · {{providers}} providers",
+      "providerSummary_one": "{{credentials}} credential · {{requests}}",
+      "providerSummary_other": "{{credentials}} credentials · {{requests}}",
+      "title": "Request flow topology",
+      "description": "Clients → tproxy → providers → credentials, arranged top to bottom.",
+      "model": "Model",
+      "provider": "Provider",
+      "credential": "Credential",
+      "noModelUsage": "No model usage recorded for this client.",
+      "loadClients": "Failed to load topology clients",
+      "modelUsage": "Model usage"
+    },
+    "proxyPools": {
+      "imported": "Imported {{host}}"
+    },
+    "flow": {
+      "controls": "Diagram controls",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "fitView": "Fit diagram to view",
+      "node": "Diagram node",
+      "edge": "Diagram connection",
+      "handle": "Connection point",
+      "providerConnection": "Connection from tproxy to {{provider}}"
+    },
+    "providers": {
+      "usage": "{{requests}} requests · {{tokens}} tokens",
+      "plan": {
+        "free": "Free",
+        "enterprise": "Enterprise",
+        "business": "Business",
+        "teams": "Teams",
+        "proCanceled": "Pro (Canceled)",
+        "proPastDue": "Pro (Past Due)",
+        "maxCanceled": "Max (Canceled)"
+      }
+    },
+    "terms": {
+      "models_modelId": "Model ID",
+      "models_priority_colProvider": "Provider · upstream model",
+      "models_priority_publicId": "Public ID",
+      "models_priority_upstream": "Upstream model",
+      "models_select_upstream": "Upstream model",
+      "operations_inputOutput": "Input / output",
+      "operations_modelResource": "Public model",
+      "providers_account_cooldownFor": "Cooldown · {{time}}",
+      "providers_addCredentialWebCookie": "Web cookie",
+      "providers_addProviderBaseUrl": "Base URL",
+      "providers_addProviderId": "Provider ID",
+      "providers_authTypeServiceAccount": "Service account",
+      "providers_credentialId": "Credential ID",
+      "providers_cursorImportAccessToken": "Access token",
+      "providers_cursorImportMachineId": "Machine ID",
+      "providers_editConnectionProxyPools": "Proxy pools",
+      "providers_kiroAuthAwsRegion": "AWS Region",
+      "providers_kiroAuthIdcStartUrl": "IDC Start URL",
+      "providers_kiroAuthRefreshToken": "Refresh token",
+      "providers_serviceAccountJson": "Service account JSON",
+      "proxyPools_namePlaceholder": "Office proxy",
+      "proxyPools_poolId": "Pool ID",
+      "proxyPools_proxyUrl": "Proxy URL",
+      "settings_page_backupTitle": "Backup & reload",
+      "settings_page_publicBaseUrl": "Public base URL",
+      "settings_page_reloadLabel": "Reload config.yaml",
+      "settings_reloadConfig": "Reload config",
+      "settings_tokenSaverRTK": "Token saver (RTK)",
+      "usage_publicModel": "Public model",
+      "usage_table_providerChip": "Provider: {{name}}",
+      "usage_upstreamModel": "Upstream model"
+    }
+  }
+}

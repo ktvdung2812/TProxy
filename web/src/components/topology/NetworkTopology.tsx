@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import "./topology-localization.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BaseEdge,
@@ -75,6 +77,7 @@ function FlowEdgeComponent({
 }
 
 function GatewayNode({ data }: NodeProps) {
+  const { t } = useTranslation();
   const payload = data as {
     label: string;
     totalRequests: number;
@@ -89,7 +92,7 @@ function GatewayNode({ data }: NodeProps) {
       <span className="material-symbols-outlined">device_hub</span>
       <div>
         <strong>{payload.label}</strong>
-        <p>{formatNumber(payload.todayRequests)} today · {payload.activeProviders} providers</p>
+        <p>{t("featureB.topology.gatewaySummary", { count: payload.activeProviders, requests: formatNumber(payload.todayRequests), providers: formatNumber(payload.activeProviders) })}</p>
       </div>
       {payload.activeCount > 0 ? <span className="topology-badge">{payload.activeCount}</span> : null}
     </div>
@@ -97,6 +100,7 @@ function GatewayNode({ data }: NodeProps) {
 }
 
 function ProviderNode({ data }: NodeProps) {
+  const { t } = useTranslation();
   const payload = data as {
     label: string;
     providerId: string;
@@ -121,13 +125,14 @@ function ProviderNode({ data }: NodeProps) {
       />
       <div>
         <strong>{payload.label}</strong>
-        <p>{payload.credentialCount} credentials · {formatNumber(payload.totalRequests)} req</p>
+        <p>{t("featureB.topology.providerSummary", { count: payload.credentialCount, credentials: formatNumber(payload.credentialCount), requests: t("featureB.topology.requestCount", { count: payload.totalRequests, value: formatNumber(payload.totalRequests) }) })}</p>
       </div>
     </div>
   );
 }
 
 function CredentialNode({ data }: NodeProps) {
+  const { t } = useTranslation();
   const { masked } = useAccountMask();
   const payload = data as {
     label: string;
@@ -142,13 +147,14 @@ function CredentialNode({ data }: NodeProps) {
       <span className="topology-dot" style={{ backgroundColor: payload.enabled ? payload.color : "#477453" }} />
       <div>
         <strong>{maskAccountText(payload.label, masked)}</strong>
-        <p>{formatNumber(payload.totalRequests)} requests</p>
+        <p>{t("featureB.topology.requestCount", { count: payload.totalRequests, value: formatNumber(payload.totalRequests) })}</p>
       </div>
     </div>
   );
 }
 
 function ClientNode({ data }: NodeProps) {
+  const { t } = useTranslation();
   const payload = data as {
     label: string;
     totalRequests: number;
@@ -163,7 +169,7 @@ function ClientNode({ data }: NodeProps) {
       <span className="material-symbols-outlined">laptop_mac</span>
       <div>
         <strong>{payload.label}</strong>
-        <p>{formatNumber(payload.todayRequests)}/day · {payload.lastSeen || "no activity"}</p>
+        <p>{t("featureB.topology.clientSummary", { requests: formatNumber(payload.todayRequests), lastSeen: payload.lastSeen || t("featureB.topology.noActivity") })}</p>
       </div>
     </div>
   );
@@ -186,6 +192,7 @@ export function NetworkTopology({
   credentialsByProvider,
   activeRequests = [],
 }: Props) {
+  const { t, i18n } = useTranslation();
   const [clients, setClients] = useState<TopologyClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -195,10 +202,10 @@ export function NetworkTopology({
 
   const loadClients = useCallback(() => {
     fetchTopologyClients(secret)
-      .then((data) => setClients(data))
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "Failed to load topology clients"))
+      .then((data) => { setClients(data); setError(""); })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : t("featureB.topology.loadClients")))
       .finally(() => setLoading(false));
-  }, [secret]);
+  }, [secret, t]);
 
   useEffect(() => {
     loadClients();
@@ -208,7 +215,7 @@ export function NetworkTopology({
 
   const { nodes, edges } = useMemo(
     () => buildTproxyTopologyFlow({ clients, providers, credentialsByProvider, activeRequests }),
-    [clients, providers, credentialsByProvider, activeRequests],
+    [clients, providers, credentialsByProvider, activeRequests, i18n.resolvedLanguage],
   );
 
   const onInit = useCallback((instance: { fitView: (options?: { padding?: number; duration?: number }) => void }) => {
@@ -235,23 +242,33 @@ export function NetworkTopology({
       <div className="usage-topology-head">
         <span className="material-symbols-outlined">account_tree</span>
         <div>
-          <strong>Request flow topology</strong>
-          <p>Clients → tproxy → providers → credentials, arranged top to bottom.</p>
+          <strong>{t("featureB.topology.title")}</strong>
+          <p>{t("featureB.topology.description")}</p>
         </div>
       </div>
 
       <div ref={containerRef} className="usage-flow-canvas network-topology-canvas">
         {loading ? (
-          <div className="usage-flow-empty">
+          <div className="usage-flow-empty" role="status" aria-label={t("common.loading")}>
             <span className="material-symbols-outlined animate-spin">progress_activity</span>
           </div>
         ) : error ? (
           <div className="usage-flow-empty">{error}</div>
         ) : nodes.length <= 1 ? (
-          <div className="usage-flow-empty">No client traffic recorded yet.</div>
+          <div className="usage-flow-empty">{t("topology.noTraffic")}</div>
         ) : (
           <ReactFlow
-            nodes={nodes}
+            ariaLabelConfig={{
+            "controls.ariaLabel": t("featureB.flow.controls"),
+            "controls.zoomIn.ariaLabel": t("featureB.flow.zoomIn"),
+            "controls.zoomOut.ariaLabel": t("featureB.flow.zoomOut"),
+            "controls.fitView.ariaLabel": t("featureB.flow.fitView"),
+            "node.a11yDescription.default": t("featureB.flow.node"),
+            "node.a11yDescription.keyboardDisabled": t("featureB.flow.node"),
+            "edge.a11yDescription.default": t("featureB.flow.edge"),
+            "handle.ariaLabel": t("featureB.flow.handle"),
+          }}
+          nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}

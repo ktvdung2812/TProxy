@@ -120,18 +120,41 @@ export function formToPayload(form: ModelFormData) {
   };
 }
 
+/**
+ * PUT body that changes only a model's route targets. The definition goes back
+ * exactly as the snapshot has it, without the form defaults formToPayload
+ * applies (display name falling back to the id, default capabilities): the
+ * server refuses definition changes to cluster-managed models, whose routes
+ * are still this node's own.
+ */
+export function routesOnlyPayload(model: ModelRecord, routes: RouteFormData[]) {
+  const { routes: targets } = formToPayload({ ...modelToForm(model, []), routes });
+  return {
+    id: model.ID,
+    display_name: model.DisplayName,
+    aliases: model.Aliases ?? null,
+    enabled: model.Enabled,
+    expose_upstream_name: model.ExposeUpstreamName === true,
+    rewrite_response_model: model.RewriteResponseModel,
+    capabilities: model.Capabilities ?? null,
+    limits: model.Limits ?? null,
+    policy: model.Policy ?? null,
+    routes: targets,
+  };
+}
+
 export function validateModelForm(form: ModelFormData, existingIds: string[], editing: boolean) {
   const id = form.id.trim();
-  if (!id) return "Model ID is required";
-  if (!MODEL_ID_REGEX.test(id)) return "Only letters, numbers, -, _, and . allowed";
-  if (!editing && existingIds.includes(id)) return "This model ID is already in use";
+  if (!id) return "models.form.idRequired";
+  if (!MODEL_ID_REGEX.test(id)) return "models.form.idAllowed";
+  if (!editing && existingIds.includes(id)) return "models.form.idInUse";
   return "";
 }
 
 export function validatePriorityRoutes(routes: RouteFormData[]) {
-  if (routes.length === 0) return "Add at least one provider route";
-  if (routes.some((route) => !route.provider.trim())) return "Each route needs a provider";
-  if (routes.some((route) => !route.upstream_model.trim())) return "Each route needs an upstream model";
+  if (routes.length === 0) return "featureB.validation.addRoute";
+  if (routes.some((route) => !route.provider.trim())) return "featureB.validation.providerRequired";
+  if (routes.some((route) => !route.upstream_model.trim())) return "featureB.validation.modelRequired";
   return "";
 }
 

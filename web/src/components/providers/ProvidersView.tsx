@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../ui";
 import { EmptyPanel } from "../page-kit";
 import { ImportModal } from "../import/ImportModal";
+import { CLUSTER_PROVIDER_TYPE } from "../clusters/utils";
 import { AddProviderModal } from "./AddProviderModal";
 import { ProviderDetail } from "./ProviderDetail";
 import { ProviderList } from "./ProviderList";
@@ -97,6 +98,9 @@ export function ProvidersView({
     }
     return false;
   }, [selectedId, snapshotLoading, presetsLoaded, providers, resolved]);
+
+  // Cluster peers are providers too, but the Clusters page shows them.
+  const listedProviders = useMemo(() => providers.filter((provider) => provider.Type !== CLUSTER_PROVIDER_TYPE), [providers]);
 
   if (awaitingProviderResolution) {
     return (
@@ -404,7 +408,7 @@ export function ProvidersView({
   return (
     <>
       <ProviderList
-        providers={providers}
+        providers={listedProviders}
         credentials={credentials}
         presets={presets}
         presetsLoading={!presetsLoaded}

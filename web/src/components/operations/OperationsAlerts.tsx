@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { ActionMenu, EmptyPanel, IconAction, SectionHead, StatusPill, ToneCounts, ToolButton } from "../page-kit";
@@ -77,7 +78,7 @@ export function OperationsAlerts({ views, totals, evaluatedAt, hasFilters, onCle
                   <strong className="op-mono-strong" title={alert.resource_id}>{view.resourceLabel}</strong>
                   {view.resourceDetail ? <small title={view.resourceDetail}>{view.resourceDetail}</small> : null}
                 </span>
-                <span className="cp-cell cp-cell-mono op-alert-age" title={t("operations.firstSeen", { time: new Date(alert.first_seen).toLocaleString() })}>
+                <span className="cp-cell cp-cell-mono op-alert-age" title={t("operations.firstSeen", { time: new Date(alert.first_seen).toLocaleString(i18n.resolvedLanguage || i18n.language) })}>
                   <span className="material-symbols-outlined" aria-hidden>schedule</span>
                   {fmtAge(alert.first_seen, now)}
                 </span>

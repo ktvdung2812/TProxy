@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { discoverProviderModels, type DiscoveredModel } from "../providers/api";
 import type { ProviderOption } from "./types";
 
 export function useProviderModelDiscovery(secret: string, providers: ProviderOption[], active = true) {
+  const { t } = useTranslation();
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, DiscoveredModel[]>>({});
   const [errorsByProvider, setErrorsByProvider] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -38,7 +40,7 @@ export function useProviderModelDiscovery(secret: string, providers: ProviderOpt
               if (result.error?.message) failures[providerId] = result.error.message;
               return [providerId, result.data || []] as const;
             } catch (cause) {
-              failures[providerId] = cause instanceof Error ? cause.message : "Failed to load models";
+              failures[providerId] = cause instanceof Error ? cause.message : t("featureB.errors.loadModels");
               return [providerId, []] as const;
             }
           }),
@@ -50,7 +52,7 @@ export function useProviderModelDiscovery(secret: string, providers: ProviderOpt
         if (!cancelled) {
           setModelsByProvider({});
           setErrorsByProvider({});
-          setError(loadError instanceof Error ? loadError.message : "Failed to load supported models");
+          setError(loadError instanceof Error ? loadError.message : t("featureB.errors.loadSupportedModels"));
         }
       } finally {
         if (!cancelled) {
@@ -63,7 +65,7 @@ export function useProviderModelDiscovery(secret: string, providers: ProviderOpt
     return () => {
       cancelled = true;
     };
-  }, [active, secret, providerKey, reloadToken]);
+  }, [active, secret, providerKey, reloadToken, t]);
 
   const reload = useCallback(() => setReloadToken((value) => value + 1), []);
 

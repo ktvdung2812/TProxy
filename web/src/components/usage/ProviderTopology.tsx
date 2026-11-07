@@ -327,8 +327,18 @@ export function ProviderTopology({
         <div className="usage-flow-empty">{t("usage.noProvidersWithConnections")}</div>
       ) : (
         <ReactFlow
+          ariaLabelConfig={{
+            "controls.ariaLabel": t("featureB.flow.controls"),
+            "controls.zoomIn.ariaLabel": t("featureB.flow.zoomIn"),
+            "controls.zoomOut.ariaLabel": t("featureB.flow.zoomOut"),
+            "controls.fitView.ariaLabel": t("featureB.flow.fitView"),
+            "node.a11yDescription.default": t("featureB.flow.node"),
+            "node.a11yDescription.keyboardDisabled": t("featureB.flow.node"),
+            "edge.a11yDescription.default": t("featureB.flow.edge"),
+            "handle.ariaLabel": t("featureB.flow.handle"),
+          }}
           nodes={nodes}
-          edges={edges}
+          edges={edges.map((edge) => ({ ...edge, ariaLabel: t("featureB.flow.providerConnection", { provider: sortedProviders.find((provider) => `provider-${provider.id}` === edge.target)?.name || edge.target }) }))}
           nodeTypes={nodeTypes}
           fitView
           fitViewOptions={FIT_VIEW_OPTS}

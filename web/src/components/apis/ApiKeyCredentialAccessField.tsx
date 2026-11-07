@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useMemo } from "react";
 import { Badge, Button, Toggle } from "../ui";
 import type { ApiKeyCombo, ApiKeyCredential, ApiKeyProvider, ApiKeyRoute } from "./types";
@@ -26,6 +27,7 @@ function unique(values: Iterable<string>): string[] {
 }
 
 export function ApiKeyCredentialAccessField({ value, models, providers, credentials, routes, combos, onChange }: Props) {
+  const { t } = useTranslation();
   const { masked } = useAccountMask();
   const selectedCredentialIDs = useMemo(() => new Set(value), [value]);
   const selectedModels = useMemo(() => parseModelSelection(models), [models]);
@@ -87,21 +89,21 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
 
   return (
     <div className="api-credential-access">
-      <div className="api-credential-access-intro">
+      <div className="api-credential-access-intro" style={{ flexWrap: "wrap" }}>
         <div>
-          <p className="api-model-access-title">Restrict account routing</p>
+          <p className="api-model-access-title">{t("featureA.restrictRouting")}</p>
           <p className="api-model-access-hint">
-            Optional. Choose only providers available through the selected PPM routes, then choose their accounts. Rotation and failover stay within these accounts.
+            {t("featureA.restrictRoutingHint")}
           </p>
         </div>
         <Badge variant={value.length ? "info" : "default"} size="sm">
-          {value.length ? `${value.length} account${value.length === 1 ? "" : "s"}` : "All accounts"}
+          {value.length ? t("featureA.accountCount", { count: value.length }) : t("featureA.allAccounts")}
         </Badge>
       </div>
 
       {compatibleProviders.length === 0 ? (
         <div className="api-credential-access-empty">
-          Select at least one virtual model with an enabled PPM route before restricting accounts.
+          {t("featureA.selectRoutedModel")}
         </div>
       ) : (
         <div className="api-credential-access-list custom-scrollbar">
@@ -121,14 +123,14 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
                     checked={providerSelected}
                     disabled={!hasEnabledCredential && !providerSelected}
                     onChange={(event) => setProviderEnabled(provider.ID, event.target.checked)}
-                    aria-label={`Allow ${provider.Name || provider.ID}`}
+                    aria-label={t("featureA.allow", { name: provider.Name || provider.ID })}
                   />
                 </div>
 
                 {providerSelected ? (
                   <div className="api-credential-account-list">
                     {providerCredentials.length === 0 ? (
-                      <p className="api-credential-access-empty">No accounts configured for this provider.</p>
+                      <p className="api-credential-access-empty">{t("featureA.noProviderAccounts")}</p>
                     ) : (
                       providerCredentials.map((credential) => {
                         const selected = selectedCredentialIDs.has(credential.id);
@@ -139,13 +141,13 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
                               <code>{maskAccountText(credential.email || credential.id, masked)}</code>
                             </div>
                             <div className="api-model-access-action">
-                              {!credential.enabled ? <Badge variant="warning" size="sm">Disabled</Badge> : null}
+                              {!credential.enabled ? <Badge variant="warning" size="sm">{t("common.disabled")}</Badge> : null}
                               <Toggle
                                 label=""
                                 checked={selected}
                                 disabled={!credential.enabled && !selected}
                                 onChange={(event) => setCredentialEnabled(credential, event.target.checked)}
-                                aria-label={`Allow ${maskAccountText(credential.label || credential.id, masked)}`}
+                                aria-label={t("featureA.allow", { name: maskAccountText(credential.label || credential.id, masked) })}
                               />
                             </div>
                           </div>
@@ -161,10 +163,10 @@ export function ApiKeyCredentialAccessField({ value, models, providers, credenti
       )}
 
       {unavailableSelectedCount > 0 ? (
-        <div className="api-credential-access-unavailable">
-          <span>{unavailableSelectedCount} selected account{unavailableSelectedCount === 1 ? " is" : "s are"} no longer available for these models.</span>
+        <div className="api-credential-access-unavailable" style={{ flexWrap: "wrap" }}>
+          <span>{t("featureA.unavailableAccounts", { count: unavailableSelectedCount })}</span>
           <Button type="button" variant="ghost" size="sm" onClick={() => updateSelection(value.filter((id) => compatibleCredentialIDs.has(id)))}>
-            Remove unavailable
+            {t("featureA.removeUnavailable")}
           </Button>
         </div>
       ) : null}

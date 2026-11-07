@@ -83,7 +83,7 @@ export function AccessPanel({
           </SettingRow>
 
           <SettingRow
-            label={t("settings.page.publicBaseUrl")}
+            label={t("featureB.terms.settings_page_publicBaseUrl")}
             hint={t("settings.page.publicBaseUrlHint")}
             htmlFor="st-public-url"
             error={urlWarning}

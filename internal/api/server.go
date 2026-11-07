@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/tproxy/tproxy/internal/bridge"
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/clitools"
+	"github.com/tproxy/tproxy/internal/cluster"
 	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/import9router"
 	"github.com/tproxy/tproxy/internal/importcliproxy"
@@ -36,6 +38,7 @@ import (
 	"github.com/tproxy/tproxy/internal/security"
 	"github.com/tproxy/tproxy/internal/store"
 	"github.com/tproxy/tproxy/internal/tunnel"
+	"github.com/tproxy/tproxy/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,6 +48,7 @@ const (
 	apiKeyContext         contextKey = "api-key"
 	clientEndpointContext contextKey = "client-endpoint"
 	requestLogContext     contextKey = "request-log"
+	clusterRelayContext   contextKey = "cluster-relay"
 )
 
 type requestLogState struct {
@@ -58,7 +62,11 @@ type requestLogState struct {
 	ErrorCode      string
 }
 
+var clusterOptionsHook func(*cluster.Options)
+
 type Server struct {
+	cluster          *cluster.Service
+	managedKeys      atomic.Pointer[map[string]struct{}]
 	operations       operationalState
 	responseSessions responseSessions
 	quotaResets      quotaResetState
@@ -107,6 +115,14 @@ func NewServerWithAuth(cfg *config.Config, dataStore *store.Store, requestRouter
 	requestRouter.SetCredentialRefresher(authManager)
 	server := &Server{store: dataStore, router: requestRouter, auth: authManager, allowRemoteMgmt: cfg.Server.AllowRemoteManagement, limiter: newRequestLimiter(), liveUsage: NewLiveUsageTracker(), liveLogs: NewLiveRequestLogBuffer(defaultLiveRequestLogLimit), dashboardPasswordCache: newDashboardPasswordCache()}
 	server.cfg.Store(cfg)
+	opts := cluster.Options{Settings: clusterSettingsAdapter{store: dataStore}, Hub: clusterHubAdapter{store: dataStore}, Local: &clusterLocal{s: server}, Version: version.Current(), MaxRelayBodyBytes: func() int64 { return server.currentConfig().Limits.MaxInputBytes }}
+	if clusterOptionsHook != nil {
+		clusterOptionsHook(&opts)
+	}
+	server.cluster = cluster.New(opts)
+	requestRouter.Registry().SetClusterTransport(server.cluster)
+	requestRouter.SetClusterRouting(server.cluster)
+	server.refreshManagedKeys(context.Background())
 	server.streamKeepalive = parsePositiveDuration(cfg.Streaming.KeepaliveInterval)
 	server.nonStreamKeepalive = parsePositiveDuration(cfg.Streaming.NonStreamKeepaliveInterval)
 	server.loadManagementSecret(context.Background())
@@ -144,6 +160,35 @@ func (s *Server) StartBackground(ctx context.Context) {
 	s.auth.Start(ctx)
 	backgroundCtx, cancel := context.WithCancel(ctx)
 	s.backgroundCancel = cancel
+	if os.Getenv("TPROXY_SKIP_CLUSTER_AUTO") != "1" {
+		s.cluster.Start(backgroundCtx)
+		if token := os.Getenv("TPROXY_CLUSTER_JOIN_TOKEN"); token != "" && s.cluster.Role() != cluster.RoleHub && s.cluster.Role() != cluster.RoleMember {
+			s.backgroundWG.Add(1)
+			go func() {
+				defer s.backgroundWG.Done()
+				delay := 5 * time.Second
+				for {
+					err := s.cluster.Join(backgroundCtx, cluster.JoinInput{Token: token, NodeName: os.Getenv("TPROXY_CLUSTER_NODE_NAME"), AllowInsecure: os.Getenv("TPROXY_CLUSTER_ALLOW_INSECURE") == "1"})
+					if err == nil || backgroundCtx.Err() != nil {
+						return
+					}
+					var ce *cluster.Error
+					if !errors.As(err, &ce) || ce.Code != cluster.CodeHubUnreachable {
+						log.Printf("[cluster] auto-join: %v", err)
+						return
+					}
+					timer := time.NewTimer(delay)
+					select {
+					case <-backgroundCtx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
+					delay = min(delay*2, 2*time.Minute)
+				}
+			}()
+		}
+	}
 	s.backgroundWG.Add(1)
 	go func() { defer s.backgroundWG.Done(); s.runOperationalMonitor(backgroundCtx) }()
 	s.backgroundWG.Add(1)
@@ -198,6 +243,7 @@ func (s *Server) Close() {
 		s.tunnel.StopBackground()
 	}
 	s.auth.Close()
+	s.cluster.Stop()
 	s.backgroundWG.Wait()
 }
 
@@ -241,7 +287,14 @@ func (s *Server) Handler() http.Handler {
 		mux.ServeHTTP(w, r)
 	})
 
-	return s.loggingMiddleware(corsMiddleware(root))
+	chain := s.loggingMiddleware(corsMiddleware(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/cluster/") {
+			s.cluster.Handler().ServeHTTP(w, r)
+			return
+		}
+		chain.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +308,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) clientAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), managedKeyContextKey{}, &atomic.Bool{}))
+		stripClusterHeaders(r)
 		token, tokenErr := extractClientAPIKey(r)
 		var key *store.APIKey
 		var err error
@@ -269,52 +324,66 @@ func (s *Server) clientAuth(next http.Handler) http.Handler {
 				writeStreamAwareError(w, r, http.StatusUnauthorized, "invalid_api_key", "invalid client API key", useClientRequestID(r))
 				return
 			}
-			if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok && key != nil {
-				state.ClientAPIKeyID = key.ID
+			var policyErr *providers.ProviderError
+			key, policyErr = s.effectiveManagedKey(r.Context(), key)
+			if policyErr != nil {
+				writeStreamAwareError(w, r, policyErr.Status, policyErr.Code, policyErr.Message, useClientRequestID(r))
+				return
 			}
 		} else if !s.currentConfig().Server.AllowLocalWithoutKey || !security.IsLoopback(r) {
 			writeStreamAwareError(w, r, http.StatusUnauthorized, "missing_api_key", "Bearer client API key is required", useClientRequestID(r))
 			return
 		}
-		if err = s.admitClientIngress(key, r); err != nil {
-			var policyErr *limitError
-			if errors.As(err, &policyErr) {
-				status := http.StatusTooManyRequests
-				if policyErr.RetryAfter != "" {
-					w.Header().Set("Retry-After", policyErr.RetryAfter)
-				}
-				if policyErr.Code == "endpoint_forbidden" {
-					status = http.StatusForbidden
-				}
-				writeError(w, status, policyErr.Code, policyErr.Message, useClientRequestID(r))
-				return
-			}
-			writeError(w, http.StatusTooManyRequests, "rate_limit_exceeded", err.Error(), useClientRequestID(r))
-			return
-		}
-		if isBodyRequest(r) {
-			if maxBytes := s.effectiveLimits(key).MaxInputBytes; maxBytes > 0 && r.Body != nil {
-				data, readErr := io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
-				_ = r.Body.Close()
-				if readErr != nil {
-					writeError(w, http.StatusBadRequest, "invalid_request", readErr.Error(), useClientRequestID(r))
-					return
-				}
-				if int64(len(data)) > maxBytes {
-					writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds API key max_input_bytes", useClientRequestID(r))
-					return
-				}
-				r.Body = io.NopCloser(bytes.NewReader(data))
-				r.ContentLength = int64(len(data))
-			}
-		}
-		ctx := context.WithValue(r.Context(), apiKeyContext, key)
-		ctx = context.WithValue(ctx, clientEndpointContext, r.URL.Path)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		s.admitClient(w, r, key, next)
 	})
 }
 
+func (s *Server) admitClient(w http.ResponseWriter, r *http.Request, key *store.APIKey, next http.Handler) {
+	if state, ok := r.Context().Value(requestLogContext).(*requestLogState); ok && key != nil {
+		state.ClientAPIKeyID = key.ID
+	}
+	if err := s.admitClientIngress(key, r); err != nil {
+		var policyErr *limitError
+		if errors.As(err, &policyErr) {
+			status := http.StatusTooManyRequests
+			if policyErr.RetryAfter != "" {
+				w.Header().Set("Retry-After", policyErr.RetryAfter)
+			}
+			if policyErr.Code == "endpoint_forbidden" {
+				status = http.StatusForbidden
+			}
+			writeError(w, status, policyErr.Code, policyErr.Message, useClientRequestID(r))
+			return
+		}
+		writeError(w, http.StatusTooManyRequests, "rate_limit_exceeded", err.Error(), useClientRequestID(r))
+		return
+	}
+	if isBodyRequest(r) {
+		if maxBytes := s.effectiveLimits(key).MaxInputBytes; maxBytes > 0 && r.Body != nil {
+			data, readErr := io.ReadAll(io.LimitReader(r.Body, maxBytes+1))
+			_ = r.Body.Close()
+			if readErr != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", readErr.Error(), useClientRequestID(r))
+				return
+			}
+			if int64(len(data)) > maxBytes {
+				writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds API key max_input_bytes", useClientRequestID(r))
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(data))
+			r.ContentLength = int64(len(data))
+		}
+	}
+	ctx := context.WithValue(r.Context(), apiKeyContext, key)
+	ctx = context.WithValue(ctx, clientEndpointContext, r.URL.Path)
+	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
 func (s *Server) proxyIngress(w http.ResponseWriter, r *http.Request) {
+	if key, _ := r.Context().Value(apiKeyContext).(*store.APIKey); isClusterRelay(r) && key != nil && len(key.Models) == 0 {
+		writeError(w, 403, "model_not_found", "model forbidden", useClientRequestID(r))
+		return
+	}
 	route, ok := classifyProxyIngress(r.URL.Path)
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint not found", useClientRequestID(r))
@@ -653,7 +722,7 @@ func (s *Server) mediaProxy(w http.ResponseWriter, r *http.Request, path string)
 		team = clientKey.Policy.Team
 		allowedCredentialIDs = append([]string(nil), clientKey.Policy.CredentialIDs...)
 	}
-	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Method: r.Method, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, AllowedCredentialIDs: allowedCredentialIDs, Team: team, PinnedProvider: pinnedProvider, MediaScopes: s.mediaScopes(clientKey)})
+	result, err := s.router.ProxyWithOptions(r.Context(), *model, requestID, path, body, contentType, router.RawProxyOptions{Relayed: isClusterRelay(r), ClusterBorrower: clusterBorrower(r, clientKey), Method: r.Method, RawQuery: r.URL.RawQuery, Headers: forwardHeaders, RetryNetworkErrors: retryNetworkErrors, DisableFallback: disableFallback, ClientAPIKeyID: clientKeyID, AllowedCredentialIDs: allowedCredentialIDs, Team: team, PinnedProvider: pinnedProvider, MediaScopes: s.mediaScopes(clientKey)})
 	if err != nil {
 		writeProviderError(w, err, requestID)
 		return
@@ -1135,7 +1204,12 @@ const (
 func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonical.Request, mode renderMode) {
 	key, _ := r.Context().Value(apiKeyContext).(*store.APIKey)
 	attachClientPolicyMetadata(&request, key)
-	if err := applyRequestControls(r, &request); err != nil {
+	if err := func() error {
+		if isClusterRelay(r) {
+			return nil
+		}
+		return applyRequestControls(r, &request)
+	}(); err != nil {
 		if strings.Contains(err.Error(), "prompt_injection") {
 			writeError(w, http.StatusBadRequest, "prompt_injection_detected", err.Error(), request.RequestID)
 			return
@@ -1187,7 +1261,9 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, request canonic
 			s.liveUsage.End(request.RequestID)
 		}
 	}()
-	s.applyTokenSaver(&request, w, r)
+	if !isClusterRelay(r) {
+		s.applyTokenSaver(&request, w, r)
+	}
 	if request.Stream {
 		stream, errStream := s.router.ExecuteStream(r.Context(), *model, request)
 		if errStream != nil {
@@ -1428,6 +1504,10 @@ func (s *Server) geminiGenerate(w http.ResponseWriter, r *http.Request, requeste
 }
 
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/admin/cluster") {
+		s.adminCluster(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/tunnel") {
 		s.adminTunnel(w, r)
 		return
@@ -1447,6 +1527,10 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/providers/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/providers/")
+		if (suffix == cluster.ProviderID || suffix == cluster.ProviderID+"/credentials/order") && r.Method != http.MethodGet {
+			s.clusterManagedError(w, r)
+			return
+		}
 		if strings.HasSuffix(suffix, "/credentials/order") {
 			s.adminReorderProviderCredentials(w, r, strings.TrimSuffix(suffix, "/credentials/order"))
 			return
@@ -1472,6 +1556,9 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/models/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/models/")
+		if r.Method == http.MethodDelete && s.clusterManaged(w, r, "model", suffix) {
+			return
+		}
 		if suffix == "test" {
 			s.adminTestModel(w, r)
 			return
@@ -1481,6 +1568,9 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/credentials/") {
 		suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/credentials/")
+		if r.Method == http.MethodDelete && s.clusterManaged(w, r, "credential", suffix) {
+			return
+		}
 		if strings.HasSuffix(suffix, "/refresh") {
 			s.adminRefreshCredential(w, r, strings.TrimSuffix(suffix, "/refresh"))
 			return
@@ -1529,7 +1619,11 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/api-keys/") {
-		s.adminAPIKeyItem(w, r, strings.TrimPrefix(r.URL.Path, "/api/admin/api-keys/"))
+		id := strings.TrimPrefix(r.URL.Path, "/api/admin/api-keys/")
+		if r.Method != http.MethodGet && s.clusterManaged(w, r, "api_key", strings.Split(id, "/")[0]) {
+			return
+		}
+		s.adminAPIKeyItem(w, r, id)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/aliases/") {
@@ -1537,7 +1631,11 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/combos/") {
-		s.adminComboItem(w, r, strings.TrimPrefix(r.URL.Path, "/api/admin/combos/"))
+		id := strings.TrimPrefix(r.URL.Path, "/api/admin/combos/")
+		if r.Method != http.MethodGet && s.clusterManaged(w, r, "combo", strings.Split(id, "/")[0]) {
+			return
+		}
+		s.adminComboItem(w, r, id)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/admin/topology/") {
@@ -1575,7 +1673,15 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			snapshot.Providers[i].Headers = nil
 			snapshot.Providers[i].Config = nil
 		}
-		writeJSON(w, 200, snapshot)
+		managed, err := s.store.ClusterManagedItems(r.Context())
+		if err != nil {
+			writeError(w, 500, "store_error", err.Error(), useClientRequestID(r))
+			return
+		}
+		writeJSON(w, 200, struct {
+			store.Snapshot
+			ClusterManaged any `json:"cluster_managed"`
+		}{snapshot, map[string]any{"models": nonNilStrings(managed.Models), "combos": nonNilStrings(managed.Combos), "api_keys": nonNilStrings(managed.APIKeys)}})
 	case "/api/admin/providers":
 		if r.Method != http.MethodPost && r.Method != http.MethodPut {
 			writeError(w, 405, "method_not_allowed", "POST or PUT required", useClientRequestID(r))
@@ -1585,6 +1691,15 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&providerCfg); err != nil {
 			writeError(w, 400, "invalid_request", err.Error(), useClientRequestID(r))
 			return
+		}
+		if providerCfg.ID == cluster.ProviderID {
+			s.clusterManagedError(w, r)
+			return
+		}
+		for _, credential := range providerCfg.Credentials {
+			if s.clusterManaged(w, r, "credential", credential.ID) {
+				return
+			}
 		}
 		if providerCfg.Type == "plugin-http" && !s.currentConfig().Security.PluginsEnabled {
 			writeError(w, http.StatusForbidden, "plugins_disabled", "plugin execution is disabled by security policy", useClientRequestID(r))
@@ -1600,9 +1715,16 @@ func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 405, "method_not_allowed", "POST or PUT required", useClientRequestID(r))
 			return
 		}
-		var modelCfg config.PublicModelConfig
-		if err := json.NewDecoder(r.Body).Decode(&modelCfg); err != nil {
+		var body struct {
+			config.PublicModelConfig
+			Policy map[string]any `json:"policy"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, 400, "invalid_request", err.Error(), useClientRequestID(r))
+			return
+		}
+		modelCfg := body.PublicModelConfig
+		if s.guardClusterModel(w, r, &modelCfg, body.Policy) {
 			return
 		}
 		for _, route := range modelCfg.Routes {
@@ -2273,6 +2395,9 @@ func (s *Server) adminAliases(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 			return
 		}
+		if s.clusterManaged(w, r, "alias", request.Alias) || s.clusterManaged(w, r, "model", request.Alias) {
+			return
+		}
 		enabled := true
 		if request.Enabled != nil {
 			enabled = *request.Enabled
@@ -2292,6 +2417,9 @@ func (s *Server) adminAliasItem(w http.ResponseWriter, r *http.Request, name str
 	decoded, err := url.PathUnescape(name)
 	if err != nil || strings.TrimSpace(decoded) == "" || strings.Contains(decoded, "/") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "alias is required", useClientRequestID(r))
+		return
+	}
+	if r.Method != http.MethodGet && (s.clusterManaged(w, r, "alias", decoded) || s.clusterManaged(w, r, "model", decoded)) {
 		return
 	}
 	if r.Method != http.MethodDelete {
@@ -2326,6 +2454,9 @@ func (s *Server) adminCombos(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
 			return
 		}
+		if s.clusterManaged(w, r, "combo", item.ID) {
+			return
+		}
 		if err := s.store.SaveCombo(r.Context(), item); err != nil {
 			writeError(w, http.StatusBadRequest, "combo_save_failed", err.Error(), useClientRequestID(r))
 			return
@@ -2340,6 +2471,9 @@ func (s *Server) adminComboItem(w http.ResponseWriter, r *http.Request, id strin
 	decoded, err := url.PathUnescape(id)
 	if err != nil || strings.TrimSpace(decoded) == "" || strings.Contains(decoded, "/") {
 		writeError(w, http.StatusBadRequest, "invalid_request", "combo id is required", useClientRequestID(r))
+		return
+	}
+	if r.Method != http.MethodGet && s.clusterManaged(w, r, "combo", decoded) {
 		return
 	}
 	if r.Method != http.MethodDelete {
@@ -2368,6 +2502,13 @@ func (s *Server) adminSaveCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if request.ProviderID == cluster.ProviderID {
+		s.clusterManagedError(w, r)
+		return
+	}
+	if s.clusterManaged(w, r, "credential", request.Credential.ID) {
 		return
 	}
 	if err := s.store.SaveCredential(r.Context(), request.ProviderID, request.Credential); err != nil {
@@ -2504,6 +2645,10 @@ func (s *Server) adminAuthImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "auth bundle exceeds the maximum import size", useClientRequestID(r))
 		return
 	}
+	items, _ := s.clusterImportItems(r.Context(), "auth-bundle", data)
+	if s.guardClusterImport(w, r, items) {
+		return
+	}
 	if err = s.store.ImportAuthBundle(r.Context(), data); err != nil {
 		writeError(w, http.StatusBadRequest, "auth_import_failed", err.Error(), useClientRequestID(r))
 		return
@@ -2524,6 +2669,9 @@ func (s *Server) adminCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error(), useClientRequestID(r))
+		return
+	}
+	if s.clusterManaged(w, r, "api_key", request.ID) {
 		return
 	}
 	if err := validateAPIKeyModelSelection(request.Models); err != nil {
@@ -3254,6 +3402,26 @@ func (s *Server) adminImportPayload(w http.ResponseWriter, r *http.Request, run 
 		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "import file exceeds 32 MB", useClientRequestID(r))
 		return
 	}
+	source := strings.TrimPrefix(r.URL.Path, "/api/admin/import/")
+	guardData := data
+	if r.URL.Path == "/api/admin/import" {
+		source, guardData, _, err = detectImport(data)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "import_failed", err.Error(), useClientRequestID(r))
+			return
+		}
+	}
+	if source == "cliproxyapi" {
+		source = "cliproxy"
+	}
+	items, err := s.clusterImportItems(r.Context(), source, guardData)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), useClientRequestID(r))
+		return
+	}
+	if s.guardClusterImport(w, r, items) {
+		return
+	}
 	dryRun := strings.EqualFold(r.URL.Query().Get("dry_run"), "true") || r.URL.Query().Get("dry_run") == "1"
 	result, err := run(r.Context(), data, dryRun)
 	if err != nil {
@@ -3317,6 +3485,9 @@ func (s *Server) adminConfigImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next.PrepareImport()
+	if s.guardClusterImport(w, r, configImportItems(&next)) {
+		return
+	}
 	if err = next.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, "config_invalid", err.Error(), useClientRequestID(r))
 		return

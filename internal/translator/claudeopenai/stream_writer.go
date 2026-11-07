@@ -87,6 +87,35 @@ func WriteClaudeStream(w http.ResponseWriter, events <-chan canonical.Event, req
 	}
 
 	for event := range events {
+		// Indexed blocks carry native Anthropic lifecycle events; generic events
+		// continue through the existing OpenAI-compatible rendering path.
+		if event.BlockIndex != nil {
+			index := *event.BlockIndex
+			switch event.Type {
+			case canonical.EventContentBlockStart:
+				ensureMessageStart(event)
+				send("content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": event.ContentBlock})
+				continue
+			case canonical.EventContentBlockStop:
+				send("content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
+				continue
+			case canonical.EventTextDelta:
+				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": event.Text}})
+				continue
+			case canonical.EventReasoningDelta:
+				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": event.Reasoning}})
+				continue
+			case canonical.EventSignatureDelta:
+				send("content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "signature_delta", "signature": event.Signature}})
+				continue
+			case canonical.EventToolCallDelta:
+				fn := mapValue(event.ToolCall["function"])
+				if args := stringValue(fn["arguments"]); args != "" {
+					send("content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "input_json_delta", "partial_json": args}})
+				}
+				continue
+			}
+		}
 		switch event.Type {
 		case canonical.EventMessageStart:
 			ensureMessageStart(event)
@@ -184,14 +213,14 @@ func WriteClaudeStream(w http.ResponseWriter, events <-chan canonical.Event, req
 				}
 				send("content_block_stop", map[string]any{"type": "content_block_stop", "index": toolInfo.blockIndex})
 			}
-			finish := openAIFinishToClaude(nonEmpty(event.FinishReason, "stop"), len(state.toolCalls) > 0)
+			finish := openAIFinishToClaude(nonEmpty(event.StopReason, nonEmpty(event.FinishReason, "stop")), len(state.toolCalls) > 0)
 			usage := map[string]any{"output_tokens": 0}
 			if state.usage != nil {
 				usage = state.usage.ClaudeUsage()
 			}
 			send("message_delta", map[string]any{
 				"type":  "message_delta",
-				"delta": map[string]any{"stop_reason": finish},
+				"delta": map[string]any{"stop_reason": finish, "stop_sequence": event.StopSequence},
 				"usage": usage,
 			})
 			send("message_stop", map[string]any{"type": "message_stop"})
@@ -400,14 +429,21 @@ func RenderClaudeResponse(response *canonical.Response, requestID string) map[st
 			"input": safeParseJSON(stringValue(fn["arguments"])),
 		})
 	}
+	if response.ContentBlocks != nil {
+		blocks = make([]any, len(response.ContentBlocks))
+		for i, block := range response.ContentBlocks {
+			blocks[i] = block
+		}
+	}
 	return map[string]any{
-		"id":          nonEmpty(response.ID, "msg_"+requestID),
-		"type":        "message",
-		"role":        "assistant",
-		"model":       response.Model,
-		"content":     blocks,
-		"stop_reason": openAIFinishToClaude(nonEmpty(response.FinishReason, "stop"), len(response.ToolCalls) > 0),
-		"usage":       response.Usage.ClaudeUsage(),
+		"id":            nonEmpty(response.ID, "msg_"+requestID),
+		"type":          "message",
+		"role":          "assistant",
+		"model":         response.Model,
+		"content":       blocks,
+		"stop_reason":   openAIFinishToClaude(nonEmpty(response.StopReason, nonEmpty(response.FinishReason, "stop")), len(response.ToolCalls) > 0),
+		"stop_sequence": response.StopSequence,
+		"usage":         response.Usage.ClaudeUsage(),
 	}
 }
 

@@ -5,6 +5,8 @@ import { clearCredentialCooldown, deleteCredential, reorderProviderCredentials, 
 import { getProviderTypeInfo } from "../providers/catalog";
 import { ProviderLogo } from "../providers/ProviderLogo";
 import { useUsageStream } from "../usage/useUsageStream";
+import { ImportModal } from "../import/ImportModal";
+import { useFileDrop } from "../import/useFileDrop";
 import { Button, ConfirmDialog, Modal, cn } from "../ui";
 import { CodexResetCreditsModal } from "./CodexResetCreditsModal";
 import { QuotaAccountDetailModal } from "./QuotaAccountDetailModal";
@@ -163,11 +165,11 @@ function getCodexResetCreditCount(quota?: CredentialQuota) {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-function formatRenewalDate(value?: string): string | null {
+function formatRenewalDate(value: string | undefined, language: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(language, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -175,7 +177,7 @@ function formatRenewalDate(value?: string): string | null {
 }
 
 export function QuotaTrackerView({ secret, credentials, accountsLoading = false, onError, onNotice, onMutated }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { masked } = useAccountMask();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -203,6 +205,14 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
   const [clearingCooldownId, setClearingCooldownId] = useState<string | null>(null);
   const [selectedCredentialIds, setSelectedCredentialIds] = useState<Set<string>>(() => new Set());
   const [quotaBulkBusy, setQuotaBulkBusy] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [droppedFiles, setDroppedFiles] = useState<File[] | null>(null);
+  // Files dropped anywhere on the page open the import dialog with them.
+  // The dialog takes over while open; the account detail dialog keeps drops off.
+  const pageDragging = useFileDrop(!showImport && !detailCredential, (files) => {
+    setDroppedFiles(files);
+    setShowImport(true);
+  });
   const [bulkResults, setBulkResults] = useState<{
     title: string;
     items: Array<{ id: string; label: string; ok: boolean; message: string }>;
@@ -901,10 +911,10 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     const providerName = getProviderTypeInfo(quotaProviderKey(best.credential)).name;
     const account = maskAccountText(getConnectionLabel(best.credential) || best.credential.id, masked);
     return {
-      time: formatResetTime(best.resetAt),
-      label: `${providerName} · ${formatQuotaName(best.name)} · ${account}`,
+      time: formatResetTime(best.resetAt, i18n.language),
+      label: `${providerName} · ${formatQuotaName(best.name, i18n.language)} · ${account}`,
     };
-  }, [scopeCredentials, resolveQuota, healthById, masked, clock]);
+  }, [scopeCredentials, resolveQuota, healthById, masked, clock, i18n.language]);
 
   const buildView = (credential: CredentialRow): QuotaAccountView => {
     const quotaKey = quotaProviderKey(credential);
@@ -940,8 +950,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
       meterRows,
       hiddenRows,
       stacked,
-      usageLabel: formatProxyUsageLabel(proxyUsageById[credential.id] ?? EMPTY_USAGE),
-      renewalDate: formatRenewalDate(quota?.renews_at),
+      usageLabel: formatProxyUsageLabel(proxyUsageById[credential.id] ?? EMPTY_USAGE, i18n.language),
+      renewalDate: formatRenewalDate(quota?.renews_at, i18n.language),
       isCodex,
       resetCredits: getCodexResetCreditCount(quota),
       refreshing: Boolean(loading[credential.id]) || clearingCooldownId === credential.id,
@@ -991,6 +1001,32 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
     updateQuotaFilters({ provider: "all", status: "all" });
   };
 
+  const importModal = (
+    <>
+      <ImportModal
+        open={showImport}
+        secret={secret}
+        initialFiles={droppedFiles}
+        onClose={() => {
+          setShowImport(false);
+          setDroppedFiles(null);
+        }}
+        onNotice={onNotice}
+        onError={onError}
+        onMutated={onMutated}
+      />
+      {pageDragging ? (
+        <div className="qt-drop-overlay" aria-hidden>
+          <div className="qt-drop-overlay-card">
+            <span className="material-symbols-outlined">upload_file</span>
+            <strong>{t("quota.dropToImport")}</strong>
+            <span>{t("quota.dropToImportHint")}</span>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+
   if (eligible.length === 0) {
     return (
       <section className="cp-page">
@@ -1002,12 +1038,18 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
             title={t("quota.noProvidersConnected")}
             description={t("quota.connectProviders")}
             action={
-              <Button variant="primary" icon="add_link" onClick={() => navigate("/providers")}>
-                {t("quota.connectProvidersAction")}
-              </Button>
+              <div className="qt-empty-actions">
+                <Button variant="primary" icon="add_link" onClick={() => navigate("/providers")}>
+                  {t("quota.connectProvidersAction")}
+                </Button>
+                <Button variant="secondary" icon="upload" onClick={() => setShowImport(true)} title={t("quota.importAccountsHint")}>
+                  {t("quota.importAccounts")}
+                </Button>
+              </div>
             }
           />
         )}
+        {importModal}
       </section>
     );
   }
@@ -1149,6 +1191,9 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
                 { value: "list", icon: "view_list", label: t("quota.viewList") },
               ]}
             />
+            <ToolButton icon="upload" onClick={() => setShowImport(true)} title={t("quota.importAccountsHint")}>
+              {t("quota.importAccounts")}
+            </ToolButton>
             <ActionMenu
               label={t("quota.quickActions")}
               text={t("quota.quickActions")}
@@ -1492,6 +1537,8 @@ export function QuotaTrackerView({ secret, credentials, accountsLoading = false,
         }}
         clock={clock}
       />
+
+      {importModal}
     </section>
   );
 }

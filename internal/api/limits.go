@@ -200,8 +200,14 @@ func (s *Server) acquireClientStream(key *store.APIKey) (func(), error) {
 
 func (s *Server) prepareClientRequest(r *http.Request, request *canonical.Request, key *store.APIKey) error {
 	attachClientPolicyMetadata(request, key)
+	markClusterRelay(r, request)
 	if request.Metadata == nil {
 		request.Metadata = map[string]any{}
+	}
+	if borrower := clusterBorrower(r, key); borrower != "" {
+		request.Metadata["cluster_borrower"] = borrower
+	} else {
+		delete(request.Metadata, "cluster_borrower")
 	}
 	encoded, _ := json.Marshal(request.Raw)
 	inputBytes := int64(len(encoded))

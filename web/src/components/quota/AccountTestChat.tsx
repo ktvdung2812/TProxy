@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { discoverCredentialModels, type DiscoveredModel } from "../providers/api";
 import { Button, cn } from "../ui";
@@ -17,6 +18,7 @@ type Turn = AccountChatMessage & {
 };
 
 export function AccountTestChat({ secret, credentialId, credentialEnabled }: Props) {
+  const { t, i18n } = useTranslation();
   const [models, setModels] = useState<DiscoveredModel[]>([]);
   const [model, setModel] = useState("");
   const [modelsError, setModelsError] = useState("");
@@ -37,11 +39,11 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
         const items = response.data || [];
         setModels(items);
         if (items.length > 0) setModel(items[0].id);
-        else setModelsError("No models available for this account.");
+        else setModelsError(t("featureA.noAccountModels"));
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        setModelsError(cause instanceof Error ? cause.message : "Could not load models.");
+        setModelsError(cause instanceof Error ? cause.message : t("featureA.loadModelsFailed"));
       });
     return () => {
       cancelled = true;
@@ -74,13 +76,13 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
         result.ok
           ? {
               role: "assistant",
-              content: result.content?.trim() || "(empty response)",
+              content: result.content?.trim() || t("featureA.emptyResponse"),
               latencyMs: result.latency_ms,
               tokens: tokens || undefined,
             }
           : {
               role: "assistant",
-              content: result.error || "Request failed.",
+              content: result.error || t("featureA.requestFailed"),
               latencyMs: result.latency_ms,
               failed: true,
             },
@@ -90,14 +92,14 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
         ...current,
         {
           role: "assistant",
-          content: cause instanceof Error ? cause.message : "Request failed.",
+          content: cause instanceof Error ? cause.message : t("featureA.requestFailed"),
           failed: true,
         },
       ]);
     } finally {
       setSending(false);
     }
-  }, [draft, model, sending, turns, secret, credentialId]);
+  }, [draft, model, sending, turns, secret, credentialId, t]);
 
   const disabled = !credentialEnabled || !model || sending;
 
@@ -106,15 +108,15 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
       <div className="account-test-chat-head">
         <div className="account-test-chat-title">
           <span className="material-symbols-outlined">forum</span>
-          <h5>Test chat</h5>
+          <h5>{t("featureA.testChat")}</h5>
         </div>
         {turns.length > 0 ? (
           <button
             type="button"
             className="quota-tracker-icon-btn"
             onClick={() => setTurns([])}
-            aria-label="Clear conversation"
-            title="Clear conversation"
+            aria-label={t("featureA.clearConversation")}
+            title={t("featureA.clearConversation")}
           >
             <span className="material-symbols-outlined">delete_sweep</span>
           </button>
@@ -126,9 +128,9 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
         value={model}
         onChange={(event) => setModel(event.target.value)}
         disabled={models.length === 0}
-        aria-label="Model to test"
+        aria-label={t("featureA.modelToTest")}
       >
-        {models.length === 0 ? <option value="">No models</option> : null}
+        {models.length === 0 ? <option value="">{t("featureA.noModels")}</option> : null}
         {models.map((item) => (
           <option key={item.id} value={item.id}>
             {item.name || item.id}
@@ -141,7 +143,7 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
           <p className="account-test-chat-empty account-test-chat-error">{modelsError}</p>
         ) : turns.length === 0 ? (
           <p className="account-test-chat-empty">
-            Send a message to check this account answers. Requests are pinned to it — no failover.
+            {t("featureA.testChatHint")}
           </p>
         ) : (
           turns.map((turn, index) => (
@@ -156,7 +158,7 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
               <p>{turn.content}</p>
               {turn.role === "assistant" && turn.latencyMs !== undefined ? (
                 <span className="account-test-chat-meta">
-                  {turn.latencyMs} ms{turn.tokens ? ` · ${turn.tokens} tok` : ""}
+                  {t("featureA.chatLatency", { value: new Intl.NumberFormat(i18n.language).format(turn.latencyMs) })}{turn.tokens ? ` · ${t("featureA.chatTokens", { value: new Intl.NumberFormat(i18n.language).format(turn.tokens) })}` : ""}
                 </span>
               ) : null}
             </div>
@@ -164,7 +166,7 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
         )}
         {sending ? (
           <div className="account-test-chat-turn account-test-chat-turn-assistant">
-            <span className="material-symbols-outlined animate-spin">progress_activity</span>
+            <span className="material-symbols-outlined animate-spin" role="status" aria-label={t("featureA.sending")}>progress_activity</span>
           </div>
         ) : null}
       </div>
@@ -179,12 +181,12 @@ export function AccountTestChat({ secret, credentialId, credentialEnabled }: Pro
               void send();
             }
           }}
-          placeholder={credentialEnabled ? "Ask something…" : "Account is disabled"}
+          placeholder={credentialEnabled ? t("featureA.askSomething") : t("featureA.accountDisabled")}
           rows={2}
           disabled={!credentialEnabled}
         />
         <Button variant="primary" size="sm" icon="send" onClick={() => void send()} disabled={disabled || !draft.trim()}>
-          Send
+          {t("featureA.send")}
         </Button>
       </div>
     </aside>

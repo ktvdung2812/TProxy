@@ -31,6 +31,16 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
       try {
         await i18n.changeLanguage(newLocale);
         setStoredLocale(newLocale);
+        // Keep an explicit URL override in sync so it cannot undo the choice on reload.
+        try {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("lang")) {
+            url.searchParams.set("lang", newLocale);
+            window.history.replaceState(window.history.state, "", url);
+          }
+        } catch {
+          // Storage still preserves the choice when history is unavailable.
+        }
         document.documentElement.lang = newLocale;
       } finally {
         setIsChangingLocale(false);

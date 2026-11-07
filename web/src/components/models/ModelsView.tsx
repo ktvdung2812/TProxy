@@ -24,7 +24,7 @@ import {
   usePageGuide,
   useStoredState,
 } from "../page-kit";
-import { deleteModel, saveModel } from "./api";
+import { deleteModel, saveModel, saveModelRoutes } from "./api";
 import { DiscoveredModels } from "./DiscoveredModels";
 import { ModelCard, ModelRow, type ModelItemHandlers } from "./ModelItem";
 import { ModelFormModal } from "./ModelFormModal";
@@ -48,12 +48,19 @@ type Props = {
   routesByModel: Record<string, RouteRecord[]>;
   providers: ProviderOption[];
   credentialCounts: Record<string, number>;
+  /**
+   * Models received from the cluster hub: their definition is read-only here,
+   * but their fallback chain (route targets) is this node's own and editable.
+   */
+  managedIds?: ReadonlySet<string>;
   /** True while the first snapshot is still loading. */
   loading?: boolean;
   onMutated?: () => void;
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
 };
+
+const NO_MANAGED: ReadonlySet<string> = new Set();
 
 type HealthFilter = "all" | ModelHealth | "discovered";
 type SortMode = "default" | "name" | "attention" | "routes";
@@ -78,6 +85,7 @@ export function ModelsView({
   routesByModel,
   providers,
   credentialCounts,
+  managedIds = NO_MANAGED,
   loading = false,
   onMutated,
   onNotice,
@@ -193,16 +201,18 @@ export function ModelsView({
 
   const pausedStates = useMemo(() => failoverStates.filter((state) => state.state === "open"), [failoverStates]);
 
-  const selectedModels = useMemo(() => models.filter((model) => selectedIds.has(model.ID)), [models, selectedIds]);
-  const allVisibleSelected = visibleViews.length > 0 && visibleViews.every((view) => selectedIds.has(view.model.ID));
-  const partlySelected = !allVisibleSelected && visibleViews.some((view) => selectedIds.has(view.model.ID));
+  // Models received from the cluster hub are read-only, so they never join a bulk selection.
+  const selectedModels = useMemo(() => models.filter((model) => selectedIds.has(model.ID) && !managedIds.has(model.ID)), [models, selectedIds, managedIds]);
+  const selectableViews = useMemo(() => visibleViews.filter((view) => !managedIds.has(view.model.ID)), [visibleViews, managedIds]);
+  const allVisibleSelected = selectableViews.length > 0 && selectableViews.every((view) => selectedIds.has(view.model.ID));
+  const partlySelected = !allVisibleSelected && selectableViews.some((view) => selectedIds.has(view.model.ID));
 
   const toggleSelection = (ids: string[], select: boolean) => {
     setSelectedIds((current) => {
       const next = new Set(current);
       for (const id of ids) {
-        if (select) next.add(id);
-        else next.delete(id);
+        if (select && !managedIds.has(id)) next.add(id);
+        else if (!select) next.delete(id);
       }
       return next;
     });
@@ -279,9 +289,17 @@ export function ModelsView({
     if (!priorityModel) return;
     setSaving(true);
     try {
-      const form = modelToForm(priorityModel, routesByModel[priorityModel.ID] || []);
-      form.routes = routes;
-      await saveModel(secret, form, true);
+      // The latest snapshot copy, so a definition change made while the editor
+      // was open (on the cluster hub, or in another tab) is not written back.
+      const model = models.find((item) => item.ID === priorityModel.ID) ?? priorityModel;
+      if (managedIds.has(model.ID)) {
+        // The hub owns this model's definition; only its routes are saved.
+        await saveModelRoutes(secret, model, routes);
+      } else {
+        const form = modelToForm(model, routesByModel[model.ID] || []);
+        form.routes = routes;
+        await saveModel(secret, form, true);
+      }
       onNotice?.(t("models.notice.prioritySaved", { name: modelLabel(priorityModel) }));
       setPriorityModel(null);
       onMutated?.();
@@ -393,16 +411,20 @@ export function ModelsView({
     else onNotice?.(t("models.notice.pausedReset", { count: pausedStates.length }));
   };
 
+  // The server refuses definition changes (switch, name, aliases, capabilities,
+  // delete) to cluster-managed models; the cards disable those actions too.
+  // Their fallback chain stays editable, and their details open read-only.
+  const editable = (model: ModelRecord) => !managedIds.has(model.ID);
   const handlers: ModelItemHandlers = {
     openPriority: (model) => setPriorityModel(model),
     editDetails: (model) => setDetailsModel(model),
-    setEnabled: (model, enabled) => void setEnabled(model, enabled),
+    setEnabled: (model, enabled) => editable(model) && void setEnabled(model, enabled),
     select: (model, select) => toggleSelection([model.ID], select),
     copyId: (model) => {
       copy(model.ID, model.ID);
       onNotice?.(t("models.notice.copied", { id: model.ID }));
     },
-    remove: (model) => confirmDelete([model]),
+    remove: (model) => editable(model) && confirmDelete([model]),
   };
 
   const hasFilters = healthFilter !== "all" || providerFilter !== "all" || search.trim() !== "";
@@ -564,9 +586,9 @@ export function ModelsView({
                 {
                   key: "select-visible",
                   icon: "select_all",
-                  label: t("models.quick.selectVisible", { count: visibleViews.length }),
-                  disabled: visibleViews.length === 0 || allVisibleSelected,
-                  onSelect: () => toggleSelection(visibleViews.map((view) => view.model.ID), true),
+                  label: t("models.quick.selectVisible", { count: selectableViews.length }),
+                  disabled: selectableViews.length === 0 || allVisibleSelected,
+                  onSelect: () => toggleSelection(selectableViews.map((view) => view.model.ID), true),
                 },
               ]}
             />
@@ -603,11 +625,11 @@ export function ModelsView({
                   type="checkbox"
                   className="cp-check"
                   checked={allVisibleSelected}
-                  disabled={visibleViews.length === 0}
+                  disabled={selectableViews.length === 0}
                   ref={(element) => {
                     if (element) element.indeterminate = partlySelected;
                   }}
-                  onChange={(event) => toggleSelection(visibleViews.map((view) => view.model.ID), event.target.checked)}
+                  onChange={(event) => toggleSelection(selectableViews.map((view) => view.model.ID), event.target.checked)}
                   aria-label={t("models.selectAllVisible")}
                 />
                 <span className="cp-section-icon material-symbols-outlined" aria-hidden>hub</span>
@@ -659,6 +681,7 @@ export function ModelsView({
                   selected={selectedIds.has(view.model.ID)}
                   busy={busyIds.has(view.model.ID) || bulkBusy}
                   discovering={!discovery.ready}
+                  managed={managedIds.has(view.model.ID)}
                 />
               ))}
             </div>
@@ -681,6 +704,7 @@ export function ModelsView({
                   selected={selectedIds.has(view.model.ID)}
                   busy={busyIds.has(view.model.ID) || bulkBusy}
                   discovering={!discovery.ready}
+                  managed={managedIds.has(view.model.ID)}
                 />
               ))}
             </div>
@@ -712,7 +736,7 @@ export function ModelsView({
         selectAll={
           allVisibleSelected
             ? null
-            : { label: t("models.quick.selectVisible", { count: visibleViews.length }), onSelect: () => toggleSelection(visibleViews.map((view) => view.model.ID), true) }
+            : { label: t("models.quick.selectVisible", { count: selectableViews.length }), onSelect: () => toggleSelection(selectableViews.map((view) => view.model.ID), true) }
         }
       >
         <BulkButton icon="toggle_on" disabled={bulkBusy} onClick={() => void bulkSetEnabled(true)}>
@@ -742,6 +766,7 @@ export function ModelsView({
       <ModelFormModal
         open={Boolean(detailsModel)}
         editing
+        readOnly={detailsModel ? managedIds.has(detailsModel.ID) : false}
         initial={detailsForm}
         existingIds={existingIds}
         saving={saving}
@@ -753,6 +778,7 @@ export function ModelsView({
         open={Boolean(priorityModel)}
         secret={secret}
         model={priorityModel}
+        managed={priorityModel ? managedIds.has(priorityModel.ID) : false}
         routes={priorityRoutes}
         providers={providers}
         credentialCounts={credentialCounts}

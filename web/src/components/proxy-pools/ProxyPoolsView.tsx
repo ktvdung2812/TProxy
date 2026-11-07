@@ -419,9 +419,9 @@ export function ProxyPoolsView({ secret, onError, onNotice, onMutated, providers
     lines.forEach((line, index) => {
       try {
         const parsed = parseProxyLine(line);
-        if (parsed) parsedEntries.push({ ...parsed, lineNumber: index + 1 });
-      } catch (error) {
-        invalidLines.push(t("proxyPools.errorInvalidFormatLine", { line: index + 1, error: error instanceof Error ? error.message : t("proxyPools.errorInvalidFormatGeneric") }));
+        if (parsed) parsedEntries.push({ ...parsed, name: t("featureB.proxyPools.imported", { host: parsed.name.slice("Imported ".length) }), lineNumber: index + 1 });
+      } catch {
+        invalidLines.push(t("proxyPools.errorInvalidFormatLine", { line: index + 1, error: t("proxyPools.errorInvalidFormatGeneric") }));
       }
     });
 

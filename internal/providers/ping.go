@@ -91,6 +91,9 @@ func (r *Registry) pingImage(ctx context.Context, provider store.Provider, crede
 }
 
 func (r *Registry) pingJSON(ctx context.Context, provider store.Provider, credential store.Credential, path string, body []byte, start time.Time, validate func(map[string]any) bool, emptyMessage string) PingResult {
+	if provider.Type == ClusterProviderType {
+		return r.pingClusterJSON(ctx, provider, credential, path, body, start, validate, emptyMessage)
+	}
 	ctx = withCredentialProxy(ctx, credential)
 	headers := authHeaders(provider, credential)
 	headers.Set("Content-Type", "application/json")

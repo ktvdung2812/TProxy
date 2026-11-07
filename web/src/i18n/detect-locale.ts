@@ -22,7 +22,7 @@ function getQueryParamLocale(): AppLocale | null {
 
 function getBrowserLocale(): AppLocale | null {
   try {
-    const languages = navigator.languages || [navigator.language];
+    const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
     for (const lang of languages) {
       const normalized = normalizeLocale(lang);
       if (normalized) return normalized;

@@ -4,6 +4,7 @@ import "testing"
 
 func TestAdminRequestIsAction(t *testing.T) {
 	actions := []string{
+		"/api/admin/cluster/sync",
 		"/api/admin/credentials/c8b83f64-6585-482b-9fff-542d6ebfdd3a/quota",
 		"/api/admin/credentials/account-a/models",
 		"/api/admin/providers/openai-main/health",
@@ -25,6 +26,8 @@ func TestAdminRequestIsAction(t *testing.T) {
 	// provider collection endpoints share a prefix with the probe endpoints
 	// above, so a suffix-only rule would wrongly silence them.
 	mutations := []string{
+		"/api/admin/cluster/create",
+		"/api/admin/cluster/lending",
 		"/api/admin/models",
 		"/api/admin/providers",
 		"/api/admin/credentials",

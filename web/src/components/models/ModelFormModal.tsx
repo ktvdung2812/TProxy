@@ -7,6 +7,7 @@ import { CAPABILITY_OPTIONS, MODEL_ID_REGEX, emptyModelForm, validateModelForm }
 type Props = {
   open: boolean;
   editing: boolean;
+  readOnly?: boolean;
   initial: ModelFormData | null;
   existingIds: string[];
   saving: boolean;
@@ -17,6 +18,7 @@ type Props = {
 export function ModelFormModal({
   open,
   editing,
+  readOnly = false,
   initial,
   existingIds,
   saving,
@@ -78,7 +80,7 @@ export function ModelFormModal({
           <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
             {t("common.cancel")}
           </Button>
-          <Button
+          {!readOnly ? <Button
             variant="primary"
             size="sm"
             icon="save"
@@ -87,13 +89,14 @@ export function ModelFormModal({
             onClick={() => onSubmit(form)}
           >
             {editing ? t("models.form.saveChanges") : t("models.createModel")}
-          </Button>
+          </Button> : null}
         </>
       }
     >
       <div className="model-form">
+        {readOnly ? <p>{t("clusters.managed.hint")}</p> : null}
         <div className="model-form-grid">
-          <Field label={t("models.modelId")} hint={editing ? t("models.form.idLocked") : t("models.form.idHint")}>
+          <Field label={t("featureB.terms.models_modelId")} hint={editing ? t("models.form.idLocked") : t("models.form.idHint")}>
             <Input
               value={form.id}
               disabled={editing}
@@ -105,6 +108,7 @@ export function ModelFormModal({
           <Field label={t("models.displayName")}>
             <Input
               value={form.display_name}
+              disabled={readOnly}
               onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
               placeholder="TD Coder Pro"
             />
@@ -114,6 +118,7 @@ export function ModelFormModal({
         <Field label={t("models.aliases")} hint={t("models.form.aliasesHint")}>
           <Input
             value={form.aliases}
+            disabled={readOnly}
             onChange={(event) => setForm((current) => ({ ...current, aliases: event.target.value }))}
             placeholder="coder, gpt-latest"
           />
@@ -122,11 +127,13 @@ export function ModelFormModal({
         <div className="model-form-toggles">
           <Toggle
             checked={form.enabled}
+            disabled={readOnly}
             onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))}
             label={t("models.form.enabled")}
           />
           <Toggle
             checked={form.rewrite_response_model}
+            disabled={readOnly}
             onChange={(event) =>
               setForm((current) => ({ ...current, rewrite_response_model: event.target.checked }))
             }
@@ -140,6 +147,7 @@ export function ModelFormModal({
               <button
                 key={capability}
                 type="button"
+                disabled={readOnly}
                 className={`model-form-capability${form.capabilities.includes(capability) ? " active" : ""}`}
                 onClick={() => toggleCapability(capability)}
               >
@@ -149,7 +157,7 @@ export function ModelFormModal({
           </div>
         </Field>
 
-        {validationError ? <p className="field-error">{validationError}</p> : null}
+        {validationError ? <p className="field-error">{t(validationError)}</p> : null}
       </div>
     </Modal>
   );

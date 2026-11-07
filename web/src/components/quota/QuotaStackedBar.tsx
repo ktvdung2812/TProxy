@@ -31,7 +31,7 @@ const AGGREGATE_KEY = "weekly";
  * could already be spent.
  */
 export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const aggregate = rows.find((row) => row.key === AGGREGATE_KEY);
   const segments = rows.filter((row) => row.key.startsWith(BREAKDOWN_PREFIX));
   const others = rows.filter((row) => row.key !== AGGREGATE_KEY && !row.key.startsWith(BREAKDOWN_PREFIX));
@@ -40,19 +40,19 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
   // nothing to say; the caller falls back to the table.
   if (!aggregate) return null;
 
-  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
+  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage, i18n.language);
   const usedPct = Math.max(0, Math.min(100, 100 - aggregate.remaining));
   const tone = getColorTone(aggregate.remaining);
-  const countdown = formatResetTime(aggregate.reset_at);
-  const absoluteReset = formatResetAbsolute(aggregate.reset_at);
+  const countdown = formatResetTime(aggregate.reset_at, i18n.language);
+  const absoluteReset = formatResetAbsolute(aggregate.reset_at, i18n.language);
   const ordered = [...segments].sort((a, b) => b.used - a.used);
 
   return (
     <div className="quota-stacked">
       <div className="quota-tracker-table-meta">
-        <span>{formatQuotaName(aggregate.name)}</span>
+        <span>{formatQuotaName(aggregate.name, i18n.language)}</span>
         {proxyUsageLabel ? (
-          <span className="quota-tracker-table-meta-usage" title="Local proxy usage (all time)">
+          <span className="quota-tracker-table-meta-usage" title={t("featureA.localUsage")}>
             {proxyUsageLabel}
           </span>
         ) : null}
@@ -72,14 +72,14 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
       <div
         className="quota-stacked-bar"
         role="img"
-        aria-label={`${usedPct}% of the weekly limit used`}
+        aria-label={t("featureA.weeklyUsed", { value: usedPct })}
       >
         {ordered.map((segment, index) => (
           <div
             key={segment.key}
             className={cn("quota-stacked-segment", `quota-stacked-segment-${Math.min(index, 4)}`)}
             style={{ width: `${Math.max(0, Math.min(100, segment.used))}%` }}
-            title={`${formatQuotaName(segment.name)}: ${segment.used}%`}
+            title={`${formatQuotaName(segment.name, i18n.language)}: ${segment.used}%`}
           />
         ))}
       </div>
@@ -89,15 +89,15 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
           {ordered.map((segment, index) => (
             <li key={segment.key} className="quota-stacked-legend-item">
               <span className={cn("quota-stacked-swatch", `quota-stacked-segment-${Math.min(index, 4)}`)} aria-hidden />
-              <span className="quota-stacked-legend-name">{formatQuotaName(segment.name)}</span>
+              <span className="quota-stacked-legend-name">{formatQuotaName(segment.name, i18n.language)}</span>
               <span className="quota-stacked-legend-value">{segment.used}%</span>
               {onHide ? (
                 <button
                   type="button"
                   className="quota-stacked-hide"
                   onClick={() => onHide(segment)}
-                  aria-label={`Hide quota ${segment.name}`}
-                  title="Hide this quota"
+                  aria-label={t("quota.hideQuotaNamed", { name: segment.name })}
+                  title={t("quota.hideQuotaRow")}
                 >
                   <span className="material-symbols-outlined">visibility_off</span>
                 </button>
@@ -113,7 +113,7 @@ export function QuotaStackedBar({ rows, proxyUsage, onHide }: Props) {
         const rowTone = getColorTone(row.remaining);
         return (
           <div key={row.key} className="quota-stacked-extra">
-            <span className="quota-stacked-extra-name">{formatQuotaName(row.name)}</span>
+            <span className="quota-stacked-extra-name">{formatQuotaName(row.name, i18n.language)}</span>
             <div className={cn("quota-tracker-progress", `quota-tracker-progress-${rowTone}`)}>
               <div className="quota-tracker-progress-fill" style={{ width: `${Math.min(row.remaining, 100)}%` }} />
             </div>

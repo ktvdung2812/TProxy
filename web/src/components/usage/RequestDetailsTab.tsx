@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyPanel, IconAction, PageNote, SectionHead, StatusPill, ToolButton } from "../page-kit";
@@ -38,8 +39,8 @@ export const isEventOk = (event: UsageEvent) => event.status >= 200 && event.sta
 function fmtStamp(iso: string) {
   const date = new Date(iso);
   return {
-    time: date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-    day: date.toLocaleDateString([], { month: "short", day: "numeric" }),
+    time: date.toLocaleTimeString(i18n.resolvedLanguage || i18n.language, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    day: date.toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: "short", day: "numeric" }),
   };
 }
 
@@ -181,7 +182,7 @@ export function RequestDetailsTab({
                 onKeyDown={(keyEvent) => onRowKey(keyEvent, event)}
                 aria-label={t("usage.log.openRow", { model: event.public_model_id, time: stamp.time })}
               >
-                <span className="cp-cell cp-cell-main us-stamp" title={new Date(event.created_at).toLocaleString()}>
+                <span className="cp-cell cp-cell-main us-stamp" title={new Date(event.created_at).toLocaleString(i18n.resolvedLanguage || i18n.language)}>
                   <strong>{stamp.time}</strong>
                   <small>{stamp.day}</small>
                 </span>

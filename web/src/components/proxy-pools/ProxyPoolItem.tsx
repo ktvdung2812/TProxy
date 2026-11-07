@@ -180,7 +180,7 @@ export function ProxyPoolCard({ view, handlers }: ItemProps) {
       </div>
       <footer className="cp-card-foot">
         <div className="cp-card-meta">
-          <span title={t("proxyPools.poolId")}>
+          <span title={t("featureB.terms.proxyPools_poolId")}>
             <span className="material-symbols-outlined" aria-hidden>tag</span>
             {view.pool.id}
           </span>

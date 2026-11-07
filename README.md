@@ -21,6 +21,7 @@ tproxy sits between your applications and upstream AI providers. Clients talk to
 - [Configuration](#configuration)
 - [Client integration](#client-integration)
 - [Deployment](#deployment)
+- [Clusters](#clusters)
 - [CLI operations](#cli-operations)
 - [Security](#security)
 - [Development](#development)
@@ -44,7 +45,7 @@ Modern AI workflows often depend on several providers — OpenAI subscriptions, 
 | OAuth is painful on a server | **Built-in OAuth wizards** (browser PKCE, device flow, provider-specific profiles) |
 | No visibility into spend | **Usage, quota, pricing estimates**, request logs, and audit events |
 
-tproxy is designed for **local machines, developer workstations, and single-node servers**. Persistence is SQLite-only — no external database cluster required.
+tproxy is designed for **local machines, developer workstations, and single-node servers**. Nodes can also join a cluster to share capacity; each node keeps its own SQLite database, with one process per database file.
 
 ---
 
@@ -90,6 +91,8 @@ The management endpoint is `POST /api/admin/import/sub2api`, with a JSON export 
 The response includes `counts.skipped` and an `accounts` plan containing the account label, email, provider/credential IDs, and action (`create`, `update`, or `skip_duplicate`). A batch preview checks each file against the current database without saving earlier files, so duplicate counts across files can differ at import time.
 
 ### Operations & governance
+
+- **Clusters** — share account capacity between independent nodes by forwarding requests, without sharing provider credentials.
 
 - **Client API keys** default to all models and inherit limits from available accounts. Per-key endpoint, RPM, concurrency, input size, output token, media-job, and daily-budget policies can tighten this shared capacity.
 - **Teams** with scoped limits and cost aggregation.
@@ -597,6 +600,81 @@ For remote management or OAuth callbacks on a public host, set `server.allow-rem
 
 ---
 
+## Clusters
+
+Clusters let independent tproxy nodes, including nodes owned by different people, share account capacity by forwarding requests. Accounts and OAuth tokens stay on their owner’s node, and upstream calls use that node’s IP. Every node retains its own SQLite database; never run more than one process against the same database file.
+
+One reachable **Hub** coordinates the cluster and relays traffic between members. Members dial out to the Hub over a WebSocket carrying HTTP/2, so they can run behind NAT. The Hub can lend and borrow capacity just like a member.
+
+```mermaid
+flowchart LR
+    Client --> A[Member A]
+    A --> Hub[Hub relay]
+    Hub --> B[Member B]
+    B --> Upstream[Upstream provider]
+```
+
+### Create and join a cluster
+
+1. On the Hub, open **Infrastructure → Clusters** in the dashboard and create a cluster. Set a Hub URL reachable by every member: a LAN address, Cloudflare Tunnel URL, or Tailscale address. Alternatively:
+
+   ```bash
+   tproxy cluster create --name MyCluster --hub-url https://hub.example.com
+   ```
+
+   HTTPS is required except for loopback, private LAN and Tailscale `100.64.0.0/10` addresses when insecure HTTP is explicitly allowed. For those addresses, use `--allow-insecure` or the dashboard option; the UI warns about plain HTTP.
+2. Issue a join token in the Hub dashboard or run `tproxy cluster token`. Tokens start with `tpc1_`, expire after 24 hours and are single use by default. Treat them as secrets.
+3. Set `TPROXY_MASTER_KEY` on the member so its node token can be stored encrypted. Join in **Infrastructure → Clusters** by pasting the token and reviewing the lending defaults, or run:
+
+   ```bash
+   tproxy cluster join <token> --name MemberA
+   ```
+
+   For a headless or Docker node, set `TPROXY_MASTER_KEY` and these environment variables before startup:
+
+   ```bash
+   TPROXY_CLUSTER_JOIN_TOKEN=<token>
+   TPROXY_CLUSTER_NODE_NAME=MemberA
+   # Only for an allowed HTTP Hub URL:
+   TPROXY_CLUSTER_ALLOW_INSECURE=1
+   ```
+
+   Auto-join runs while the node is standalone and retries if the Hub is unreachable. Set `TPROXY_SKIP_CLUSTER_AUTO=1` to disable cluster background work.
+
+### Lending and borrowing
+
+Each node controls lending: enable or disable it, select models (an empty list means every shared model), and set per-borrowing-node limits for requests per minute, concurrent streams, maximum input bytes and daily USD budget. Joining defaults to lending on, 20 RPM and 2 concurrent streams; the join form shows these defaults for the owner’s consent. Relayed requests run under the synthetic client `cluster:<originNodeID>`, so existing per-key limits, budgets and usage apply.
+
+Borrowing is enabled by default. In `fallback` mode, the default, peers are used after local accounts fail or run out. In `shared` mode, cluster capacity is balanced with local routes. Peers appear as accounts of the managed `tproxy-cluster` provider, so normal cooldowns, rotation, usage and session affinity apply; sticking to one peer helps keep prompt caches warm. Relayed requests never hop twice.
+
+### Catalog and ledger
+
+The Hub admin chooses public models and their global aliases, combos and client API keys to share; keys are shared by hash only. Members receive them as read-only managed items. A local item with the same ID wins and is reported as a conflict. Routes are never synced: on each member’s **Models** page, attach local provider routes to a cluster model to contribute capacity. Providers and credentials are never synced. A cluster key used on a member is subject to the intersection of the key’s policy and that member’s lending policy. The Hub can set a cluster price per model for borrower budgets.
+
+Config export keeps those local routes in a `cluster-routes` section, because the managed model definitions themselves are not exported. On import, routes for a model that already exists are attached at once; routes for a model the node has not synced yet are kept as pending and attached when the catalog delivers it. An import that tries to redefine a Hub-managed model, combo, alias or key is rejected with `cluster_managed`.
+
+Every member can read the ledger for 1 or 7 days, showing requests, tokens and cost consumed by each borrower from each lender.
+
+### Security and troubleshooting
+
+Join and node tokens are stored hashed on the Hub; the member’s node token is encrypted with its master key. Revoking a node immediately closes its link. Node endpoints use their own token authentication, separate from the management secret, and member link endpoints are reachable only over the link. Members trust the Hub to state the origin node of relayed requests.
+
+- `master_key_required`: set `TPROXY_MASTER_KEY` on the member.
+- `insecure_hub_url`: use HTTPS, or allow insecure HTTP for an eligible LAN or Tailscale IP.
+- `hub_unreachable`: check the URL, tunnel and firewall. A LAN Hub’s `server.host` must not bind only to loopback.
+- `revoked`: the Hub revoked this node; leave and join again with a new token.
+- `hub_listens_on_loopback`: use a tunnel or LAN URL.
+
+### v1 limitations
+
+- One Hub, without high availability.
+- Claude and OpenAI streams relayed through a peer are re-rendered from canonical events; Responses streams pass through byte-exact.
+- Cluster-key limits apply per node, not cluster-wide.
+- There is no mTLS; rely on the Hub’s HTTPS.
+- Usage recorded before schema version 24 has no stored borrower, so the ledger still classifies those rows by the keys currently shared. Usage recorded after the upgrade keeps its borrower even if the Hub stops sharing the key.
+
+---
+
 ## CLI operations
 
 ```bash
@@ -620,9 +698,19 @@ tproxy --config config.yaml --integrity-check
 tproxy --config config.yaml --export-auth oauth-bundle.enc
 tproxy --config config.yaml --import-auth oauth-bundle.enc
 
+# Cluster operations
+tproxy cluster status [--json]
+tproxy cluster create --name N --hub-url URL [--allow-insecure] [--no-lend] [--rpm 20] [--streams 2]
+tproxy cluster token [--label L] [--ttl 24h] [--uses 1]
+tproxy cluster join <token> [--name N] [--owner O] [--allow-insecure] [--no-lend] [--rpm 20] [--streams 2]
+tproxy cluster leave [--yes]
+tproxy cluster dissolve [--yes]
+
 # Remote CLI connect (tunnel to a running instance)
 tproxy connect <remote-url>
 ```
+
+Cluster commands also accept `--url` (default `TPROXY_URL` or `http://127.0.0.1:28120`) and `--secret` (default `TPROXY_ADMIN_SECRET`).
 
 Electron desktop shell (optional): `cd electron && npm install && npm start` — tray icon, hide-to-tray, and **Start at Login**.
 

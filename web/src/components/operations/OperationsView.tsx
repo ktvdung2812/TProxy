@@ -162,7 +162,7 @@ export function OperationsView({ secret, providers, credentials = {} }: Props) {
             resourceDetail = [provider, subject.modelId].filter(Boolean).join(" · ");
             filterQuery = subject.credentialId || subject.modelId;
           } else if (alert.kind === "route_unavailable") {
-            resourceDetail = t("operations.modelResource");
+            resourceDetail = t("featureB.terms.operations_modelResource");
           } else {
             resourceLabel = accountLabel(alert.resource_id);
             filterQuery = alert.resource_id;

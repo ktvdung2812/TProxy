@@ -73,7 +73,7 @@ export function BackupPanel({ secret, hasUnsavedChanges, onError, onNotice, onMu
     <SettingsPanel
       id="backup"
       icon="backup"
-      title={t("settings.page.backupTitle")}
+      title={t("featureB.terms.settings_page_backupTitle")}
       subtitle={t("settings.page.backupSubtitle")}
     >
       <SettingRow label={t("settings.page.exportLabel")} hint={t("settings.page.exportHint")}>
@@ -105,10 +105,10 @@ export function BackupPanel({ secret, hasUnsavedChanges, onError, onNotice, onMu
         />
       </SettingRow>
 
-      <SettingRow label={t("settings.page.reloadLabel")} hint={t("settings.page.reloadHint")}>
+      <SettingRow label={t("featureB.terms.settings_page_reloadLabel")} hint={t("settings.page.reloadHint")}>
         <div className="st-actions">
           <Button variant="outline" size="sm" icon="restart_alt" loading={reloading} disabled={busy} onClick={() => setConfirmReload(true)}>
-            {reloading ? t("settings.reloading") : t("settings.reloadConfig")}
+            {reloading ? t("settings.reloading") : t("featureB.terms.settings_reloadConfig")}
           </Button>
         </div>
       </SettingRow>
@@ -134,7 +134,7 @@ export function BackupPanel({ secret, hasUnsavedChanges, onError, onNotice, onMu
         open={confirmReload}
         title={t("settings.page.reloadConfirmTitle")}
         message={`${t("settings.page.reloadConfirmMessage")}${unsavedNote}`}
-        confirmText={t("settings.reloadConfig")}
+        confirmText={t("featureB.terms.settings_reloadConfig")}
         cancelText={t("common.cancel")}
         onClose={() => setConfirmReload(false)}
         onConfirm={() => {

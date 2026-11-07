@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useMemo, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyPanel, SectionHead, Segmented, StatusPill, useStoredState } from "../page-kit";
@@ -154,7 +155,7 @@ export function ProviderUsagePanel({ stats, providers, valueMode, selected, onSe
                     </small>
                   </span>
                 </span>
-                <span className="cp-cell us-share" title={`${(share * 100).toFixed(1)}%`}>
+                <span className="cp-cell us-share" title={new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(share)}>
                   <span className="us-share-track">
                     <span className="us-share-fill" style={{ width: `${Math.max(share > 0 ? 2 : 0, share * 100)}%` }} />
                   </span>

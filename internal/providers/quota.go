@@ -88,6 +88,10 @@ func (r *Registry) CredentialQuota(ctx context.Context, provider store.Provider,
 		ProviderType: provider.Type,
 		Quotas:       map[string]QuotaEntry{},
 	}
+	if provider.Type == ClusterProviderType {
+		result.Message = "Quota for a cluster peer is tracked on that node"
+		return result, nil
+	}
 	if credential.ID == "" || credential.Secret == "" {
 		return result, &ProviderError{Code: "authorization_required", Message: "credential has no access token", Status: http.StatusUnauthorized}
 	}

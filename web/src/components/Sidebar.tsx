@@ -21,7 +21,7 @@ export function Sidebar({ onClose, online = true, collapsed = false, onToggleCol
     <aside className={cn("sidebar", collapsed && "is-collapsed")}>
       <div className="sidebar-header">
         <div className="sidebar-brand-row">
-          <NavLink className="sidebar-brand" to="/" onClick={() => onClose?.()} title="tproxy control center">
+          <NavLink className="sidebar-brand" to="/" onClick={() => onClose?.()} title={`tproxy · ${t("nav.controlCenter")}`}>
             <span className="brand-mark">
               <span className="material-symbols-outlined">terminal</span>
             </span>

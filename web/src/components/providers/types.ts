@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 /* Shared types for the providers feature.
    Mirrors the snapshot shapes documented by the tdproxy backend
    (PascalCase for providers/models/routes, snake_case for credentials). */
@@ -99,13 +100,7 @@ export function formatCredentialAddedAt(value?: string) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+  return date.toLocaleString(i18n.resolvedLanguage || i18n.language, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 const SERVICE_PLAN_LABELS: Record<string, string> = {

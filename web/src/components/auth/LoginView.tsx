@@ -33,7 +33,7 @@ export function LoginView({ onLogin }: Props) {
             <span className="material-symbols-outlined">hub</span>
           </span>
           <div>
-            <p className="login-eyebrow">tproxy control center</p>
+            <p className="login-eyebrow">tproxy {t("nav.controlCenter")}</p>
             <h1>{t("auth.login")}</h1>
           </div>
         </div>

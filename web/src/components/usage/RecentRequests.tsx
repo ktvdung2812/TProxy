@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyPanel, SectionHead, Segmented, Tag } from "../page-kit";
@@ -113,7 +114,7 @@ function RecentRequestsPanel({ requests, activeRequests, providers, filter, onFi
                     <span>{fmtCompact(item.promptTokens)}<i aria-hidden>↑</i></span>
                     <span>{fmtCompact(item.completionTokens)}<i aria-hidden>↓</i></span>
                   </span>
-                  <span className="us-live-when" title={new Date(item.timestamp).toLocaleString()}>{fmtTime(item.timestamp, t)}</span>
+                  <span className="us-live-when" title={new Date(item.timestamp).toLocaleString(i18n.resolvedLanguage || i18n.language)}>{fmtTime(item.timestamp, t)}</span>
                 </div>
               );
             })}

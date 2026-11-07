@@ -87,7 +87,7 @@ export function MetricsSection({ views, hasFilters, onClearFilters }: { views: M
             <span className="op-num">{t("operations.latency")}</span>
             <span className="op-num">{t("operations.ttft")}</span>
             <span className="op-num">{t("operations.queue")}</span>
-            <span className="op-num">{t("operations.inputOutput")}</span>
+            <span className="op-num">{t("featureB.terms.operations_inputOutput")}</span>
             <span className="op-num">{t("operations.cacheReadWrite")}</span>
             <span />
           </div>

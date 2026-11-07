@@ -24,7 +24,7 @@ import {
   useStoredState,
 } from "../page-kit";
 import { fetchCredentialProxyUsage, type CredentialProxyUsage } from "../quota/api";
-import { formatProxyUsageLabel } from "../quota/utils";
+import { fmtCompact } from "../usage/utils";
 import { maskAccountText } from "../../lib/accountMask";
 import { useAccountMask } from "../../hooks/useAccountMask";
 import {
@@ -507,6 +507,10 @@ export function ProviderAccounts({
   const oauthReady = connectionProfile.methods.some((method) => method.kind === "oauth" && method.available);
   const rankById = new Map(orderedIds.map((id, index) => [id, index + 1]));
 
+  const formatUsage = (usage?: { requests: number; promptTokens: number; completionTokens: number } | null) => usage
+    ? t("featureB.providers.usage", { requests: fmtCompact(usage.requests || 0), tokens: fmtCompact((usage.promptTokens || 0) + (usage.completionTokens || 0)) })
+    : null;
+
   const buildView = (credential: Credential): AccountView => {
     const state = states[credential.id] ?? accountState(credential);
     const primary = credential.email || credential.label || credential.id;
@@ -523,7 +527,7 @@ export function ProviderAccounts({
       supportsQuota,
       quota: quotas.quotaById[credential.id],
       quotaBusy: Boolean(quotas.busyById[credential.id]),
-      usageLabel: formatProxyUsageLabel(usageById[credential.id]),
+      usageLabel: formatUsage(usageById[credential.id]),
       busy: busyById[credential.id] ?? (bulkBusy && selectedIds.includes(credential.id) ? bulkBusy : null),
       selected: selectedIds.includes(credential.id),
       dragging: draggingId === credential.id,
@@ -595,7 +599,7 @@ export function ProviderAccounts({
     setErrorCodeFilter("");
     setStateFilter("all");
   };
-  const usageLabel = formatProxyUsageLabel(usageTotal);
+  const usageLabel = formatUsage(usageTotal);
   const reorderLocked = reordering;
 
   return (

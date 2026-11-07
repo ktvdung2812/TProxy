@@ -1,9 +1,10 @@
+import i18n from "../../i18n/config";
 import { useState, type DragEvent, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Toggle, cn } from "../ui";
 import { ActionMenu, IconAction, StatusPill, Tag, type ActionMenuItem } from "../page-kit";
-import { formatResetTime } from "../quota/utils";
+import { formatQuotaName, formatResetTime } from "../quota/utils";
 import { ACCOUNT_STATE_TONE, relativeAge, timeLeft, type AccountState } from "./providerHealth";
 import type { QuotaView } from "./useAccountQuotas";
 import type { Credential } from "./types";
@@ -52,6 +53,11 @@ export type AccountHandlers = {
 
 type ItemProps = { view: AccountView; handlers: AccountHandlers; reorderLocked: boolean; now: number };
 
+function planLabel(plan: string | undefined, t: TFunction) {
+  const keys: Record<string, string> = { Free: "free", Enterprise: "enterprise", Business: "business", Teams: "teams", "Pro (Canceled)": "proCanceled", "Pro (Past Due)": "proPastDue", "Max (Canceled)": "maxCanceled" };
+  return plan && keys[plan] ? t(`featureB.providers.plan.${keys[plan]}`) : plan;
+}
+
 function stop(event: { stopPropagation: () => void }) {
   event.stopPropagation();
 }
@@ -70,9 +76,9 @@ function StatePill({ view, now }: { view: AccountView; now: number }) {
   return (
     <StatusPill
       tone={ACCOUNT_STATE_TONE[view.state]}
-      title={view.credential.cooldown_until && left ? `${t("providers.cooldownUntil")} ${new Date(view.credential.cooldown_until).toLocaleString()}` : t(`providers.accountStateHint.${view.state}`)}
+      title={view.credential.cooldown_until && left ? `${t("providers.cooldownUntil")} ${new Date(view.credential.cooldown_until).toLocaleString(i18n.resolvedLanguage || i18n.language)}` : t(`providers.accountStateHint.${view.state}`)}
     >
-      {left ? t("providers.account.cooldownFor", { time: left }) : t(`providers.accountState.${view.state}`)}
+      {left ? t("featureB.terms.providers_account_cooldownFor", { time: left }) : t(`providers.accountState.${view.state}`)}
     </StatusPill>
   );
 }
@@ -80,7 +86,7 @@ function StatePill({ view, now }: { view: AccountView; now: number }) {
 function authLabel(authType: string, t: TFunction) {
   if (authType === "oauth") return "OAuth";
   if (authType === "api_key") return t("providers.authTypeApiKey");
-  if (authType === "service_account") return t("providers.authTypeServiceAccount");
+  if (authType === "service_account") return t("featureB.terms.providers_authTypeServiceAccount");
   if (authType === "none") return t("providers.authTypeNone");
   return authType;
 }
@@ -219,16 +225,18 @@ function QuotaList({ view, inline }: { view: AccountView; inline?: boolean }) {
   return (
     <div className={cn("pv-quota", inline && "is-inline")}>
       {shown.map((row) => {
-        const reset = formatResetTime(row.resetAt).replace(/^(\d+d \d+h) \d+m$/, "$1");
+        const language = i18n.resolvedLanguage || i18n.language;
+        const name = formatQuotaName(row.name, language);
+        const reset = formatResetTime(row.resetAt, language).replace(/^(\d+d \d+h) \d+m$/, "$1");
         return (
           <div key={row.key} className={cn("pv-quota-row", `cp-tone-${row.tone}`)}>
             <div className="pv-quota-head">
-              <span className="pv-quota-name" title={row.name}>{row.name}</span>
+              <span className="pv-quota-name" title={name}>{name}</span>
               <span className="pv-quota-value">{row.value}</span>
               {!inline && reset !== "-" ? <span className="pv-quota-reset" title={t("providers.account.resetsIn", { time: reset })}>{reset}</span> : null}
             </div>
             {row.percent !== null ? (
-              <div className="cp-meter-track" role="meter" aria-label={row.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={row.percent}>
+              <div className="cp-meter-track" role="meter" aria-label={name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={row.percent}>
                 <div className="cp-meter-fill" style={{ width: `${row.percent}%` }} />
               </div>
             ) : null}
@@ -290,7 +298,7 @@ export function AccountCard(props: ItemProps) {
           <strong title={view.label}>{view.label}</strong>
           <div className="cp-card-tags">
             <StatePill view={view} now={now} />
-            {view.quota?.plan ? <Tag title={t("providers.account.plan", { plan: view.quota.plan })}>{view.quota.plan}</Tag> : null}
+            {view.quota?.plan ? <Tag title={t("providers.account.plan", { plan: planLabel(view.quota.plan, t) })}>{planLabel(view.quota.plan, t)}</Tag> : null}
             <Tag tone="neutral">{authLabel(credential.auth_type, t)}</Tag>
             {credential.last_error_code ? <Tag tone="danger" title={credential.last_error || credential.last_error_code}>{credential.last_error_code}</Tag> : null}
           </div>
@@ -321,7 +329,7 @@ export function AccountCard(props: ItemProps) {
             </span>
           ) : null}
           {used ? (
-            <span title={new Date(credential.last_used_at!).toLocaleString()}>
+            <span title={new Date(credential.last_used_at!).toLocaleString(i18n.resolvedLanguage || i18n.language)}>
               <span className="material-symbols-outlined" aria-hidden>history</span>
               {t("providers.account.usedAgo", { time: used })}
             </span>
@@ -349,7 +357,7 @@ export function AccountRow(props: ItemProps) {
   const { view, handlers, now } = props;
   const { t } = useTranslation();
   const { credential } = view;
-  const details = [view.number ? `#${view.number}` : null, view.secondary, view.quota?.plan, authLabel(credential.auth_type, t)].filter(Boolean).join(" · ");
+  const details = [view.number ? `#${view.number}` : null, view.secondary, planLabel(view.quota?.plan, t), authLabel(credential.auth_type, t)].filter(Boolean).join(" · ");
   return (
     <div
       className={itemClasses(view, "pv-account-row")}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tproxy/tproxy/internal/canonical"
 	"github.com/tproxy/tproxy/internal/config"
+	"github.com/tproxy/tproxy/internal/providers"
 	"github.com/tproxy/tproxy/internal/store"
 )
 
@@ -218,6 +219,9 @@ func (r *Router) Capacity(ctx context.Context, key *store.APIKey, modelID string
 				return result, err
 			}
 			credentials = filterAllowedCredentials(credentials, metadata)
+			if provider.Type == providers.ClusterProviderType {
+				credentials = filterServedModels(credentials, route.UpstreamModel)
+			}
 			for _, credential := range credentials {
 				if !seenQuota[credential.ID] && (credential.Enabled || store.QuotaAutoDisabled(credential.Metadata)) && !store.AccountExpired(credential, now) && credential.Status != "auth_required" {
 					result.QuotaWindows = append(result.QuotaWindows, r.CachedQuota(credential.ID, provider.Type))

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Modal } from "../ui";
+import { Button, Modal, cn } from "../ui";
 import { storeApiKeySecretsFrom9routerBackup } from "../../lib/apiKeySecrets";
 import { importData, type ImportResult } from "./api";
+import { useFileDrop } from "./useFileDrop";
 
 type Props = {
   open: boolean;
@@ -11,6 +12,8 @@ type Props = {
   onNotice?: (message: string) => void;
   onError?: (message: string) => void;
   onMutated?: () => void;
+  /** Files dropped elsewhere (e.g. on the page) that the dialog previews as soon as it opens. */
+  initialFiles?: File[] | null;
 };
 
 type FilePlan = {
@@ -35,7 +38,11 @@ function supportsAccountOptions(plan: FilePlan) {
   return plan.preview?.source === "sub2api" || plan.preview?.source === "chatgpt";
 }
 
-export function ImportModal({ open, secret, onClose, onNotice, onError, onMutated }: Props) {
+function fileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+export function ImportModal({ open, secret, onClose, onNotice, onError, onMutated, initialFiles }: Props) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [plans, setPlans] = useState<FilePlan[]>([]);
@@ -44,25 +51,37 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
   const pending = plans.filter((plan) => !plan.imported);
   const canImport = pending.length > 0 && pending.every((plan) => plan.reviewed && !plan.error);
 
+  const consumedInitialFiles = useRef<File[] | null>(null);
   useEffect(() => {
-    if (!open) return;
-    setPlans([]);
+    if (!open) {
+      consumedInitialFiles.current = null;
+      return;
+    }
     setBusy(null);
     setSkipDuplicates(true);
-  }, [open]);
+    if (initialFiles?.length && consumedInitialFiles.current !== initialFiles) {
+      consumedInitialFiles.current = initialFiles;
+      addFiles(initialFiles, [], true);
+    } else {
+      setPlans([]);
+    }
+    // Runs once per opening; addFiles is recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFiles]);
 
   const summary = (result: ImportResult) => Object.entries(result.result.counts)
     .filter(([, count]) => count > 0)
     .map(([key, count]) => t(`import.counts.${key}`, { count }))
     .join(" · ");
 
-  const run = async (rows: FilePlan[], dryRun: boolean) => {
+  const run = async (rows: FilePlan[], dryRun: boolean, from = 0, skip = skipDuplicates) => {
     setBusy(dryRun ? "preview" : "import");
     const next = [...rows];
     let attemptedImport = false;
     let importedFiles = 0;
+    let failedFiles = 0;
     try {
-      for (let index = 0; index < next.length; index++) {
+      for (let index = from; index < next.length; index++) {
         const row = next[index]!;
         if (row.imported) continue;
         try {
@@ -77,7 +96,7 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
           }
           attemptedImport ||= !dryRun;
           const preview = await importData(secret, payload, {
-            dryRun, maxAccounts: row.importCount, skipDuplicates,
+            dryRun, maxAccounts: row.importCount, skipDuplicates: skip,
           });
           const hasRecords = Object.values(preview.result.counts).some((count) => count > 0);
           const error = !preview.result.ok
@@ -96,22 +115,40 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
         } catch (error) {
           next[index] = { ...row, reviewed: false, error: error instanceof Error ? error.message : t("import.failedFile") };
         }
+        if (next[index]!.error) failedFiles++;
         setPlans([...next]);
       }
       if (!dryRun && importedFiles) onNotice?.(t("import.batchDone", { count: importedFiles }));
-      if (next.some((row) => row.error)) onError?.(t("import.checkFileErrors"));
+      if (failedFiles) onError?.(t("import.checkFileErrors"));
     } finally {
       if (attemptedImport) onMutated?.();
       setBusy(null);
     }
   };
 
-  const selectFiles = (files: FileList | null) => {
-    if (!files?.length || busy) return;
-    const next = Array.from(files, (file): FilePlan => ({ file }));
+  // New files are appended to the list (same file twice is ignored) and only
+  // the new ones are previewed.
+  const addFiles = (files: File[], base: FilePlan[], skip = skipDuplicates) => {
+    const seen = new Set(base.map((plan) => fileKey(plan.file)));
+    const added: FilePlan[] = [];
+    for (const file of files) {
+      const key = fileKey(file);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      added.push({ file });
+    }
+    if (!added.length) return;
+    const next = [...base, ...added];
     setPlans(next);
-    void run(next, true);
+    void run(next, true, base.length, skip);
   };
+
+  const selectFiles = (files: File[]) => {
+    if (!files.length || busy) return;
+    addFiles(files, plans);
+  };
+
+  const dragging = useFileDrop(open, selectFiles);
 
   return (
     <Modal
@@ -135,14 +172,14 @@ export function ImportModal({ open, secret, onClose, onNotice, onError, onMutate
       }
     >
       <input ref={inputRef} type="file" accept="application/json,.json" multiple hidden onChange={(event) => {
-        selectFiles(event.target.files);
+        selectFiles(Array.from(event.target.files ?? []));
         event.target.value = "";
       }} />
       <div className="import-modal-panel">
         <p>{t("import.supportedFormats")}</p>
-        <button type="button" className="import-modal-dropzone" disabled={!!busy} onClick={() => inputRef.current?.click()}>
-          <span className="material-symbols-outlined" aria-hidden>upload_file</span>
-          <strong>{t("import.chooseFiles")}</strong>
+        <button type="button" className={cn("import-modal-dropzone", dragging && !busy && "is-dragging")} disabled={!!busy} onClick={() => inputRef.current?.click()}>
+          <span className="material-symbols-outlined" aria-hidden>{dragging && !busy ? "file_download" : "upload_file"}</span>
+          <strong>{dragging && !busy ? t("import.dropFilesHere") : t("import.chooseOrDropFiles")}</strong>
           <span>{t("import.autoDetect")}</span>
         </button>
         {plans.some(supportsAccountOptions) ? (

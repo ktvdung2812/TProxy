@@ -308,14 +308,14 @@ export function KiroAuthModal({
 
       {method === "idc" ? (
         <div className="oauth-connect">
-          <Field label={t("providers.kiroAuthIdcStartUrl")} hint={t("providers.kiroAuthIdcStartUrlHint")}>
+          <Field label={t("featureB.terms.providers_kiroAuthIdcStartUrl")} hint={t("providers.kiroAuthIdcStartUrlHint")}>
             <Input
               value={idcStartUrl}
               onChange={(e) => setIdcStartUrl(e.target.value)}
               placeholder="https://your-org.awsapps.com/start"
             />
           </Field>
-          <Field label={t("providers.kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
+          <Field label={t("featureB.terms.providers_kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
             <Input value={idcRegion} onChange={(e) => setIdcRegion(e.target.value)} placeholder="us-east-1" />
           </Field>
           {errorMsg ? <p className="oauth-inline-error">{errorMsg}</p> : null}
@@ -336,7 +336,7 @@ export function KiroAuthModal({
               <p>{t("providers.kiroAuthTokenDetected")}</p>
             </div>
           ) : null}
-          <Field label={t("providers.kiroAuthRefreshToken")}>
+          <Field label={t("featureB.terms.providers_kiroAuthRefreshToken")}>
             <Input value={refreshToken} onChange={(e) => setRefreshToken(e.target.value)} placeholder="aorAAAAAG..." />
           </Field>
           {!autoDetecting ? (
@@ -368,7 +368,7 @@ export function KiroAuthModal({
           <Field label={t("providers.kiroAuthApiKeyField")}>
             <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t("providers.kiroAuth.apiKeyPlaceholder")} />
           </Field>
-          <Field label={t("providers.kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
+          <Field label={t("featureB.terms.providers_kiroAuthAwsRegion")} hint={t("providers.kiroAuthAwsRegionHint")}>
             <Input value={apiKeyRegion} onChange={(e) => setApiKeyRegion(e.target.value)} placeholder="us-east-1" />
           </Field>
           {errorMsg ? <p className="oauth-inline-error">{errorMsg}</p> : null}

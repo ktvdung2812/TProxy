@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -286,6 +287,7 @@ export function Modal({
   children,
   ...props
 }: ModalProps) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -327,7 +329,7 @@ export function Modal({
               </div>
             </div>
             {headerAction ? <div className="modal-head-action">{headerAction}</div> : null}
-            <button className="modal-close" onClick={onClose} aria-label="Close">
+            <button className="modal-close" onClick={onClose} aria-label={t("common.close")}>
               <span className="material-symbols-outlined">close</span>
             </button>
           </div>
@@ -379,12 +381,13 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmText = "Confirm",
-  cancelText = "Cancel",
+  confirmText,
+  cancelText,
   variant = "primary",
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <Modal
       open={open}
@@ -395,10 +398,10 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" size="md" onClick={onClose}>
-            {cancelText}
+            {cancelText ?? t("common.cancel")}
           </Button>
           <Button variant={variant} size="md" onClick={onConfirm}>
-            {confirmText}
+            {confirmText ?? t("common.confirm")}
           </Button>
         </>
       }

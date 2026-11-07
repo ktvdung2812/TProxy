@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { UsageBucketEntry, UsageActiveRequest, UsageRecentRequest } from "./api";
 
 /** Time ranges the stats and chart endpoints accept; labels live under usage.period.*. */
@@ -7,31 +8,13 @@ export type UsageTableView = "model" | "account" | "apiKey" | "endpoint";
 export const USAGE_TABLE_VIEWS: UsageTableView[] = ["model", "account", "apiKey", "endpoint"];
 export type UsageValueMode = "tokens" | "costs";
 
-export const fmt = (value: number) => new Intl.NumberFormat().format(value || 0);
+export const fmt = (value: number) => new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language).format(value || 0);
 export function fmtCompact(value: number) {
-  const normalized = Number.isFinite(value) ? value : 0;
-  const units = ["", "K", "M", "B", "T"];
-  let scaled = Math.abs(normalized);
-  let unitIndex = 0;
-
-  while (scaled >= 1000 && unitIndex < units.length - 1) {
-    scaled /= 1000;
-    unitIndex += 1;
-  }
-
-  // Avoid values such as 1,000K at unit boundaries after rounding.
-  if (Number(scaled.toFixed(2)) >= 1000 && unitIndex < units.length - 1) {
-    scaled /= 1000;
-    unitIndex += 1;
-  }
-
-  if (normalized < 0) scaled *= -1;
-  const compact = new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: unitIndex === 0 ? 0 : 2,
-  }).format(scaled);
-  return `${compact}${units[unitIndex]}`;
+  return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, {
+    notation: "compact", maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
 }
-export const fmtCost = (value: number) => `$${(value || 0).toFixed(2)}`;
+export const fmtCost = (value: number) => new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "currency", currency: "USD" }).format(value || 0);
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -42,19 +25,19 @@ export function fmtTime(iso: string | undefined, t: Translate) {
   if (diffMins < 1) return t("usage.time.justNow");
   if (diffMins < 60) return t("usage.time.minutesAgo", { count: diffMins });
   if (diffMins < 1440) return t("usage.time.hoursAgo", { count: Math.floor(diffMins / 60) });
-  return new Date(iso).toLocaleDateString();
+  return new Date(iso).toLocaleDateString(i18n.resolvedLanguage || i18n.language);
 }
 
 /** Cost with sub-cent precision for single requests, cents for totals. */
 export function fmtCostPrecise(value: number) {
   const amount = value || 0;
-  if (amount > 0 && amount < 0.01) return `$${amount.toFixed(4)}`;
+  if (amount > 0 && amount < 0.01) return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "currency", currency: "USD", minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(amount);
   return fmtCost(amount);
 }
 
 export function fmtMs(value: number | null | undefined) {
   if (value === null || value === undefined) return "—";
-  if (value >= 10_000) return `${(value / 1000).toFixed(1)} s`;
+  if (value >= 10_000) return `${new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value / 1000)} s`;
   return `${fmt(Math.round(value))} ms`;
 }
 

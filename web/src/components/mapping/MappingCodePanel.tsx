@@ -67,7 +67,7 @@ export function MappingCodePanel({ client, apiKeys, overrides, data }: Props) {
   const { content, filename, language, hint } = useMemo(() => {
     if (client === "cursor") {
       return {
-        content: buildCursorSetupGuide(baseUrl, apiKey, overrides),
+        content: buildCursorSetupGuide(baseUrl, apiKey, overrides, t),
         filename: "cursor-setup.txt",
         language: "text",
         hint: t("mapping.cursorSetupHint"),

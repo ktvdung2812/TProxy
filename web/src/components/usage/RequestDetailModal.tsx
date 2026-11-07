@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAction, StatusPill } from "../page-kit";
@@ -83,14 +84,14 @@ export function RequestDetailModal({ event, onClose, providerName, providerType,
         ) : null}
 
         <Facts title={t("usage.request.routing")} icon="alt_route">
-          <Fact label={t("usage.publicModel")} mono>{event.public_model_id || "—"}</Fact>
-          <Fact label={t("usage.upstreamModel")} mono>{event.upstream_model || "—"}</Fact>
+          <Fact label={t("featureB.terms.usage_publicModel")} mono>{event.public_model_id || "—"}</Fact>
+          <Fact label={t("featureB.terms.usage_upstreamModel")} mono>{event.upstream_model || "—"}</Fact>
           <Fact label={t("usage.provider")}>{providerName}</Fact>
           <Fact label={t("usage.credential")}>{accountLabel || "—"}</Fact>
           <Fact label={t("usage.apiKey")}>{keyLabel}</Fact>
           <Fact label={t("usage.attempt")}>{String(event.attempt)}</Fact>
           <Fact label={t("operations.reason")}>{event.routing_reason || "—"}</Fact>
-          <Fact label={t("usage.timestamp")}>{new Date(event.created_at).toLocaleString()}</Fact>
+          <Fact label={t("usage.timestamp")}>{new Date(event.created_at).toLocaleString(i18n.resolvedLanguage || i18n.language)}</Fact>
         </Facts>
 
         <Facts title={t("usage.request.timing")} icon="timer">

@@ -69,6 +69,7 @@ type Router struct {
 	modelsRegistry        *pricing.ModelsRegistry
 	circuitBreakers       *resilience.Registry
 	arena                 *intelligence.Arena
+	cluster               clusterHook
 }
 
 type CredentialRefresher interface {
@@ -111,14 +112,19 @@ type RawResult struct {
 
 type RawProxyOptions struct {
 	Method               string
+	RawQuery             string
 	Headers              http.Header
 	RetryNetworkErrors   bool
 	DisableFallback      bool
 	ClientAPIKeyID       string
+	ClusterBorrower      string
 	AllowedCredentialIDs []string
 	Team                 string
 	PinnedProvider       string
 	MediaScopes          []store.MediaJobScope
+	// Relayed marks a request another cluster node relayed here; like every
+	// relayed request it is served from local accounts only.
+	Relayed bool
 }
 
 const AllowedCredentialIDsMetadataKey = "client_allowed_credential_ids"
@@ -142,6 +148,9 @@ func (r *Router) CircuitBreakers() *resilience.Registry {
 	}
 	return r.circuitBreakers
 }
+
+// Registry returns the provider registry requests are dispatched through.
+func (r *Router) Registry() *providers.Registry { return r.registry }
 
 func (r *Router) SetCredentialRefresher(refresher CredentialRefresher) {
 	r.mu.Lock()
@@ -226,6 +235,9 @@ func (r *Router) catalogUpstreamModel(ctx context.Context, model store.PublicMod
 			return route.UpstreamModel, true
 		}
 	}
+	if _, _, ok := r.clusterRoute(model.ID); ok {
+		return model.ID, true
+	}
 	return "", false
 }
 
@@ -238,6 +250,9 @@ func (r *Router) IsModelCatalogVisible(ctx context.Context, model store.PublicMo
 		return true
 	}
 	if registry.KnownModelRef(model.ID) {
+		return true
+	}
+	if _, _, ok := r.clusterRoute(model.ID); ok {
 		return true
 	}
 	for _, alias := range model.Aliases {
@@ -335,15 +350,19 @@ func (r *Router) configureFailover(cfg config.FailoverConfig) {
 // breakerAllows reports whether the provider is still eligible to serve this
 // model. A provider that tripped mid-request is skipped for the rest of the
 // chain walk, so traffic moves straight on to the next priority.
+//
+// The cluster provider is exempt here and in the record helpers: its
+// credentials are independent peers, and per-peer cooldowns already take a
+// failing one out without benching the healthy ones.
 func (r *Router) breakerAllows(modelID, providerID string) bool {
-	if r.circuitBreakers == nil {
+	if r.circuitBreakers == nil || providerID == ClusterProviderID {
 		return true
 	}
 	return r.circuitBreakers.CanExecute(modelID, providerID)
 }
 
 func (r *Router) recordProviderSuccess(modelID, providerID string) {
-	if r.circuitBreakers == nil {
+	if r.circuitBreakers == nil || providerID == ClusterProviderID {
 		return
 	}
 	r.circuitBreakers.RecordSuccess(modelID, providerID)
@@ -353,7 +372,7 @@ func (r *Router) recordProviderFailure(modelID, providerID string, status int, e
 	if localPolicyError(err) {
 		return
 	}
-	if r.circuitBreakers == nil {
+	if r.circuitBreakers == nil || providerID == ClusterProviderID {
 		return
 	}
 	reason := ""
@@ -741,7 +760,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
 			previousFailure = failureReasonForStatus(providers.Status(lastErr))
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -805,7 +824,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 			if r.arena != nil {
 				r.arena.RecordOutcome(selection.Credential, true)
 			}
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, CacheCreationTokens: response.Usage.CacheCreationTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 200, InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens, ReasoningTokens: response.Usage.ReasoningTokens, CachedTokens: response.Usage.CachedTokens, CacheCreationTokens: response.Usage.CacheCreationTokens, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(response.Usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			if model.RewriteResponseModel {
 				response.Model = model.ID
 			}
@@ -814,7 +833,7 @@ func (r *Router) Execute(ctx context.Context, model store.PublicModel, request c
 		lastErr = errExecute
 		status := providers.Status(errExecute)
 		code := providers.Code(errExecute)
-		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 		fallback := shouldFallbackStatus(status)
 		if fallback {
 			r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
@@ -875,7 +894,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
 			previousFailure = failureReasonForStatus(providers.Status(lastErr))
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -903,7 +922,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			credentialsTried--
 			releaseAccount()
 			lastErr = &providers.ProviderError{Status: http.StatusTooManyRequests, Code: "provider_concurrency_limit", Message: fmt.Sprintf("provider %s concurrent stream limit is reached", selection.Provider.ID)}
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: http.StatusTooManyRequests, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: http.StatusTooManyRequests, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if disableFallback(request) {
 				return nil, lastErr
 			}
@@ -967,7 +986,7 @@ func (r *Router) ExecuteStream(ctx context.Context, model store.PublicModel, req
 			r.releaseProviderStream(selection.Provider)
 			lastErr = errExecute
 			status, code := providers.Status(errExecute), providers.Code(errExecute)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 			fallback := shouldFallbackStatus(status)
 			if fallback {
 				r.setCredentialCooldown(ctx, selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, errExecute)
@@ -1068,6 +1087,7 @@ func (r *Router) RefreshMediaJob(ctx context.Context, job store.MediaJob) (*RawR
 func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, requestID, path string, body []byte, contentType string, options RawProxyOptions) (*RawResult, error) {
 	start := time.Now()
 	rawRequestContext := canonical.Request{RequestID: requestID, PublicModelID: model.ID, Source: canonical.ProtocolOpenAI, Metadata: map[string]any{"capability": rawCapability(path), "path": path, "client_api_key_id": options.ClientAPIKeyID, "team": options.Team}}
+	rawRequestContext.Metadata["cluster_borrower"] = options.ClusterBorrower
 	rawRequestContext.Metadata[InputBytesMetadataKey] = int64(len(body))
 	if strings.Contains(contentType, "json") {
 		_ = json.Unmarshal(body, &rawRequestContext.Raw)
@@ -1081,6 +1101,9 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 	}
 	if options.DisableFallback {
 		rawRequestContext.Metadata["disable_fallback"] = true
+	}
+	if options.Relayed {
+		rawRequestContext.Metadata[ClusterRelayedMetadataKey] = true
 	}
 	selections, err := r.selections(ctx, model, rawRequestContext)
 	if err != nil {
@@ -1101,7 +1124,7 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 		prepared, prepareErr := r.prepareCredential(ctx, selection, false)
 		if prepareErr != nil {
 			lastErr = asCredentialError(prepareErr)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, ClusterBorrower: requestClusterBorrower(rawRequestContext), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: 401, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: providers.Code(lastErr), CreatedAt: time.Now()})
 			if options.DisableFallback {
 				return nil, lastErr
 			}
@@ -1151,7 +1174,10 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			}
 		}
 		requestBody := rewriteRequestModel(body, contentType, selection.Route.UpstreamModel)
-		rawRequest := providers.RawRequest{Method: options.Method, Path: path, Body: requestBody, ContentType: contentType, Headers: options.Headers.Clone()}
+		rawRequest := providers.RawRequest{Method: options.Method, Path: path, RawQuery: options.RawQuery, ClientID: options.ClientAPIKeyID, UpstreamModel: selection.Route.UpstreamModel, Body: requestBody, ContentType: contentType, Headers: options.Headers.Clone()}
+		if rawRequest.UpstreamModel == "" {
+			rawRequest.UpstreamModel = model.ID
+		}
 		call := func() (*providers.RawResponse, error) {
 			if err := r.admitProviderRequest(ctx, selection.Provider, rawRequestContext); err != nil {
 				return nil, err
@@ -1179,14 +1205,14 @@ func (r *Router) ProxyWithOptions(ctx context.Context, model store.PublicModel, 
 			}
 			r.clearSuccessfulCooldown(ctx, selection)
 			r.recordProviderSuccess(model.ID, selection.Provider.ID)
-			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
+			_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, ClusterBorrower: requestClusterBorrower(rawRequestContext), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: raw.Status, EstimatedCostUSD: r.estimateCost(canonical.Usage{}, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), CreatedAt: time.Now()})
 			return &RawResult{Selection: selection, Response: raw, MediaReservation: reservation}, nil
 		}
 		reservation.Release()
 		lastErr = errProxy
 		status, code := providers.Status(errProxy), providers.Code(errProxy)
 		r.recordProviderFailure(model.ID, selection.Provider.ID, status, errProxy)
-		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(ctx, store.UsageEvent{RequestID: requestID, ClientAPIKeyID: options.ClientAPIKeyID, ClusterBorrower: requestClusterBorrower(rawRequestContext), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: code, CreatedAt: time.Now()})
 		if status == 0 && !options.RetryNetworkErrors {
 			if options.DisableFallback {
 				return nil, errProxy
@@ -1358,6 +1384,11 @@ func clampFloatTokenCount(value float64) int {
 	return int(value)
 }
 
+func requestClusterBorrower(request canonical.Request) string {
+	borrower, _ := request.Metadata["cluster_borrower"].(string)
+	return borrower
+}
+
 func requestClientAPIKeyID(request canonical.Request) string {
 	if request.Metadata == nil {
 		return ""
@@ -1380,6 +1411,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 		terminal := false
 		errorCode := ""
 		errorMessage := ""
+		var terminalErr error
 		var usage canonical.Usage
 		var ttft *int64
 	stream:
@@ -1428,6 +1460,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 				usage = mergeCanonicalUsage(usage, *event.Usage)
 			}
 			if event.Type == canonical.EventError {
+				terminalErr = event.Err
 				status = providers.Status(event.Err)
 				if status < http.StatusBadRequest {
 					status = http.StatusBadGateway
@@ -1475,7 +1508,9 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 			// Client hung up. Not the provider's fault, so leave its circuit alone.
 		default:
 			r.recordProviderFailure(model.ID, selection.Provider.ID, status, fmt.Errorf("%s", errorCode))
-			if errorCode == providers.CodeUpstreamModelAtCapacity {
+			if selection.Provider.Type == providers.ClusterProviderType && terminalErr != nil && !errors.Is(terminalErr, context.Canceled) && ctx.Err() == nil && !localPolicyError(terminalErr) {
+				r.setCredentialCooldown(context.Background(), selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, terminalErr)
+			} else if errorCode == providers.CodeUpstreamModelAtCapacity {
 				// The stream had already started, so failover was impossible —
 				// but bench this provider/model pair briefly so the next
 				// request tries a different route instead of repeating the
@@ -1486,7 +1521,7 @@ func (r *Router) wrapEvents(ctx context.Context, model store.PublicModel, select
 				r.setCredentialCooldown(context.Background(), selection.Provider.ID, selection.Credential.ID, selection.Route.UpstreamModel, &providers.ProviderError{Status: http.StatusTooManyRequests, Code: errorCode, Message: errorMessage})
 			}
 		}
-		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, CacheCreationTokens: usage.CacheCreationTokens, TTFTMS: ttft, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
+		_ = r.store.AddUsage(context.Background(), store.UsageEvent{RequestID: request.RequestID, ClientAPIKeyID: requestClientAPIKeyID(request), ClusterBorrower: requestClusterBorrower(request), PublicModelID: model.ID, ProviderID: selection.Provider.ID, UpstreamModel: selection.Route.UpstreamModel, CredentialID: selection.Credential.ID, Attempt: selection.Attempt, Status: status, InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.ReasoningTokens, CachedTokens: usage.CachedTokens, CacheCreationTokens: usage.CacheCreationTokens, TTFTMS: ttft, TokensSaved: requestTokensSaved(request), EstimatedCostUSD: r.estimateCost(usage, selection), QueueMS: selection.QueueMS, RoutingReason: selection.RoutingReason, LatencyMS: time.Since(start).Milliseconds(), ErrorCode: errorCode, CreatedAt: time.Now()})
 	}()
 	return out
 }
@@ -1665,6 +1700,10 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 		}
 		routesConsidered++
 		provider, errProvider := r.store.Provider(ctx, route.ProviderID)
+		if errProvider == nil && provider.Type == ClusterProviderID && IsClusterRelayed(request) {
+			// A relayed request is served from local accounts only: one hop, no loops.
+			continue
+		}
 		// Provider status is a cached summary of the last health sync and can lag
 		// behind reality, so treat it as advisory: only a provider that is
 		// actually switched off is skipped here. Credential eligibility below is
@@ -1711,6 +1750,9 @@ func (r *Router) selections(ctx context.Context, model store.PublicModel, reques
 			return nil, errCredentials
 		}
 		credentials = filterAllowedCredentials(credentials, request.Metadata)
+		if provider.Type == providers.ClusterProviderType {
+			credentials = filterServedModels(credentials, route.UpstreamModel)
+		}
 		eligible := store.EligibleCredentials(credentials, now)
 		if len(eligible) == 0 {
 			// Nothing usable here: remember why so the final error names the real
@@ -1973,6 +2015,7 @@ func (r *Router) modelRoutes(ctx context.Context, model store.PublicModel, rotat
 			return nil, err
 		}
 		if len(routes) > 0 {
+			routes = r.withClusterRoute(routeModelID, routes)
 			if rotate {
 				routes = r.rotateRoutes(model.ID, routes)
 			}
@@ -1992,7 +2035,7 @@ func (r *Router) modelRoutes(ctx context.Context, model store.PublicModel, rotat
 				}}, nil
 			}
 		}
-		return nil, nil
+		return r.withClusterRoute(routeModelID, nil), nil
 	}
 	var result []store.RouteTarget
 	for index, comboItem := range model.ComboItems {
@@ -2006,6 +2049,7 @@ func (r *Router) modelRoutes(ctx context.Context, model store.PublicModel, rotat
 				filtered = append(filtered, route)
 			}
 		}
+		direct := false
 		if len(filtered) == 0 {
 			if providerPrefix, upstreamModel, ok := splitProviderModelSelector(comboItem.PublicModelID); ok {
 				provider, providerErr := r.store.ProviderByPrefix(ctx, providerPrefix)
@@ -2019,8 +2063,12 @@ func (r *Router) modelRoutes(ctx context.Context, model store.PublicModel, rotat
 						Weight:        1,
 						Enabled:       true,
 					}}
+					direct = true
 				}
 			}
+		}
+		if comboItem.RouteTargetID == "" && !direct {
+			filtered = r.withClusterRoute(comboItem.PublicModelID, filtered)
 		}
 		if rotate {
 			filtered = r.rotateRoutes(comboItem.PublicModelID, filtered)
@@ -2119,6 +2167,10 @@ func (r *Router) rotateRoutes(modelID string, routes []store.RouteTarget) []stor
 // bootstrapBufferingEnabled reports whether a Codex stream from this provider
 // should hold its handshake before the first byte reaches the client.
 func (r *Router) bootstrapBufferingEnabled(provider store.Provider, request canonical.Request) bool {
+	if provider.Type == ClusterProviderID && request.Source == canonical.ProtocolResponses {
+		// A peer's failure before any output then fails over to the next route.
+		return true
+	}
 	if provider.Type != "codex" || request.Source != canonical.ProtocolResponses {
 		return false
 	}

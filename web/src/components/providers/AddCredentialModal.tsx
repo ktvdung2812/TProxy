@@ -96,7 +96,7 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
         provider_id: providerId,
         credential: {
           id: id || `${providerId}-cred-${Date.now().toString(36)}`,
-          label: label || (isCookie ? t("providers.addCredentialWebCookie") : undefined),
+          label: label || (isCookie ? t("featureB.terms.providers_addCredentialWebCookie") : undefined),
           email: email || undefined,
           auth_type: authType,
           secret: resolvedSecret,
@@ -132,7 +132,7 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
           <PageNote icon="info">{method?.authHint || description}</PageNote>
         ) : null}
         <div className="inline-fields">
-          <Field label={t("providers.credentialId")} hint={t("providers.credentialIdHint")}>
+          <Field label={t("featureB.terms.providers_credentialId")} hint={t("providers.credentialIdHint")}>
             <Input placeholder={t("providers.credentialIdPlaceholder")} value={id} onChange={(e) => setId(e.target.value)} />
           </Field>
           <Field label={t("providers.label")}>
@@ -154,7 +154,7 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
             <Field label={t("providers.authType")}>
               <Select value={authType} onChange={(e) => setAuthType(e.target.value as CredentialAuthType)}>
                 <option value="api_key">{t("providers.authTypeApiKey")}</option>
-                <option value="service_account">{t("providers.authTypeServiceAccount")}</option>
+                <option value="service_account">{t("featureB.terms.providers_authTypeServiceAccount")}</option>
                 <option value="none">{t("providers.authTypeNone")}</option>
               </Select>
             </Field>
@@ -165,7 +165,7 @@ export function AddCredentialModal({ open, providerId, providerType, secret, met
         ) : null}
         {needsSecret && (
           <Field
-            label={isCookie ? t("providers.cookieValue") : authType === "service_account" ? t("providers.serviceAccountJson") : isOllamaLocal ? t("providers.apiKeyOptional") : t("providers.apiKey")}
+            label={isCookie ? t("providers.cookieValue") : authType === "service_account" ? t("featureB.terms.providers_serviceAccountJson") : isOllamaLocal ? t("providers.apiKeyOptional") : t("providers.apiKey")}
             hint={
               isCookie
                 ? method?.authHint

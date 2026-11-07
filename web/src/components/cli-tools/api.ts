@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 export type CoworkPlugin = {
   name: string;
   title?: string;
@@ -43,7 +44,7 @@ function authHeaders(secret: string): Record<string, string> {
 async function parseResponse<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T & { error?: { message?: string } };
   if (!response.ok) {
-    throw new Error(data.error?.message ?? `Request failed (${response.status})`);
+    throw new Error(data.error?.message ?? i18n.t("featureA.requestFailedStatus", { status: response.status }));
   }
   return data;
 }

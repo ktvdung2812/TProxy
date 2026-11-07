@@ -21,6 +21,7 @@ tproxy nằm giữa ứng dụng của bạn và các nhà cung cấp AI upstrea
 - [Cấu hình](#cấu-hình)
 - [Tích hợp client](#tích-hợp-client)
 - [Triển khai](#triển-khai)
+- [Clusters (Cụm node)](#clusters-cụm-node)
 - [Thao tác CLI](#thao-tác-cli)
 - [Bảo mật](#bảo-mật)
 - [Phát triển](#phát-triển)
@@ -43,7 +44,7 @@ Quy trình AI hiện đại thường phụ thuộc vào nhiều provider — su
 | OAuth phức tạp trên server | **Tích hợp OAuth wizard** (trình duyệt PKCE, device flow, profile riêng cho từng provider) |
 | Không có tầm nhìn về chi tiêu | **Theo dõi sử dụng, quota, ước tính giá**, request log và audit event |
 
-tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển và server đơn node**. Lưu trữ chỉ dùng SQLite — không cần cụm cơ sở dữ liệu ngoài.
+tproxy được thiết kế cho **máy cục bộ, máy trạm phát triển và server**. Mỗi node lưu dữ liệu trong SQLite riêng, không cần cụm cơ sở dữ liệu ngoài; nhiều node có thể tham gia một cluster để chia sẻ sức chứa tài khoản.
 
 ---
 
@@ -191,6 +192,107 @@ Trỏ bất kỳ client tương thích OpenAI, Anthropic hoặc Gemini vào tpro
 Base URL:  http://127.0.0.1:28120/v1
 API key:   <TPROXY_API_KEY của bạn>
 Model:     <public model ID hoặc alias>
+```
+
+---
+
+## Clusters (Cụm node)
+
+Cluster kết nối nhiều node tproxy, kể cả node thuộc các chủ sở hữu khác nhau, để chia sẻ sức chứa bằng cách chuyển tiếp request. Dùng cluster khi muốn tận dụng tài khoản trên nhiều máy hoặc mượn sức chứa khi tài khoản cục bộ hết quota. Tài khoản và OAuth token luôn ở node sở hữu; request upstream vẫn đi từ IP của node đó. Mỗi node giữ SQLite riêng, không có ghi chung vào cơ sở dữ liệu.
+
+```mermaid
+flowchart LR
+    C[Client] --> A[Member A]
+    A <-->|WebSocket mang HTTP/2| H[Hub]
+    B[Member B] <-->|WebSocket mang HTTP/2| H
+    H --> U[Provider của Hub]
+    B --> V[Provider của Member B]
+```
+
+Hub có URL mà các member truy cập được; member chủ động kết nối ra Hub nên có thể nằm sau NAT. Hub chuyển tiếp lưu lượng giữa các member và cũng có thể cho mượn hoặc mượn sức chứa như mọi node khác.
+
+### Tạo Hub và token tham gia
+
+1. Chọn URL Hub có thể truy cập từ các member, qua LAN, Cloudflare Tunnel hoặc Tailscale. Dùng HTTPS; HTTP chỉ được phép cho loopback, IP LAN riêng hoặc Tailscale `100.64.0.0/10` khi bật cho phép kết nối không an toàn. Với Hub trong LAN, đặt `server.host` không phải loopback.
+2. Trên dashboard Hub, mở **Hạ tầng → Cụm node**, tạo cluster với tên và URL Hub. Hoặc dùng CLI:
+
+   ```bash
+   tproxy cluster create --name "My cluster" --hub-url https://hub.example.com
+   ```
+
+   Với URL HTTP đủ điều kiện, thêm `--allow-insecure`. Có thể dùng `--no-lend`, `--rpm` và `--streams` để chọn chính sách cho mượn ban đầu.
+3. Trên dashboard Hub, tạo token tham gia; hoặc chạy `tproxy cluster token --label "Member"`. Token `tpc1_…` mặc định có hiệu lực 24 giờ và chỉ dùng một lần. Có thể đổi bằng `--ttl` và `--uses`. Chuyển token cho chủ node member qua kênh an toàn.
+
+### Tham gia cluster
+
+Đặt `TPROXY_MASTER_KEY` trên member trước khi tham gia: node token được lưu mã hóa bằng master key. Trên dashboard member, mở **Hạ tầng → Cụm node**, dán token và xem chính sách cho mượn hiển thị trước khi xác nhận. Hoặc chạy:
+
+```bash
+tproxy cluster join <token> --name "Member A" --owner "Alice"
+```
+
+Thêm `--allow-insecure` nếu Hub dùng HTTP trên địa chỉ được phép; `--no-lend`, `--rpm` và `--streams` điều chỉnh lựa chọn ban đầu.
+
+Với Docker hoặc node không có giao diện, đặt các biến môi trường sau trước khi khởi động:
+
+```bash
+TPROXY_CLUSTER_JOIN_TOKEN=tpc1_…
+TPROXY_CLUSTER_NODE_NAME=member-a
+TPROXY_CLUSTER_ALLOW_INSECURE=1
+```
+
+`TPROXY_CLUSTER_JOIN_TOKEN` kích hoạt tự tham gia khi khởi động và thử lại khi Hub chưa truy cập được. Chỉ đặt `TPROXY_CLUSTER_ALLOW_INSECURE=1` khi cần HTTP trên địa chỉ được phép. Đặt `TPROXY_SKIP_CLUSTER_AUTO=1` để bỏ qua tự động tham gia.
+
+### Cho mượn và mượn sức chứa
+
+Mỗi node tự bật/tắt cho mượn, chọn model (để trống nghĩa là mọi model được chia sẻ), và đặt giới hạn cho từng node đi mượn: RPM, số stream đồng thời, kích thước input tối đa và ngân sách USD hàng ngày. Khi tham gia, mặc định bật cho mượn với 20 RPM và 2 stream đồng thời; biểu mẫu tham gia hiển thị các giá trị này để chủ node xác nhận. Request chuyển tiếp chạy dưới client tổng hợp `cluster:<originNodeID>`, áp dụng các giới hạn, ngân sách và thống kê sử dụng hiện có.
+
+Mượn sức chứa mặc định được bật. Chế độ `fallback` mặc định chỉ dùng node khác sau khi tài khoản cục bộ lỗi hoặc hết sức chứa; `shared` cân bằng cùng các route cục bộ. Peer xuất hiện như tài khoản của provider được quản lý `tproxy-cluster`, nên cooldown, session affinity, rotation và usage hoạt động như thường. Request đã được chuyển tiếp không tiếp tục chuyển tiếp sang node khác.
+
+### Catalog và route
+
+Hub chọn public model (cùng alias toàn cục), combo và client API key để chia sẻ; chỉ hash của key được đồng bộ. Member nhận các mục này dưới dạng **managed**, chỉ đọc. Mục cục bộ cùng ID được ưu tiên và được báo là xung đột. Hub cũng có thể đặt giá cluster cho từng model.
+
+Route không được đồng bộ: chủ member gắn route cục bộ vào model cluster trên trang **Models** để đóng góp sức chứa. Provider và credential không bao giờ được đồng bộ. Cluster key trên member chịu đồng thời chính sách của key và chính sách cho mượn của member.
+
+Bản xuất cấu hình giữ các route cục bộ đó trong mục `cluster-routes`, vì định nghĩa model do Hub quản lý không được xuất. Khi nhập, route của model đã có trên node được gắn ngay; route của model node chưa đồng bộ về được giữ chờ và tự gắn khi catalog đồng bộ model đó. Bản nhập cố định nghĩa lại model, combo, alias hoặc key do Hub quản lý sẽ bị từ chối với mã `cluster_managed`.
+
+### Ledger
+
+Ledger cho mọi member xem node nào đã dùng bao nhiêu request, token và chi phí từ node cho mượn nào, trong 1 hoặc 7 ngày.
+
+### Bảo mật và xử lý sự cố
+
+Hub chỉ lưu hash của token; member lưu node token mã hóa bằng master key. Các endpoint node nằm dưới `/api/cluster/v1/*` và dùng xác thực token riêng. Thu hồi một node đóng kết nối của node đó ngay lập tức. Các member tin Hub xác định đúng nguồn gốc request được chuyển tiếp; chỉ tham gia Hub mà bạn tin cậy.
+
+| Lỗi / cảnh báo | Cách xử lý |
+| --- | --- |
+| `master_key_required` | Đặt `TPROXY_MASTER_KEY` trên member. |
+| `insecure_hub_url` | Dùng HTTPS, hoặc cho phép HTTP với IP LAN/Tailscale đủ điều kiện. |
+| `hub_unreachable` | Kiểm tra URL, tunnel và firewall; với Hub LAN, `server.host` không được là loopback. |
+| `revoked` | Rời cluster rồi tham gia lại bằng token mới. |
+| `hub_listens_on_loopback` | Đổi `server.host` khỏi loopback nếu member cần kết nối trực tiếp qua LAN. |
+
+### Giới hạn v1
+
+- Một Hub duy nhất, chưa có HA.
+- Stream Claude/OpenAI qua peer được dựng lại; Responses được chuyển tiếp nguyên byte.
+- Giới hạn cluster key được áp dụng riêng trên từng node; chưa có mTLS.
+- Mức sử dụng ghi trước schema 24 chưa lưu bên đi mượn, nên ledger vẫn phân loại các dòng đó theo các key đang được chia sẻ. Mức sử dụng ghi sau khi nâng cấp giữ nguyên bên đi mượn kể cả khi Hub ngừng chia sẻ key.
+
+---
+
+## Thao tác CLI
+
+Các lệnh cluster dùng `--url` (mặc định `TPROXY_URL` hoặc `http://127.0.0.1:28120`) và `--secret` (mặc định `TPROXY_ADMIN_SECRET`) để kết nối node cần quản trị:
+
+```text
+tproxy cluster status [--json]
+tproxy cluster create --name N --hub-url URL [--allow-insecure] [--no-lend] [--rpm 20] [--streams 2]
+tproxy cluster token [--label L] [--ttl 24h] [--uses 1]
+tproxy cluster join <token> [--name N] [--owner O] [--allow-insecure] [--no-lend] [--rpm 20] [--streams 2]
+tproxy cluster leave [--yes]
+tproxy cluster dissolve [--yes]
 ```
 
 ---

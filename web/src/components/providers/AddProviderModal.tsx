@@ -166,13 +166,13 @@ export function AddProviderModal({ open, secret, presetType, onClose, onSaved }:
           <Field label={t("providers.addProviderType")}>
             <Input value={selected?.name ?? ""} disabled />
           </Field>
-          <Field label={t("providers.addProviderId")} hint={t("providers.addProviderIdHint")} required>
+          <Field label={t("featureB.terms.providers_addProviderId")} hint={t("providers.addProviderIdHint")} required>
             <Input placeholder={t("providers.addProviderIdPlaceholder")} value={id} onChange={(e) => setId(e.target.value)} required />
           </Field>
           <Field label={t("providers.addProviderDisplayName")}>
             <Input placeholder={t("providers.addProviderDisplayNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label={t("providers.addProviderBaseUrl")} hint={selected?.defaultBaseUrl ? t("providers.addProviderBaseUrlHint", { url: selected.defaultBaseUrl }) : t("providers.addProviderBaseUrlOptional")}>
+          <Field label={t("featureB.terms.providers_addProviderBaseUrl")} hint={selected?.defaultBaseUrl ? t("providers.addProviderBaseUrlHint", { url: selected.defaultBaseUrl }) : t("providers.addProviderBaseUrlOptional")}>
             <Input placeholder={t("providers.addProviderBaseUrlPlaceholder")} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </Field>
           {error && (

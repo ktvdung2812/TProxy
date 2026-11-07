@@ -17,6 +17,7 @@ import "strings"
 //
 // Patterns are matched per path segment; "*" matches exactly one segment.
 var adminActionPaths = []string{
+	"/api/admin/cluster/sync",
 	// Polled by the quota tracker, once per credential per refresh.
 	"/api/admin/credentials/*/quota",
 	"/api/admin/credentials/*/models",

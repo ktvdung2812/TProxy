@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -211,7 +212,7 @@ export function ProviderCard({ view, handlers, now }: ItemProps) {
       </div>
       <footer className="cp-card-foot">
         <div className="cp-card-meta">
-          <span title={view.provider.LastChecked ? new Date(view.provider.LastChecked).toLocaleString() : undefined}>
+          <span title={view.provider.LastChecked ? new Date(view.provider.LastChecked).toLocaleString(i18n.resolvedLanguage || i18n.language) : undefined}>
             <span className="material-symbols-outlined" aria-hidden>schedule</span>
             {checked ? t("providers.list.checkedAgo", { time: checked }) : t("providers.list.neverChecked")}
           </span>

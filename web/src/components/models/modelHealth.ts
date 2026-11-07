@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { DiscoveredModel } from "../providers/api";
 import type { FailoverState } from "./failoverApi";
 import type { ModelRecord, ProviderOption, RouteRecord } from "./types";
@@ -171,8 +172,9 @@ export function failoverKeyMap(states: FailoverState[]) {
 /** Short countdown like "2m" for a paused provider's next retry. */
 export function formatRetryIn(seconds: number) {
   if (seconds <= 0) return "";
-  if (seconds < 60) return `${seconds}s`;
+  const unit = (value: number, name: "second" | "minute" | "hour") => new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value);
+  if (seconds < 60) return unit(seconds, "second");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.round(minutes / 60)}h`;
+  if (minutes < 60) return unit(minutes, "minute");
+  return unit(Math.round(minutes / 60), "hour");
 }

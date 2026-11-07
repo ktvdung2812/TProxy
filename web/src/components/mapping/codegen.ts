@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { ClaudeMappingResponse } from "./api";
 
 export type MappingTier = "default" | "fable" | "opus" | "sonnet" | "haiku";
@@ -219,6 +220,7 @@ export function buildCursorSetupGuide(
   baseUrl: string,
   apiKey: string,
   overrides: Record<string, string>,
+  t: TFunction,
 ): string {
   const origin = baseUrl.replace(/\/v1\/?$/, "");
   const mappings = Object.entries(overrides)
@@ -227,28 +229,27 @@ export function buildCursorSetupGuide(
   const modelList =
     mappings.length > 0
       ? mappings.map(([source]) => `  - ${source}`).join("\n")
-      : "  - (add mappings on Mapping → Cursor first)";
+      : `  - (${t("featureA.cursorGuide.addMappings")})`;
 
   return [
     `# Cursor IDE → tproxy`,
     `#`,
-    `# 1. Settings → Models → enable OpenAI API key`,
-    `# 2. Base URL (public/tunnel URL required — not localhost):`,
+    `# 1. ${t("featureA.cursorGuide.step1")}`,
+    `# 2. ${t("featureA.cursorGuide.step2")}:`,
     `#    ${origin}/v1`,
     `# 3. API Key:`,
     `#    ${apiKey || "your-tproxy-api-key"}`,
-    `# 4. Add Custom Models using the Cursor model IDs you mapped:`,
+    `# 4. ${t("featureA.cursorGuide.step4")}:`,
     modelList,
-    `# 5. In chat, pick one of those custom models.`,
+    `# 5. ${t("featureA.cursorGuide.step5")}`,
     `#`,
-    `# tproxy rewrites each Cursor model ID using Mapping → Cursor, then routes`,
-    `# to the chosen virtual model / provider selector.`,
+    `# ${t("featureA.cursorGuide.routing")}`,
     ``,
     `OpenAI Base URL: ${origin}/v1`,
     `OpenAI API Key:  ${apiKey || "your-tproxy-api-key"}`,
-    `Mapped models:`,
+    `${t("featureA.cursorGuide.mappedModels")}:`,
     ...(mappings.length > 0
       ? mappings.map(([source, target]) => `  ${source}  →  ${target}`)
-      : ["  (none yet)"]),
+      : [`  (${t("featureA.cursorGuide.none")})`]),
   ].join("\n");
 }

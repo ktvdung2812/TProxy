@@ -142,6 +142,159 @@ Configuration export omits decrypted secrets and emits environment placeholders 
 
 The optional `plugin-http` adapter is disabled by default. When explicitly enabled, it speaks a canonical HTTP protocol (`/execute`, `/stream`, `/proxy`, `/models`) in a separate process; plugin configuration and credentials are never returned in management snapshots.
 
+### Cluster management
+
+Cluster management uses `Authorization: Bearer <management secret or dashboard password>`, subject to the management access rules above. Mutations below return the fresh cluster status unless otherwise noted.
+
+```http
+GET    /api/admin/cluster
+POST   /api/admin/cluster/create
+POST   /api/admin/cluster/join
+POST   /api/admin/cluster/leave
+POST   /api/admin/cluster/dissolve
+PUT    /api/admin/cluster/node
+PUT    /api/admin/cluster/lending
+PUT    /api/admin/cluster/borrowing
+PUT    /api/admin/cluster/shared
+POST   /api/admin/cluster/sync
+GET    /api/admin/cluster/tokens
+POST   /api/admin/cluster/tokens
+DELETE /api/admin/cluster/tokens/{id}
+PATCH  /api/admin/cluster/nodes/{id}
+DELETE /api/admin/cluster/nodes/{id}
+GET    /api/admin/cluster/ledger?days=7
+```
+
+`GET /api/admin/cluster` returns the role (`standalone`, `hub` or `member`), node, cluster and link status, lending and borrowing settings, nodes, catalog and warnings. For example, a member response has this shape:
+
+```json
+{
+  "role": "member",
+  "node": {"id": "node-a", "name": "Member A", "version": "1.0"},
+  "cluster": {"id": "cluster-1", "name": "Team", "hub_url": "https://hub.example.com", "hub_node_id": "hub-1", "joined_at": "2026-01-01T00:00:00Z", "allow_insecure": false},
+  "link": {"state": "connected", "connected_at": "2026-01-01T00:00:00Z", "last_error": "", "rtt_ms": 12},
+  "lending": {"enabled": true, "models": [], "limits": {"requests_per_minute": 20, "concurrent_streams": 2, "max_input_bytes": 0, "budget_usd_per_day": 0}},
+  "borrowing": {"enabled": true, "mode": "fallback"},
+  "nodes": [{"id": "node-a", "name": "Member A", "owner": "Alice", "role": "member", "status": "active", "online": true, "self": true, "version": "1.0", "last_seen_at": "2026-01-01T00:00:00Z", "rtt_ms": 12, "lending_enabled": true, "offers": [{"model_id": "model-1", "eligible_accounts": 1, "healthy": true}]}],
+  "catalog": {"version": 1, "models": [{"id": "model-1", "display_name": "Model 1"}], "combos": [], "api_keys": [{"id": "key-1", "name": "Team key"}], "conflicts": [{"kind": "model", "id": "model-1", "reason": "local item exists"}]},
+  "warnings": []
+}
+```
+
+`cluster`, `link` and `catalog` can be null. Link states are `connecting`, `connected`, `revoked`, `error` and `offline`; node statuses are `active`, `revoked` and `left`. The Hub also returns `shared` (`models`, `combos`, `api_keys`, `prices`); a standalone node returns `suggested_hub_urls`. Warnings include `hub_listens_on_loopback`, `insecure_hub_url`, `master_key_missing` and `hub_unreachable`.
+
+Examples of setup and settings bodies:
+
+```http
+POST /api/admin/cluster/create
+Content-Type: application/json
+
+{"name":"Team","hub_url":"https://hub.example.com","allow_insecure":false,"lending":{"enabled":true,"models":[],"limits":{"requests_per_minute":20,"concurrent_streams":2,"max_input_bytes":0,"budget_usd_per_day":0}}}
+```
+
+```http
+POST /api/admin/cluster/join
+Content-Type: application/json
+
+{"token":"tpc1_…","node_name":"Member A","owner":"Alice","allow_insecure":false,"lending":{"enabled":true,"models":[],"limits":{"requests_per_minute":20,"concurrent_streams":2,"max_input_bytes":0,"budget_usd_per_day":0}}}
+```
+
+```http
+PUT /api/admin/cluster/node
+Content-Type: application/json
+
+{"name":"Member A"}
+```
+
+```http
+PUT /api/admin/cluster/lending
+Content-Type: application/json
+
+{"enabled":true,"models":["model-1"],"limits":{"requests_per_minute":20,"concurrent_streams":2,"max_input_bytes":1000000,"budget_usd_per_day":5}}
+```
+
+```http
+PUT /api/admin/cluster/borrowing
+Content-Type: application/json
+
+{"enabled":true,"mode":"shared"}
+```
+
+```http
+PUT /api/admin/cluster/shared
+Content-Type: application/json
+
+{"models":["model-1"],"combos":["combo-1"],"api_keys":["key-1"],"prices":{"model-1":{"input_per_million":1,"output_per_million":2,"reasoning_per_million":2,"request":0.01}}}
+```
+
+An empty lending model list means every shared model. Borrowing modes are `fallback` and `shared`. The Hub shares public models and global aliases, combos and key hashes; members receive read-only managed items and attach their own routes. Local items with the same ID win and are reported as conflicts. Providers, credentials and routes are not synced. `POST /api/admin/cluster/sync` requests a sync. `GET /api/admin/snapshot` also includes `"cluster_managed":{"models":[],"combos":[],"api_keys":[]}`.
+
+Create a join token and list tokens:
+
+```http
+POST /api/admin/cluster/tokens
+Content-Type: application/json
+
+{"label":"Member A","ttl_hours":24,"max_uses":1}
+```
+
+```json
+{"token":"tpc1_…","id":"token-1","expires_at":"2026-01-02T00:00:00Z","command":"tproxy cluster join tpc1_…"}
+```
+
+```http
+GET /api/admin/cluster/tokens
+```
+
+```json
+{"tokens":[{"id":"token-1","label":"Member A","max_uses":1,"uses":0,"expires_at":"2026-01-02T00:00:00Z","created_at":"2026-01-01T00:00:00Z","revoked_at":null}]}
+```
+
+`DELETE /api/admin/cluster/tokens/{id}` revokes a token. `PATCH /api/admin/cluster/nodes/{id}` accepts `{"name":"Member A","owner":"Alice"}`; `DELETE /api/admin/cluster/nodes/{id}` revokes the node and closes its link.
+
+The ledger accepts `days=1` or `days=7` and returns rows such as:
+
+```json
+{"rows":[{"day":"2026-01-01","lender":"node-b","lender_name":"Member B","borrower":"node-a","borrower_name":"Member A","requests":10,"input_tokens":1000,"output_tokens":500,"cost_usd":0.01}]}
+```
+
+Errors use `{"error":{"type":"…","code":"…","message":"…","request_id":"…"}}`.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `cluster_not_configured`, `cluster_already_configured` | 409 | Cluster state does not allow the operation. |
+| `invalid_join_token`, `join_token_expired` | 400 | Join token is invalid or expired. |
+| `hub_unreachable` | 502 | The Hub could not be reached. |
+| `insecure_hub_url` | 400 | The Hub URL is not allowed. |
+| `master_key_required` | 412 | The member needs `TPROXY_MASTER_KEY`. |
+| `cluster_managed` | 409 | A Hub-managed item cannot be edited locally. |
+| `invalid_request` | 400 | The request is invalid. |
+| `not_found` | 404 | The requested item was not found. |
+
+### Cluster node endpoints
+
+Node endpoints use `Authorization: Bearer <node token>`, separate from management authentication. Join uses the join-token secret in its body. The Hub exposes:
+
+```http
+POST /api/cluster/v1/join
+GET  /api/cluster/v1/link
+GET  /api/cluster/v1/state
+GET  /api/cluster/v1/catalog
+GET  /api/cluster/v1/ledger?days=7
+POST /api/cluster/v1/leave
+ANY  /api/cluster/v1/relay/{nodeID}/{path…}
+```
+
+The link is a WebSocket carrying HTTP/2 and requires `X-TProxy-Cluster-Protocol: 1`. State supports `ETag` and `If-None-Match`. The relay path identifies the target’s `/v1/...` path; a request cannot be relayed twice. Member endpoints are reachable only over the link:
+
+```http
+GET  /_cluster/v1/inventory
+ANY  /_cluster/v1/serve/{path…}
+POST /_cluster/v1/notify
+```
+
+Hub error codes include `cluster_unauthorized`, `cluster_node_revoked`, `cluster_protocol_mismatch` (426), `cluster_relay_loop`, `cluster_node_unknown`, `cluster_node_offline` (503), `cluster_relay_failed` (502), `cluster_lending_disabled`, `cluster_model_not_lent` and `request_too_large`.
+
 ### OAuth authorization
 
 Start a browser PKCE flow:

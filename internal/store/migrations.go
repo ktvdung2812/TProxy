@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const sqliteCurrentSchemaVersion = 22
+const sqliteCurrentSchemaVersion = 24
 
 type sqliteMigration struct {
 	version int
@@ -62,6 +62,14 @@ var sqliteMigrations = []sqliteMigration{
 	{version: 20, apply: migrateCredentialCreatedAt},
 	{version: 21, apply: migrateAPIKeyModelDefaults},
 	{version: 22, apply: migrateOperationalUsage},
+	{version: 23, apply: createClusterSchema},
+	{version: 24, apply: func(ctx context.Context, tx *sql.Tx) error {
+		if err := addColumnIfMissing(ctx, tx, "usage_events", "cluster_borrower", `ALTER TABLE usage_events ADD COLUMN cluster_borrower TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_usage_events_cluster_borrower_created_at ON usage_events(cluster_borrower, created_at)`)
+		return err
+	}},
 }
 
 func migrateSQLite(ctx context.Context, db *sql.DB) error {
@@ -383,5 +391,23 @@ func migrateOperationalUsage(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_usage_created_provider ON usage_events(created_at,provider_id)`)
+	return err
+}
+
+func createClusterSchema(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS cluster_nodes (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL DEFAULT '', token_hash TEXT NOT NULL UNIQUE,
+ status TEXT NOT NULL DEFAULT 'active', version TEXT NOT NULL DEFAULT '', last_addr TEXT NOT NULL DEFAULT '',
+ joined_at TEXT NOT NULL, last_seen_at TEXT NOT NULL DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}'
+); CREATE TABLE IF NOT EXISTS cluster_join_tokens (
+ id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, label TEXT NOT NULL DEFAULT '', max_uses INTEGER NOT NULL DEFAULT 1,
+ uses INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT NOT NULL DEFAULT ''
+); CREATE TABLE IF NOT EXISTS cluster_ledger (
+ day TEXT NOT NULL, lender_node_id TEXT NOT NULL, borrower TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0,
+ input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0,
+ updated_at TEXT NOT NULL, PRIMARY KEY(day, lender_node_id, borrower)
+); CREATE TABLE IF NOT EXISTS cluster_managed_items (
+ kind TEXT NOT NULL, item_id TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(kind, item_id)
+);`)
 	return err
 }

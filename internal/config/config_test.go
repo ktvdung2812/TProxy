@@ -3,8 +3,28 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestValidateClusterRoutes(t *testing.T) {
+	cfg := Config{Providers: []ProviderConfig{{ID: "local", Type: "openai-compatible"}}, ClusterRoutes: []ClusterRouteAttachment{{Model: "hub-model", Routes: []RouteTargetConfig{{Provider: "local"}}}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("hub model should not need a local definition: %v", err)
+	}
+	cfg.ClusterRoutes[0].Routes[0].Provider = "missing"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("unknown provider: %v", err)
+	}
+	cfg.ClusterRoutes[0].Routes[0].Provider = "tproxy-cluster"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected cluster provider to be rejected")
+	}
+	cfg.ClusterRoutes[0].Model = "  "
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("empty model: %v", err)
+	}
+}
 
 func TestValidateRejectsInvalidServerBinding(t *testing.T) {
 	cases := []struct {

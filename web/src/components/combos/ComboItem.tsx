@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Toggle, cn } from "../ui";
 import { ActionMenu, IconAction, StatusPill, Tag, type ActionMenuItem, type Tone } from "../page-kit";
+import { ManagedTag } from "../clusters/ManagedTag";
 import type { ComboHealth, ComboStep, ComboStepState, ComboView } from "./comboHealth";
 import type { ComboRecord } from "./types";
 
@@ -21,6 +22,8 @@ type ItemProps = {
   selected: boolean;
   busy: boolean;
   copied: boolean;
+  /** Received from the cluster hub: shown, but not editable here. */
+  managed?: boolean;
 };
 
 export const HEALTH_TONE: Record<ComboHealth, Tone> = {
@@ -131,25 +134,28 @@ function InlineChain({ view }: { view: ComboView }) {
   );
 }
 
-function menuItems(view: ComboView, handlers: ComboItemHandlers, busy: boolean, t: TFunction): ActionMenuItem[] {
+function menuItems(view: ComboView, handlers: ComboItemHandlers, busy: boolean, t: TFunction, managed = false): ActionMenuItem[] {
   const { combo } = view;
+  // Cluster-managed combos belong to the hub: edits are off, with the reason as hint.
+  // Duplicate and copy stay: a duplicate is an ordinary local combo.
+  const managedHint = managed ? t("clusters.managed.hint") : undefined;
   return [
-    { key: "edit", icon: "edit", label: t("combos.menu.edit"), hint: t("combos.menu.editHint"), disabled: busy, onSelect: () => handlers.edit(combo) },
+    { key: "edit", icon: "edit", label: t("combos.menu.edit"), hint: managedHint ?? t("combos.menu.editHint"), disabled: busy || managed, onSelect: () => handlers.edit(combo) },
     { key: "duplicate", icon: "content_copy", label: t("combos.menu.duplicate"), hint: t("combos.menu.duplicateHint"), onSelect: () => handlers.duplicate(combo) },
     {
       key: "toggle",
       icon: combo.enabled ? "toggle_off" : "toggle_on",
       label: combo.enabled ? t("combos.menu.disable") : t("combos.menu.enable"),
-      hint: combo.enabled ? t("combos.menu.disableHint") : t("combos.menu.enableHint"),
-      disabled: busy,
+      hint: managedHint ?? (combo.enabled ? t("combos.menu.disableHint") : t("combos.menu.enableHint")),
+      disabled: busy || managed,
       onSelect: () => handlers.setEnabled(combo, !combo.enabled),
     },
     { key: "copy", icon: "tag", label: t("combos.copyComboId"), hint: combo.id, onSelect: () => handlers.copyId(combo) },
-    { key: "delete", icon: "delete", label: t("combos.deleteCombo"), danger: true, disabled: busy, onSelect: () => handlers.remove(combo) },
+    { key: "delete", icon: "delete", label: t("combos.deleteCombo"), hint: managedHint, danger: true, disabled: busy || managed, onSelect: () => handlers.remove(combo) },
   ];
 }
 
-function QuickActions({ view, handlers, busy, copied }: { view: ComboView; handlers: ComboItemHandlers; busy: boolean; copied: boolean }) {
+function QuickActions({ view, handlers, busy, copied, managed = false }: { view: ComboView; handlers: ComboItemHandlers; busy: boolean; copied: boolean; managed?: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="cb-actions" onClick={stop}>
@@ -159,19 +165,19 @@ function QuickActions({ view, handlers, busy, copied }: { view: ComboView; handl
         label={copied ? t("combos.copied") : t("combos.copyComboId")}
         onClick={() => handlers.copyId(view.combo)}
       />
-      <ActionMenu label={t("combos.menu.more")} items={menuItems(view, handlers, busy, t)} />
+      <ActionMenu label={t("combos.menu.more")} items={menuItems(view, handlers, busy, t, managed)} />
     </div>
   );
 }
 
-function EnabledToggle({ view, handlers, busy }: { view: ComboView; handlers: ComboItemHandlers; busy: boolean }) {
+function EnabledToggle({ view, handlers, busy, managed = false }: { view: ComboView; handlers: ComboItemHandlers; busy: boolean; managed?: boolean }) {
   const { t } = useTranslation();
   const label = view.combo.enabled ? t("combos.menu.disable") : t("combos.menu.enable");
   return (
-    <span className="cb-toggle" onClick={stop} title={label}>
+    <span className="cb-toggle" onClick={stop} title={managed ? t("clusters.managed.hint") : label}>
       <Toggle
         checked={view.combo.enabled}
-        disabled={busy}
+        disabled={busy || managed}
         onChange={(event) => handlers.setEnabled(view.combo, event.target.checked)}
         aria-label={`${label}: ${view.name}`}
       />
@@ -179,18 +185,32 @@ function EnabledToggle({ view, handlers, busy }: { view: ComboView; handlers: Co
   );
 }
 
-function SelectBox({ view, handlers, selected }: { view: ComboView; handlers: ComboItemHandlers; selected: boolean }) {
+function SelectBox({ view, handlers, selected, managed = false }: { view: ComboView; handlers: ComboItemHandlers; selected: boolean; managed?: boolean }) {
   const { t } = useTranslation();
   return (
     <input
       type="checkbox"
       className="cp-check"
       checked={selected}
+      disabled={managed}
+      title={managed ? t("clusters.managed.hint") : undefined}
       onClick={stop}
       onChange={(event) => handlers.select(view.combo, event.target.checked)}
       aria-label={t("combos.selectCombo", { name: view.name })}
     />
   );
+}
+
+/** Click-to-open props for a card or row; a cluster-managed combo opens nothing. */
+function openProps(view: ComboView, handlers: ComboItemHandlers, managed: boolean, t: TFunction) {
+  if (managed) return { title: t("clusters.managed.hint") };
+  return {
+    role: "button",
+    tabIndex: 0,
+    "aria-label": t("combos.openCombo", { name: view.name }),
+    onClick: () => handlers.edit(view.combo),
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => openOnKey(event, () => handlers.edit(view.combo)),
+  };
 }
 
 function itemClasses(view: ComboView, base: "cb-card" | "cb-row", selected: boolean, busy: boolean) {
@@ -204,29 +224,23 @@ function itemClasses(view: ComboView, base: "cb-card" | "cb-row", selected: bool
   );
 }
 
-export function ComboCard({ view, handlers, selected, busy, copied }: ItemProps) {
+export function ComboCard({ view, handlers, selected, busy, copied, managed = false }: ItemProps) {
   const { t } = useTranslation();
   const { combo } = view;
   return (
-    <article
-      className={itemClasses(view, "cb-card", selected, busy)}
-      role="button"
-      tabIndex={0}
-      aria-label={t("combos.openCombo", { name: view.name })}
-      onClick={() => handlers.edit(combo)}
-      onKeyDown={(event) => openOnKey(event, () => handlers.edit(combo))}
-    >
+    <article className={itemClasses(view, "cb-card", selected, busy)} {...openProps(view, handlers, managed, t)}>
       <header className="cp-card-head">
-        <SelectBox view={view} handlers={handlers} selected={selected} />
+        <SelectBox view={view} handlers={handlers} selected={selected} managed={managed} />
         <div className="cp-card-title">
           <strong title={view.name}>{view.name}</strong>
           <div className="cp-card-tags">
             <ComboHealthPill health={view.health} />
+            {managed ? <ManagedTag /> : null}
             <ClientTag client={view.client} />
             <code className="cb-id" title={combo.id}>{combo.id}</code>
           </div>
         </div>
-        <EnabledToggle view={view} handlers={handlers} busy={busy} />
+        <EnabledToggle view={view} handlers={handlers} busy={busy} managed={managed} />
       </header>
 
       <div className="cp-card-body">
@@ -244,34 +258,36 @@ export function ComboCard({ view, handlers, selected, busy, copied }: ItemProps)
             {combo.rewrite_response_model !== false ? t("combos.rewriteOn") : t("combos.rewriteOff")}
           </span>
         </div>
-        <QuickActions view={view} handlers={handlers} busy={busy} copied={copied} />
+        <QuickActions view={view} handlers={handlers} busy={busy} copied={copied} managed={managed} />
       </footer>
     </article>
   );
 }
 
-export function ComboRow({ view, handlers, selected, busy, copied }: ItemProps) {
+export function ComboRow({ view, handlers, selected, busy, copied, managed = false }: ItemProps) {
   const { t } = useTranslation();
   const { combo } = view;
   return (
-    <div
-      className={itemClasses(view, "cb-row", selected, busy)}
-      role="button"
-      tabIndex={0}
-      aria-label={t("combos.openCombo", { name: view.name })}
-      onClick={() => handlers.edit(combo)}
-      onKeyDown={(event) => openOnKey(event, () => handlers.edit(combo))}
-    >
-      <span className="cp-cell"><SelectBox view={view} handlers={handlers} selected={selected} /></span>
+    <div className={itemClasses(view, "cb-row", selected, busy)} {...openProps(view, handlers, managed, t)}>
+      <span className="cp-cell"><SelectBox view={view} handlers={handlers} selected={selected} managed={managed} /></span>
       <span className="cp-cell cp-cell-main">
         <strong title={view.name}>{view.name}</strong>
         <small title={combo.id}>{combo.id}</small>
       </span>
-      <span className="cp-cell"><ComboHealthPill health={view.health} /></span>
+      <span className="cp-cell">
+        {managed ? (
+          <span className="cl-inline-tags">
+            <ComboHealthPill health={view.health} />
+            <ManagedTag />
+          </span>
+        ) : (
+          <ComboHealthPill health={view.health} />
+        )}
+      </span>
       <span className="cp-cell"><ClientTag client={view.client} /></span>
       <span className="cp-cell"><InlineChain view={view} /></span>
-      <span className="cp-cell"><EnabledToggle view={view} handlers={handlers} busy={busy} /></span>
-      <span className="cp-cell"><QuickActions view={view} handlers={handlers} busy={busy} copied={copied} /></span>
+      <span className="cp-cell"><EnabledToggle view={view} handlers={handlers} busy={busy} managed={managed} /></span>
+      <span className="cp-cell"><QuickActions view={view} handlers={handlers} busy={busy} copied={copied} managed={managed} /></span>
     </div>
   );
 }

@@ -89,30 +89,36 @@ type Usage struct {
 }
 
 type Response struct {
-	ID           string           `json:"id"`
-	Model        string           `json:"model"`
-	Role         string           `json:"role,omitempty"`
-	Content      any              `json:"content,omitempty"`
-	ToolCalls    []map[string]any `json:"tool_calls,omitempty"`
-	Reasoning    string           `json:"reasoning,omitempty"`
-	FinishReason string           `json:"finish_reason,omitempty"`
-	Usage        Usage            `json:"usage"`
-	Raw          map[string]any   `json:"raw,omitempty"`
+	ContentBlocks []map[string]any `json:"content_blocks,omitempty"`
+	StopReason    string           `json:"stop_reason,omitempty"`
+	StopSequence  *string          `json:"stop_sequence,omitempty"`
+	ID            string           `json:"id"`
+	Model         string           `json:"model"`
+	Role          string           `json:"role,omitempty"`
+	Content       any              `json:"content,omitempty"`
+	ToolCalls     []map[string]any `json:"tool_calls,omitempty"`
+	Reasoning     string           `json:"reasoning,omitempty"`
+	FinishReason  string           `json:"finish_reason,omitempty"`
+	Usage         Usage            `json:"usage"`
+	Raw           map[string]any   `json:"raw,omitempty"`
 }
 
 type EventType string
 
 const (
-	EventMessageStart   EventType = "message_start"
-	EventTextDelta      EventType = "text_delta"
-	EventReasoningDelta EventType = "reasoning_delta"
-	EventToolCallDelta  EventType = "tool_call_delta"
-	EventImageDelta     EventType = "image_delta"
-	EventAudioDelta     EventType = "audio_delta"
-	EventUsage          EventType = "usage"
-	EventMessageEnd     EventType = "message_end"
-	EventResponsesSSE   EventType = "responses_sse"
-	EventError          EventType = "error"
+	EventContentBlockStart EventType = "content_block_start"
+	EventContentBlockStop  EventType = "content_block_stop"
+	EventSignatureDelta    EventType = "signature_delta"
+	EventMessageStart      EventType = "message_start"
+	EventTextDelta         EventType = "text_delta"
+	EventReasoningDelta    EventType = "reasoning_delta"
+	EventToolCallDelta     EventType = "tool_call_delta"
+	EventImageDelta        EventType = "image_delta"
+	EventAudioDelta        EventType = "audio_delta"
+	EventUsage             EventType = "usage"
+	EventMessageEnd        EventType = "message_end"
+	EventResponsesSSE      EventType = "responses_sse"
+	EventError             EventType = "error"
 	// EventUpstreamHeaders carries response headers captured from the upstream
 	// HTTP response before the body stream begins (for example Codex's
 	// x-codex-turn-state sticky-routing token and rate-limit header family).
@@ -121,6 +127,11 @@ const (
 )
 
 type Event struct {
+	BlockIndex         *int              `json:"block_index,omitempty"`
+	ContentBlock       map[string]any    `json:"content_block,omitempty"`
+	Signature          string            `json:"signature,omitempty"`
+	StopReason         string            `json:"stop_reason,omitempty"`
+	StopSequence       *string           `json:"stop_sequence,omitempty"`
 	Type               EventType         `json:"type"`
 	ID                 string            `json:"id,omitempty"`
 	Model              string            `json:"model,omitempty"`

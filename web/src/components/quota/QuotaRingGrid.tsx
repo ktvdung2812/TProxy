@@ -35,19 +35,19 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
  * each model a fixed-size tile, so the row count stops driving the height.
  */
 export function QuotaRingGrid({ rows, proxyUsage, onHide }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   if (rows.length === 0) return null;
 
-  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage);
+  const proxyUsageLabel = formatProxyUsageLabel(proxyUsage, i18n.language);
 
   return (
     <div className="quota-ring-wrap">
       <div className="quota-tracker-table-meta">
         <span>
-          {rows.length} quota{rows.length === 1 ? "" : "s"}
+          {t("featureA.quotaCount", { count: rows.length })}
         </span>
         {proxyUsageLabel ? (
-          <span className="quota-tracker-table-meta-usage" title="Local proxy usage (all time)">
+          <span className="quota-tracker-table-meta-usage" title={t("featureA.localUsage")}>
             {proxyUsageLabel}
           </span>
         ) : null}
@@ -57,11 +57,11 @@ export function QuotaRingGrid({ rows, proxyUsage, onHide }: Props) {
         {rows.map((row) => {
           const tone = getColorTone(row.remaining);
           const remaining = Math.max(0, Math.min(100, row.remaining));
-          const countdown = formatResetTime(row.reset_at);
-          const absoluteReset = formatResetAbsolute(row.reset_at);
-          const name = formatQuotaName(row.name);
-          const usageTitle = `${Math.round(row.used).toLocaleString()} / ${
-            row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString()
+          const countdown = formatResetTime(row.reset_at, i18n.language);
+          const absoluteReset = formatResetAbsolute(row.reset_at, i18n.language);
+          const name = formatQuotaName(row.name, i18n.language);
+          const usageTitle = `${Math.round(row.used).toLocaleString(i18n.language)} / ${
+            row.unlimited || row.total <= 0 ? "∞" : Math.round(row.total).toLocaleString(i18n.language)
           }`;
 
           return (
@@ -71,15 +71,15 @@ export function QuotaRingGrid({ rows, proxyUsage, onHide }: Props) {
                   type="button"
                   className="quota-ring-hide"
                   onClick={() => onHide(row)}
-                  aria-label={`Hide quota ${name}`}
-                  title="Hide this quota"
+                  aria-label={t("quota.hideQuotaNamed", { name: name })}
+                  title={t("quota.hideQuotaRow")}
                 >
                   <span className="material-symbols-outlined">visibility_off</span>
                 </button>
               ) : null}
 
               <div className="quota-ring-chart" title={usageTitle}>
-                <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} role="img" aria-label={`${name}: ${remaining}% remaining`}>
+                <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} role="img" aria-label={t("featureA.quotaRemaining", { name, value: remaining })}>
                   {/* Rotated so the arc starts at twelve o'clock rather than three. */}
                   <g transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}>
                     <circle

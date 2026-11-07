@@ -1,0 +1,193 @@
+{
+  "featureA": {
+    "restrictRouting": "Restrict account routing",
+    "restrictRoutingHint": "Optional. Choose only providers available through the selected PPM routes, then choose their accounts. Rotation and failover stay within these accounts.",
+    "selectRoutedModel": "Select at least one virtual model with an enabled PPM route before restricting accounts.",
+    "noProviderAccounts": "No accounts configured for this provider.",
+    "removeUnavailable": "Remove unavailable",
+    "accountCount_one": "{{count}} account",
+    "accountCount_other": "{{count}} accounts",
+    "allAccounts": "All accounts",
+    "allow": "Allow {{name}}",
+    "unavailableAccounts_one": "{{count}} selected account is no longer available for these models.",
+    "unavailableAccounts_other": "{{count}} selected accounts are no longer available for these models.",
+    "noAccountModels": "No models available for this account.",
+    "loadModelsFailed": "Could not load models.",
+    "emptyResponse": "(empty response)",
+    "requestFailed": "Request failed.",
+    "askSomething": "Ask something…",
+    "accountDisabled": "Account is disabled",
+    "testChat": "Test chat",
+    "noModels": "No models",
+    "testChatHint": "Send a message to check this account answers. Requests are pinned to it — no failover.",
+    "send": "Send",
+    "clearConversation": "Clear conversation",
+    "modelToTest": "Model to test",
+    "chatLatency": "{{value}} ms",
+    "chatTokens": "{{value}} tokens",
+    "sending": "Sending…",
+    "loadHistoryFailed": "Failed to load request history",
+    "healthCheckFailed": "Health check failed",
+    "refreshQuotaFailed": "Failed to refresh quota",
+    "disableAccount": "Disable account",
+    "enableAccount": "Enable account",
+    "checking": "Checking…",
+    "live": "Live",
+    "accountRouting": "Account routing",
+    "proxyRequests": "Proxy requests",
+    "proxyTokens": "Proxy tokens",
+    "quotaWindows": "Quota windows",
+    "recentRequests": "Recent requests",
+    "accountDetails": "Account details",
+    "provider": "Provider",
+    "authType": "Auth type",
+    "credentialId": "Credential ID",
+    "health": "Health",
+    "added": "Added",
+    "plan": "Plan",
+    "renewsAt": "Renews at",
+    "autoPaused": "Auto-paused",
+    "autoPausedReason": "Yes — quota reached 0%",
+    "upstreamQuotas": "Upstream quotas",
+    "noQuotaData": "No quota data loaded for this account.",
+    "requestHistory": "Request history",
+    "requestHistoryHint": "Recent proxy traffic routed through this account",
+    "loadingHistory": "Loading request history…",
+    "quotaCountdown": "{{name}} in {{time}}",
+    "healthStatus": {
+      "healthy": "Healthy",
+      "unhealthy": "Unhealthy",
+      "degraded": "Degraded"
+    },
+    "loadUsageFailed": "Failed to load account usage",
+    "loadModelUsageFailed": "Failed to load model usage",
+    "accountUsageChart": "Account usage chart",
+    "usagePeriod": "Usage period",
+    "accountUsage": "Account usage",
+    "accountUsageHint": "Requests and proxy tokens routed through this account.",
+    "loadingUsage": "Loading usage…",
+    "noUsage": "No usage recorded for this period.",
+    "byModel": "By model",
+    "model": "Model",
+    "requests": "Requests",
+    "input": "Input",
+    "output": "Output",
+    "totalTokens": "Total tokens",
+    "period": {
+      "day": "Day",
+      "week": "Week",
+      "month": "Month"
+    },
+    "tokens": "Tokens",
+    "localUsage": "Local proxy usage (all time)",
+    "quotaCount_one": "{{count}} quota",
+    "quotaCount_other": "{{count}} quotas",
+    "confirmReset": "Confirm reset",
+    "resetForFree": "Reset for free",
+    "limitResets": "Limit resets",
+    "limitResetsHint": "Free resets Claude grants this account",
+    "loadingResets": "Loading limit resets…",
+    "fullReset": "Full reset",
+    "fiveHourReset": "5-hour reset",
+    "refreshResets": "Refresh limit resets",
+    "ineligibleReason": "Not eligible for full resets ({{reason}}).",
+    "loadResetsFailed": "Failed to load limit resets",
+    "resetFailed": "Failed to reset limits",
+    "resetNotApplied": "Reset not applied ({{result}}).",
+    "expires": "Expires {{date}}",
+    "resetsLeft": "{{left}} of {{total}} left",
+    "clears": "Clears {{windows}}",
+    "paused": "Paused",
+    "usableAtLimit": "Usable once a limit is hit",
+    "refillsSession": "Refills the session limit",
+    "perWeek": "{{count}} per week",
+    "nextAvailable": "Next available {{date}}",
+    "noSessionResets": "None right now. When you get one, it shows up here.",
+    "nextResetAfter": "Next reset possible after {{date}}.",
+    "resetWindows": {
+      "five_hour": "session",
+      "seven_day": "weekly",
+      "seven_day_overage_included": "weekly overage"
+    },
+    "resetResults": {
+      "reset": "Limits reset.",
+      "already_used": "This reset was already used.",
+      "not_limited": "Nothing to reset — the account is not at a limit.",
+      "cooldown": "A reset was just used on this account; try again shortly.",
+      "ineligible": "This account is not eligible for this reset.",
+      "unavailable": "This reset isn't available right now."
+    },
+    "weeklyUsed": "{{value}}% of the weekly limit used",
+    "quotaRemaining": "{{name}}: {{value}}% remaining",
+    "loadResetCreditsFailed": "Failed to load reset credits",
+    "codexAccount": "Codex account",
+    "lan": {
+      "windows": {
+        "0": {
+          "title": "PowerShell (Administrator)",
+          "note": "Run in an elevated PowerShell session."
+        },
+        "1": {
+          "title": "Command Prompt (Administrator)"
+        }
+      },
+      "macos": {
+        "0": {
+          "title": "Packet Filter (temporary until reboot)",
+          "note": "Requires sudo. For a persistent rule, add the pass line to /etc/pf.conf and reload pf."
+        },
+        "1": {
+          "title": "Application Firewall (allow the tproxy binary)",
+          "note": "Replace /path/to/tproxy with the actual binary path."
+        }
+      },
+      "linux": {
+        "0": {
+          "title": "UFW (Ubuntu / Debian)"
+        },
+        "1": {
+          "title": "firewalld (Fedora / RHEL)"
+        },
+        "2": {
+          "title": "iptables",
+          "note": "Persist the rule with your distro's iptables save mechanism (e.g. iptables-save)."
+        }
+      }
+    },
+    "discoverModelsFailed": "Failed to discover models from configured providers.",
+    "requestFailedStatus": "Request failed ({{status}})",
+    "readFileFailed": "Failed to read file",
+    "quotaNames": {
+      "session": "Session",
+      "weekly": "Weekly",
+      "weekly limit": "Weekly limit",
+      "daily": "Daily",
+      "monthly": "Monthly",
+      "monthly included": "Monthly included",
+      "extra usage": "Extra usage",
+      "spend": "Spend",
+      "prepaid": "Prepaid",
+      "on-demand": "On-demand",
+      "credits": "Credits",
+      "unlimited": "Unlimited",
+      "remaining (usd)": "Remaining (USD)"
+    },
+    "proxyUsage": "{{requests}} req · {{tokens}} tok",
+    "creditStatus": {
+      "available": "Available",
+      "used": "Used",
+      "expired": "Expired"
+    },
+    "skillPrompt": "Read this skill and use it with tproxy: {{path}}\n\nSet TPROXY_URL and TPROXY_KEY if not already configured.",
+    "cursorGuide": {
+      "addMappings": "add mappings on Mapping → Cursor first",
+      "step1": "Settings → Models → enable OpenAI API key",
+      "step2": "Base URL (public/tunnel URL required — not localhost)",
+      "step4": "Add Custom Models using the Cursor model IDs you mapped",
+      "step5": "In chat, pick one of those custom models.",
+      "routing": "tproxy rewrites each Cursor model ID using Mapping → Cursor, then routes to the chosen virtual model / provider selector.",
+      "mappedModels": "Mapped models",
+      "none": "none yet"
+    }
+  }
+}

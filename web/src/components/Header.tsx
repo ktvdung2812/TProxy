@@ -59,7 +59,7 @@ export function Header({
           <IconButton icon="menu" label={t("nav.expandMenu")} className="header-menu-btn" onClick={onOpenNav} />
         ) : null}
         <div className="header-title-copy">
-          <p className="header-kicker">// CONTROL PLANE</p>
+          <p className="header-kicker">// {t("nav.controlPlane")}</p>
           <h1>
             <span className="material-symbols-outlined">{icon}</span>
             {title}
@@ -80,8 +80,8 @@ export function Header({
           target="_blank"
           rel="noopener noreferrer"
           className="icon-btn header-social-link"
-          aria-label="GitHub repository"
-          title="GitHub repository"
+          aria-label={t("nav.githubRepository")}
+          title={t("nav.githubRepository")}
         >
           <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false">
             <path
@@ -95,8 +95,8 @@ export function Header({
           target="_blank"
           rel="noopener noreferrer"
           className="icon-btn header-social-link"
-          aria-label="Buy me a coffee"
-          title="Buy me a coffee"
+          aria-label={t("nav.buyMeACoffee")}
+          title={t("nav.buyMeACoffee")}
         >
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
             <path
@@ -121,7 +121,7 @@ export function Header({
         <div className="header-menu" ref={menuRef}>
           <IconButton
             icon="more_vert"
-            label="More"
+            label={t("nav.moreActions")}
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
           />

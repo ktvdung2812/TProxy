@@ -204,7 +204,7 @@ export function OverviewView({
       value: compactNumber(errors),
       tone: errors === 0 ? "success" : errorRate >= 5 ? "danger" : "warning",
       muted: errors === 0,
-      hint: errors === 0 ? t("overview.stats.noErrors") : t("overview.stats.errorRate", { rate: errorRate }),
+      hint: errors === 0 ? t("overview.stats.noErrors") : t("overview.stats.errorRate", { rate: errorRate.toLocaleString(i18n.language) }),
       ...link("/logs", t("nav.logs")),
     },
     {
@@ -214,7 +214,7 @@ export function OverviewView({
       value: compactNumber(saved),
       tone: saved > 0 ? "success" : "neutral",
       muted: saved === 0,
-      hint: saved > 0 ? t("overview.stats.savedShare", { rate: percent(saved, inputTokens + saved) }) : t("overview.stats.savedNone"),
+      hint: saved > 0 ? t("overview.stats.savedShare", { rate: percent(saved, inputTokens + saved).toLocaleString(i18n.language) }) : t("overview.stats.savedNone"),
       ...link("/token-saver", t("nav.tokenSaver")),
     },
     {

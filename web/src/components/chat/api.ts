@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { readAssistantText } from "./utils";
 
 type ChatCompletionMessage = {
@@ -88,7 +89,7 @@ export async function streamChatCompletion(
           const message =
             typeof chunk.error === "string"
               ? chunk.error
-              : chunk.error.message || `Request failed (${response.status})`;
+              : chunk.error.message || i18n.t("featureA.requestFailedStatus", { status: response.status });
           throw new Error(message);
         }
         const text = readAssistantText(chunk);
@@ -107,7 +108,7 @@ export async function streamChatCompletion(
 async function readErrorMessage(response: Response): Promise<string> {
   const raw = await response.text().catch(() => "");
   const trimmed = raw.trim();
-  if (!trimmed) return `Request failed (${response.status})`;
+  if (!trimmed) return i18n.t("featureA.requestFailedStatus", { status: response.status });
 
   // Auth and other pre-stream failures may be JSON or OpenAI SSE (`data: {...}`).
   const candidates = [trimmed];
@@ -135,7 +136,7 @@ async function readErrorMessage(response: Response): Promise<string> {
     }
   }
 
-  return `Request failed (${response.status})`;
+  return i18n.t("featureA.requestFailedStatus", { status: response.status });
 }
 
 function textValue(value: unknown): string {

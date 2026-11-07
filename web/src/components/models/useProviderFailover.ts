@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchFailoverState, resetFailoverState, type FailoverState } from "./failoverApi";
 
@@ -9,6 +10,7 @@ const POLL_INTERVAL_MS = 10_000;
  * provider drop out — and come back — without reloading the page.
  */
 export function useProviderFailover(secret: string, modelId: string | undefined, active: boolean) {
+  const { t } = useTranslation();
   const [states, setStates] = useState<FailoverState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const cancelled = useRef(false);
@@ -23,10 +25,10 @@ export function useProviderFailover(secret: string, modelId: string | undefined,
       }
     } catch (loadError) {
       if (!cancelled.current) {
-        setError(loadError instanceof Error ? loadError.message : "Failed to load failover state");
+        setError(loadError instanceof Error ? loadError.message : t("featureB.errors.loadFailover"));
       }
     }
-  }, [secret, modelId]);
+  }, [secret, modelId, t]);
 
   useEffect(() => {
     cancelled.current = false;

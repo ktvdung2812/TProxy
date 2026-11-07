@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useNavigate } from "react-router-dom";
 import { ProviderLogo } from "../providers/ProviderLogo";
-import { Button, Select, Toggle, cn } from "../ui";
+import { Button, Field, Input, Select, Toggle, cn } from "../ui";
 import { IconAction, LinkButton, PageNote, StatusPill, ToolButton, type Tone } from "../page-kit";
 import type { FailoverState } from "./failoverApi";
 import { formatRetryIn } from "./modelHealth";
@@ -12,6 +12,7 @@ import { useProviderFailover } from "./useProviderFailover";
 import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 import {
   hasUsableAccounts,
+  emptyRoute,
   providerDisplayLabel,
   providersForUpstreamModel,
   reorderRoutePriorities,
@@ -54,6 +55,7 @@ type Props = {
   active: boolean;
   secret: string;
   model: ModelRecord | null;
+  allowEmpty?: boolean;
   routes: RouteFormData[];
   providers: ProviderOption[];
   credentialCounts: Record<string, number>;
@@ -66,6 +68,7 @@ export function ProviderPriorityEditor({
   active,
   secret,
   model,
+  allowEmpty = false,
   routes,
   providers,
   credentialCounts,
@@ -97,14 +100,14 @@ export function ProviderPriorityEditor({
   );
 
   useEffect(() => {
-    if (!active || !model || loadingModels || !canonicalUpstream) return;
+    if (allowEmpty || !active || !model || loadingModels || !canonicalUpstream) return;
 
     setItems((current) => {
       const base = current.length > 0 ? current : sortRouteForms(routes);
       const synced = syncRoutesForUpstreamModel(base, providers, modelsByProvider, canonicalUpstream, credentialCounts);
       return routeFormsEqual(base, synced) ? base : synced;
     });
-  }, [active, canonicalUpstream, loadingModels, model, modelsByProvider, providers, routes]);
+  }, [active, allowEmpty, canonicalUpstream, loadingModels, model, modelsByProvider, providers, routes]);
 
   const compatibleProviders = useMemo(
     () => providersForUpstreamModel(providers, modelsByProvider, canonicalUpstream),
@@ -116,7 +119,7 @@ export function ProviderPriorityEditor({
     [compatibleProviders],
   );
 
-  const validationError = validatePriorityRoutes(items);
+  const validationError = allowEmpty && items.length === 0 ? "" : validatePriorityRoutes(items);
   // Providers with no accounts stay in the saved chain but are hidden here and
   // skipped by the router, so they never occupy a visible priority slot.
   const visibleItems = useMemo(
@@ -128,8 +131,8 @@ export function ProviderPriorityEditor({
   const primaryProvider = enabledItems[0]?.provider || "";
   const savedProviders = useMemo(() => new Set(routes.map((route) => route.provider)), [routes]);
   const dirty = useMemo(
-    () => !routeFormsEqual(reorderRoutePriorities(items), reorderRoutePriorities(sortRouteForms(routes))),
-    [items, routes],
+    () => !routeFormsEqual(allowEmpty ? items : reorderRoutePriorities(items), allowEmpty ? sortRouteForms(routes) : reorderRoutePriorities(sortRouteForms(routes))),
+    [allowEmpty, items, routes],
   );
 
   useEffect(() => {
@@ -141,10 +144,10 @@ export function ProviderPriorityEditor({
     onRegisterSave({
       canSave: !validationError,
       dirty,
-      save: () => onSave(reorderRoutePriorities(items)),
+      save: () => onSave(allowEmpty ? items : reorderRoutePriorities(items)),
     });
     return () => onRegisterSave(null);
-  }, [onRegisterSave, model, onSave, validationError, items, dirty]);
+  }, [onRegisterSave, model, onSave, validationError, items, dirty, allowEmpty]);
 
   const goToProviders = () => {
     onNavigateAway?.();
@@ -231,17 +234,51 @@ export function ProviderPriorityEditor({
     return <p className="priority-manager-empty">{t("models.priority.selectModel")}</p>;
   }
 
+  if (allowEmpty) {
+    return (
+      <div className="model-form">
+        <PageNote icon="info">{t("clusters.managed.routesHint")}</PageNote>
+        {items.map((route, index) => (
+          <div className="model-form" key={route.id}>
+            <div className="model-form-grid">
+              <Field label={t("clusters.managed.provider")}>
+                <Select value={route.provider} onChange={(event) => setItems((current) => current.map((item, i) => i === index ? { ...item, provider: event.target.value } : item))}>
+                  <option value="">{t("clusters.managed.selectProvider")}</option>
+                  {route.provider && !providers.some((provider) => provider.id === route.provider) ? <option value={route.provider}>{route.provider}</option> : null}
+                  {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}
+                </Select>
+              </Field>
+              <Field label={t("clusters.managed.upstreamModel")}>
+                <Input value={route.upstream_model} onChange={(event) => updateRoute(index, { upstream_model: event.target.value })} />
+              </Field>
+              <Field label={t("clusters.managed.priority")}>
+                <Input type="number" value={route.priority} onChange={(event) => updateRoute(index, { priority: Number(event.target.value) })} />
+              </Field>
+              <Field label={t("clusters.managed.weight")}>
+                <Input type="number" min={1} value={route.weight} onChange={(event) => updateRoute(index, { weight: Number(event.target.value) })} />
+              </Field>
+            </div>
+            <Toggle checked={route.enabled} onChange={(event) => updateRoute(index, { enabled: event.target.checked })} label={t("clusters.managed.routeEnabled")} />
+            <Button variant="ghost" size="sm" icon="delete" onClick={() => setItems((current) => current.filter((_, i) => i !== index))}>{t("models.priority.removeRoute")}</Button>
+          </div>
+        ))}
+        <Button variant="ghost" size="sm" icon="add" onClick={() => setItems((current) => [...current, emptyRoute()])}>{t("clusters.managed.addRoute")}</Button>
+        {validationError ? <p className="field-error">{t(validationError)}</p> : null}
+      </div>
+    );
+  }
+
   const providerFor = (id: string) => providers.find((provider) => provider.id === id);
 
   return (
     <div className="md-pe">
       <dl className="cp-facts md-pe-facts">
         <div>
-          <dt>{t("models.priority.publicId")}</dt>
+          <dt>{t("featureB.terms.models_priority_publicId")}</dt>
           <dd><code>{model.ID}</code></dd>
         </div>
         <div>
-          <dt>{t("models.priority.upstream")}</dt>
+          <dt>{t("featureB.terms.models_priority_upstream")}</dt>
           <dd title={canonicalUpstream}><code>{canonicalUpstream || "—"}</code></dd>
         </div>
         <div>
@@ -294,7 +331,7 @@ export function ProviderPriorityEditor({
         <div className="md-pe-table" role="table" aria-label={t("models.priority.tableLabel")}>
           <div className="md-pe-head" role="row">
             <span role="columnheader">{t("models.priority.colOrder")}</span>
-            <span role="columnheader">{t("models.priority.colProvider")}</span>
+            <span role="columnheader">{t("featureB.terms.models_priority_colProvider")}</span>
             <span role="columnheader">{t("models.priority.colHealth")}</span>
             <span role="columnheader">{t("models.priority.colEnabled")}</span>
             <span aria-hidden />
@@ -351,7 +388,7 @@ export function ProviderPriorityEditor({
                     <Select
                       value={route.provider}
                       onChange={(event) => updateRoute(index, { provider: event.target.value })}
-                      aria-label={t("models.priority.colProvider")}
+                      aria-label={t("featureB.terms.models_priority_colProvider")}
                     >
                       {providerOptionsForRoute(route.provider).map((option) => (
                         <option key={option.value} value={option.value}>
@@ -424,7 +461,7 @@ export function ProviderPriorityEditor({
 
       {modelsError ? <p className="field-error">{modelsError}</p> : null}
       {failoverError ? <p className="field-error">{failoverError}</p> : null}
-      {validationError ? <p className="field-error">{validationError}</p> : null}
+      {validationError ? <p className="field-error">{t(validationError)}</p> : null}
     </div>
   );
 }

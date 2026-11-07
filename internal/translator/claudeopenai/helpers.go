@@ -221,6 +221,10 @@ func convertOpenAIToolChoice(choice any) map[string]any {
 
 func openAIFinishToClaude(reason string, hasToolCalls bool) string {
 	switch reason {
+	case "end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal":
+		return reason
+	case "content_filter":
+		return "refusal"
 	case "tool_calls":
 		return "tool_use"
 	case "length":
@@ -240,12 +244,16 @@ func openAIFinishToClaude(reason string, hasToolCalls bool) string {
 
 func claudeStopToOpenAI(reason string) string {
 	switch reason {
+	case "stop", "length", "tool_calls", "content_filter", "function_call":
+		return reason
 	case "tool_use":
 		return "tool_calls"
 	case "max_tokens":
 		return "length"
-	case "end_turn", "stop_sequence":
+	case "end_turn", "stop_sequence", "pause_turn":
 		return "stop"
+	case "refusal":
+		return "content_filter"
 	default:
 		return "stop"
 	}

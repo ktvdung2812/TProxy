@@ -70,6 +70,12 @@ export const NAV_SECTIONS: NavSection[] = [
         i18nKey: "nav.proxyPools",
         icon: "lan",
       },
+      {
+        id: "clusters",
+        path: "/clusters",
+        i18nKey: "nav.clusters",
+        icon: "hub",
+      },
     ],
   },
   {

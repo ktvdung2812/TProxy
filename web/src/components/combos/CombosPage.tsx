@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useChatModels } from "../chat/useChatModels";
+import { managedSet } from "../clusters/utils";
 import type { ModelRecord, RouteRecord } from "../models/types";
 import { CombosView } from "./CombosView";
 import { useComboStepOptions } from "./modelOptions";
@@ -11,6 +12,8 @@ export type CombosSnapshot = {
   models: ModelRecord[] | null;
   combos: ComboRecord[] | null;
   routes: Record<string, RouteRecord[] | null> | null;
+  /** Cluster members: ids of combos received from the hub (read-only here). */
+  cluster_managed?: { combos?: string[] | null } | null;
 };
 
 type Props = {
@@ -73,6 +76,8 @@ export function CombosPage({ secret, snapshot, loading, onMutated, onNotice, onE
   );
   const { models: discoveredModels } = useChatModels(secret, chatSnapshot);
   const comboStepOptions = useComboStepOptions(models, combos, routes, discoveredModels);
+  const managedCombos = snapshot.cluster_managed?.combos;
+  const managedIds = useMemo(() => managedSet(managedCombos), [managedCombos]);
 
   return (
     <CombosView
@@ -80,6 +85,7 @@ export function CombosPage({ secret, snapshot, loading, onMutated, onNotice, onE
       combos={combos}
       models={comboModels}
       modelOptions={comboStepOptions}
+      managedIds={managedIds}
       loading={loading}
       onMutated={onMutated}
       onNotice={onNotice}

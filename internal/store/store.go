@@ -153,6 +153,7 @@ type UsageEvent struct {
 	RoutingReason       string    `json:"routing_reason,omitempty"`
 	RequestID           string    `json:"request_id"`
 	ClientAPIKeyID      string    `json:"client_api_key_id,omitempty"`
+	ClusterBorrower     string    `json:"cluster_borrower,omitempty"`
 	PublicModelID       string    `json:"public_model_id"`
 	ProviderID          string    `json:"provider_id"`
 	UpstreamModel       string    `json:"upstream_model"`
@@ -358,6 +359,9 @@ VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET public_model_id=excluded.p
 			}
 		}
 	}
+	if err = applyClusterRoutesTx(ctx, tx, cfg.ClusterRoutes); err != nil {
+		return rollback(err)
+	}
 	for _, comboCfg := range cfg.Combos {
 		capabilities, _ := json.Marshal(comboCfg.Capabilities)
 		limits, _ := json.Marshal(comboCfg.Limits)
@@ -490,19 +494,8 @@ func (s *Store) SavePublicModel(ctx context.Context, modelCfg config.PublicModel
 			return rollback(err)
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM route_targets WHERE public_model_id=?`, modelCfg.ID); err != nil {
+	if err = saveModelRoutesTx(ctx, tx, modelCfg.ID, modelCfg.Routes, false); err != nil {
 		return rollback(err)
-	}
-	usedRouteIDs := map[string]struct{}{}
-	for _, route := range modelCfg.Routes {
-		routeID := allocateRouteTargetID(modelCfg.ID, route, usedRouteIDs)
-		if route.Weight <= 0 {
-			route.Weight = 1
-		}
-		conditions, _ := json.Marshal(routeConditions(route))
-		if _, err = tx.ExecContext(ctx, `INSERT INTO route_targets(id,public_model_id,provider_id,upstream_model,priority,weight,enabled,conditions_json) VALUES(?,?,?,?,?,?,?,?)`, routeID, modelCfg.ID, route.Provider, route.UpstreamModel, route.Priority, route.Weight, boolInt(route.IsEnabled()), string(conditions)); err != nil {
-			return rollback(err)
-		}
 	}
 	return tx.Commit()
 }
@@ -2133,7 +2126,7 @@ func decodeCredentialMetadata(credential *Credential) {
 }
 
 func (s *Store) AddUsage(ctx context.Context, event UsageEvent) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheCreationTokens, event.TTFTMS, event.QueueMS, event.RoutingReason, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO usage_events(request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,cluster_borrower,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.RequestID, event.PublicModelID, event.ProviderID, event.UpstreamModel, event.CredentialID, event.ClientAPIKeyID, event.ClusterBorrower, event.Attempt, event.Status, event.InputTokens, event.OutputTokens, event.ReasoningTokens, event.CachedTokens, event.CacheCreationTokens, event.TTFTMS, event.QueueMS, event.RoutingReason, event.TokensSaved, event.EstimatedCostUSD, event.LatencyMS, event.ErrorCode, event.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -2362,7 +2355,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 		return nil, 0, err
 	}
 
-	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	listQuery := `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,cluster_borrower,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	listArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.db.QueryContext(ctx, listQuery, listArgs...)
 	if err != nil {
@@ -2374,7 +2367,7 @@ func (s *Store) UsageEvents(ctx context.Context, query UsageEventsQuery) ([]Usag
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.ClusterBorrower, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, 0, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -2390,7 +2383,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	if limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT request_id,public_model_id,provider_id,upstream_model,credential_id,client_api_key_id,cluster_borrower,attempt,status,input_tokens,output_tokens,reasoning_tokens,cached_tokens,cache_creation_tokens,ttft_ms,queue_ms,routing_reason,tokens_saved,estimated_cost_usd,latency_ms,error_code,created_at FROM usage_events ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2399,7 +2392,7 @@ func (s *Store) RecentUsage(ctx context.Context, limit int) ([]UsageEvent, error
 	for rows.Next() {
 		var item UsageEvent
 		var created string
-		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
+		if err := rows.Scan(&item.RequestID, &item.PublicModelID, &item.ProviderID, &item.UpstreamModel, &item.CredentialID, &item.ClientAPIKeyID, &item.ClusterBorrower, &item.Attempt, &item.Status, &item.InputTokens, &item.OutputTokens, &item.ReasoningTokens, &item.CachedTokens, &item.CacheCreationTokens, &item.TTFTMS, &item.QueueMS, &item.RoutingReason, &item.TokensSaved, &item.EstimatedCostUSD, &item.LatencyMS, &item.ErrorCode, &created); err != nil {
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
@@ -2664,12 +2657,22 @@ func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOA
 		}
 		result.ProxyPools = append(result.ProxyPools, exported)
 	}
+	// Cluster rows are rebuilt from the hub at runtime and are never config.
+	managed, err := loadClusterManaged(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	clusterProviders := map[string]bool{}
 	result.Providers = nil
 	providers, err := s.Providers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, provider := range providers {
+		if provider.Type == ClusterProviderID {
+			clusterProviders[provider.ID] = true
+			continue
+		}
 		item := config.ProviderConfig{ID: provider.ID, Type: provider.Type, Name: provider.Name, BaseURL: provider.BaseURL, Enabled: provider.Enabled, Headers: redactExportHeaders(provider.Headers), Config: redactExportMap(provider.Config), Limits: provider.Limits, OAuth: provider.OAuth, ProxyPools: append([]string(nil), provider.ProxyPoolIDs...)}
 		credentials, credentialsErr := s.Credentials(ctx, provider.ID)
 		if credentialsErr != nil {
@@ -2686,20 +2689,30 @@ func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOA
 		result.Providers = append(result.Providers, item)
 	}
 	result.Models = nil
+	result.ClusterRoutes = nil
 	models, err := s.PublicModels(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, model := range models {
-		item := config.PublicModelConfig{ID: model.ID, DisplayName: model.DisplayName, Aliases: append([]string(nil), model.Aliases...), Enabled: model.Enabled, ExposeUpstreamName: model.ExposeUpstreamName, RewriteResponseModel: model.RewriteResponseModel, Capabilities: append([]string(nil), model.Capabilities...), Limits: model.Limits}
+		item := config.PublicModelConfig{ID: model.ID, DisplayName: model.DisplayName, Aliases: managed.unmanagedAliases(model.Aliases), Enabled: model.Enabled, ExposeUpstreamName: model.ExposeUpstreamName, RewriteResponseModel: model.RewriteResponseModel, Capabilities: append([]string(nil), model.Capabilities...), Limits: model.Limits}
 		routes, routesErr := s.Routes(ctx, model.ID)
 		if routesErr != nil {
 			return nil, routesErr
 		}
 		for _, route := range routes {
+			if route.ProviderID == ClusterProviderID || clusterProviders[route.ProviderID] {
+				continue
+			}
 			item.Routes = append(item.Routes, config.RouteTargetConfig{ID: route.ID, Provider: route.ProviderID, UpstreamModel: route.UpstreamModel, Priority: route.Priority, Weight: route.Weight, Enabled: boolPointer(route.Enabled), Conditions: route.Conditions, Pricing: route.Pricing})
 		}
-		result.Models = append(result.Models, item)
+		if managed.has(clusterKindModel, model.ID) {
+			if len(item.Routes) > 0 {
+				result.ClusterRoutes = append(result.ClusterRoutes, config.ClusterRouteAttachment{Model: model.ID, Routes: item.Routes})
+			}
+		} else {
+			result.Models = append(result.Models, item)
+		}
 	}
 	result.Combos = nil
 	combos, err := s.Combos(ctx)
@@ -2707,9 +2720,20 @@ func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOA
 		return nil, err
 	}
 	for _, combo := range combos {
+		if managed.has(clusterKindCombo, combo.ID) {
+			continue
+		}
 		item := config.ComboConfig{ID: combo.ID, DisplayName: combo.DisplayName, Enabled: combo.Enabled, RewriteResponseModel: combo.RewriteResponseModel, Capabilities: append([]string(nil), combo.Capabilities...), Limits: combo.Limits, Policy: combo.Policy}
 		for _, comboItem := range combo.Items {
+			// Managed models are not exported, so an item naming one would
+			// fail validation on import.
+			if managed.has(clusterKindModel, comboItem.PublicModelID) || managed.has(clusterKindAlias, comboItem.PublicModelID) {
+				continue
+			}
 			item.Items = append(item.Items, config.ComboItemConfig{PublicModelID: comboItem.PublicModelID, RouteTargetID: comboItem.RouteTargetID})
+		}
+		if len(item.Items) == 0 && len(combo.Items) > 0 {
+			continue
 		}
 		result.Combos = append(result.Combos, item)
 	}
@@ -2719,6 +2743,9 @@ func (s *Store) exportConfig(ctx context.Context, base *config.Config, includeOA
 		return nil, err
 	}
 	for _, key := range keys {
+		if managed.has(clusterKindAPIKey, key.ID) {
+			continue
+		}
 		result.ClientAPIKeys = append(result.ClientAPIKeys, config.ClientAPIKey{ID: key.ID, Name: key.Name, KeyEnv: "TPROXY_CLIENT_KEY_" + exportToken(key.ID), Models: append([]string(nil), key.Models...), Policy: key.Policy})
 	}
 	return result, nil

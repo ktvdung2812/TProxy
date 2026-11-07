@@ -32,7 +32,7 @@ type Props = {
  * without the card growing past the screen.
  */
 export function QuotaMeters({ rows, limit = 4, inline = false, liveKey, onHide }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   if (rows.length === 0) return null;
 
@@ -48,10 +48,10 @@ export function QuotaMeters({ rows, limit = 4, inline = false, liveKey, onHide }
         const tone = unlimited ? "success" : getColorTone(row.remaining);
         const remaining = Math.max(0, Math.min(100, row.remaining));
         // Minutes are noise once a reset is days away: "5d 23h" not "5d 23h 3m".
-        const countdown = formatResetTime(row.reset_at).replace(/^(\d+d \d+h) \d+m$/, "$1");
-        const absolute = formatResetAbsolute(row.reset_at);
-        const name = formatQuotaName(row.name);
-        const usage = `${Math.round(row.used).toLocaleString()} / ${unlimited ? "∞" : Math.round(row.total).toLocaleString()}`;
+        const countdown = formatResetTime(row.reset_at, i18n.language).replace(/^(\d+d \d+h) \d+m$/, "$1");
+        const absolute = formatResetAbsolute(row.reset_at, i18n.language);
+        const name = formatQuotaName(row.name, i18n.language);
+        const usage = `${Math.round(row.used).toLocaleString(i18n.language)} / ${unlimited ? "∞" : Math.round(row.total).toLocaleString(i18n.language)}`;
         return (
           <div key={row.key} className={cn("qt-meter", `cp-tone-${tone}`, liveKey === row.key && "qt-meter-live")}>
             <div className="qt-meter-head">

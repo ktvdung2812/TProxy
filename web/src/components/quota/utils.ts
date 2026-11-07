@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { CredentialQuota, QuotaEntry } from "./api";
 
 export const REFRESH_INTERVAL_MS = 60000;
@@ -241,7 +242,7 @@ export function getAccountHealth(input: {
   return "ready";
 }
 
-export function formatResetTime(date?: string) {
+export function formatResetTime(date?: string, language?: string) {
   if (!date) return "-";
   const resetDate = new Date(date);
   if (Number.isNaN(resetDate.getTime())) return "-";
@@ -249,28 +250,28 @@ export function formatResetTime(date?: string) {
   if (diffMs <= 0) return "-";
 
   const totalMinutes = Math.ceil(diffMs / 60000);
-  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const unit = (value: number, name: "minute" | "hour" | "day", fallback: string) => language ? new Intl.NumberFormat(language, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value) : `${value}${fallback}`;
+  if (totalMinutes < 60) return unit(totalMinutes, "minute", "m");
 
   const totalHours = Math.floor(totalMinutes / 60);
   const remainingMinutes = totalMinutes % 60;
-  if (totalHours < 24) return `${totalHours}h ${remainingMinutes}m`;
+  if (totalHours < 24) return `${unit(totalHours, "hour", "h")} ${unit(remainingMinutes, "minute", "m")}`;
 
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
-  return `${days}d ${hours}h ${remainingMinutes}m`;
+  return `${unit(days, "day", "d")} ${unit(hours, "hour", "h")} ${unit(remainingMinutes, "minute", "m")}`;
 }
 
-export function formatResetAbsolute(date?: string) {
+export function formatResetAbsolute(date?: string, language?: string) {
   if (!date) return null;
   const resetDate = new Date(date);
   if (Number.isNaN(resetDate.getTime())) return null;
-
+  if (language) return resetDate.toLocaleString(language, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
   const hours = String(resetDate.getHours()).padStart(2, "0");
   const minutes = String(resetDate.getMinutes()).padStart(2, "0");
   const day = String(resetDate.getDate()).padStart(2, "0");
   const month = String(resetDate.getMonth() + 1).padStart(2, "0");
-  const year = resetDate.getFullYear();
-  return `${hours}:${minutes} ${day}/${month}/${year}`;
+  return `${hours}:${minutes} ${day}/${month}/${resetDate.getFullYear()}`;
 }
 
 export function quotaEntries(quota?: CredentialQuota) {
@@ -343,7 +344,9 @@ export function getColorTone(remaining: number) {
   return "danger" as const;
 }
 
-export function formatQuotaName(name: string) {
+export function formatQuotaName(name: string, language?: string) {
+  const normalized = name.trim().replace(/_/g, " ").toLowerCase();
+  if (language && i18n.exists(`featureA.quotaNames.${normalized}`, { lng: language })) return i18n.t(`featureA.quotaNames.${normalized}`, { lng: language });
   return name
     .trim()
     .replace(/_/g, " ")
@@ -358,10 +361,12 @@ export function getColorEmoji(remaining: number) {
 
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
-export function formatProxyUsageLabel(usage?: { requests: number; promptTokens: number; completionTokens: number }) {
+export function formatProxyUsageLabel(usage?: { requests: number; promptTokens: number; completionTokens: number }, language?: string) {
   if (!usage) return null;
   const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
-  return `${compactNumber.format(usage.requests || 0)} req · ${compactNumber.format(tokens)} tok`;
+  if (!language) return `${compactNumber.format(usage.requests || 0)} req · ${compactNumber.format(tokens)} tok`;
+  const number = new Intl.NumberFormat(language, { notation: "compact", maximumFractionDigits: 1 });
+  return i18n.t("featureA.proxyUsage", { lng: language, requests: number.format(usage.requests || 0), tokens: number.format(tokens) });
 }
 
 export async function runWithConcurrency<T, R>(

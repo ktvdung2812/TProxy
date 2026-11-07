@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../ui";
@@ -179,7 +180,7 @@ export function ProviderDetail({
             {(provider.ProxyPoolIDs?.length ?? 0) > 0 ? (
               <Tag tone="neutral" title={provider.ProxyPoolIDs?.join(", ")}>{t("providers.list.proxyPools", { count: provider.ProxyPoolIDs!.length })}</Tag>
             ) : null}
-            <span className="pv-identity-checked" title={provider.LastChecked ? new Date(provider.LastChecked).toLocaleString() : undefined}>
+            <span className="pv-identity-checked" title={provider.LastChecked ? new Date(provider.LastChecked).toLocaleString(i18n.resolvedLanguage || i18n.language) : undefined}>
               {checked ? t("providers.list.checkedAgo", { time: checked }) : t("providers.list.neverChecked")}
             </span>
           </>

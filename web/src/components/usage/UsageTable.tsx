@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { Fragment, useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyPanel, SectionHead, Tag, ToolButton } from "../page-kit";
@@ -77,7 +78,7 @@ function ValueCells({ row, valueMode, grandTotal }: { row: UsageRow; valueMode: 
       {cell(tokens ? row.promptTokens : row.inputCost)}
       {cell(tokens ? row.cachedTokens : row.cachedCost, !row.cachedTokens)}
       {cell(tokens ? row.completionTokens : row.outputCost)}
-      <span className="cp-cell us-total" title={`${tokens ? fmt(total) : fmtCost(total)} · ${(share * 100).toFixed(1)}%`}>
+      <span className="cp-cell us-total" title={`${tokens ? fmt(total) : fmtCost(total)} · ${new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(share)}`}>
         <strong>{tokens ? fmtCompact(total) : fmtCost(total)}</strong>
         <span className="us-share-track" aria-hidden>
           <span className="us-share-fill" style={{ width: `${share * 100}%` }} />
@@ -203,7 +204,7 @@ export function UsageTable({
         meta={
           providerId ? (
             <button type="button" className="us-chip" onClick={onClearProvider} title={t("usage.providers.clearFilter")}>
-              <Tag tone="primary">{t("usage.table.providerChip", { name: providerLabel })}</Tag>
+              <Tag tone="primary">{t("featureB.terms.usage_table_providerChip", { name: providerLabel })}</Tag>
               <span className="material-symbols-outlined" aria-hidden>close</span>
             </button>
           ) : null

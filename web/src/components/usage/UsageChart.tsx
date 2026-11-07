@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -23,7 +24,7 @@ function formatValue(metric: Metric, value: number) {
 /** Axis ticks stay short: $1.2K rather than $1,234.00. */
 function formatTick(metric: Metric, value: number) {
   if (metric === "tokens") return fmtCompact(value);
-  return value >= 1000 ? `$${fmtCompact(value)}` : `$${Number(value.toFixed(2))}`;
+  return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
 function ChartTooltip({ active, payload, metric }: { active?: boolean; payload?: Array<{ payload: UsageChartPoint }>; metric: Metric }) {

@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import type { Edge, Node } from "@xyflow/react";
 import { getProviderTypeInfo } from "../providers/catalog";
 import type { UsageActiveRequest } from "../usage/api";
@@ -77,21 +78,19 @@ const CLIENT_IDLE_MS = 90_000;
 const CLIENT_REMOVE_MS = 300_000;
 
 export function formatNumber(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value);
+  return new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 export function timeAgo(value: string, now = Date.now()): string {
   const then = Date.parse(value);
   if (Number.isNaN(then)) return "";
-  const diff = now - then;
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return i18n.t("usage.time.justNow");
+  const formatter = new Intl.RelativeTimeFormat(i18n.resolvedLanguage || i18n.language, { numeric: "auto", style: "short" });
+  if (minutes < 60) return formatter.format(-minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return formatter.format(-hours, "hour");
+  return formatter.format(-Math.floor(hours / 24), "day");
 }
 
 function providerColor(type: string): string {
@@ -148,14 +147,14 @@ export function buildTproxyTopologyFlow(input: {
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
 
-  const CLIENT_W = 220;
-  const CLIENT_H = 72;
-  const GATEWAY_W = 140;
-  const GATEWAY_H = 64;
-  const PROVIDER_W = 180;
-  const PROVIDER_H = 64;
-  const CREDENTIAL_W = 180;
-  const CREDENTIAL_H = 48;
+  const CLIENT_W = 260;
+  const CLIENT_H = 88;
+  const GATEWAY_W = 240;
+  const GATEWAY_H = 88;
+  const PROVIDER_W = 240;
+  const PROVIDER_H = 88;
+  const CREDENTIAL_W = 240;
+  const CREDENTIAL_H = 72;
   const GAP_X = 20;
   const GAP_Y = 12;
   const TIER_GAP = 40;
@@ -236,7 +235,7 @@ export function buildTproxyTopologyFlow(input: {
       animated: !stale && client.today_requests > 0,
       data: {
         color: stale ? "#477453" : "#6ab0bf",
-        label: client.today_requests > 0 ? `${formatNumber(client.today_requests)}/day` : undefined,
+        label: client.today_requests > 0 ? i18n.t("featureB.topology.perDay", { value: formatNumber(client.today_requests) }) : undefined,
         animated: !stale && client.today_requests > 0,
       },
     });
@@ -280,7 +279,7 @@ export function buildTproxyTopologyFlow(input: {
         animated: active,
         data: {
           color,
-          label: usage.total > 0 ? `${formatNumber(usage.total)} req` : undefined,
+          label: usage.total > 0 ? i18n.t("featureB.topology.requestCount", { count: usage.total, value: formatNumber(usage.total) }) : undefined,
           animated: active,
         },
       });

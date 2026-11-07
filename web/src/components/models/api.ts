@@ -1,5 +1,5 @@
-import type { ModelFormData } from "./types";
-import { formToPayload } from "./utils";
+import type { ModelFormData, ModelRecord, RouteFormData } from "./types";
+import { formToPayload, routesOnlyPayload } from "./utils";
 
 async function adminFetch<T>(
   secret: string,
@@ -29,6 +29,11 @@ export function saveModel(secret: string, form: ModelFormData, editing: boolean)
     editing ? "PUT" : "POST",
     formToPayload(form),
   );
+}
+
+/** Saves only the route targets (fallback chain); the definition is sent back unchanged. */
+export function saveModelRoutes(secret: string, model: ModelRecord, routes: RouteFormData[]) {
+  return adminFetch<{ ok: boolean; model_id: string }>(secret, "/api/admin/models", "PUT", routesOnlyPayload(model, routes));
 }
 
 export function deleteModel(secret: string, id: string) {

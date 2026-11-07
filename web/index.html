@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="vi" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -19,7 +19,9 @@
       (function () {
         try {
           var saved = localStorage.getItem("tproxy-theme");
-          var useDark = saved ? saved === "dark" : true; // default to dark
+          var useDark = saved === "auto"
+            ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            : saved !== "light"; // default to dark
           var root = document.documentElement;
           root.classList.toggle("dark", useDark);
           root.classList.toggle("light", !useDark);

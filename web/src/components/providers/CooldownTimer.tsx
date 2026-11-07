@@ -1,3 +1,4 @@
+import i18n from "../../i18n/config";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -34,7 +35,7 @@ export function CooldownTimer({ until, onExpire }: { until: string; onExpire?: (
   const label = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m ${seconds}s`;
 
   return (
-    <span className="cooldown-timer" title={`${t("providers.cooldownUntil")} ${new Date(until).toLocaleString()}`}>
+    <span className="cooldown-timer" title={`${t("providers.cooldownUntil")} ${new Date(until).toLocaleString(i18n.resolvedLanguage || i18n.language)}`}>
       <span className="material-symbols-outlined">timer</span>
       {label}
     </span>

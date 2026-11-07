@@ -27,3 +27,5 @@ models.dev-catalog.json.new
 # Local agent/tooling workspace
 /.pi/
 opencode.json
+
+/.dev/

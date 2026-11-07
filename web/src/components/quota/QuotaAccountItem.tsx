@@ -242,7 +242,7 @@ function QuickActions({ view, handlers }: Pick<ItemProps, "view" | "handlers">) 
 }
 
 function QuotaBody({ view, handlers, inline }: Pick<ItemProps, "view" | "handlers"> & { inline?: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const hide = (row: QuotaMeterRow) => handlers.hideRow(view.quotaKey, row);
   let content: ReactNode;
   if (view.loading && !view.quota) {
@@ -307,7 +307,7 @@ function QuotaBody({ view, handlers, inline }: Pick<ItemProps, "view" | "handler
               onClick={() => handlers.showRow(view.quotaKey, row)}
               title={t("quota.showQuotaRow")}
             >
-              {formatQuotaName(row.name)}
+              {formatQuotaName(row.name, i18n.language)}
               <span className="material-symbols-outlined" aria-hidden>visibility</span>
             </button>
           ))}

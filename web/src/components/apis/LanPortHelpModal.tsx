@@ -56,7 +56,7 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
             return (
               <div key={copyId} className="lan-port-help-section">
                 <div className="lan-port-help-section-head">
-                  <span>{section.title}</span>
+                  <span>{t(`featureA.lan.${osTab}.${index}.title`, { defaultValue: section.title })}</span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -68,7 +68,7 @@ export function LanPortHelpModal({ open, port, onClose }: Props) {
                   />
                 </div>
                 <pre className="lan-port-help-code">{section.command}</pre>
-                {section.note ? <p className="lan-port-help-note">{section.note}</p> : null}
+                {section.note ? <p className="lan-port-help-note">{t(`featureA.lan.${osTab}.${index}.note`, { defaultValue: section.note })}</p> : null}
               </div>
             );
           })}

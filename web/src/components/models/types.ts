@@ -5,6 +5,10 @@ export type ModelRecord = {
   Enabled: boolean;
   RewriteResponseModel?: boolean;
   Capabilities: string[];
+  /** Snapshot-only fields the forms do not edit; a routes-only save sends them back unchanged. */
+  ExposeUpstreamName?: boolean;
+  Limits?: Record<string, unknown> | null;
+  Policy?: Record<string, unknown> | null;
 };
 
 export type RouteRecord = {

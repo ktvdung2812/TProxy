@@ -8,7 +8,16 @@ import { detectLocale } from "./detect-locale";
 import vi from "../locales/vi.json";
 import en from "../locales/en.json";
 
-const resources = { vi: { translation: vi }, en: { translation: en } };
+// Feature fragments are optional until their owners add them to the tree.
+const fragments = import.meta.glob<Record<string, unknown>>(
+  ["../locales/feature-a.en.json", "../locales/feature-a.vi.json", "../locales/feature-b.en.json", "../locales/feature-b.vi.json"],
+  { eager: true, import: "default" },
+);
+const resources = { vi: { translation: { ...vi } }, en: { translation: { ...en } } };
+for (const [path, fragment] of Object.entries(fragments)) {
+  const locale = path.endsWith(".vi.json") ? "vi" : "en";
+  Object.assign(resources[locale].translation, fragment);
+}
 
 i18n
   .use(LanguageDetector)
