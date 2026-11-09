@@ -297,8 +297,19 @@ func TestProviderDefaultsForMuse(t *testing.T) {
 	if provider.OAuth.MaxTokenAge == "" || provider.OAuth.HardMaxTokenAge == "" {
 		t.Fatal("muse re-mint cadence not configured")
 	}
+	if provider.OAuth.Headers["x-api-version"] != MuseAPIVersion {
+		t.Fatalf("muse oauth headers = %v", provider.OAuth.Headers)
+	}
 	if err := validateOAuth("meta", "muse", provider.OAuth); err != nil {
 		t.Fatalf("muse oauth defaults invalid: %v", err)
+	}
+}
+
+func TestNormalizeMuseOAuthKeepsOperatorHeader(t *testing.T) {
+	oauth := &OAuthConfig{Headers: map[string]string{"X-Api-Version": "2.0.0"}}
+	NormalizeMuseOAuth(oauth)
+	if len(oauth.Headers) != 1 || oauth.Headers["X-Api-Version"] != "2.0.0" {
+		t.Fatalf("headers = %v", oauth.Headers)
 	}
 }
 

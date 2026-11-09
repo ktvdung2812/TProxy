@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tproxy/tproxy/internal/canonical"
+	"github.com/tproxy/tproxy/internal/config"
 	"github.com/tproxy/tproxy/internal/ninerouter"
 	"github.com/tproxy/tproxy/internal/store"
 )
@@ -435,6 +436,7 @@ func (r *Registry) museQuota(ctx context.Context, provider store.Provider, crede
 	headers := http.Header{
 		"Authorization": []string{"Bearer " + dca},
 		"User-Agent":    []string{"muse-code/1.0.2"},
+		"X-Api-Version": []string{config.MuseAPIVersion},
 		"Content-Type":  []string{"application/json"},
 		"Accept":        []string{"application/json"},
 	}

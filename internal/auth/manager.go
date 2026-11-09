@@ -102,6 +102,9 @@ type SessionStatus struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 	ConsumedAt   time.Time `json:"consumed_at,omitempty"`
 	ErrorCode    string    `json:"error_code,omitempty"`
+	// ErrorMessage is a provider-supplied, user-facing reason (for example
+	// Meta's "subscription required" with its fix-it URL), when one exists.
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 type CredentialStatus struct {
@@ -126,6 +129,9 @@ type Error struct {
 	// ignoring it and retrying on our own fixed schedule is what turns a
 	// throttle into a lockout.
 	retryAfter time.Duration
+	// detail is a user-facing reason safe to show in the dashboard. Error()
+	// keeps returning the generic per-code text.
+	detail string
 }
 
 func (e *Error) Error() string {
@@ -172,6 +178,15 @@ func Code(err error) string {
 	return "oauth_error"
 }
 
+// Detail returns the user-facing reason attached to err, if any.
+func Detail(err error) string {
+	var target *Error
+	if errors.As(err, &target) {
+		return target.detail
+	}
+	return ""
+}
+
 func IsPermanent(err error) bool {
 	var target *Error
 	return errors.As(err, &target) && target.permanent
@@ -197,6 +212,7 @@ type session struct {
 	status             string
 	consumedAt         time.Time
 	errorCode          string
+	errorMessage       string
 	cancel             chan struct{}
 	cancelClosed       bool
 	callbackServer     *http.Server
@@ -346,6 +362,9 @@ func (m *Manager) resolveOAuthConfig(ctx context.Context, provider store.Provide
 	resolved := *provider.OAuth
 	if provider.Type == "claude" {
 		config.NormalizeClaudeOAuth(&resolved)
+	}
+	if provider.Type == "muse" {
+		config.NormalizeMuseOAuth(&resolved)
 	}
 	if strings.TrimSpace(resolved.DiscoveryURL) == "" {
 		return &resolved, nil
@@ -819,7 +838,7 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 	}
 	oauthConfig, err := m.resolveOAuthConfig(ctx, *provider)
 	if err != nil {
-		m.failSession(item, Code(err))
+		m.failSessionErr(item, err)
 		return m.statusFor(item), err
 	}
 	// Claude (and some Anthropic-style flows) return authorization codes as
@@ -855,12 +874,12 @@ func (m *Manager) CompleteCallback(ctx context.Context, state, code, sessionID s
 		token, err = m.exchangeCode(ctx, *oauthConfig, code, tokenState, verifier, redirectURL)
 	}
 	if err != nil {
-		m.failSession(item, Code(err))
+		m.failSessionErr(item, err)
 		return m.statusFor(item), err
 	}
 	token, email, err = m.prepareProviderToken(ctx, *provider, token, email)
 	if err != nil {
-		m.failSession(item, Code(err))
+		m.failSessionErr(item, err)
 		return m.statusFor(item), err
 	}
 	if !m.beginSessionCommit(item, "consumed") {
@@ -1358,7 +1377,7 @@ func (m *Manager) requestDeviceCode(ctx context.Context, cfg config.OAuthConfig,
 		form.Set("code_challenge", pkceChallenge(verifier))
 		form.Set("code_challenge_method", "S256")
 	}
-	data, status, err := m.postTokenRequest(ctx, cfg.DeviceCodeURL, form, cfg.DeviceRequestFormat)
+	data, status, err := m.postTokenRequest(ctx, cfg.DeviceCodeURL, form, cfg.DeviceRequestFormat, cfg.Headers)
 	if err != nil {
 		return deviceCodeResponse{}, err
 	}
@@ -1423,7 +1442,7 @@ func (m *Manager) pollDevice(item *session) {
 		}
 		oauthConfig, resolveErr := m.resolveOAuthConfig(m.rootCtx, *provider)
 		if resolveErr != nil {
-			m.failSession(item, Code(resolveErr))
+			m.failSessionErr(item, resolveErr)
 			return
 		}
 		var token store.OAuthToken
@@ -1444,7 +1463,7 @@ func (m *Manager) pollDevice(item *session) {
 		if err == nil {
 			token, email, prepareErr := m.prepareProviderToken(m.rootCtx, *provider, token, email)
 			if prepareErr != nil {
-				m.failSession(item, Code(prepareErr))
+				m.failSessionErr(item, prepareErr)
 				return
 			}
 			if !m.beginSessionCommit(item, "polling") {
@@ -1458,7 +1477,7 @@ func (m *Manager) pollDevice(item *session) {
 			return
 		}
 		if !pending {
-			m.failSession(item, Code(err))
+			m.failSessionErr(item, err)
 			return
 		}
 		if Code(err) == "slow_down" {
@@ -1491,7 +1510,7 @@ func (m *Manager) exchangeDeviceCode(ctx context.Context, cfg config.OAuthConfig
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
-	data, status, err := m.postForm(ctx, cfg.TokenURL, form)
+	data, status, err := m.postForm(ctx, cfg.TokenURL, form, cfg.Headers)
 	if err != nil {
 		return store.OAuthToken{}, false, err
 	}
@@ -1516,7 +1535,7 @@ func (m *Manager) exchangeCodexDevice(ctx context.Context, cfg config.OAuthConfi
 		return store.OAuthToken{}, false, &Error{code: "oauth_configuration_invalid", permanent: true}
 	}
 	form := url.Values{"device_auth_id": {deviceAuthID}, "user_code": {userCode}}
-	data, status, err := m.postTokenRequest(ctx, cfg.DeviceTokenURL, form, cfg.DeviceRequestFormat)
+	data, status, err := m.postTokenRequest(ctx, cfg.DeviceTokenURL, form, cfg.DeviceRequestFormat, cfg.Headers)
 	if err != nil {
 		return store.OAuthToken{}, false, err
 	}
@@ -1561,7 +1580,7 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg config.OAuthConfig, code
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
-	data, status, err := m.postTokenRequest(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
+	data, status, err := m.postTokenRequest(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat, cfg.Headers)
 	if err != nil {
 		return store.OAuthToken{}, err
 	}
@@ -1588,7 +1607,7 @@ func (m *Manager) exchangeRefresh(ctx context.Context, cfg config.OAuthConfig, r
 	if secret := m.clientSecret(cfg); secret != "" {
 		form.Set("client_secret", secret)
 	}
-	data, status, header, err := m.postTokenRequestWithHeader(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat)
+	data, status, header, err := m.postTokenRequestWithHeader(ctx, cfg.TokenURL, form, cfg.TokenRequestFormat, cfg.Headers)
 	if err != nil {
 		return store.OAuthToken{}, err
 	}
@@ -1660,16 +1679,16 @@ func retryAfterHint(err error) time.Duration {
 	return 0
 }
 
-func (m *Manager) postForm(ctx context.Context, target string, form url.Values) ([]byte, int, error) {
-	return m.postTokenRequest(ctx, target, form, "form")
+func (m *Manager) postForm(ctx context.Context, target string, form url.Values, headers map[string]string) ([]byte, int, error) {
+	return m.postTokenRequest(ctx, target, form, "form", headers)
 }
 
-func (m *Manager) postTokenRequest(ctx context.Context, target string, form url.Values, requestFormat string) ([]byte, int, error) {
-	data, status, _, err := m.postTokenRequestWithHeader(ctx, target, form, requestFormat)
+func (m *Manager) postTokenRequest(ctx context.Context, target string, form url.Values, requestFormat string, headers map[string]string) ([]byte, int, error) {
+	data, status, _, err := m.postTokenRequestWithHeader(ctx, target, form, requestFormat, headers)
 	return data, status, err
 }
 
-func (m *Manager) postTokenRequestWithHeader(ctx context.Context, target string, form url.Values, requestFormat string) ([]byte, int, http.Header, error) {
+func (m *Manager) postTokenRequestWithHeader(ctx context.Context, target string, form url.Values, requestFormat string, headers map[string]string) ([]byte, int, http.Header, error) {
 	format := strings.ToLower(strings.TrimSpace(requestFormat))
 	var body io.Reader
 	contentType := "application/x-www-form-urlencoded"
@@ -1692,6 +1711,9 @@ func (m *Manager) postTokenRequestWithHeader(ctx context.Context, target string,
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, body)
 	if err != nil {
 		return nil, 0, nil, &Error{code: "oauth_configuration_invalid", permanent: true}
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
 	}
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Set("Accept", "application/json")
@@ -2024,7 +2046,7 @@ func (m *Manager) clientSecret(cfg config.OAuthConfig) string {
 func (m *Manager) statusFor(item *session) SessionStatus {
 	item.mu.Lock()
 	defer item.mu.Unlock()
-	return SessionStatus{SessionID: item.id, ProviderID: item.providerID, CredentialID: item.credentialID, Mode: item.mode, Status: item.status, ExpiresAt: item.expiresAt, ConsumedAt: item.consumedAt, ErrorCode: item.errorCode}
+	return SessionStatus{SessionID: item.id, ProviderID: item.providerID, CredentialID: item.credentialID, Mode: item.mode, Status: item.status, ExpiresAt: item.expiresAt, ConsumedAt: item.consumedAt, ErrorCode: item.errorCode, ErrorMessage: item.errorMessage}
 }
 
 func (m *Manager) expireIfNeeded(item *session) {
@@ -2067,12 +2089,22 @@ func (m *Manager) completeSession(item *session) {
 	item.mu.Lock()
 	item.status = "complete"
 	item.errorCode = ""
+	item.errorMessage = ""
 	clearSessionSecretsLocked(item)
 	item.mu.Unlock()
 	m.stopSession(item)
 }
 
 func (m *Manager) failSession(item *session, code string) {
+	m.failSessionDetail(item, code, "")
+}
+
+// failSessionErr fails the session with err's code and its user-facing detail.
+func (m *Manager) failSessionErr(item *session, err error) {
+	m.failSessionDetail(item, Code(err), Detail(err))
+}
+
+func (m *Manager) failSessionDetail(item *session, code, detail string) {
 	item.mu.Lock()
 	if item.status == "cancelled" || item.status == "complete" || item.status == "expired" {
 		item.mu.Unlock()
@@ -2080,6 +2112,7 @@ func (m *Manager) failSession(item *session, code string) {
 	}
 	item.status = "failed"
 	item.errorCode = code
+	item.errorMessage = detail
 	clearSessionSecretsLocked(item)
 	item.mu.Unlock()
 	m.stopSession(item)

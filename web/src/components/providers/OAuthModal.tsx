@@ -122,8 +122,9 @@ export function OAuthModal({
         }, 3000);
       } else if (status.status === "failed" || status.status === "expired") {
         setPhase("failed");
-        setErrorMsg(status.error_code || `OAuth ${status.status}`);
-        onError?.(status.error_code || `OAuth ${status.status}`);
+        const reason = status.error_message || status.error_code || `OAuth ${status.status}`;
+        setErrorMsg(reason);
+        onError?.(reason);
       } else if (status.status === "cancelled") {
         setPhase("cancelled");
       }

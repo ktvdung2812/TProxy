@@ -357,6 +357,7 @@ type OAuthConfig struct {
 	ExtraAuthParams           map[string]string `yaml:"extra-auth-params" json:"extra_auth_params"`
 	ExtraTokenParams          map[string]string `yaml:"extra-token-params" json:"extra_token_params"`
 	ExtraRefreshParams        map[string]string `yaml:"extra-refresh-params" json:"extra_refresh_params"`
+	Headers                   map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
 	RefreshSafetyWindow       string            `yaml:"refresh-safety-window" json:"refresh_safety_window"`
 	// MaxTokenAge is how long an access token may go without being refreshed
 	// before the background loop proactively rotates it, regardless of the
@@ -578,6 +579,7 @@ func ApplyProviderDefaults(provider *ProviderConfig) {
 			provider.OAuth.ClientID = "1031625952748946"
 		}
 		provider.OAuth.DeviceFlow = "rfc8628"
+		NormalizeMuseOAuth(provider.OAuth)
 		// Minted keys are good for roughly a day; re-mint with the stored dca:
 		// token before the window closes.
 		if provider.OAuth.MaxTokenAge == "" {
@@ -1028,6 +1030,29 @@ var claudeOAuthScopes = []string{
 // ClaudeOAuthScopes returns the canonical Claude OAuth scopes.
 func ClaudeOAuthScopes() []string {
 	return append([]string(nil), claudeOAuthScopes...)
+}
+
+// MuseAPIVersion is the x-api-version the Muse Code CLI sends to auth.meta.com
+// and the Meta Model API for subscription sign-ins.
+const MuseAPIVersion = "1.0.0"
+
+// NormalizeMuseOAuth adds the Muse Code x-api-version header to the device
+// login. It also runs on stored providers that predate the header.
+func NormalizeMuseOAuth(oauth *OAuthConfig) {
+	if oauth == nil {
+		return
+	}
+	for key := range oauth.Headers {
+		if strings.EqualFold(key, "x-api-version") {
+			return
+		}
+	}
+	headers := make(map[string]string, len(oauth.Headers)+1)
+	for key, value := range oauth.Headers {
+		headers[key] = value
+	}
+	headers["x-api-version"] = MuseAPIVersion
+	oauth.Headers = headers
 }
 
 // NormalizeClaudeOAuth aligns stored Claude OAuth settings with the dashboard browser flow.

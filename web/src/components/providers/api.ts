@@ -68,6 +68,8 @@ export type OAuthSessionStatus = {
   expires_at?: string;
   consumed_at?: string;
   error_code?: string;
+  /** Provider-supplied reason, e.g. Meta's subscription link. */
+  error_message?: string;
 };
 
 /** Common fetch wrapper that injects the Bearer secret and JSON content type. */

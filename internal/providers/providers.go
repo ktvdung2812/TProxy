@@ -311,7 +311,7 @@ func NewRegistry() *Registry {
 	client := &http.Client{Transport: newProxyTransport()}
 	cluster := &clusterPeerAdapter{}
 	return &Registry{client: client, cluster: cluster, items: map[string]Adapter{
-		"muse":                 &openAIAdapter{client: client},
+		"muse":                 newMuseAdapter(client),
 		"openai-compatible":    &openAIAdapter{client: client},
 		"image":                &openAIAdapter{client: client},
 		"video":                &openAIAdapter{client: client},
@@ -401,6 +401,9 @@ func authHeaders(provider store.Provider, credential store.Credential) http.Head
 	}
 	if provider.Type == "xai" {
 		applyGrokCLIHeaders(headers, provider.BaseURL)
+	}
+	if provider.Type == "muse" {
+		applyMuseHeaders(headers, credential)
 	}
 	if provider.Type == "cline" || provider.Type == "clinepass" {
 		applyClineAuthHeaders(headers, credential)
